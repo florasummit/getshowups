@@ -47,7 +47,9 @@ function confirmPage(invite, customer, purpose, { status = 200, error = '' } = {
     status,
     isReconnect ? 'Reconnect your Google Calendar' : 'Connect your Google Calendar',
     'GetShowUps will ask Google for permission to see your availability and add appointments to calendars you own. Check the account name below before you continue. This link works once.',
-    {},
+    // no-referrer would make browsers send "Origin: null" on this form's POST, which the
+    // same-origin check below rejects. same-origin sends the real Origin to us and nothing to others.
+    { 'Referrer-Policy': 'same-origin' },
     html,
   )
 }

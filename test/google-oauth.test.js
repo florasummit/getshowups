@@ -198,6 +198,28 @@ test('GET start page shows the customer account and requires an explicit confirm
   assert.match(re, /replaces the Google Calendar currently connected/)
 })
 
+test('confirmation page lets browsers send a real Origin; the Google redirect still sends no referrer', async () => {
+  // Regression: with Referrer-Policy: no-referrer, browsers send "Origin: null" on the form POST,
+  // and the same-origin check blocks every real user.
+  const env = makeEnv()
+  const t = await issue(env)
+  const get = await startGet(env, t)
+  assert.equal(get.headers.get('Referrer-Policy'), 'same-origin')
+  assert.match(get.headers.get('Content-Security-Policy'), /form-action 'self' https:\/\/accounts\.google\.com/)
+  assert.equal(get.headers.get('X-Frame-Options'), 'DENY')
+  assert.equal(get.headers.get('Cache-Control'), 'no-store')
+
+  const unticked = await begin(env, t, { confirm: null })
+  assert.equal(unticked.headers.get('Referrer-Policy'), 'same-origin', 're-shown confirmation page too')
+
+  const redirect = await begin(env, t)
+  assert.equal(redirect.status, 303)
+  assert.equal(redirect.headers.get('Referrer-Policy'), 'no-referrer', 'Google never sees the invite URL')
+
+  assert.equal((await startGet(env, 'x'.repeat(43))).headers.get('Referrer-Policy'), 'no-referrer', 'error pages unchanged')
+  assert.equal((await begin(env, t, { origin: 'null' })).status, 403, 'strict Origin check unchanged')
+})
+
 test('GET start page rejects unknown, used, or expired invites', async () => {
   const env = makeEnv()
   assert.equal((await startGet(env, 'x'.repeat(43))).status, 410)
