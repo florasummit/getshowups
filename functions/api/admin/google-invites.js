@@ -1,7 +1,8 @@
 // POST /api/admin/google-invites — issue a single-use Google Calendar onboarding link.
 //   Authorization: Bearer <ADMIN_API_TOKEN>
 //   Body: { "customer": "acme-dental", "purpose": "connect" | "reconnect" }
-// Only POST is exported, so Cloudflare Pages answers other methods with 405.
+// Only POST is exported. Other methods never reach this handler: Pages falls through to static
+// assets (GET returns the site's index.html).
 import { isAdmin, json, missingConfig } from '../../../server/google-oauth.js'
 import { CUSTOMER_RE, createInvite } from '../../../server/invites.js'
 

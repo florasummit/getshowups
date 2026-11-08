@@ -160,7 +160,7 @@ test('auth: endpoint fails closed when configuration is missing', async () => {
   assert.equal(calls.length, 0)
 })
 
-test('auth: only GET is exported (Pages returns 405 for other methods)', () => {
+test('auth: only GET is exported (other methods never reach the handler)', () => {
   assert.deepEqual(Object.keys(health), ['onRequestGet'])
 })
 

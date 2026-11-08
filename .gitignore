@@ -26,3 +26,18 @@ dist-ssr
 # Cloudflare local secrets and state
 .dev.vars
 .wrangler/
+
+# Environment files (only the documented example is committed)
+.env
+.env.*
+!.env.example
+
+# Credentials that must never be committed
+client_secret*.json
+*.pem
+*.key
+
+# Playwright output
+test-results/
+playwright-report/
+blob-report/

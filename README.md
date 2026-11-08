@@ -4,11 +4,14 @@ React + Vite single-page marketing site for GetShowUps, an AI-powered appointmen
 
 ## Develop
 
+Full conventions, security rules, and the definition of done are in [CLAUDE.md](CLAUDE.md);
+the build workflow and current status are in [docs/](docs/).
+
 ```bash
-npm install
-npm run dev      # local dev server
-npm run build    # production build → dist/
-npm run lint
+npm ci && npx playwright install chromium   # first time
+npm run verify        # lint, unit tests, build, Functions compile
+npm run verify:all    # verify + Playwright browser smoke tests (run before committing)
+npm run dev           # local Vite dev server (frontend only)
 ```
 
 Deployment (Cloudflare Pages): build command `npm run build`, output directory `dist`.

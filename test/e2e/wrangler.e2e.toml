@@ -1,0 +1,11 @@
+# Test-only config for applying D1 migrations to the LOCAL e2e database.
+# Deliberately NOT at the repo root: a root wrangler.toml would make Cloudflare Pages use
+# file-based bindings and override the production dashboard configuration.
+name = "getshowups-e2e"
+compatibility_date = "2026-11-08"
+
+[[d1_databases]]
+binding = "ONBOARDING_DB"
+database_name = "getshowups-e2e"
+database_id = "e2e-onboarding"
+migrations_dir = "../../migrations"

@@ -8,7 +8,7 @@
 //   4. calls freeBusy.query on the primary calendar (allowed by the calendar.freebusy scope)
 // Responds with status codes and sanitized error codes only: no tokens, no credentials, no
 // calendar or event data. Nothing is written to KV, D1, or Google Calendar.
-// Only GET is exported, so Cloudflare Pages answers other methods with 405.
+// Only GET is exported. Other methods never reach this handler (Pages answers POST with 405).
 import { CALENDAR_SCOPES, decrypt, isAdmin, json, missingConfig, refreshAccessToken } from '../../../server/google-oauth.js'
 import { CUSTOMER_RE } from '../../../server/invites.js'
 
