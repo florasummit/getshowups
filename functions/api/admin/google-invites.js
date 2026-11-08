@@ -2,7 +2,7 @@
 //   Authorization: Bearer <ADMIN_API_TOKEN>
 //   Body: { "customer": "acme-dental", "purpose": "connect" | "reconnect" }
 // Only POST is exported, so Cloudflare Pages answers other methods with 405.
-import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server/google-oauth.js'
+import { isAdmin, json, missingConfig } from '../../../server/google-oauth.js'
 import { CUSTOMER_RE, createInvite } from '../../../server/invites.js'
 
 export async function onRequestPost({ request, env }) {
@@ -12,12 +12,7 @@ export async function onRequestPost({ request, env }) {
     return json(503, { error: 'not_configured' })
   }
 
-  const header = request.headers.get('Authorization') || ''
-  const presented = header.startsWith('Bearer ') ? header.slice(7) : ''
-  // Compare fixed-length digests so timing does not leak the token length or prefix.
-  if (!presented || !timingSafeEqual(await sha256Hex(presented), await sha256Hex(env.ADMIN_API_TOKEN))) {
-    return json(401, { error: 'unauthorized' })
-  }
+  if (!(await isAdmin(request, env))) return json(401, { error: 'unauthorized' })
 
   let body
   try {

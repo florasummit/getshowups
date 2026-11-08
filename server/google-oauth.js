@@ -111,6 +111,42 @@ export async function revokeToken(token) {
   }
 }
 
+// Bearer-token check for /api/admin/* routes. Compares fixed-length digests so timing does not
+// leak the token length or prefix.
+export async function isAdmin(request, env) {
+  const header = request.headers.get('Authorization') || ''
+  const presented = header.startsWith('Bearer ') ? header.slice(7) : ''
+  return Boolean(presented) && timingSafeEqual(await sha256Hex(presented), await sha256Hex(env.ADMIN_API_TOKEN))
+}
+
+// Only these Google OAuth error codes are passed through; anything else becomes "other".
+const OAUTH_ERRORS = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client', 'invalid_request', 'invalid_scope'])
+
+// Exchanges a refresh token for a short-lived access token. The access token is returned to the
+// caller only, for immediate use; it is never stored or logged. Network failures report status 0.
+export async function refreshAccessToken(env, refreshToken) {
+  let res
+  try {
+    res = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    })
+  } catch {
+    return { ok: false, httpStatus: 0, error: 'network_error' }
+  }
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok || !body.access_token) {
+    return { ok: false, httpStatus: res.status, error: OAUTH_ERRORS.has(body.error) ? body.error : 'other' }
+  }
+  return { ok: true, httpStatus: res.status, accessToken: body.access_token, scope: body.scope || '' }
+}
+
 export const NO_STORE = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
 
 export function json(status, body) {
