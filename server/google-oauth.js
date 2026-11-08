@@ -1,0 +1,167 @@
+// Shared helpers for the Google Calendar OAuth (authorization-code + PKCE) flow.
+// Runs only in Cloudflare Pages Functions. Never import this from src/ (the browser bundle).
+//
+// Required Cloudflare Pages configuration (Settings → Variables and Secrets / Bindings):
+//   GOOGLE_CLIENT_ID       variable   OAuth 2.0 Web client ID
+//   GOOGLE_CLIENT_SECRET   secret     OAuth 2.0 Web client secret
+//   GOOGLE_REDIRECT_URI    variable   https://getshowups.com/api/google/oauth/callback
+//   TOKEN_ENCRYPTION_KEY   secret     base64 of 32 random bytes (openssl rand -base64 32)
+//   ADMIN_API_TOKEN        secret     bearer token for POST /api/admin/google-invites (32+ random chars)
+//   GOOGLE_TOKENS          KV binding stores encrypted refresh tokens
+//   ONBOARDING_DB          D1 binding single-use onboarding invites (migrations/0001_onboarding_invites.sql)
+
+export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+// Least privilege, verified against Google's Calendar API scope docs:
+//   calendar.events.owned — create/change events on calendars the user owns (not shared calendars)
+//   calendar.freebusy     — read availability only; accepted by freeBusy.query
+export const CALENDAR_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events.owned',
+  'https://www.googleapis.com/auth/calendar.freebusy',
+]
+export const SCOPES = ['openid', 'email', ...CALENDAR_SCOPES]
+export const STATE_COOKIE = '__Host-gsu_google_oauth'
+export const STATE_TTL_SECONDS = 600
+
+const REQUIRED = [
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_REDIRECT_URI',
+  'TOKEN_ENCRYPTION_KEY',
+  'ADMIN_API_TOKEN',
+]
+
+export function missingConfig(env) {
+  const missing = REQUIRED.filter((k) => !env[k])
+  if (!env.GOOGLE_TOKENS) missing.push('GOOGLE_TOKENS (KV binding)')
+  if (!env.ONBOARDING_DB) missing.push('ONBOARDING_DB (D1 binding)')
+  if (env.ADMIN_API_TOKEN && env.ADMIN_API_TOKEN.length < 32) missing.push('ADMIN_API_TOKEN (min 32 chars)')
+  return missing
+}
+
+const enc = new TextEncoder()
+const dec = new TextDecoder()
+
+export function b64url(bytes) {
+  let s = ''
+  for (const b of bytes) s += String.fromCharCode(b)
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromB64url(str) {
+  const s = str.replace(/-/g, '+').replace(/_/g, '/')
+  const bin = atob(s + '='.repeat((4 - (s.length % 4)) % 4))
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0))
+}
+
+export function randomToken(bytes = 32) {
+  return b64url(crypto.getRandomValues(new Uint8Array(bytes)))
+}
+
+export async function sha256Hex(value) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(value)))
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+export async function pkceChallenge(verifier) {
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(verifier))
+  return b64url(new Uint8Array(digest))
+}
+
+async function aesKey(env) {
+  const raw = Uint8Array.from(atob(env.TOKEN_ENCRYPTION_KEY), (c) => c.charCodeAt(0))
+  if (raw.length !== 32) throw new Error('TOKEN_ENCRYPTION_KEY must be 32 bytes, base64-encoded')
+  return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'])
+}
+
+// AES-256-GCM: confidentiality + integrity. Output: base64url(iv || ciphertext).
+export async function encrypt(env, plaintext) {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(env), enc.encode(plaintext))
+  const out = new Uint8Array(12 + ct.byteLength)
+  out.set(iv)
+  out.set(new Uint8Array(ct), 12)
+  return b64url(out)
+}
+
+export async function decrypt(env, token) {
+  const data = fromB64url(token)
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, await aesKey(env), data.slice(12))
+  return dec.decode(pt)
+}
+
+export function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+// Best effort: revoking a refresh token also revokes the grant's access tokens.
+export async function revokeToken(token) {
+  try {
+    await fetch(GOOGLE_REVOKE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }),
+    })
+  } catch (err) {
+    console.error('Google token revoke failed:', err?.message)
+  }
+}
+
+export const NO_STORE = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
+
+export function json(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff', ...NO_STORE },
+  })
+}
+
+export function readCookie(request, name) {
+  const header = request.headers.get('Cookie') || ''
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === name) return v.join('=')
+  }
+  return null
+}
+
+export function stateCookie(value, maxAge) {
+  return `${STATE_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`
+}
+
+// Decodes the id_token payload. Safe without signature verification ONLY because the token
+// came directly from Google's token endpoint over TLS (OpenID Connect Core §3.1.3.7).
+export function idTokenClaims(idToken) {
+  try {
+    return JSON.parse(dec.decode(fromB64url(idToken.split('.')[1])))
+  } catch {
+    return {}
+  }
+}
+
+export const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+
+// extraHtml must be trusted, already-escaped markup.
+export function page(status, title, message, extraHeaders = {}, extraHtml = '') {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0c;color:#e4e4e9;font:16px/1.6 system-ui,sans-serif;padding:24px}main{max-width:460px;text-align:center}h1{color:#fff;font-size:1.5rem;margin:0 0 12px}a{color:#ff8a47}button{font:inherit;font-weight:600;padding:12px 24px;border:0;border-radius:999px;background:#ff6a1a;color:#0b0b0c;cursor:pointer}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}<p><a href="/">Back to GetShowUps</a></p></main></body></html>`
+  return new Response(html, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...NO_STORE,
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      // form-action must allow Google because Chrome applies it to the redirect after the POST.
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'",
+      ...extraHeaders,
+    },
+  })
+}
