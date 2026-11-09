@@ -476,47 +476,33 @@ test('missing binding fails closed with 503', async () => {
 })
 
 // ---- OAuth client migration (old Google Cloud project → new project) ----
-// A refresh token only works with the client that issued it. During migration the old client is kept
-// as GOOGLE_LEGACY_CLIENT_ID/SECRET so existing connections keep working until the customer reconnects.
+// A refresh token only works with the client that issued it. The legacy-client fallback was removed
+// once every connection moved to the current client; reconnecting still archives a record issued by
+// another client (never revokes it) so a rollback remains possible.
 import { connect as calendarConnect } from '../server/calendar.js'
 
 async function legacyRecord(env, customer, refreshToken) {
-  // Shape stored before client tracking existed (no clientId), e.g. PoolThru's production record.
+  // Shape stored before client tracking existed (no clientId).
   env.GOOGLE_TOKENS.m.set(`google:${customer}`, JSON.stringify({ customer, googleSub: 'g', email: 'care@example.com', scope: ALL_SCOPES, refreshToken: await oauth.encrypt(env, refreshToken), connectedAt: '2026-11-08T21:04:40.703Z' }))
 }
 function migratingEnv() {
   const env = makeEnv()
-  env.GOOGLE_LEGACY_CLIENT_ID = 'old-cid.apps.example'
-  env.GOOGLE_LEGACY_CLIENT_SECRET = 'old-secret'
   env.GOOGLE_CLIENT_ID = 'new-cid.apps.example'
   env.GOOGLE_CLIENT_SECRET = 'new-secret'
   return env
 }
 
-test('migration: oauthClient picks the issuing client; untracked records use legacy only when configured', () => {
+test('migration: oauthClient always uses the configured client and reports whether it issued the record', () => {
   const env = migratingEnv()
-  assert.equal(oauth.oauthClient(env, undefined).id, 'old-cid.apps.example')
-  assert.equal(oauth.oauthClient(env, 'old-cid.apps.example').kind, 'legacy')
   assert.equal(oauth.oauthClient(env, 'new-cid.apps.example').kind, 'current')
-  assert.equal(oauth.oauthClient(env, 'someone-else').kind, 'current')
-  const plain = makeEnv()
-  assert.equal(oauth.oauthClient(plain, undefined).kind, 'current') // no legacy configured: unchanged behavior
-  assert.equal(oauth.oauthClient({ ...plain, GOOGLE_LEGACY_CLIENT_ID: 'x' }, undefined).kind, 'current') // incomplete legacy config ignored
+  assert.equal(oauth.oauthClient(env, 'old-cid.apps.example').kind, 'other')
+  assert.equal(oauth.oauthClient(env, undefined).kind, 'other')
+  const withOldVars = { ...env, GOOGLE_LEGACY_CLIENT_ID: 'old-cid.apps.example', GOOGLE_LEGACY_CLIENT_SECRET: 'old-secret' }
+  assert.equal(oauth.oauthClient(withOldVars, undefined).id, 'new-cid.apps.example', 'legacy variables are ignored')
+  assert.equal(oauth.oauthClient(withOldVars, 'old-cid.apps.example').secret, 'new-secret')
 })
 
-test('migration: an existing connection keeps refreshing with the legacy client after the switch', async () => {
-  const env = migratingEnv()
-  await legacyRecord(env, 'poolthru', 'rt-old')
-  const g = mockGoogle()
-  const conn = await calendarConnect(env, 'poolthru')
-  assert.equal(conn.ok, true)
-  assert.equal(conn.oauthClient, 'legacy')
-  assert.equal(g.lastBody.client_id, 'old-cid.apps.example')
-  assert.equal(g.lastBody.client_secret, 'old-secret')
-  assert.equal(g.lastBody.refresh_token, 'rt-old')
-})
-
-test('migration: reconnecting under the new client stores clientId and archives (does not revoke) the old token', async () => {
+test('migration: reconnecting a record from another client stores clientId and archives (does not revoke) the old token', async () => {
   const env = migratingEnv()
   await legacyRecord(env, 'poolthru', 'rt-old')
   const before = env.GOOGLE_TOKENS.m.get('google:poolthru')
@@ -544,7 +530,6 @@ test('migration rollback: restoring the archived record works again with the old
   const env = migratingEnv()
   await legacyRecord(env, 'poolthru', 'rt-old')
   const original = env.GOOGLE_TOKENS.m.get('google:poolthru')
-  // Roll back: old client becomes primary again, legacy vars removed, archived record restored.
   const rolledBack = { ...makeEnv(), GOOGLE_CLIENT_ID: 'old-cid.apps.example', GOOGLE_CLIENT_SECRET: 'old-secret', GOOGLE_TOKENS: env.GOOGLE_TOKENS, TOKEN_ENCRYPTION_KEY: env.TOKEN_ENCRYPTION_KEY }
   rolledBack.GOOGLE_TOKENS.m.set('google:poolthru', original)
   const g = mockGoogle()

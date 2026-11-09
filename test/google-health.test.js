@@ -49,6 +49,7 @@ async function record(customer, refreshToken, { key = KEY, scope = FULL_SCOPE } 
     customer,
     googleSub: 'sub',
     email: `${customer}@example.com`,
+    clientId: 'cid.apps.googleusercontent.com',
     scope,
     refreshToken: await encrypt({ TOKEN_ENCRYPTION_KEY: key }, refreshToken),
     connectedAt: '2026-11-08T21:04:40.703Z',

@@ -171,19 +171,17 @@ export function googleApi(env) {
 // Only these Google OAuth error codes are passed through; anything else becomes "other".
 const OAUTH_ERRORS = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client', 'invalid_request', 'invalid_scope'])
 
-// OAuth client used to refresh a stored connection. Google binds a refresh token to the client that
-// issued it, so during a client migration connections issued by the previous client keep refreshing
-// through GOOGLE_LEGACY_CLIENT_ID/SECRET until the customer reconnects. Connections stored before
-// client tracking (no issuedTo) came from the legacy client when one is configured.
+// OAuth client used to refresh a stored connection: always the configured client. Google binds a
+// refresh token to the client that issued it, so the connection's recorded clientId is reported:
+// 'current' when it matches, 'other' when it was issued by a different client (it will not refresh;
+// the business must reconnect). The old-project fallback (GOOGLE_LEGACY_CLIENT_*) was removed after
+// every connection moved to the current client (docs/LAUNCH.md, M5).
 export function oauthClient(env, issuedTo) {
-  const current = { id: env.GOOGLE_CLIENT_ID, secret: env.GOOGLE_CLIENT_SECRET, kind: 'current' }
-  const legacy =
-    env.GOOGLE_LEGACY_CLIENT_ID && env.GOOGLE_LEGACY_CLIENT_SECRET
-      ? { id: env.GOOGLE_LEGACY_CLIENT_ID, secret: env.GOOGLE_LEGACY_CLIENT_SECRET, kind: 'legacy' }
-      : null
-  if (issuedTo && issuedTo === current.id) return current
-  if (legacy && (!issuedTo || issuedTo === legacy.id)) return legacy
-  return current
+  return {
+    id: env.GOOGLE_CLIENT_ID,
+    secret: env.GOOGLE_CLIENT_SECRET,
+    kind: issuedTo && issuedTo === env.GOOGLE_CLIENT_ID ? 'current' : 'other',
+  }
 }
 
 // Exchanges a refresh token for a short-lived access token. The access token is returned to the
