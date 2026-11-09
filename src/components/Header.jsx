@@ -43,6 +43,9 @@ export default function Header() {
             ))}
           </ul>
         </nav>
+        <a href="/dashboard" className="header-login">
+          Log in
+        </a>
         <a href="#book-demo" className="btn btn-primary btn-sm header-cta">
           Book a Demo
         </a>
@@ -67,6 +70,9 @@ export default function Header() {
             </li>
           ))}
         </ul>
+        <a href="/dashboard" className="btn btn-ghost btn-block">
+          Log in
+        </a>
         <a href="#book-demo" className="btn btn-primary btn-block" onClick={close}>
           Book a Demo
         </a>

@@ -267,6 +267,17 @@ svg {
   background: rgb(255 255 255 / 0.06);
 }
 
+.header-login {
+  padding: 8px 4px;
+  font-size: 0.93rem;
+  font-weight: 600;
+  color: var(--ink-200);
+}
+
+.header-login:hover {
+  color: var(--white);
+}
+
 .menu-toggle {
   display: none;
   margin-left: auto;
@@ -286,7 +297,8 @@ svg {
 
 @media (max-width: 900px) {
   .desktop-nav,
-  .header-cta {
+  .header-cta,
+  .header-login {
     display: none;
   }
 

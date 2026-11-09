@@ -1,11 +1,11 @@
-# Validates every push to main and every pull request.
+# Validates every push to main or a release/** branch, and every pull request.
 # Uses NO repository or Cloudflare secrets: safe for pull requests from forks.
 # Deployment is NOT done here; Cloudflare Pages deploys from Git on its own.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
 
 permissions:

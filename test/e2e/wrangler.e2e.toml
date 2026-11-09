@@ -9,3 +9,7 @@ binding = "ONBOARDING_DB"
 database_name = "getshowups-e2e"
 database_id = "e2e-onboarding"
 migrations_dir = "../../migrations"
+
+[[kv_namespaces]]
+binding = "GOOGLE_TOKENS"
+id = "GOOGLE_TOKENS"

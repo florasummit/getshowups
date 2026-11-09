@@ -20,6 +20,7 @@ import {
   stateCookie,
 } from '../../../../server/google-oauth.js'
 import { claimInvite, peekInvite } from '../../../../server/invites.js'
+import { hitByIp, tooManyPage } from '../../../../server/ratelimit.js'
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
 
@@ -57,6 +58,8 @@ function confirmPage(invite, customer, purpose, { status = 200, error = '' } = {
 export async function onRequestGet({ request, env }) {
   const missing = missingConfig(env)
   if (missing.length) return notConfigured(missing)
+  const rl = await hitByIp(env, 'connect', request)
+  if (rl.limited) return tooManyPage(rl.retryAfter)
 
   const invite = new URL(request.url).searchParams.get('invite') || ''
   if (!TOKEN_RE.test(invite)) return invalidLink()
@@ -69,6 +72,8 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPost({ request, env }) {
   const missing = missingConfig(env)
   if (missing.length) return notConfigured(missing)
+  const rl = await hitByIp(env, 'connect', request)
+  if (rl.limited) return tooManyPage(rl.retryAfter)
 
   // Only accept the form from our own confirmation page. Browsers always send Origin on POST,
   // so a cross-site auto-submitted form (or a request with no Origin) is refused.

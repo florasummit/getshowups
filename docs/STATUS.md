@@ -9,6 +9,29 @@ _Update at the end of every task. Newest first._
 - Customer **poolthru** connected; production health check `GET /api/admin/google-health?customer=poolthru`
   returned `healthy` (token refresh 200, freeBusy 200) on 2026-11-08 at deploy e780355.
 - Development accelerator: `npm run verify`, `npm run verify:all`, GitHub Actions CI, Playwright smoke tests.
+- Launch release incl. admin console, invitations, billing prep, analytics: **built and tested locally, not deployed**.
+
+## In progress
+
+### Launch release (awaiting approval — see docs/LAUNCH.md)
+Everything below is **local and tested**, not in production.
+- [x] Self-service onboarding, PoolThru linking, booking page, appointment engine, results dashboard
+- [x] Hardening: rate limits, Google timeouts, idempotent event creation, stale-reservation recovery
+- [x] Platform console `/admin`: customers, signup dates, sources, onboarding, calendar health (live check),
+  booking activity, subscription/account status, attention flags, search, detail, audit trail
+- [x] Onboarding ops: self-service, admin invitation, admin-assisted setup (one data model); expiring single-use
+  invitations bound to one Google email; resend/revoke; follow-ups queued (email delivery not configured)
+- [x] Billing prepared (inactive until Stripe keys + plans): Checkout with one-time trial, portal for
+  upgrade/downgrade/cancel/reactivate, signed idempotent webhooks, out-of-order protection, statuses
+  trialing/active/past_due/canceled + manual suspension (booking paused, billing still reachable)
+- [x] Analytics events (deduplicated) + growth metrics: activation, first booking, conversion, show-up,
+  retention, MRR/ARR/paying/trialing/revenue/churn from billing data; CAC/LTV/gross margin shown as unavailable
+- [x] Tests: 108 unit/integration + 33 Playwright
+- Not done: email provider, Stripe account/plans, public Google app verification, cancellation/reschedule,
+  session/invite purge job, cron (follow-ups run when the admin console loads).
+
+- Google Cloud migration M1+M2 done (new project `getshowups`, client `380394286094-cume4v…`); M3 (Cloudflare
+  secrets) awaiting approval. Old project untouched. See docs/LAUNCH.md.
 
 ## Decisions
 

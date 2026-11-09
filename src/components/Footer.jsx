@@ -27,6 +27,9 @@ export default function Footer() {
             <li>
               <a href="#book-demo">Book a Demo</a>
             </li>
+            <li>
+              <a href="/dashboard">Log in</a>
+            </li>
           </ul>
         </nav>
       </div>

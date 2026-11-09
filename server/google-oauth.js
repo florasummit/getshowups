@@ -98,10 +98,18 @@ export function timingSafeEqual(a, b) {
   return diff === 0
 }
 
+// Every server-side call to Google goes through here so none can hang a request: it aborts after
+// GOOGLE_TIMEOUT_MS (env override exists only so tests can use a short timeout).
+export const GOOGLE_TIMEOUT_MS = 8000
+export function googleFetch(env, url, init = {}) {
+  const ms = Number(env?.GOOGLE_TIMEOUT_MS) > 0 ? Number(env.GOOGLE_TIMEOUT_MS) : GOOGLE_TIMEOUT_MS
+  return fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
+}
+
 // Best effort: revoking a refresh token also revokes the grant's access tokens.
-export async function revokeToken(token) {
+export async function revokeToken(token, env) {
   try {
-    await fetch(GOOGLE_REVOKE_URL, {
+    await googleFetch(env, GOOGLE_REVOKE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ token }),
@@ -119,20 +127,47 @@ export async function isAdmin(request, env) {
   return Boolean(presented) && timingSafeEqual(await sha256Hex(presented), await sha256Hex(env.ADMIN_API_TOKEN))
 }
 
+// Server-side Google API endpoints. GOOGLE_API_MOCK_ORIGIN exists only so end-to-end tests can
+// point token refresh and Calendar calls at a local mock; it is ignored unless it is a loopback
+// http origin, so it can never redirect production traffic elsewhere.
+export function googleApi(env) {
+  const o = env?.GOOGLE_API_MOCK_ORIGIN
+  const mock = typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? o : null
+  return {
+    token: mock ? `${mock}/token` : GOOGLE_TOKEN_URL,
+    calendar: mock ? `${mock}/calendar/v3` : 'https://www.googleapis.com/calendar/v3',
+  }
+}
+
 // Only these Google OAuth error codes are passed through; anything else becomes "other".
 const OAUTH_ERRORS = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client', 'invalid_request', 'invalid_scope'])
 
+// OAuth client used to refresh a stored connection. Google binds a refresh token to the client that
+// issued it, so during a client migration connections issued by the previous client keep refreshing
+// through GOOGLE_LEGACY_CLIENT_ID/SECRET until the customer reconnects. Connections stored before
+// client tracking (no issuedTo) came from the legacy client when one is configured.
+export function oauthClient(env, issuedTo) {
+  const current = { id: env.GOOGLE_CLIENT_ID, secret: env.GOOGLE_CLIENT_SECRET, kind: 'current' }
+  const legacy =
+    env.GOOGLE_LEGACY_CLIENT_ID && env.GOOGLE_LEGACY_CLIENT_SECRET
+      ? { id: env.GOOGLE_LEGACY_CLIENT_ID, secret: env.GOOGLE_LEGACY_CLIENT_SECRET, kind: 'legacy' }
+      : null
+  if (issuedTo && issuedTo === current.id) return current
+  if (legacy && (!issuedTo || issuedTo === legacy.id)) return legacy
+  return current
+}
+
 // Exchanges a refresh token for a short-lived access token. The access token is returned to the
 // caller only, for immediate use; it is never stored or logged. Network failures report status 0.
-export async function refreshAccessToken(env, refreshToken) {
+export async function refreshAccessToken(env, refreshToken, client = oauthClient(env)) {
   let res
   try {
-    res = await fetch(GOOGLE_TOKEN_URL, {
+    res = await googleFetch(env, googleApi(env).token, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: env.GOOGLE_CLIENT_ID,
-        client_secret: env.GOOGLE_CLIENT_SECRET,
+        client_id: client.id,
+        client_secret: client.secret,
         refresh_token: refreshToken,
         grant_type: 'refresh_token',
       }),
@@ -183,10 +218,10 @@ export const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
 // extraHtml must be trusted, already-escaped markup.
-export function page(status, title, message, extraHeaders = {}, extraHtml = '') {
+export function page(status, title, message, extraHeaders = {}, extraHtml = '', backLink = true) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0c;color:#e4e4e9;font:16px/1.6 system-ui,sans-serif;padding:24px}main{max-width:460px;text-align:center}h1{color:#fff;font-size:1.5rem;margin:0 0 12px}a{color:#ff8a47}button{font:inherit;font-weight:600;padding:12px 24px;border:0;border-radius:999px;background:#ff6a1a;color:#0b0b0c;cursor:pointer}</style></head>
-<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}<p><a href="/">Back to GetShowUps</a></p></main></body></html>`
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}${backLink ? '<p><a href="/dashboard">Back to your dashboard</a></p>' : ''}</main></body></html>`
   return new Response(html, {
     status,
     headers: {

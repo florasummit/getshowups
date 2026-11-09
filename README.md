@@ -62,6 +62,12 @@ Backend code lives in `functions/` (routes) and `server/` (shared helpers). Noth
 | `POST /api/admin/google-invites` | Issue a single-use onboarding link (`Authorization: Bearer $ADMIN_API_TOKEN`) |
 | `GET/POST /api/google/oauth/start?invite=…` | Shows the customer account; the user ticks a confirmation box → claims the invite → redirects to Google |
 | `GET /api/google/oauth/callback` | Google redirect URI: `https://getshowups.com/api/google/oauth/callback` |
+| `POST /api/admin/customers` | Link an existing business (e.g. PoolThru) to owner emails (admin token) |
+| `GET /api/auth/google/start` → `/api/auth/google/callback` | Dashboard "Sign in with Google" (second redirect URI) |
+| `GET /api/dashboard/{me,calendar,overview}`, `POST /api/dashboard/{business,hours,connect-link,outcome}` | Dashboard APIs (session cookie) |
+| `GET /api/book/:id`, `POST /api/book/:id/{lead,appointment}` | Public booking page APIs |
+
+Launch steps for the first real appointment: [docs/LAUNCH.md](docs/LAUNCH.md).
 
 Issue a link:
 
