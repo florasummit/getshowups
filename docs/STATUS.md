@@ -13,6 +13,39 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Advertising engine: built and tested locally, NOT deployed, no live ad calls (2026-11-09)
+- Migration 0006 (new tables only): ad_profiles, ad_budget_approvals, ad_connections, ad_campaigns, ad_metrics_daily,
+  ad_actions (audit + idempotency), ad_creatives, ai_usage, lead_attribution, ghl_links, meta_lead_events.
+- Campaign spec (server/ads/spec.js) is the only input adapters accept: platform text limits, ZIP geo, https URL,
+  and an unapproved-claims filter (guarantees, discounts, credentials, superlatives, reviews, before/after, speed).
+- AI planner (server/ads/strategy.js): claude-opus-5-5, structured JSON output, refusal fallback, cost recorded against
+  a $20/month per-business AI cap. Output is filtered, then drafts are validated. Without ANTHROPIC_API_KEY a
+  labelled starter template is used (this is what e2e exercises).
+- Spend guardrails: owner approves a monthly ceiling (checkbox), and approved campaigns' combined daily budgets can't
+  exceed it. Editing an approved campaign returns it to draft. Live create/resume requires ADS_LIVE_LAUNCH=true
+  (operator switch, needs approval), an approved campaign, budget room, monthly spend under the ceiling, and an active
+  or trialing subscription once Stripe is configured. Campaigns are always created PAUSED; the owner presses Start.
+- Non-spending path: "Check (no spend)" = Google validateOnly / Meta dry run.
+- Optimizer (server/ads/optimizer.js, cron): deterministic; pauses on monthly ceiling, overspend or a missing approval;
+  alerts on stale data or missing tracking; recommends budget cuts. Never raises spend, never resumes. Idempotent
+  per campaign/rule/day, and an owner resume overrides it for that day.
+- Adapters: Google Ads v26 (server/ads/google.js + /api/ads/google/*), Meta v27 (server/ads/meta.js +
+  /api/ads/meta/* incl. lead webhook), creatives (OpenAI images, Runway video, R2 AD_ASSETS, quotas). All mocked in
+  tests. Payload shapes marked UNVERIFIED in the code need a sandbox/test account.
+- GoHighLevel (server/ghl.js): one-way copy of contacts and pipeline stage; GHL can own SMS (then our SMS is skipped
+  as ghl_sms); workflow enrollment respects the message test gate. docs/DATA_OWNERSHIP.md.
+- Attribution: ad links carry utm_campaign=<our campaign id>; booking-page leads are attributed only to the same
+  business's campaign. Results: spend, qualified leads, booked, completed jobs, reported job value, cost per
+  booking and per completed job (null when unmeasurable); verified payments and incremental revenue not measured.
+- Pricing copy: proposed $499/month (labelled proposed). Billing uses the existing Stripe plan infra; it needs a
+  $499 Stripe Price id.
+- Tests: 217 unit tests (ads 21, ads-google 20, ads-meta 22, ghl 14) and 51 Playwright tests (ads.spec 3). Fixed a
+  cross-spec slot race in modes.spec.
+- Needs approval, in order: migration 0006 on production → deploy → Google OAuth redirect URIs + adwords scope +
+  Ads API access → Meta app + App Review → ANTHROPIC_API_KEY / OPENAI_* / R2 bucket → GHL PIT → Stripe $499 Price
+  → ADS_LIVE_LAUNCH=true (first real spend).
+
+
 ### Appointment modes: at_business / at_customer (local only, not deployed)
 - [x] Migration 0005 (additive): service_settings, lead_addresses, appointment_outcomes
 - [x] Business setting "Where do appointments happen?"; existing businesses stay at_business

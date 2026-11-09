@@ -41,6 +41,9 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
+  api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
+  api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect)
+  api/ads/google/     Google Ads connect: start, callback, accounts.  api/ads/meta/: start, callback, accounts, webhook (leads)
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
@@ -60,6 +63,9 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)
+  ads/               spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
+                     optimizer (pause/recommend only), google, meta, creative, connections, attribution
+  ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
@@ -106,6 +112,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
+- Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
+  budget approval, and room under it. Automation may pause or recommend, never raise budgets or resume. Every spec goes
+  through validateSpec(); AI output never reaches a platform unvalidated. Ad mock origins are loopback-only test vars.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not

@@ -6,6 +6,19 @@ import { processDueMessages } from '../../../server/messages.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
+import { syncMetrics, pauseForOptimizer } from '../../../server/ads/campaigns.js'
+import { runOptimizer } from '../../../server/ads/optimizer.js'
+import { pollVideos } from '../../../server/ads/creative.js'
+
+// Ads work runs after messages and never fails the run (each step reports its own error code).
+async function adsStep(label, fn) {
+  try {
+    return await fn()
+  } catch (err) {
+    console.error(`cron ads ${label} failed:`, err?.name)
+    return { error: 'failed' }
+  }
+}
 
 export async function onRequestPost({ request, env }) {
   if (missingConfig(env).length || !env.CRON_SECRET || env.CRON_SECRET.length < 32) return json(503, { error: 'not_configured' })
@@ -18,7 +31,12 @@ export async function onRequestPost({ request, env }) {
     const messages = await processDueMessages(env)
     const onboardingQueued = await queueFollowUps(env)
     const outbox = await flushOutbox(env)
-    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed } })
+    const ads = {
+      metrics: await adsStep('metrics', () => syncMetrics(env)),
+      optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: pauseForOptimizer })),
+      videos: await adsStep('videos', () => pollVideos(env)),
+    }
+    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed }, ads })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

@@ -83,7 +83,7 @@ export const features = [
 
 export const pricing = {
   name: 'Introductory plan',
-  price: 299,
+  price: 499,
   period: 'month',
   badge: 'Proposed pricing',
   note: 'This is proposed introductory pricing and may change before launch. Final terms will be confirmed with you during your demo.',
@@ -117,8 +117,8 @@ export const faqs = [
     a: 'You approve the qualification questions, tone, and boundaries during setup. Conversations that fall outside those boundaries are handed off to your team instead of being improvised.',
   },
   {
-    q: 'Is $299/month the final price?',
-    a: 'No. $299/month is proposed introductory pricing and may change. We’ll confirm current pricing and what’s included on your demo call before you commit to anything.',
+    q: 'Is $499/month the final price?',
+    a: 'No. $499/month is proposed introductory pricing and may change. We’ll confirm current pricing and what’s included on your demo call before you commit to anything.',
   },
   {
     q: 'What do I need for SMS to work?',

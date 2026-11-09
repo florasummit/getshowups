@@ -1,0 +1,319 @@
+// Campaign service: ad profile, drafts, owner approval, launch (non-spending by default), pause/resume,
+// metrics sync, and the dashboard results summary. Routes stay thin and call these.
+import { randomToken } from '../google-oauth.js'
+import { validateSpec, dailyCeilingCents } from './spec.js'
+import { currentApproval, remainingDailyCents } from './budget.js'
+import * as meta from './meta.js'
+import { stripeConfigured, getSubscription } from '../stripe.js'
+
+const ZIP_RE = /^\d{5}$/
+const OBJECTIVES = ['leads', 'bookings']
+let googleAdapter = null
+// Adapters are loaded lazily so a missing optional adapter never breaks the dashboard.
+export async function adapter(platform) {
+  if (platform === 'meta') return meta
+  if (platform === 'google') return (googleAdapter ||= await import('./google.js'))
+  return null
+}
+const PLATFORM_STATUS = { google: { paused: 'PAUSED', active: 'ENABLED' }, meta: { paused: 'PAUSED', active: 'ACTIVE' } }
+
+// ---------- profile ----------
+const list = (v, max, len) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean))].filter((x) => x.length <= len).slice(0, max) : [])
+
+export function validateProfile(body) {
+  const b = body && typeof body === 'object' ? body : {}
+  const errors = []
+  const website = String(b.website ?? '').trim()
+  if (website) {
+    try {
+      if (new URL(website).protocol !== 'https:') errors.push('website')
+    } catch {
+      errors.push('website')
+    }
+  }
+  const industry = String(b.industry ?? '').trim().slice(0, 80)
+  if (!industry) errors.push('industry')
+  const services = list(b.services, 12, 80)
+  if (!services.length) errors.push('services')
+  const zips = [...new Set((b.serviceArea?.zips || []).map((z) => String(z).trim()))]
+  if (!zips.length || zips.length > 200 || zips.some((z) => !ZIP_RE.test(z))) errors.push('zips')
+  const cities = list(b.serviceArea?.cities, 10, 60)
+  const exclusions = String(b.exclusions ?? '').trim().slice(0, 500)
+  const value = b.customerValueCents == null || b.customerValueCents === '' ? null : Number(b.customerValueCents)
+  if (value != null && !(Number.isInteger(value) && value >= 0 && value <= 10000000)) errors.push('customerValue')
+  const objective = OBJECTIVES.includes(b.objective) ? b.objective : 'leads'
+  const budget = b.monthlyBudgetCents == null || b.monthlyBudgetCents === '' ? null : Number(b.monthlyBudgetCents)
+  if (budget != null && !(Number.isInteger(budget) && budget >= 15000 && budget <= 5000000)) errors.push('monthlyBudget')
+  const approvedClaims = list(b.approvedClaims, 10, 90)
+  if (errors.length) return { errors }
+  return { profile: { website, industry, services, serviceArea: { zips, cities }, exclusions, customerValueCents: value, objective, monthlyBudgetCents: budget, approvedClaims } }
+}
+
+const rowToProfile = (r) =>
+  r && {
+    website: r.website,
+    industry: r.industry,
+    services: JSON.parse(r.services || '[]'),
+    serviceArea: { zips: [], cities: [], ...JSON.parse(r.service_area || '{}') },
+    exclusions: r.exclusions,
+    customerValueCents: r.customer_value_cents,
+    objective: r.objective,
+    monthlyBudgetCents: r.monthly_budget_cents,
+    approvedClaims: JSON.parse(r.approved_claims || '[]'),
+  }
+
+export async function getProfile(db, customer) {
+  return rowToProfile(await db.prepare('SELECT * FROM ad_profiles WHERE customer = ?1').bind(customer).first())
+}
+
+export async function saveProfile(db, customer, p, now = Date.now()) {
+  await db
+    .prepare(
+      `INSERT INTO ad_profiles (customer, website, industry, services, service_area, exclusions, customer_value_cents, objective, monthly_budget_cents, approved_claims, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       ON CONFLICT(customer) DO UPDATE SET website = ?2, industry = ?3, services = ?4, service_area = ?5, exclusions = ?6,
+         customer_value_cents = ?7, objective = ?8, monthly_budget_cents = ?9, approved_claims = ?10, updated_at = ?11`,
+    )
+    .bind(customer, p.website, p.industry, JSON.stringify(p.services), JSON.stringify(p.serviceArea), p.exclusions, p.customerValueCents, p.objective, p.monthlyBudgetCents, JSON.stringify(p.approvedClaims), now)
+    .run()
+}
+
+// ---------- campaigns ----------
+const publicCampaign = (r) => ({
+  id: r.id,
+  platform: r.platform,
+  status: r.status,
+  spec: JSON.parse(r.spec),
+  dailyBudgetCents: r.daily_budget_cents,
+  launched: Boolean(r.platform_campaign_id),
+  approvedAt: r.approved_at,
+  launchedAt: r.launched_at,
+  lastError: r.last_error,
+  updatedAt: r.updated_at,
+})
+
+export async function listCampaigns(db, customer) {
+  const { results } = await db.prepare("SELECT * FROM ad_campaigns WHERE customer = ?1 AND status <> 'removed' ORDER BY created_at DESC LIMIT 20").bind(customer).all()
+  return results.map(publicCampaign)
+}
+
+const getRow = (db, customer, id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(id) ? db.prepare('SELECT * FROM ad_campaigns WHERE id = ?1 AND customer = ?2').bind(id, customer).first() : null)
+
+async function logAction(db, { customer, campaignId, actor, kind, status = 'applied', reason, details = {}, id = randomToken(12) }, now = Date.now()) {
+  await db
+    .prepare('INSERT OR IGNORE INTO ad_actions (id, customer, campaign_id, actor, kind, status, reason, details, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)')
+    .bind(id, customer, campaignId, actor, kind, status, reason, JSON.stringify(details), now)
+    .run()
+}
+
+// Saves (creates or edits) a draft. Drafts may be incomplete; errors are returned for the editor.
+export async function saveDraft(env, customer, { id, spec }, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const profile = await getProfile(db, customer.id)
+  if (!profile) return { ok: false, error: 'profile_required' }
+  if (!spec || !['google', 'meta'].includes(spec.platform)) return { ok: false, error: 'invalid_spec' }
+  const [errors] = validateSpec(spec, { approvedClaims: profile.approvedClaims })
+  const daily = Number.isInteger(spec.dailyBudgetCents) && spec.dailyBudgetCents > 0 ? spec.dailyBudgetCents : 500
+  const body = JSON.stringify(spec).slice(0, 60000)
+  if (id) {
+    const row = await getRow(db, customer.id, id)
+    if (!row) return { ok: false, error: 'not_found' }
+    if (!['draft', 'approved', 'error'].includes(row.status) || row.platform_campaign_id) return { ok: false, error: 'not_editable' }
+    if (row.platform !== spec.platform) return { ok: false, error: 'invalid_spec' }
+    // Editing an approved draft returns it to draft: approval covers exactly what the owner saw.
+    await db.prepare("UPDATE ad_campaigns SET spec = ?3, daily_budget_cents = ?4, status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = ?5 WHERE id = ?1 AND customer = ?2").bind(id, customer.id, body, daily, now).run()
+    return { ok: true, id, errors }
+  }
+  const count = await db.prepare("SELECT count(*) AS n FROM ad_campaigns WHERE customer = ?1 AND status <> 'removed'").bind(customer.id).first()
+  if ((count?.n ?? 0) >= 10) return { ok: false, error: 'too_many_campaigns' }
+  const newId = randomToken(12)
+  await db
+    .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES (?1, ?2, ?3, 'draft', ?4, ?5, ?6, ?6)")
+    .bind(newId, customer.id, spec.platform, body, daily, now)
+    .run()
+  return { ok: true, id: newId, errors }
+}
+
+// Owner approval of one campaign: strict validation against the approved budget's remaining room.
+export async function approveCampaign(env, customer, id, ownerEmail, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customer.id, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  if (!['draft', 'error'].includes(row.status) || row.platform_campaign_id) return { ok: false, error: 'not_editable' }
+  if (!(await currentApproval(db, customer.id))) return { ok: false, error: 'budget_approval_required' }
+  const profile = await getProfile(db, customer.id)
+  const [errors, spec] = validateSpec(JSON.parse(row.spec), { approvedClaims: profile?.approvedClaims || [], ceilingDailyCents: await remainingDailyCents(db, customer.id, id) })
+  if (errors.length) return { ok: false, error: 'invalid_spec', errors }
+  if (spec.platform === 'meta') {
+    for (const cid of [...spec.meta.imageCreativeIds, ...spec.meta.videoCreativeIds]) {
+      const c = await db.prepare("SELECT 1 AS x FROM ad_creatives WHERE id = ?1 AND customer = ?2 AND status = 'approved'").bind(cid, customer.id).first()
+      if (!c) return { ok: false, error: 'creative_not_approved' }
+    }
+  }
+  await db
+    .prepare("UPDATE ad_campaigns SET status = 'approved', spec = ?3, daily_budget_cents = ?4, approved_by = ?5, approved_at = ?6, last_error = NULL, updated_at = ?6 WHERE id = ?1 AND customer = ?2")
+    .bind(id, customer.id, JSON.stringify(spec), spec.dailyBudgetCents, ownerEmail, now)
+    .run()
+  await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'approve', reason: 'Owner approved campaign', details: { dailyBudgetCents: spec.dailyBudgetCents } }, now)
+  return { ok: true }
+}
+
+// Live launch needs: ADS_LIVE_LAUNCH === 'true' (operator switch, requires human approval to set),
+// a connected account, and an approved campaign. Otherwise a non-spending check runs
+// (Google validateOnly / Meta dry run) and nothing is created.
+// Release switch for the whole Ads feature (dashboard tab + routes). Off unless exactly 'true'.
+export const adsEnabled = (env) => env.ADS_ENABLED === 'true'
+export const liveLaunchEnabled = (env) => env.ADS_LIVE_LAUNCH === 'true'
+
+// Access rule: once billing is configured, starting ads needs an active or trialing subscription.
+// Before billing exists (pilot) this is not enforced. Pausing is always allowed.
+export async function billingAllowsAds(env, customerId) {
+  if (!stripeConfigured(env)) return true
+  const sub = await getSubscription(env.ONBOARDING_DB, customerId)
+  return ['active', 'trialing'].includes(sub?.status)
+}
+
+export async function launch(env, customer, id, ownerEmail, { live = false } = {}, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customer.id, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  const spec = JSON.parse(row.spec)
+  const a = await adapter(row.platform)
+  if (!a) return { ok: false, error: 'platform_unavailable' }
+  const campaign = { id: row.id, spec, platformIds: JSON.parse(row.platform_ids || '{}'), platform_ids: row.platform_ids }
+  if (!live) {
+    // Validation path: never spends, never creates objects.
+    const r = row.platform === 'google' ? await a.launchCampaign(env, customer.id, campaign, { validateOnly: true }) : await a.launchCampaign(env, customer.id, campaign, { dryRun: true })
+    await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'validate', status: r.ok ? 'applied' : 'failed', reason: r.ok ? 'Validation passed (nothing created, no spend)' : `Validation failed: ${r.error}` }, now)
+    return r.ok ? { ok: true, validated: true, live: false } : { ok: false, error: r.error }
+  }
+  if (!liveLaunchEnabled(env)) return { ok: false, error: 'live_launch_disabled' }
+  if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
+  if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
+  // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
+  if (row.daily_budget_cents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
+  const claimed = await db.prepare("UPDATE ad_campaigns SET status = 'launching', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'approved' RETURNING id").bind(id, customer.id, now).first()
+  if (!claimed) return { ok: false, error: 'approval_required' }
+  const r = row.platform === 'google' ? await a.launchCampaign(env, customer.id, campaign, { validateOnly: false }) : await a.launchCampaign(env, customer.id, campaign, { dryRun: false })
+  const ids = JSON.stringify(r.platformIds || campaign.platformIds || {})
+  if (!r.ok) {
+    await db.prepare("UPDATE ad_campaigns SET status = 'error', platform_ids = ?3, last_error = ?4, updated_at = ?5 WHERE id = ?1 AND customer = ?2").bind(id, customer.id, ids, r.error, now).run()
+    await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'launch', status: 'failed', reason: `Launch failed: ${r.error}` }, now)
+    return { ok: false, error: r.error }
+  }
+  // Created PAUSED on the platform. Delivery starts only when the owner presses Resume.
+  await db
+    .prepare("UPDATE ad_campaigns SET status = 'paused', platform_campaign_id = ?3, platform_ids = ?4, launched_at = ?5, last_error = NULL, updated_at = ?5 WHERE id = ?1 AND customer = ?2")
+    .bind(id, customer.id, r.platformCampaignId || null, ids, now)
+    .run()
+  await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'launch', reason: 'Created on the platform, paused' }, now)
+  return { ok: true, live: true, status: 'paused' }
+}
+
+export async function setCampaignStatus(env, customer, id, target, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customer.id, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  if (!['paused', 'active'].includes(target)) return { ok: false, error: 'invalid_status' }
+  if (!row.platform_campaign_id && !JSON.parse(row.platform_ids || '{}').campaignId) return { ok: false, error: 'not_launched' }
+  if (target === 'active') {
+    if (!liveLaunchEnabled(env)) return { ok: false, error: 'live_launch_disabled' }
+    if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
+    if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
+    const approval = await currentApproval(db, customer.id)
+    if (!approval) return { ok: false, error: 'budget_approval_required' }
+    if (row.daily_budget_cents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
+    const month = await db.prepare('SELECT coalesce(sum(spend_cents),0) AS s FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2').bind(customer.id, new Date(now).toISOString().slice(0, 8) + '01').first()
+    if ((month?.s ?? 0) >= approval.monthly_cents) return { ok: false, error: 'monthly_budget_reached' }
+  }
+  const a = await adapter(row.platform)
+  const r = await a.setStatus(env, customer.id, row, PLATFORM_STATUS[row.platform][target])
+  if (!r.ok) {
+    await logAction(db, { customer: customer.id, campaignId: id, actor, kind: target === 'active' ? 'resume' : 'pause', status: 'failed', reason: `Platform error: ${r.error}` }, now)
+    return { ok: false, error: r.error }
+  }
+  await db.prepare('UPDATE ad_campaigns SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(id, customer.id, target, now).run()
+  await logAction(db, { customer: customer.id, campaignId: id, actor, kind: target === 'active' ? 'resume' : 'pause', reason: target === 'active' ? 'Resumed' : 'Paused' }, now)
+  return { ok: true, status: target }
+}
+
+// Optimizer pause hook (cron).
+export async function pauseForOptimizer(env, row) {
+  const a = await adapter(row.platform)
+  return a ? a.setStatus(env, row.customer, row, PLATFORM_STATUS[row.platform].paused) : { ok: false }
+}
+
+// Pulls the last 3 days of metrics for launched campaigns (cron). Upserts ad_metrics_daily.
+export async function syncMetrics(env, now = Date.now(), limit = 25) {
+  const db = env.ONBOARDING_DB
+  const { results } = await db.prepare("SELECT * FROM ad_campaigns WHERE status IN ('active', 'paused') AND platform_campaign_id IS NOT NULL ORDER BY updated_at LIMIT ?1").bind(limit).all()
+  const since = new Date(now - 3 * 86400000).toISOString().slice(0, 10)
+  const until = new Date(now).toISOString().slice(0, 10)
+  let synced = 0
+  let failed = 0
+  for (const row of results) {
+    const a = await adapter(row.platform)
+    const r = await a.fetchDailyMetrics(env, row.customer, row, since, until)
+    if (!r.ok) {
+      failed++
+      continue
+    }
+    for (const m of r.rows) {
+      await db
+        .prepare(
+          `INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, impressions, clicks, conversions, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+           ON CONFLICT(campaign_id, date) DO UPDATE SET spend_cents = ?4, impressions = ?5, clicks = ?6, conversions = ?7, fetched_at = ?8`,
+        )
+        .bind(row.id, row.customer, m.date, m.spendCents, m.impressions, m.clicks, m.conversions, now)
+        .run()
+    }
+    synced++
+  }
+  return { synced, failed }
+}
+
+// ---------- results ----------
+// Spend comes from the platforms; leads/bookings/jobs from our own records for attributed leads only.
+// Revenue is the owner-reported booking value; there is no verified payment or incremental figure.
+export async function adResults(db, customer, now = Date.now()) {
+  const since = now - 30 * 86400000
+  const sinceDay = new Date(since).toISOString().slice(0, 10)
+  const one = (sql, ...a) => db.prepare(sql).bind(customer, ...a).first()
+  const spend = await one('SELECT coalesce(sum(spend_cents),0) AS s, count(*) AS n, coalesce(sum(clicks),0) AS c FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2', sinceDay)
+  const leads = await one(
+    `SELECT count(*) AS n, coalesce(sum(CASE WHEN l.status <> 'unqualified' THEN 1 ELSE 0 END),0) AS q FROM lead_attribution a JOIN leads l ON l.id = a.lead_id
+      WHERE a.customer = ?1 AND a.source IN ('google_ads','meta_lead_form','meta_ad_click') AND a.created_at >= ?2`,
+    since,
+  )
+  const appts = await one(
+    `SELECT count(*) AS booked,
+            coalesce(sum(CASE WHEN o.work = 'completed' THEN 1 ELSE 0 END),0) AS completed,
+            coalesce(sum(CASE WHEN o.work = 'completed' THEN o.value_cents ELSE 0 END),0) AS value,
+            coalesce(sum(CASE WHEN o.work = 'completed' AND o.value_cents IS NOT NULL THEN 1 ELSE 0 END),0) AS valued
+       FROM lead_attribution a JOIN appointments p ON p.lead_id = a.lead_id LEFT JOIN appointment_outcomes o ON o.appointment_id = p.id
+      WHERE a.customer = ?1 AND a.source IN ('google_ads','meta_lead_form','meta_ad_click') AND a.created_at >= ?2 AND p.status <> 'cancelled'`,
+    since,
+  )
+  const approval = await currentApproval(db, customer)
+  const hasSpend = (spend?.n ?? 0) > 0
+  const per = (n) => (hasSpend && n > 0 ? Math.round(spend.s / n) : null)
+  const { results: actions } = await db.prepare('SELECT kind, status, reason, at FROM ad_actions WHERE customer = ?1 ORDER BY at DESC LIMIT 10').bind(customer).all()
+  return {
+    spendCents: hasSpend ? spend.s : null,
+    qualifiedLeads: leads?.q ?? 0,
+    leads: leads?.n ?? 0,
+    booked: appts?.booked ?? 0,
+    completedJobs: appts?.completed ?? 0,
+    reportedRevenueCents: (appts?.valued ?? 0) > 0 ? appts.value : null,
+    verifiedPaymentsCents: null,
+    incrementalRevenueCents: null,
+    costPerQualifiedLeadCents: per(leads?.q ?? 0),
+    costPerBookingCents: per(appts?.booked ?? 0),
+    costPerCompletedJobCents: per(appts?.completed ?? 0),
+    approvedMonthlyCents: approval?.monthly_cents ?? null,
+    dailyCeilingCents: approval ? dailyCeilingCents(approval.monthly_cents) : null,
+    actions,
+  }
+}
+
+export { logAction }

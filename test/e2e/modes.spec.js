@@ -25,7 +25,9 @@ test('visit booking: service address is required and lands on the calendar event
   await page.getByLabel('State').fill('sc')
   await page.getByRole('button', { name: 'Choose a time' }).click()
   await expect(page.getByRole('heading', { name: 'Pick a visit time' })).toBeVisible()
-  await page.locator('.slot').first().click()
+  // The mock calendar is shared by all businesses and other specs book the first slot in parallel,
+  // so take the last offered slot to avoid a cross-spec race (production calendars are separate).
+  await page.locator('.slot').last().click()
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: 'Visit booked' })).toBeVisible()
   await expect(page.getByText('E2E Home Service will visit 21 Tide Ln.')).toBeVisible()

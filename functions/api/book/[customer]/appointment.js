@@ -4,8 +4,9 @@ import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { bookAppointment } from '../../../../server/booking.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
+import { syncStage } from '../../../../server/ghl.js'
 
-export async function onRequestPost({ request, env, params }) {
+export async function onRequestPost({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
   if (response) return response
   const rl = await hitByIp(env, 'bookAppointment', request)
@@ -20,6 +21,9 @@ export async function onRequestPost({ request, env, params }) {
     return json(503, { error: 'storage_error' })
   }
   if (!result.ok) return json(result.httpStatus, { error: result.error })
+  const sync = syncStage(env, customer.id, body.leadId, 'booked').catch((e) => console.error('ghl stage failed:', e?.name))
+  if (typeof waitUntil === 'function') waitUntil(sync)
+  else await sync
   const { start: s, end } = result.appointment
   return json(201, { start: new Date(s).toISOString(), end: new Date(end).toISOString(), timezone: customer.timezone, name: customer.name })
 }

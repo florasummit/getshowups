@@ -845,3 +845,77 @@
 .row-title .tag {
   margin-left: 8px;
 }
+
+/* ---------- ads ---------- */
+.stack > * + * {
+  margin-top: 12px;
+}
+.campaign-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ink-100);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.chip--active {
+  background: #dcfce7;
+  color: #166534;
+}
+.chip--error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.ad-preview {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+  overflow-wrap: anywhere;
+}
+.ad-preview-title {
+  color: #1a0dab;
+  font-weight: 600;
+}
+.campaign-edit {
+  margin: 12px 0;
+}
+.campaign-edit summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.campaign-edit > * + * {
+  margin-top: 12px;
+}
+.problems {
+  margin: 8px 0;
+  padding-left: 18px;
+  color: #991b1b;
+  font-size: 0.9rem;
+  list-style: disc;
+}
+.plan-notes > * + * {
+  margin-top: 8px;
+}
+.creatives {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.creatives img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+}

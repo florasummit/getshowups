@@ -133,7 +133,10 @@ function Details({ id, askZip, visit, offerSms, bizName, onDone }) {
   const submit = async (e) => {
     e.preventDefault()
     setState({ saving: true })
-    const body = visit ? { ...form, address } : form
+    // Ad attribution: only the utm/gclid parameters from the link, never personal data.
+    const q = new URLSearchParams(location.search)
+    const attribution = Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'gclid'].filter((k) => q.get(k)).map((k) => [k, q.get(k)]))
+    const body = { ...(visit ? { ...form, address } : form), ...(Object.keys(attribution).length ? { attribution } : {}) }
     const { status, data } = await api(`/api/book/${id}/lead`, { method: 'POST', body })
     if (status === 201) {
       return onDone({ ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0], street: visit ? address.street.trim() : null })

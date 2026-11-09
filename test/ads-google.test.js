@@ -1,0 +1,621 @@
+// Google Ads adapter + connect routes: OAuth start/callback (adwords scope, PKCE, encrypted state and
+// token), account selection, the one-mutate PAUSED launch (validateOnly by default), idempotency,
+// error mapping/retries, status/budget updates, metrics normalization, isolation and leak checks.
+// Real handlers + migrations (incl. 0006) on node:sqlite, Map KV with real encryption, mocked fetch.
+// Nothing here talks to Google. Run: node --no-warnings --test test/ads-google.test.js
+import { test, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
+
+import { decrypt, encrypt, pkceChallenge, sha256Hex } from '../server/google-oauth.js'
+import { getConnection, saveToken, upsertConnection } from '../server/ads/connections.js'
+import { validateSpec } from '../server/ads/spec.js'
+import * as G from '../server/ads/google.js'
+import * as start from '../functions/api/ads/google/start.js'
+import * as callback from '../functions/api/ads/google/callback.js'
+import * as accounts from '../functions/api/ads/google/accounts.js'
+
+const ORIGIN = 'https://getshowups.com'
+const ADS = 'https://googleads.googleapis.com/v26'
+const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+const RT = '1//ads-refresh-SECRET'
+const AT = 'ya29.ads-access-SECRET'
+const SECRET = 'client-secret-SECRET'
+const LEAK = 'Customer 1234567890 belongs to Jane Doe at secret-co'
+const ACCT = '1234567890'
+const ACCT2 = '9876543210'
+const MCC = '5555555555'
+
+function d1() {
+  const sql = new DatabaseSync(':memory:')
+  for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) sql.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
+  const stmt = (q, args = []) => ({
+    q,
+    args,
+    bind: (...a) => stmt(q, a),
+    first: async () => sql.prepare(q).get(...args) ?? null,
+    all: async () => ({ results: sql.prepare(q).all(...args) }),
+    run: async () => ({ meta: { changes: sql.prepare(q).run(...args).changes } }),
+  })
+  return { sql, prepare: (q) => stmt(q), batch: async (list) => list.forEach((s) => sql.prepare(s.q).run(...s.args)) }
+}
+
+let env, db, kv, calls, logs, outputs, origFetch, origError, refreshMode, ads, tokenExchange
+
+function seed(id, owner) {
+  const now = Date.now()
+  db.sql
+    .prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES (?, ?, 'UTC', '', '09:00', '17:00', '1,2,3,4,5', ?, ?, ?)")
+    .run(id, `${id} Co`, now, now, now)
+  db.sql.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?, ?, ?)').run(owner, id, now)
+}
+
+const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+const adsError = (status, code, errorCode) => reply(status, { error: { code: status, message: LEAK, status: code, details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v26.errors.GoogleAdsFailure', errors: [{ errorCode, message: LEAK }] }] } })
+
+// Default Google Ads mock: two accessible accounts, no existing campaign, ZIPs resolve, mutates succeed.
+function defaultAds(path, body) {
+  if (path === '/customers:listAccessibleCustomers') return reply(200, { resourceNames: [`customers/${ACCT}`, `customers/${MCC}`] })
+  if (path === '/geoTargetConstants:suggest') {
+    return reply(200, {
+      geoTargetConstantSuggestions: body.locationNames.names.map((z) => ({ searchTerm: z, locale: 'en', reach: '1000', geoTargetConstant: { resourceName: `geoTargetConstants/9${z}`, id: `9${z}`, targetType: 'Postal Code', countryCode: 'US' } })),
+    })
+  }
+  if (/googleAds:search$/.test(path)) {
+    if (body.query.includes('FROM customer_client')) return reply(200, { results: body.query.endsWith(ACCT2) ? [{ customerClient: { id: ACCT2 } }] : [] })
+    if (body.query.includes('FROM customer ')) return reply(200, { results: [{ customer: { id: ACCT, descriptiveName: 'Pools Ads', currencyCode: 'USD' } }] })
+    return reply(200, { results: [] })
+  }
+  if (/googleAds:mutate$/.test(path)) {
+    if (body.validateOnly) return reply(200, {})
+    const acct = path.split('/')[2]
+    return reply(200, {
+      mutateOperationResponses: body.mutateOperations.map((op) => {
+        const kind = Object.keys(op)[0].replace('Operation', 'Result')
+        const n = { campaignBudgetResult: 'campaignBudgets/111', campaignResult: 'campaigns/222', adGroupResult: 'adGroups/333', adGroupAdResult: 'adGroupAds/333~444' }[kind] || 'x/1'
+        return { [kind]: { resourceName: `customers/${acct}/${n}` } }
+      }),
+    })
+  }
+  if (/campaigns:mutate$|campaignBudgets:mutate$/.test(path)) return reply(200, { results: [{ resourceName: body.operations[0].update.resourceName }] })
+  throw new Error(`unexpected ads path ${path}`)
+}
+
+beforeEach(async () => {
+  db = d1()
+  kv = new Map()
+  calls = []
+  logs = []
+  outputs = []
+  refreshMode = 'ok'
+  ads = defaultAds
+  tokenExchange = () => reply(200, { access_token: AT, refresh_token: RT, scope: G.ADS_SCOPE, expires_in: 3599, token_type: 'Bearer' })
+  env = {
+    ADS_ENABLED: 'true',
+    GOOGLE_CLIENT_ID: 'cid',
+    GOOGLE_CLIENT_SECRET: SECRET,
+    GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`,
+    TOKEN_ENCRYPTION_KEY: KEY,
+    ADMIN_API_TOKEN: 'a'.repeat(40),
+    ONBOARDING_DB: db,
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) },
+    GOOGLE_ADS_RETRY_MS: '0',
+  }
+  seed('pools', 'owner@pools.example')
+  seed('salon', 'owner@salon.example')
+  origFetch = globalThis.fetch
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url)
+    const headers = new Headers(init.headers)
+    if (u === 'https://oauth2.googleapis.com/token') {
+      const form = new URLSearchParams(String(init.body))
+      calls.push({ url: u, form })
+      if (form.get('grant_type') === 'authorization_code') return tokenExchange(form)
+      if (refreshMode === 'invalid_grant') return reply(400, { error: 'invalid_grant', error_description: LEAK })
+      return reply(200, { access_token: AT, scope: G.ADS_SCOPE })
+    }
+    if (u.startsWith(ADS)) {
+      const path = u.slice(ADS.length)
+      const body = init.body ? JSON.parse(init.body) : undefined
+      calls.push({ url: u, path, method: init.method || 'GET', headers, body })
+      assert.equal(headers.get('Authorization'), `Bearer ${AT}`)
+      return ads(path, body, headers)
+    }
+    throw new Error(`unexpected ${u}`)
+  }
+  origError = console.error
+  console.error = (...a) => logs.push(a.map(String).join(' '))
+})
+
+afterEach(() => {
+  globalThis.fetch = origFetch
+  console.error = origError
+  const out = [...logs, ...outputs].join('\n')
+  for (const s of [RT, AT, SECRET, LEAK, 'Jane Doe']) assert.ok(!out.includes(s), `must not leak ${s}`)
+})
+
+const adsCalls = (re) => calls.filter((c) => c.path && re.test(c.path))
+const remember = (r) => (outputs.push(JSON.stringify(r)), r)
+
+async function session(email) {
+  const token = email.replace(/[^A-Za-z0-9]/g, 'x').padEnd(43, 'Q').slice(0, 43)
+  db.sql.prepare('INSERT OR IGNORE INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)').run(await sha256Hex(token), email, Date.now(), Date.now() + 864e5)
+  return `__Host-gsu_session=${token}`
+}
+async function call(mod, method, path, { cookie, body, headers: extra = {} } = {}) {
+  const headers = { 'CF-Connecting-IP': '203.0.113.9', ...extra }
+  if (cookie) headers.Cookie = cookie
+  if (method === 'POST' && !('Origin' in extra)) headers.Origin = ORIGIN
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const res = await mod[`onRequest${method === 'GET' ? 'Get' : 'Post'}`]({ request: new Request(ORIGIN + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }), env })
+  const text = await res.clone().text()
+  outputs.push(text, res.headers.get('Location') || '')
+  return { res, status: res.status, text, json: () => JSON.parse(text), location: res.headers.get('Location') }
+}
+const stateCookie = (res) => res.headers.get('Set-Cookie').match(/__Host-gsu_ads_google=([^;]*)/)[1]
+
+async function connect(email = 'owner@pools.example') {
+  const cookie = await session(email)
+  const s = await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { 'Sec-Fetch-Site': 'same-origin' } })
+  const state = new URL(s.location).searchParams.get('state')
+  return call(callback, 'GET', `/api/ads/google/callback?code=c0de&state=${state}`, { cookie: `${cookie}; __Host-gsu_ads_google=${stateCookie(s.res)}` })
+}
+
+async function connected(customer = 'pools', { accountId = ACCT, extra = {} } = {}) {
+  await saveToken(env, 'google', customer, { refreshToken: RT, clientId: 'cid', scope: G.ADS_SCOPE })
+  await upsertConnection(env, customer, 'google', { accountId, extra, currency: 'USD', status: 'connected' })
+}
+
+const SPEC_INPUT = {
+  platform: 'google',
+  name: "Joe's Pools",
+  dailyBudgetCents: 2500,
+  geo: { zips: ['29403', '29401'] },
+  finalUrl: 'https://pools.example/book',
+  google: {
+    keywords: [
+      { text: 'pool cleaning', match: 'PHRASE' },
+      { text: 'pool service charleston', match: 'EXACT' },
+    ],
+    negativeKeywords: ['jobs', 'diy'],
+    headlines: ['Pool Cleaning Charleston', 'Book A Pool Visit', 'Weekly Pool Service'],
+    descriptions: ['Weekly pool cleaning for Charleston homes.', 'Pick a time online in a minute.'],
+    path1: 'pools',
+  },
+}
+const campaign = () => {
+  const [errors, spec] = validateSpec(SPEC_INPUT)
+  assert.deepEqual(errors, [])
+  return { id: 'cmp_abc123', spec }
+}
+const row = (extra = {}) => ({
+  id: 'cmp_abc123',
+  customer: 'pools',
+  platform_campaign_id: '222',
+  platform_ids: JSON.stringify({ campaign: `customers/${ACCT}/campaigns/222`, budget: `customers/${ACCT}/campaignBudgets/111` }),
+  ...extra,
+})
+
+// ---------- base + error mapping ----------
+
+test('googleAdsBase honors only loopback mock origins', () => {
+  assert.equal(G.googleAdsBase({}), ADS)
+  assert.equal(G.googleAdsBase({ GOOGLE_ADS_API_MOCK_ORIGIN: 'http://127.0.0.1:8799' }), 'http://127.0.0.1:8799/v26')
+  for (const bad of ['https://evil.example', 'http://localhost:8799', 'http://127.0.0.1.evil.example:80', 'http://127.0.0.1']) {
+    assert.equal(G.googleAdsBase({ GOOGLE_ADS_API_MOCK_ORIGIN: bad }), ADS, bad)
+  }
+})
+
+test('mapError: allowlisted codes only, never the provider message', () => {
+  const body = (errorCode, status) => ({ error: { status, message: LEAK, details: [{ errors: [{ errorCode, message: LEAK }] }] } })
+  const cases = [
+    [401, body({ authenticationError: 'OAUTH_TOKEN_REVOKED' }, 'UNAUTHENTICATED'), 'reconnect_required', false, true],
+    [403, body({ authorizationError: 'USER_PERMISSION_DENIED' }, 'PERMISSION_DENIED'), 'permission_denied', false, false],
+    [403, body({ authorizationError: 'CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION' }, 'PERMISSION_DENIED'), 'not_approved_for_production', false, false],
+    [429, body({ quotaError: 'RESOURCE_EXHAUSTED' }, 'RESOURCE_EXHAUSTED'), 'quota_exhausted', true, false],
+    [409, body({ databaseError: 'CONCURRENT_MODIFICATION' }, 'ABORTED'), 'concurrent_modification', true, false],
+    [500, body({ internalError: 'TRANSIENT_ERROR' }, 'INTERNAL'), 'transient', true, false],
+    [503, {}, 'transient', true, false],
+    [400, body({ campaignError: 'DUPLICATE_CAMPAIGN_NAME' }, 'INVALID_ARGUMENT'), 'invalid_request', false, false],
+    [400, 'not json', 'invalid_request', false, false],
+    [400, [body({ quotaError: 'RESOURCE_EXHAUSTED' })], 'quota_exhausted', true, false], // searchStream arrays
+  ]
+  for (const [status, b, error, retryable, reconnect] of cases) {
+    const r = G.mapError(status, b)
+    assert.deepEqual(r, { ok: false, error, httpStatus: status, retryable, reconnect }, error)
+    assert.ok(!JSON.stringify(r).includes(LEAK))
+  }
+})
+
+// ---------- OAuth start ----------
+
+test('start: owner session required; cross-site refused; adwords scope + PKCE + encrypted state', async () => {
+  assert.equal((await call(start, 'GET', '/api/ads/google/start')).status, 401)
+  const noBiz = await session('someone@new.example')
+  assert.equal((await call(start, 'GET', '/api/ads/google/start', { cookie: noBiz })).status, 409)
+  const cookie = await session('owner@pools.example')
+  assert.equal((await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403)
+  assert.equal((await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { Origin: 'https://evil.example' } })).status, 403)
+
+  const r = await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { 'Sec-Fetch-Site': 'same-origin' } })
+  assert.equal(r.status, 302)
+  const u = new URL(r.location)
+  assert.equal(u.origin + u.pathname, 'https://accounts.google.com/o/oauth2/v2/auth')
+  const q = Object.fromEntries(u.searchParams)
+  assert.equal(q.scope, 'https://www.googleapis.com/auth/adwords')
+  assert.equal(q.redirect_uri, `${ORIGIN}/api/ads/google/callback`)
+  assert.equal(q.access_type, 'offline')
+  assert.equal(q.code_challenge_method, 'S256')
+  assert.equal(q.client_id, 'cid')
+  const setCookie = r.res.headers.get('Set-Cookie')
+  assert.match(setCookie, /^__Host-gsu_ads_google=[^;]+; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=600$/)
+  const sealed = JSON.parse(await decrypt(env, stateCookie(r.res)))
+  assert.equal(sealed.state, q.state)
+  assert.equal(sealed.customer, 'pools')
+  assert.equal(await pkceChallenge(sealed.verifier), q.code_challenge)
+  assert.ok(!setCookie.includes(sealed.verifier), 'verifier is only inside the encrypted cookie')
+  assert.ok(!r.location.includes(sealed.verifier))
+})
+
+test('start: rate limited per IP with the login rule', async () => {
+  const cookie = await session('owner@pools.example')
+  let last
+  for (let i = 0; i < 21; i++) last = await call(start, 'GET', '/api/ads/google/start', { cookie })
+  assert.equal(last.status, 429)
+})
+
+// ---------- OAuth callback ----------
+
+test('callback: rejects bad/missing state, other business sessions, and denied consent', async () => {
+  const cookie = await session('owner@pools.example')
+  const s = await call(start, 'GET', '/api/ads/google/start', { cookie })
+  const sealed = stateCookie(s.res)
+  const state = new URL(s.location).searchParams.get('state')
+  const cb = (qs, c) => call(callback, 'GET', `/api/ads/google/callback?${qs}`, { cookie: c })
+  assert.equal((await cb(`code=x&state=${state}`, cookie)).location, '/dashboard?ads_error=expired') // no state cookie
+  assert.equal((await cb(`code=x&state=wrong`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=expired')
+  assert.equal((await cb(`code=x&state=${state}`, `${cookie}; __Host-gsu_ads_google=garbage`)).location, '/dashboard?ads_error=expired')
+  assert.equal((await cb(`error=access_denied&state=${state}`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=cancelled')
+  // A different business's owner cannot finish this business's flow (state names the business).
+  const other = await session('owner@salon.example')
+  assert.equal((await cb(`code=x&state=${state}`, `${other}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=expired')
+  // Expired state.
+  const old = await encrypt(env, JSON.stringify({ state: 's'.repeat(43), verifier: 'v', customer: 'pools', email: 'owner@pools.example', iat: Date.now() - 11 * 60_000 }))
+  assert.equal((await cb(`code=x&state=${'s'.repeat(43)}`, `${cookie}; __Host-gsu_ads_google=${old}`)).location, '/dashboard?ads_error=expired')
+  assert.equal(calls.length, 0, 'no token exchange happened')
+  assert.equal(kv.size, 0)
+})
+
+test('callback: exchanges with PKCE, stores the refresh token encrypted, single account auto-selected', async () => {
+  ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${ACCT}`] }) : defaultAds(path, body, h))
+  const r = await connect()
+  assert.equal(r.status, 303)
+  assert.equal(r.location, '/dashboard?ads=google_connected')
+  assert.match(r.res.headers.get('Set-Cookie'), /__Host-gsu_ads_google=; .*Max-Age=0/)
+  const ex = calls.find((c) => c.form?.get('grant_type') === 'authorization_code').form
+  assert.equal(ex.get('redirect_uri'), `${ORIGIN}/api/ads/google/callback`)
+  assert.ok(ex.get('code_verifier')?.length >= 43)
+  const stored = kv.get('ads:google:pools')
+  assert.ok(stored && !stored.includes(RT), 'token is encrypted at rest')
+  assert.equal(JSON.parse(await decrypt(env, stored)).refreshToken, RT)
+  const conn = await getConnection(env, 'pools', 'google')
+  assert.equal(conn.status, 'connected')
+  assert.equal(conn.account_id, ACCT)
+  assert.equal(conn.account_name, 'Pools Ads')
+  assert.equal(conn.currency, 'USD')
+  assert.ok(!JSON.stringify(conn).includes(RT))
+})
+
+test('callback: several accounts → needs_account; missing scope or refresh token refused', async () => {
+  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
+  assert.equal((await getConnection(env, 'pools', 'google')).account_id, null)
+
+  tokenExchange = () => reply(200, { access_token: AT, scope: 'openid email' , refresh_token: RT })
+  assert.equal((await connect('owner@salon.example')).location, '/dashboard?ads_error=scope_denied')
+  tokenExchange = () => reply(200, { access_token: AT, scope: G.ADS_SCOPE })
+  assert.equal((await connect('owner@salon.example')).location, '/dashboard?ads_error=no_refresh_token')
+  assert.equal(kv.has('ads:google:salon'), false)
+})
+
+test('callback: test-access project → connection kept as needs_account with an allowlisted error', async () => {
+  ads = () => adsError(403, 'PERMISSION_DENIED', { authorizationError: 'CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION' })
+  assert.equal((await connect()).location, '/dashboard?ads_error=not_approved_for_production')
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
+})
+
+// ---------- account selection ----------
+
+test('accounts: list and select only accessible accounts (direct or via a manager); owner + same-origin', async () => {
+  await connect()
+  const cookie = await session('owner@pools.example')
+  const list = await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })
+  assert.deepEqual(list.json(), { status: 'needs_account', selected: null, accounts: [{ id: ACCT }, { id: MCC }] })
+  assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts')).status, 401)
+
+  const post = (body, extra) => call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body, headers: extra })
+  assert.equal((await post({ accountId: ACCT }, { Origin: 'https://evil.example' })).status, 403)
+  assert.equal((await post({ accountId: '123' })).json().error, 'invalid_account')
+  assert.equal((await post({ accountId: ACCT, loginCustomerId: 'abc' })).json().error, 'invalid_account')
+  assert.equal((await post({ accountId: '1111111111' })).json().error, 'account_not_accessible')
+  assert.equal((await post({ accountId: '1111111111', loginCustomerId: MCC })).json().error, 'account_not_accessible')
+
+  const ok = await post({ accountId: '123-456-7890' })
+  assert.deepEqual(ok.json(), { ok: true, accountId: ACCT, status: 'connected' })
+  const viaMcc = await post({ accountId: ACCT2, loginCustomerId: MCC })
+  assert.equal(viaMcc.status, 200)
+  const conn = await getConnection(env, 'pools', 'google')
+  assert.equal(conn.account_id, ACCT2)
+  assert.deepEqual(conn.extra, { loginCustomerId: MCC })
+  assert.equal(adsCalls(/customer_client|googleAds:search/).at(-1).headers.get('login-customer-id'), MCC)
+
+  // Another business has no connection: nothing of pools' is visible to it.
+  const salon = await session('owner@salon.example')
+  assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts', { cookie: salon })).json().error, 'not_connected')
+  assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie: salon, body: { accountId: ACCT } })).json().error, 'not_connected')
+})
+
+// ---------- launch ----------
+
+test('launch: validateOnly by default; one atomic mutate with temp ids, PAUSED campaign, geo, keywords, negatives, RSA', async () => {
+  await connected()
+  const r = remember(await G.launchCampaign(env, 'pools', campaign()))
+  assert.deepEqual(r, { ok: true, validateOnly: true, existing: false, operations: 10 })
+  const search = adsCalls(/googleAds:search$/)
+  assert.equal(search.length, 1)
+  assert.equal(search[0].body.query, "SELECT campaign.resource_name, campaign.id, campaign.status, campaign.campaign_budget FROM campaign WHERE campaign.name = 'Joe\\'s Pools [gsu:cmp_abc123]' AND campaign.status != 'REMOVED' LIMIT 1")
+  const geo = adsCalls(/geoTargetConstants:suggest$/)
+  assert.deepEqual(geo[0].body, { locale: 'en', countryCode: 'US', locationNames: { names: ['29403', '29401'] } })
+  const mutates = adsCalls(/googleAds:mutate$/)
+  assert.equal(mutates.length, 1)
+  const m = mutates[0]
+  assert.equal(m.path, `/customers/${ACCT}/googleAds:mutate`)
+  assert.equal(m.headers.get('login-customer-id'), null)
+  assert.equal(m.headers.get('developer-token'), null)
+  const c = `customers/${ACCT}`
+  const name = "Joe's Pools [gsu:cmp_abc123]"
+  assert.deepEqual(m.body, {
+    partialFailure: false,
+    validateOnly: true,
+    mutateOperations: [
+      { campaignBudgetOperation: { create: { resourceName: `${c}/campaignBudgets/-1`, name: `${name} budget`, amountMicros: '25000000', deliveryMethod: 'STANDARD', explicitlyShared: false } } },
+      {
+        campaignOperation: {
+          create: {
+            resourceName: `${c}/campaigns/-2`,
+            name,
+            status: 'PAUSED',
+            advertisingChannelType: 'SEARCH',
+            campaignBudget: `${c}/campaignBudgets/-1`,
+            maximizeConversions: {},
+            networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+            containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+          },
+        },
+      },
+      { campaignCriterionOperation: { create: { campaign: `${c}/campaigns/-2`, location: { geoTargetConstant: 'geoTargetConstants/929403' } } } },
+      { campaignCriterionOperation: { create: { campaign: `${c}/campaigns/-2`, location: { geoTargetConstant: 'geoTargetConstants/929401' } } } },
+      { campaignCriterionOperation: { create: { campaign: `${c}/campaigns/-2`, negative: true, keyword: { text: 'jobs', matchType: 'PHRASE' } } } },
+      { campaignCriterionOperation: { create: { campaign: `${c}/campaigns/-2`, negative: true, keyword: { text: 'diy', matchType: 'PHRASE' } } } },
+      { adGroupOperation: { create: { resourceName: `${c}/adGroups/-3`, campaign: `${c}/campaigns/-2`, name: `${name} ad group`, status: 'ENABLED', type: 'SEARCH_STANDARD' } } },
+      { adGroupCriterionOperation: { create: { adGroup: `${c}/adGroups/-3`, status: 'ENABLED', keyword: { text: 'pool cleaning', matchType: 'PHRASE' } } } },
+      { adGroupCriterionOperation: { create: { adGroup: `${c}/adGroups/-3`, status: 'ENABLED', keyword: { text: 'pool service charleston', matchType: 'EXACT' } } } },
+      {
+        adGroupAdOperation: {
+          create: {
+            adGroup: `${c}/adGroups/-3`,
+            status: 'ENABLED',
+            ad: {
+              finalUrls: ['https://pools.example/book'],
+              responsiveSearchAd: {
+                headlines: [{ text: 'Pool Cleaning Charleston' }, { text: 'Book A Pool Visit' }, { text: 'Weekly Pool Service' }],
+                descriptions: [{ text: 'Weekly pool cleaning for Charleston homes.' }, { text: 'Pick a time online in a minute.' }],
+                path1: 'pools',
+              },
+            },
+          },
+        },
+      },
+    ],
+  })
+  // The only object that gates serving is never created enabled.
+  assert.ok(m.body.mutateOperations.every((op) => op.campaignOperation?.create.status !== 'ENABLED'))
+})
+
+test('launch: real create returns ids; relaunch finds the tagged campaign instead of duplicating', async () => {
+  await connected('pools', { extra: { loginCustomerId: MCC } })
+  const r = remember(await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false }))
+  assert.deepEqual(r, {
+    ok: true,
+    validateOnly: false,
+    existing: false,
+    platformCampaignId: '222',
+    platformIds: { campaign: `customers/${ACCT}/campaigns/222`, budget: `customers/${ACCT}/campaignBudgets/111`, adGroup: `customers/${ACCT}/adGroups/333`, ad: `customers/${ACCT}/adGroupAds/333~444` },
+  })
+  const m = adsCalls(/googleAds:mutate$/)[0]
+  assert.equal(m.body.validateOnly, false)
+  assert.equal(m.body.mutateOperations[1].campaignOperation.create.status, 'PAUSED')
+  assert.equal(m.headers.get('login-customer-id'), MCC)
+
+  calls = []
+  ads = (path, body, h) =>
+    /googleAds:search$/.test(path) ? reply(200, { results: [{ campaign: { resourceName: `customers/${ACCT}/campaigns/222`, id: '222', status: 'PAUSED', campaignBudget: `customers/${ACCT}/campaignBudgets/111` } }] }) : defaultAds(path, body, h)
+  const again = await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false })
+  assert.deepEqual(again, { ok: true, existing: true, validateOnly: false, platformCampaignId: '222', platformIds: { campaign: `customers/${ACCT}/campaigns/222`, budget: `customers/${ACCT}/campaignBudgets/111` } })
+  assert.equal(adsCalls(/googleAds:mutate$/).length, 0)
+  assert.equal(adsCalls(/geoTargetConstants/).length, 0)
+})
+
+test('launch: unknown outcome (5xx) re-checks before retrying, so a committed create is not duplicated', async () => {
+  await connected()
+  let searches = 0
+  ads = (path, body, h) => {
+    if (/googleAds:mutate$/.test(path)) return adsError(500, 'INTERNAL', { internalError: 'INTERNAL_ERROR' })
+    if (/googleAds:search$/.test(path)) return ++searches === 1 ? reply(200, { results: [] }) : reply(200, { results: [{ campaign: { resourceName: `customers/${ACCT}/campaigns/222`, id: '222' } }] })
+    return defaultAds(path, body, h)
+  }
+  const r = await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false })
+  assert.equal(r.existing, true)
+  assert.equal(r.platformCampaignId, '222')
+  assert.equal(adsCalls(/googleAds:mutate$/).length, 1)
+})
+
+test('launch: refuses non-Google specs, unconnected or unselected accounts, unresolved ZIPs', async () => {
+  assert.equal((await G.launchCampaign(env, 'pools', { id: 'cmp_x1', spec: { platform: 'meta' } })).error, 'invalid_spec')
+  assert.equal((await G.launchCampaign(env, 'pools', campaign())).error, 'not_connected')
+  await saveToken(env, 'google', 'pools', { refreshToken: RT })
+  await upsertConnection(env, 'pools', 'google', { status: 'needs_account' })
+  assert.equal((await G.launchCampaign(env, 'pools', campaign())).error, 'needs_account')
+  assert.equal(calls.length, 0)
+  await connected()
+  ads = (path, body, h) => (path === '/geoTargetConstants:suggest' ? reply(200, { geoTargetConstantSuggestions: [] }) : defaultAds(path, body, h))
+  assert.equal((await G.launchCampaign(env, 'pools', campaign())).error, 'geo_unresolved')
+  assert.equal(adsCalls(/googleAds:mutate$/).length, 0)
+})
+
+// ---------- tokens + error handling ----------
+
+test('expired/revoked grant → reconnect_required and the connection is marked', async () => {
+  await connected()
+  refreshMode = 'invalid_grant'
+  const r = remember(await G.launchCampaign(env, 'pools', campaign()))
+  assert.deepEqual(r, { ok: false, error: 'reconnect_required', httpStatus: 400, retryable: false, reconnect: true })
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'reconnect_required')
+  assert.equal(adsCalls(/./).length, 0)
+
+  await connected()
+  refreshMode = 'ok'
+  ads = () => adsError(401, 'UNAUTHENTICATED', { authenticationError: 'OAUTH_TOKEN_REVOKED' })
+  const r2 = remember(await G.setStatus(env, 'pools', row(), 'PAUSED'))
+  assert.equal(r2.error, 'reconnect_required')
+  assert.equal(adsCalls(/campaigns:mutate$/).length, 1, 'not retried')
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'reconnect_required')
+
+  // No stored token at all.
+  kv.clear()
+  await upsertConnection(env, 'pools', 'google', { accountId: ACCT, status: 'connected' })
+  assert.equal((await G.listAccounts(env, 'pools')).error, 'reconnect_required')
+})
+
+test('permission denied is not retried; quota exhausted retried once then succeeds', async () => {
+  await connected()
+  ads = () => adsError(403, 'PERMISSION_DENIED', { authorizationError: 'USER_PERMISSION_DENIED' })
+  assert.equal(remember(await G.setStatus(env, 'pools', row(), 'PAUSED')).error, 'permission_denied')
+  assert.equal(adsCalls(/campaigns:mutate$/).length, 1)
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'connected')
+
+  calls = []
+  let n = 0
+  ads = (path, body, h) => (++n === 1 ? adsError(429, 'RESOURCE_EXHAUSTED', { quotaError: 'RESOURCE_EXHAUSTED' }) : defaultAds(path, body, h))
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'PAUSED'), { ok: true, status: 'PAUSED' })
+  assert.equal(adsCalls(/campaigns:mutate$/).length, 2)
+})
+
+test('transient errors: one retry, then a retryable failure', async () => {
+  await connected()
+  ads = () => adsError(503, 'UNAVAILABLE', { internalError: 'TRANSIENT_ERROR' })
+  assert.deepEqual(remember(await G.setDailyBudget(env, 'pools', row(), 3000)), { ok: false, error: 'transient', httpStatus: 503, retryable: true, reconnect: false })
+  assert.equal(adsCalls(/campaignBudgets:mutate$/).length, 2)
+
+  calls = []
+  ads = (path, body, h) => {
+    if (/googleAds:mutate$/.test(path)) return adsError(500, 'INTERNAL', { internalError: 'INTERNAL_ERROR' })
+    return defaultAds(path, body, h)
+  }
+  const r = await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false })
+  assert.equal(r.error, 'transient')
+  assert.equal(adsCalls(/googleAds:mutate$/).length, 2)
+
+  calls = []
+  ads = () => {
+    throw new TypeError('network down')
+  }
+  assert.equal((await G.setStatus(env, 'pools', row(), 'PAUSED')).error, 'transient')
+  assert.equal(adsCalls(/campaigns:mutate$/).length, 2)
+})
+
+test('invalid request maps to invalid_request without the provider message', async () => {
+  await connected()
+  ads = (path, body, h) => (/googleAds:mutate$/.test(path) ? adsError(400, 'INVALID_ARGUMENT', { campaignError: 'DUPLICATE_CAMPAIGN_NAME' }) : defaultAds(path, body, h))
+  const r = remember(await G.launchCampaign(env, 'pools', campaign()))
+  assert.deepEqual(r, { ok: false, error: 'invalid_request', httpStatus: 400, retryable: false, reconnect: false })
+  assert.equal(adsCalls(/googleAds:mutate$/).length, 1)
+  assert.ok(logs.some((l) => l.includes('invalid_request')), 'the code is logged, not the message')
+})
+
+// ---------- status, budget, metrics ----------
+
+test('setStatus and setDailyBudget send minimal update operations', async () => {
+  await connected('pools', { extra: { loginCustomerId: MCC } })
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'ENABLED'), { ok: true, status: 'ENABLED' })
+  const s = adsCalls(/campaigns:mutate$/)[0]
+  assert.equal(s.path, `/customers/${ACCT}/campaigns:mutate`)
+  assert.deepEqual(s.body, { operations: [{ update: { resourceName: `customers/${ACCT}/campaigns/222`, status: 'ENABLED' }, updateMask: 'status' }] })
+  assert.equal(s.headers.get('login-customer-id'), MCC)
+  assert.equal((await G.setStatus(env, 'pools', row(), 'REMOVED')).error, 'invalid_request')
+
+  assert.deepEqual(await G.setDailyBudget(env, 'pools', row(), 1999), { ok: true, dailyBudgetCents: 1999 })
+  const b = adsCalls(/campaignBudgets:mutate$/)[0]
+  assert.deepEqual(b.body, { operations: [{ update: { resourceName: `customers/${ACCT}/campaignBudgets/111`, amountMicros: '19990000' }, updateMask: 'amountMicros' }] })
+  for (const bad of [0, 499, 12.5, '2000']) assert.equal((await G.setDailyBudget(env, 'pools', row(), bad)).error, 'invalid_request')
+  assert.equal((await G.setStatus(env, 'pools', row({ platform_campaign_id: null, platform_ids: '{}' }), 'PAUSED')).error, 'not_launched')
+})
+
+test('fetchDailyMetrics: GAQL per day, micros → cents, string int64s, batches merged', async () => {
+  await connected()
+  ads = (path) => {
+    assert.equal(path, `/customers/${ACCT}/googleAds:searchStream`)
+    return reply(200, [
+      { results: [{ segments: { date: '2026-11-01' }, metrics: { costMicros: '12345678', impressions: '100', clicks: '7', conversions: 1.5 } }] },
+      {
+        results: [
+          { segments: { date: '2026-11-02' }, metrics: { costMicros: '4999', impressions: '3' } },
+          { segments: { date: 'bogus' }, metrics: { costMicros: '1' } },
+        ],
+      },
+    ])
+  }
+  const r = await G.fetchDailyMetrics(env, 'pools', row(), '2026-11-01', '2026-11-02')
+  assert.deepEqual(r, {
+    ok: true,
+    rows: [
+      { date: '2026-11-01', spendCents: 1235, impressions: 100, clicks: 7, conversions: 1.5 },
+      { date: '2026-11-02', spendCents: 0, impressions: 3, clicks: 0, conversions: 0 },
+    ],
+  })
+  assert.equal(
+    adsCalls(/searchStream$/)[0].body.query,
+    "SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = 222 AND segments.date BETWEEN '2026-11-01' AND '2026-11-02'",
+  )
+  for (const [a, b] of [['2026-11-1', '2026-11-02'], ["2026-11-01' OR 1=1", '2026-11-02'], ['2026-11-03', '2026-11-02']]) {
+    assert.equal((await G.fetchDailyMetrics(env, 'pools', row(), a, b)).error, 'invalid_request')
+  }
+  assert.equal((await G.fetchDailyMetrics(env, 'pools', row({ platform_campaign_id: '1 OR 1=1', platform_ids: '{}' }), '2026-11-01', '2026-11-02')).error, 'not_launched')
+})
+
+// ---------- isolation ----------
+
+test('cross-customer isolation: tokens, accounts and campaigns never cross businesses', async () => {
+  await connected('pools')
+  await saveToken(env, 'google', 'salon', { refreshToken: '1//salon-refresh' })
+  await upsertConnection(env, 'salon', 'google', { accountId: ACCT2, status: 'connected' })
+
+  // A pools row used under salon is refused before any call.
+  assert.equal((await G.setStatus(env, 'salon', row(), 'PAUSED')).error, 'not_launched')
+  assert.equal((await G.fetchDailyMetrics(env, 'salon', row(), '2026-11-01', '2026-11-02')).error, 'not_launched')
+  assert.equal(adsCalls(/./).length, 0)
+  // A salon row with a pools budget resource name is refused (budget must live in salon's account).
+  assert.equal((await G.setDailyBudget(env, 'salon', row({ customer: 'salon' }), 3000)).error, 'not_launched')
+  // Salon's call uses salon's own refresh token and account.
+  calls = []
+  await G.setStatus(env, 'salon', row({ customer: 'salon' }), 'PAUSED')
+  assert.equal(calls.find((c) => c.form).form.get('refresh_token'), '1//salon-refresh')
+  assert.equal(adsCalls(/campaigns:mutate$/)[0].path, `/customers/${ACCT2}/campaigns:mutate`)
+  assert.equal(adsCalls(/campaigns:mutate$/)[0].body.operations[0].update.resourceName, `customers/${ACCT2}/campaigns/222`)
+  // Marking one business for reconnect leaves the other alone.
+  refreshMode = 'invalid_grant'
+  await G.listAccounts(env, 'salon')
+  assert.equal((await getConnection(env, 'salon', 'google')).status, 'reconnect_required')
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'connected')
+})

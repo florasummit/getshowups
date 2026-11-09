@@ -53,7 +53,7 @@ test('simulation is labeled and steps through scenarios', async ({ page }) => {
 
 test('pricing is marked as proposed and FAQ expands', async ({ page }) => {
   const pricing = page.locator('#pricing')
-  await expect(pricing.locator('.price-amount')).toContainText('$299/month')
+  await expect(pricing.locator('.price-amount')).toContainText('$499/month')
   await expect(pricing.getByText('Proposed pricing')).toBeVisible()
   const item = page.locator('#faq details').first()
   await item.locator('summary').click()

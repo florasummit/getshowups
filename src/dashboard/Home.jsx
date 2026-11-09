@@ -1,9 +1,11 @@
 // Dashboard home: booking link, results, who to mark, what's next, who to call. Settings in one view.
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
 import { BusinessForm, HoursForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
+
+const Ads = lazy(() => import('./Ads.jsx'))
 
 export function SignOut({ email, label = 'Sign out' }) {
   const signOut = async () => {
@@ -471,7 +473,12 @@ export default function Home({ me, reload }) {
       <header className="app-header">
         <Logo href="/" />
         <div className="header-nav">
-          <button type="button" className="link-btn" onClick={() => setView(view === 'home' ? 'settings' : 'home')} aria-pressed={view === 'settings'}>
+          {me.features?.ads && (
+            <button type="button" className="link-btn" onClick={() => setView(view === 'ads' ? 'home' : 'ads')} aria-pressed={view === 'ads'}>
+              Ads
+            </button>
+          )}
+          <button type="button" className="link-btn" onClick={() => setView(view === 'settings' ? 'home' : 'settings')} aria-pressed={view === 'settings'}>
             Settings
           </button>
           <SignOut email={me.email} />
@@ -483,6 +490,15 @@ export default function Home({ me, reload }) {
             <h1 className="title title--page">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} />
             <Overview me={me} />
+          </>
+        ) : view === 'ads' ? (
+          <>
+            <button type="button" className="link-btn back-btn" onClick={() => setView('home')}>
+              ← Back
+            </button>
+            <Suspense fallback={<div aria-busy="true" />}>
+              <Ads />
+            </Suspense>
           </>
         ) : (
           <Settings me={me} reload={reload} billing={billing} onClose={() => setView('home')} />

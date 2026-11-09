@@ -285,7 +285,7 @@ export async function setOutcome(env, customer, id, outcome, { work, valueCents 
     await scheduleNoShowMessage(env, customer, { id, leadId: row.lead_id, smsConsent: await hasSmsConsent(db, row.lead_id) }, now)
   }
   await track(env, 'appointment_outcome', { id: `outcome:${id}`, customer: customer.id, props: { outcome, work: work ?? null }, at: now, replace: true })
-  return { ok: true, appointment: { id: row.id, status: row.status, work: outcome === 'showed' ? (work ?? null) : null, valueCents: outcome === 'showed' ? (valueCents ?? null) : null } }
+  return { ok: true, leadId: row.lead_id, appointment: { id: row.id, status: row.status, work: outcome === 'showed' ? (work ?? null) : null, valueCents: outcome === 'showed' ? (valueCents ?? null) : null } }
 }
 
 const addressOf = (r) => (r.street ? formatAddress({ street: r.street, unit: r.unit, city: r.city, state: r.state, zip: r.address_zip }) : null)

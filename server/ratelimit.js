@@ -13,6 +13,12 @@ export const RULES = {
   bookAppointment: { limit: 15, windowSec: 600 }, // POST appointment (per IP)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
   confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
+  adsConnect: { limit: 20, windowSec: 600 }, //     GET /api/ads/{google,meta}/start (per IP)
+  adsCallback: { limit: 30, windowSec: 600 }, //    GET /api/ads/{google,meta}/callback (per IP)
+  metaWebhook: { limit: 600, windowSec: 600 }, //   POST /api/ads/meta/webhook (per IP, before signature check)
+  adsPlan: { limit: 6, windowSec: 3600 }, //        POST /api/dashboard/ads/plan (per business; each call may use AI)
+  adsCreative: { limit: 12, windowSec: 3600 }, //    POST /api/dashboard/ads/creative generate (per business)
+  adsWrite: { limit: 60, windowSec: 600 }, //        other ads writes (per business)
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
 }
 

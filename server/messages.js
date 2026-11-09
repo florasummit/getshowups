@@ -11,6 +11,7 @@
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
 import { sendSms, smsConfigured } from './sms.js'
+import { smsHandledByGhl } from './ghl.js'
 import { confirmUrl, resumeUrl } from './links.js'
 import { track } from './events.js'
 
@@ -243,9 +244,15 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     .run()
   const { results } = await db.prepare(DUE_SQL).bind(now, limit).all()
   const configured = { email: emailConfigured(env), sms: smsConfigured(env) }
+  const ghlSms = new Map() // one owner per channel: a business texting through GoHighLevel gets no texts from us
+  const textsViaGhl = async (customer) => {
+    if (!ghlSms.has(customer)) ghlSms.set(customer, await smsHandledByGhl(env, customer).catch(() => false))
+    return ghlSms.get(customer)
+  }
   for (const m of results) {
     const reason =
       skipReason(m, now) ??
+      (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone) ? null : 'test_mode')
     if (reason) {

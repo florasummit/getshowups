@@ -1,0 +1,400 @@
+// Google Ads API adapter: OAuth helpers, accessible-account discovery, a Search campaign launch in ONE
+// atomic googleAds:mutate (campaign always PAUSED, validateOnly by default), status/budget changes and
+// daily metrics. Every call goes through googleFetch() with at most one jittered retry.
+//
+// Verified on developers.google.com / googleapis protos (2026-11-09):
+//   - REST base https://googleads.googleapis.com/v26; OAuth scope https://www.googleapis.com/auth/adwords.
+//   - GET  /v26/customers:listAccessibleCustomers → { resourceNames: ['customers/123'] }.
+//   - POST /v26/customers/{id}/googleAds:mutate { mutateOperations, partialFailure, validateOnly };
+//     atomic unless partialFailure; negative temp ids (customers/{id}/campaigns/-2) link new objects.
+//   - POST /v26/customers/{id}/googleAds:search|searchStream { query } (GAQL); campaigns:mutate and
+//     campaignBudgets:mutate { operations: [{ update, updateMask }] }.
+//   - POST /v26/geoTargetConstants:suggest { locale, countryCode, locationNames: { names[≤25] } }.
+//   - Campaign.status defaults to ENABLED when omitted → we always send PAUSED. Fields used:
+//     advertisingChannelType, campaignBudget, networkSettings, maximizeConversions,
+//     containsEuPoliticalAdvertising. CampaignCriterion { campaign, negative, location, keyword }.
+//   - Test-access developer projects reach test accounts only (CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION).
+// UNVERIFIED (conservative choices; verify against a Google Ads TEST account before any real use):
+//   - Exact GoogleAdsFailure JSON layout (error.details[].errors[].errorCode.{xxxError}); mapError
+//     also falls back to HTTP status so an unexpected layout still maps to a safe code.
+//   - FieldMask JSON path spelling for budgets ("amountMicros"); geo suggestion targetType 'Postal Code'.
+//   - Whether a developer-token header is still required: sent only when GOOGLE_ADS_DEVELOPER_TOKEN is set.
+// Tests use GOOGLE_ADS_API_MOCK_ORIGIN (loopback only) — never set in production.
+import { googleFetch, refreshAccessToken } from '../google-oauth.js'
+import { siteOrigin } from '../auth.js'
+import { failure, getConnection, loadToken, markReconnect } from './connections.js'
+import { LIMITS } from './spec.js'
+
+export const GOOGLE_ADS_API_VERSION = 'v26'
+export const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords'
+export const ADS_STATE_COOKIE = '__Host-gsu_ads_google'
+export const ADS_STATE_TTL_SECONDS = 600
+export const ACCOUNT_RE = /^\d{10}$/
+
+export const adsRedirectUri = (env) => `${siteOrigin(env)}/api/ads/google/callback`
+export function googleAdsBase(env) {
+  const o = env?.GOOGLE_ADS_API_MOCK_ORIGIN
+  const mock = typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? o : null
+  return `${mock || 'https://googleads.googleapis.com'}/${GOOGLE_ADS_API_VERSION}`
+}
+// Accepts 123-456-7890 or 1234567890; returns the 10-digit form or null.
+export const normalizeAccountId = (v) => {
+  const s = String(v ?? '').replace(/-/g, '')
+  return ACCOUNT_RE.test(s) ? s : null
+}
+
+// ---------- errors ----------
+
+// Flattens GoogleAdsFailure error codes to 'quotaError.RESOURCE_EXHAUSTED' strings.
+function errorCodes(body) {
+  const list = Array.isArray(body) ? body : [body]
+  const out = []
+  for (const b of list) {
+    for (const d of b?.error?.details || []) {
+      for (const e of d?.errors || []) {
+        for (const [k, v] of Object.entries(e?.errorCode || {})) out.push(`${k}.${v}`)
+      }
+    }
+  }
+  return out
+}
+
+// Maps a Google Ads API failure to an allowlisted code. Provider messages are never passed through.
+export function mapError(httpStatus, body) {
+  const codes = errorCodes(body)
+  const has = (prefix) => codes.some((c) => c.startsWith(prefix))
+  const first = Array.isArray(body) ? body[0] : body
+  const status = String(first?.error?.status || '')
+  if (has('authorizationError.CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION') || has('authorizationError.DEVELOPER_TOKEN_NOT_APPROVED') || has('authorizationError.DEVELOPER_TOKEN_PROHIBITED')) {
+    return failure('not_approved_for_production', { httpStatus })
+  }
+  if (has('authenticationError.') || httpStatus === 401 || status === 'UNAUTHENTICATED') return failure('reconnect_required', { httpStatus, reconnect: true })
+  if (has('authorizationError.') || httpStatus === 403 || status === 'PERMISSION_DENIED') return failure('permission_denied', { httpStatus })
+  if (has('quotaError.') || httpStatus === 429 || status === 'RESOURCE_EXHAUSTED') return failure('quota_exhausted', { httpStatus, retryable: true })
+  if (codes.some((c) => c.includes('CONCURRENT_MODIFICATION')) || status === 'ABORTED') return failure('concurrent_modification', { httpStatus, retryable: true })
+  if (has('internalError.') || httpStatus === 0 || httpStatus >= 500) return failure('transient', { httpStatus, retryable: true })
+  return failure('invalid_request', { httpStatus })
+}
+
+// ---------- tokens + requests ----------
+
+// Short-lived access token for the business's stored Ads grant. Never stored or logged.
+export async function accessToken(env, customerId) {
+  const tok = await loadToken(env, 'google', customerId)
+  if (!tok?.refreshToken) {
+    await markReconnect(env, customerId, 'google')
+    return failure('reconnect_required', { reconnect: true })
+  }
+  const r = await refreshAccessToken(env, tok.refreshToken)
+  if (r.ok) return { ok: true, token: r.accessToken }
+  if (r.error === 'invalid_grant') {
+    await markReconnect(env, customerId, 'google')
+    return failure('reconnect_required', { httpStatus: r.httpStatus, reconnect: true })
+  }
+  if (r.httpStatus === 0 || r.httpStatus >= 500) return failure('transient', { httpStatus: r.httpStatus, retryable: true })
+  console.error('Google Ads token refresh failed:', r.httpStatus, r.error)
+  return failure('invalid_request', { httpStatus: r.httpStatus })
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const retryDelay = (env) => {
+  const base = env?.GOOGLE_ADS_RETRY_MS != null && Number(env.GOOGLE_ADS_RETRY_MS) >= 0 ? Number(env.GOOGLE_ADS_RETRY_MS) : 1000
+  return base + Math.floor(Math.random() * base) // jitter: base..2×base
+}
+
+// One HTTP call. Returns { ok: true, data } or a failure(). Retries once on a retryable failure
+// unless retry is false (used where a lost response could have applied a change).
+async function call(env, token, method, path, { body, loginCustomerId, retry = true } = {}) {
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
+  if (env.GOOGLE_ADS_DEVELOPER_TOKEN) headers['developer-token'] = env.GOOGLE_ADS_DEVELOPER_TOKEN
+  for (let attempt = 0; ; attempt++) {
+    let result
+    try {
+      const res = await googleFetch(env, `${googleAdsBase(env)}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+      const data = await res.json().catch(() => ({}))
+      result = res.ok ? { ok: true, data } : mapError(res.status, data)
+    } catch {
+      result = failure('transient', { httpStatus: 0, retryable: true })
+    }
+    if (result.ok || !result.retryable || !retry || attempt >= 1) {
+      if (!result.ok) console.error('Google Ads request failed:', method, path.split('?')[0].replace(/\d{6,}/g, '<id>'), result.httpStatus, result.error)
+      return result
+    }
+    await sleep(retryDelay(env))
+  }
+}
+
+// Runs fn(token, conn) for a connected business; marks the connection when Google says reconnect.
+async function withAccount(env, customerId, fn, { needAccount = true } = {}) {
+  const conn = await getConnection(env, customerId, 'google')
+  if (!conn) return failure('not_connected')
+  if (needAccount && (conn.status !== 'connected' || !ACCOUNT_RE.test(String(conn.account_id || '')))) return failure('needs_account')
+  const t = await accessToken(env, customerId)
+  if (!t.ok) return t
+  const r = await fn(t.token, conn)
+  if (!r.ok && r.reconnect) await markReconnect(env, customerId, 'google')
+  return r
+}
+const login = (conn) => normalizeAccountId(conn?.extra?.loginCustomerId) || undefined
+
+// ---------- accounts ----------
+
+export async function listAccountsWithToken(env, token) {
+  const r = await call(env, token, 'GET', '/customers:listAccessibleCustomers')
+  if (!r.ok) return r
+  const ids = (r.data.resourceNames || []).map((n) => String(n).replace(/^customers\//, '')).filter((id) => ACCOUNT_RE.test(id))
+  return { ok: true, accounts: [...new Set(ids)] }
+}
+
+// Accessible customer ids (10 digits) for the business's grant. Works before an account is chosen.
+export async function listAccounts(env, customerId) {
+  const t = await accessToken(env, customerId)
+  if (!t.ok) return t
+  const r = await listAccountsWithToken(env, t.token)
+  if (!r.ok && r.reconnect) await markReconnect(env, customerId, 'google')
+  return r
+}
+
+// Name + currency of one account (best effort; null fields when unreadable).
+export async function describeAccountWithToken(env, token, accountId, loginCustomerId) {
+  const r = await call(env, token, 'POST', `/customers/${accountId}/googleAds:search`, {
+    body: { query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code FROM customer LIMIT 1' },
+    loginCustomerId,
+  })
+  const c = r.ok ? r.data.results?.[0]?.customer : null
+  return { name: typeof c?.descriptiveName === 'string' ? c.descriptiveName.slice(0, 120) : null, currency: /^[A-Z]{3}$/.test(c?.currencyCode || '') ? c.currencyCode : null }
+}
+
+// True when accountId is a client under the manager loginCustomerId (for accounts reached via an MCC).
+export async function isClientOfManager(env, token, managerId, accountId) {
+  const r = await call(env, token, 'POST', `/customers/${managerId}/googleAds:search`, {
+    body: { query: `SELECT customer_client.id FROM customer_client WHERE customer_client.id = ${accountId}` },
+    loginCustomerId: managerId,
+  })
+  return r.ok && (r.data.results || []).some((x) => String(x.customerClient?.id) === accountId)
+}
+
+// ---------- launch ----------
+
+const tagged = (campaign) => `${campaign.spec.name} [gsu:${campaign.id}]`.slice(0, 250)
+const gaqlString = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+const lastId = (rn) => String(rn || '').split('/').pop() || null
+
+async function findExisting(env, token, accountId, loginCustomerId, name) {
+  const r = await call(env, token, 'POST', `/customers/${accountId}/googleAds:search`, {
+    body: { query: `SELECT campaign.resource_name, campaign.id, campaign.status, campaign.campaign_budget FROM campaign WHERE campaign.name = ${gaqlString(name)} AND campaign.status != 'REMOVED' LIMIT 1` },
+    loginCustomerId,
+  })
+  if (!r.ok) return r
+  const c = r.data.results?.[0]?.campaign
+  return { ok: true, campaign: c?.resourceName ? c : null }
+}
+
+// ZIP codes → geo target constant resource names (≤25 names per suggest call).
+async function resolveZips(env, token, zips) {
+  const out = []
+  for (let i = 0; i < zips.length; i += 25) {
+    const names = zips.slice(i, i + 25)
+    const r = await call(env, token, 'POST', '/geoTargetConstants:suggest', { body: { locale: 'en', countryCode: 'US', locationNames: { names } } })
+    if (!r.ok) return r
+    for (const zip of names) {
+      const hit = (r.data.geoTargetConstantSuggestions || []).find(
+        (s) => s.searchTerm === zip && s.geoTargetConstant?.resourceName && (!s.geoTargetConstant.targetType || s.geoTargetConstant.targetType === 'Postal Code'),
+      )
+      if (!hit) return failure('geo_unresolved')
+      out.push(hit.geoTargetConstant.resourceName)
+    }
+  }
+  return { ok: true, geo: [...new Set(out)] }
+}
+
+// The mutateOperations for one campaign. Only the campaign gates serving and it is always PAUSED;
+// child objects are ENABLED so resuming later is a single, owner-approved campaign status change.
+export function buildOperations(accountId, campaign, geo) {
+  const s = campaign.spec
+  const g = s.google
+  const name = tagged(campaign)
+  const cust = `customers/${accountId}`
+  const budget = `${cust}/campaignBudgets/-1`
+  const camp = `${cust}/campaigns/-2`
+  const adGroup = `${cust}/adGroups/-3`
+  return [
+    { campaignBudgetOperation: { create: { resourceName: budget, name: `${name} budget`, amountMicros: String(s.dailyBudgetCents * 10000), deliveryMethod: 'STANDARD', explicitlyShared: false } } },
+    {
+      campaignOperation: {
+        create: {
+          resourceName: camp,
+          name,
+          status: 'PAUSED',
+          advertisingChannelType: 'SEARCH',
+          campaignBudget: budget,
+          maximizeConversions: {},
+          networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+          containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+        },
+      },
+    },
+    ...geo.map((geoTargetConstant) => ({ campaignCriterionOperation: { create: { campaign: camp, location: { geoTargetConstant } } } })),
+    ...g.negativeKeywords.map((text) => ({ campaignCriterionOperation: { create: { campaign: camp, negative: true, keyword: { text, matchType: 'PHRASE' } } } })),
+    { adGroupOperation: { create: { resourceName: adGroup, campaign: camp, name: `${name} ad group`, status: 'ENABLED', type: 'SEARCH_STANDARD' } } },
+    ...g.keywords.map((k) => ({ adGroupCriterionOperation: { create: { adGroup, status: 'ENABLED', keyword: { text: k.text, matchType: k.match } } } })),
+    {
+      adGroupAdOperation: {
+        create: {
+          adGroup,
+          status: 'ENABLED',
+          ad: {
+            finalUrls: [s.finalUrl],
+            responsiveSearchAd: {
+              headlines: g.headlines.map((text) => ({ text })),
+              descriptions: g.descriptions.map((text) => ({ text })),
+              ...(g.path1 ? { path1: g.path1 } : {}),
+              ...(g.path2 ? { path2: g.path2 } : {}),
+            },
+          },
+        },
+      },
+    },
+  ]
+}
+
+function launchable(campaign) {
+  const s = campaign?.spec
+  if (typeof campaign?.id !== 'string' || !/^[A-Za-z0-9_-]{4,64}$/.test(campaign.id)) return 'invalid_spec'
+  if (s?.platform !== 'google' || !s.google || !Array.isArray(s.geo?.zips) || !s.geo.zips.length) return 'invalid_spec'
+  if (!Number.isInteger(s.dailyBudgetCents) || s.dailyBudgetCents < LIMITS.minDailyBudgetCents) return 'invalid_spec'
+  return null
+}
+
+const existingResult = (c, validateOnly) => ({
+  ok: true,
+  existing: true,
+  validateOnly,
+  platformCampaignId: String(c.id || lastId(c.resourceName)),
+  platformIds: { campaign: c.resourceName, budget: c.campaignBudget || null },
+})
+
+// Non-spending by default (validateOnly: Google validates the whole request, creates nothing).
+// With validateOnly false everything is created in one atomic mutate with the campaign PAUSED.
+// A campaign already named with our id is returned instead of creating a duplicate.
+export async function launchCampaign(env, customerId, campaign, { validateOnly = true } = {}) {
+  const invalid = launchable(campaign)
+  if (invalid) return failure(invalid)
+  return withAccount(env, customerId, async (token, conn) => {
+    const accountId = conn.account_id
+    const loginCustomerId = login(conn)
+    const name = tagged(campaign)
+    const found = await findExisting(env, token, accountId, loginCustomerId, name)
+    if (!found.ok) return found
+    if (found.campaign) return existingResult(found.campaign, validateOnly)
+    const geo = await resolveZips(env, token, campaign.spec.geo.zips)
+    if (!geo.ok) return geo
+    const body = { mutateOperations: buildOperations(accountId, campaign, geo.geo), partialFailure: false, validateOnly: validateOnly !== false }
+    const path = `/customers/${accountId}/googleAds:mutate`
+    let r = await call(env, token, 'POST', path, { body, loginCustomerId, retry: false })
+    if (!r.ok && r.retryable) {
+      // The outcome may be unknown (e.g. a 5xx after commit): look again before retrying once.
+      if (!body.validateOnly) {
+        const again = await findExisting(env, token, accountId, loginCustomerId, name)
+        if (again.ok && again.campaign) return existingResult(again.campaign, false)
+      }
+      await sleep(retryDelay(env))
+      r = await call(env, token, 'POST', path, { body, loginCustomerId, retry: false })
+    }
+    if (!r.ok) return r
+    if (body.validateOnly) return { ok: true, validateOnly: true, existing: false, operations: body.mutateOperations.length }
+    const results = r.data.mutateOperationResponses || []
+    const pick = (k) => results.find((x) => x[k]?.resourceName)?.[k].resourceName || null
+    const campaignRn = pick('campaignResult')
+    if (!campaignRn) return failure('invalid_request')
+    return {
+      ok: true,
+      validateOnly: false,
+      existing: false,
+      platformCampaignId: lastId(campaignRn),
+      platformIds: { campaign: campaignRn, budget: pick('campaignBudgetResult'), adGroup: pick('adGroupResult'), ad: pick('adGroupAdResult') },
+    }
+  })
+}
+
+// ---------- changes on a launched campaign ----------
+
+const idsOf = (row) => {
+  if (row?.platformIds && typeof row.platformIds === 'object') return row.platformIds
+  try {
+    return JSON.parse(row?.platform_ids || '{}') || {}
+  } catch {
+    return {}
+  }
+}
+// Resolves the campaign/budget resource names of a row, only inside the business's own account.
+function resources(conn, row, customerId) {
+  if (row?.customer !== undefined && row.customer !== customerId) return null
+  const ids = idsOf(row)
+  const cust = `customers/${conn.account_id}/`
+  const campaignId = String(row?.platform_campaign_id || row?.platformCampaignId || lastId(ids.campaign) || '')
+  if (!/^\d{1,20}$/.test(campaignId)) return null
+  const budget = typeof ids.budget === 'string' && ids.budget.startsWith(`${cust}campaignBudgets/`) ? ids.budget : null
+  return { campaignId, campaign: `${cust}campaigns/${campaignId}`, budget }
+}
+
+export async function setStatus(env, customerId, row, status) {
+  if (!['PAUSED', 'ENABLED'].includes(status)) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = resources(conn, row, customerId)
+    if (!res) return failure('not_launched')
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaigns:mutate`, {
+      body: { operations: [{ update: { resourceName: res.campaign, status }, updateMask: 'status' }] },
+      loginCustomerId: login(conn),
+    })
+    return r.ok ? { ok: true, status } : r
+  })
+}
+
+// Caller enforces the owner-approved ceiling (server/ads/budget.js); this only applies the value.
+export async function setDailyBudget(env, customerId, row, dailyCents) {
+  if (!Number.isInteger(dailyCents) || dailyCents < LIMITS.minDailyBudgetCents) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = resources(conn, row, customerId)
+    if (!res?.budget) return failure('not_launched')
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaignBudgets:mutate`, {
+      body: { operations: [{ update: { resourceName: res.budget, amountMicros: String(dailyCents * 10000) }, updateMask: 'amountMicros' }] },
+      loginCustomerId: login(conn),
+    })
+    return r.ok ? { ok: true, dailyBudgetCents: dailyCents } : r
+  })
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/
+
+// Daily rows for one campaign: money in cents of the account currency (cost_micros / 10,000, rounded).
+export async function fetchDailyMetrics(env, customerId, row, sinceYmd, untilYmd) {
+  if (!YMD.test(sinceYmd) || !YMD.test(untilYmd) || sinceYmd > untilYmd) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = resources(conn, row, customerId)
+    if (!res) return failure('not_launched')
+    const query = `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${res.campaignId} AND segments.date BETWEEN '${sinceYmd}' AND '${untilYmd}'`
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const byDate = new Map()
+    for (const batch of Array.isArray(r.data) ? r.data : [r.data]) {
+      for (const x of batch?.results || []) {
+        const date = String(x.segments?.date || '')
+        if (!YMD.test(date)) continue
+        const m = x.metrics || {}
+        const d = byDate.get(date) || { date, micros: 0, impressions: 0, clicks: 0, conversions: 0 }
+        d.micros += Number(m.costMicros || 0)
+        d.impressions += Number(m.impressions || 0)
+        d.clicks += Number(m.clicks || 0)
+        d.conversions += Number(m.conversions || 0)
+        byDate.set(date, d)
+      }
+    }
+    const rows = [...byDate.values()]
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .map((d) => ({ date: d.date, spendCents: Math.round(d.micros / 10000), impressions: d.impressions, clicks: d.clicks, conversions: d.conversions }))
+    return { ok: true, rows }
+  })
+}
