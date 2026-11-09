@@ -382,6 +382,7 @@ test('GHL owns texting: due SMS for that business is skipped as ghl_sms, email s
   db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES ('lead2001', 'pools', 'n', 'e@x.example', '+15550100199', 'need', '1', 'new', 'h', ?, ?)").run(now, now)
   db.sql.prepare("INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES ('lead2001', 'pools', 'v1', ?)").run(now)
   db.sql.prepare("INSERT INTO messages (id, customer, lead_id, kind, channel, send_at, status, created_at, updated_at) VALUES ('m1', 'pools', 'lead2001', 'lead_followup_1', 'sms', ?, 'scheduled', ?, ?)").run(now - 1000, now, now)
+  env.GHL_ENABLED = 'true'
   Object.assign(env, { TWILIO_ACCOUNT_SID: 'AC'.padEnd(34, '0'), TWILIO_AUTH_TOKEN: 't'.repeat(32), TWILIO_MESSAGING_SERVICE_SID: 'MG'.padEnd(34, '0') })
   await processDueMessages(env, now)
   const m = db.sql.prepare("SELECT status, error FROM messages WHERE id = 'm1'").get()
@@ -432,5 +433,5 @@ test('release switch: without ADS_ENABLED every ads dashboard route is 404 and m
   }
   assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ad_profiles').get().n, 0)
   const me = await import('../functions/api/dashboard/me.js')
-  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false })
+  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false })
 })

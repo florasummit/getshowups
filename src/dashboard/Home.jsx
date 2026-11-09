@@ -6,6 +6,8 @@ import { BusinessForm, HoursForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 
 const Ads = lazy(() => import('./Ads.jsx'))
+const LandingSettings = lazy(() => import('./LandingSettings.jsx'))
+const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
 
 export function SignOut({ email, label = 'Sign out' }) {
   const signOut = async () => {
@@ -456,6 +458,20 @@ function Settings({ me, reload, onClose, billing }) {
         <h2 className="card-title">Google Calendar</h2>
         <CalendarSettings />
       </section>
+      <section className="card">
+        <h2 className="card-title">Your landing page</h2>
+        <Suspense fallback={<div aria-busy="true" />}>
+          <LandingSettings />
+        </Suspense>
+      </section>
+      {me.features?.ghl && (
+        <section className="card">
+          <h2 className="card-title">GoHighLevel</h2>
+          <Suspense fallback={<div aria-busy="true" />}>
+            <GhlSettings />
+          </Suspense>
+        </section>
+      )}
       {billing && <BillingCard billing={billing} />}
       <section className="card">
         <h2 className="card-title">Business</h2>

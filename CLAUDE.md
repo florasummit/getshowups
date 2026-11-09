@@ -42,7 +42,8 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
-  api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect)
+  api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
+  api/dashboard/landing  Owner landing page (GET draft/saved, POST save/publish).  api/page/[customer]: public page data
   api/ads/google/     Google Ads connect: start, callback, accounts.  api/ads/meta/: start, callback, accounts, webhook (leads)
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
@@ -66,6 +67,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ads/               spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
+  landing.js         Business landing page: template draft, claims filter, publish
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
@@ -115,6 +117,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. Automation may pause or recommend, never raise budgets or resume. Every spec goes
   through validateSpec(); AI output never reaches a platform unvalidated. Ad mock origins are loopback-only test vars.
+- Release switches (off unless exactly 'true'): ADS_ENABLED (Ads tab + /api/dashboard/ads/* + /api/ads/* connect),
+  ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
+  in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not

@@ -919,3 +919,34 @@
   object-fit: cover;
   border-radius: var(--radius);
 }
+
+/* ---------- business landing page (/p/:id) ---------- */
+.landing {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 16px 48px;
+}
+.landing-hero > * + * {
+  margin-top: 12px;
+}
+.landing-cta {
+  margin-top: 20px;
+}
+.landing-list,
+.landing-steps {
+  padding-left: 20px;
+}
+.landing-list {
+  list-style: disc;
+}
+.landing-steps {
+  list-style: decimal;
+}
+.landing-list li + li,
+.landing-steps li + li {
+  margin-top: 6px;
+}
+.landing-foot {
+  margin-top: 24px;
+  text-align: center;
+}

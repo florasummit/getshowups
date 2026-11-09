@@ -62,6 +62,7 @@ beforeEach(() => {
     ONBOARDING_DB: db,
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k) },
     MESSAGE_TEST_RECIPIENTS: 'lead@example.net',
+    GHL_ENABLED: 'true',
   }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')

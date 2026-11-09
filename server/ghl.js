@@ -79,6 +79,7 @@ async function call(env, token, method, path, body) {
 // ---------- config ----------
 
 export async function getGhlConfig(env, customerId) {
+  if (env.GHL_ENABLED !== 'true') return null // release switch: off → no sync, no SMS hand-off
   try {
     const raw = await env.GOOGLE_TOKENS.get(kvKey(customerId))
     if (!raw) return null

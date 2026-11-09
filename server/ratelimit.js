@@ -11,6 +11,7 @@ export const RULES = {
   bookLead: { limit: 10, windowSec: 600 }, //        POST lead (per IP)
   bookLeadPerBusiness: { limit: 100, windowSec: 3600 }, // POST lead (per business, caps spam floods)
   bookAppointment: { limit: 15, windowSec: 600 }, // POST appointment (per IP)
+  pageView: { limit: 120, windowSec: 600 }, //       GET /api/page/:id (per IP; public landing page)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
   confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
   adsConnect: { limit: 20, windowSec: 600 }, //     GET /api/ads/{google,meta}/start (per IP)

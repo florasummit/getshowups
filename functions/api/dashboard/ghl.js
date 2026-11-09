@@ -8,12 +8,14 @@ import { requireSession } from '../../../server/auth.js'
 import { deleteGhlConfig, getGhlConfig, publicConfig, saveGhlConfig } from '../../../server/ghl.js'
 
 export async function onRequestGet({ request, env }) {
+  if (env.GHL_ENABLED !== 'true') return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
   return json(200, publicConfig(await getGhlConfig(env, session.customer.id)))
 }
 
 export async function onRequestPost({ request, env }) {
+  if (env.GHL_ENABLED !== 'true') return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
   const body = await request.json().catch(() => null)

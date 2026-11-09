@@ -13,6 +13,22 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Launch completion: release candidate on branch release/ads-mvp (2026-11-09), NOT pushed or deployed
+- Production D1 backup taken (read-only export, 39 rows, kept locally in the session scratchpad, not committed).
+  Migrations 0006 + 0007 applied twice to a restored copy: 12 new tables, all 21 existing tables byte-identical,
+  integrity ok.
+- Release switches added so deploying changes nothing customers see: ADS_ENABLED, GHL_ENABLED (plus the existing
+  ADS_LIVE_LAUNCH, MESSAGES_LIVE). With all of them unset, the only visible change is the landing page card in Settings.
+- Landing page: /p/:id from one template (headline, intro, services, area, owner-confirmed facts), the claims
+  filter is shared with ads, and the owner publishes. Public only while published AND the business is bookable.
+  "Book" opens the existing /book/:id with utm parameters kept. Ads drafts point to it once published.
+- GoHighLevel Settings card (GHL_ENABLED only).
+- Tests: 223 unit tests, 53 Playwright tests (landing.spec added).
+- Release plan, each step needs approval: push branch (CI) → merge to main (auto-deploys) → apply 0006 then
+  0007 on production → smoke checks (/, /dashboard, /book/poolthru-llc, /api/dashboard/ads → 404, /p/poolthru-llc → 404 until published) →
+  PoolThru: publish landing page, one live test booking.
+
+
 ### Advertising engine: built and tested locally, NOT deployed, no live ad calls (2026-11-09)
 - Migration 0006 (new tables only): ad_profiles, ad_budget_approvals, ad_connections, ad_campaigns, ad_metrics_daily,
   ad_actions (audit + idempotency), ad_creatives, ai_usage, lead_attribution, ghl_links, meta_lead_events.

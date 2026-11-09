@@ -7,6 +7,7 @@ import { getProfile, saveDraft } from '../../../../server/ads/campaigns.js'
 import { generatePlan, draftSpecs } from '../../../../server/ads/strategy.js'
 import { remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
+import { getPage } from '../../../../server/landing.js'
 
 export async function onRequestPost({ request, env }) {
   if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
@@ -23,7 +24,9 @@ export async function onRequestPost({ request, env }) {
   // Size drafts to what is still approvable; with no approval yet, to the owner's requested budget.
   const remaining = await remainingDailyCents(db, customer.id)
   const ceiling = remaining > 0 ? remaining : profile.monthlyBudgetCents ? dailyCeilingCents(profile.monthlyBudgetCents) : 1000
-  const bookingUrl = `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${customer.id}`
+  // Ads send clicks to the published landing page when there is one, otherwise straight to booking.
+  const origin = new URL(env.GOOGLE_REDIRECT_URI).origin
+  const bookingUrl = (await getPage(db, customer.id))?.published ? `${origin}/p/${customer.id}` : `${origin}/book/${customer.id}`
   const ids = []
   for (const d of draftSpecs(customer, profile, result.plan, { dailyCeilingCents: ceiling, bookingUrl })) {
     const saved = await saveDraft(env, customer, { spec: d.spec })

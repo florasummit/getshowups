@@ -12,6 +12,6 @@ export async function onRequestGet({ request, env }) {
     customer,
     progress: await progress(env, customer),
     bookingUrl: customer ? `${siteOrigin(env)}/book/${customer.id}` : null,
-    features: { ads: env.ADS_ENABLED === 'true' },
+    features: { ads: env.ADS_ENABLED === 'true', ghl: env.GHL_ENABLED === 'true' },
   })
 }
