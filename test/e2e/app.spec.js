@@ -176,6 +176,11 @@ test.describe('read-only pages @mobile', () => {
     await expect(page).toHaveURL(/\/privacy$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible()
     await expect(page.getByText('including the Limited Use requirements')).toBeVisible()
+    const contacts = page.locator('main a[href^="mailto:"]')
+    await expect(contacts).toHaveCount(2)
+    for (const href of await contacts.evaluateAll((els) => els.map((e) => e.getAttribute('href')))) {
+      expect(href).toBe('mailto:brandon@getshowups.com')
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   })
 

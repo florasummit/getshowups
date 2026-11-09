@@ -16,7 +16,7 @@ export default function Privacy() {
       <h2>Who we are</h2>
       <p>
         GetShowUps (getshowups.com) helps service businesses turn booking requests into confirmed appointments. Questions
-        about this policy: <a href="mailto:hello@getshowups.com">hello@getshowups.com</a>.
+        about this policy: <a href="mailto:brandon@getshowups.com">brandon@getshowups.com</a>.
       </p>
 
       <h2>Information we collect</h2>
@@ -97,7 +97,7 @@ export default function Privacy() {
           contacting us.
         </li>
         <li>
-          To access or delete your information, email <a href="mailto:hello@getshowups.com">hello@getshowups.com</a>. If
+          To access or delete your information, email <a href="mailto:brandon@getshowups.com">brandon@getshowups.com</a>. If
           you booked with a business, you can also contact that business directly.
         </li>
       </ul>

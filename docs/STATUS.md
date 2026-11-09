@@ -33,6 +33,7 @@ Everything below is **local and tested**, not in production.
 - 2026-11-09 00:53Z: launch release `9c1bcef` LIVE (deployment 2c7f07ff). D1 migrations 0002/0003 applied (14 tables);
   pre-release backup: Time Travel bookmark 0000000b-00000000-0000511e-1d9da13728f07191fe8dfeb5f824b61a + local export.
   New Google client active for sign-in/connect; PoolThru health `healthy`, `oauthClient: legacy`.
+  Privacy requests: manual runbook in docs/DATA_REQUESTS.md (contact brandon@getshowups.com).
   2026-11-09: PoolThru on new client (M4 done). Canonical customer = `poolthru-llc` (self-serve duplicate of `poolthru`).
   Test booking verified + cleaned up; /admin verified. Next: deploy /privacy and publish Google app before
   ~2026-11-16 (Testing tokens expire after 7 days), then legacy cleanup plan in docs/LAUNCH.md.
