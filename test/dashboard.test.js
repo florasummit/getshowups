@@ -94,7 +94,7 @@ beforeEach(async () => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: ADMIN,
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
   }
   seedCustomer('alpha', 'owner@alpha.example')
   seedCustomer('bravo', 'boss@bravo.example')

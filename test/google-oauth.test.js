@@ -17,6 +17,7 @@ const REDIRECT = `${ORIGIN}/api/google/oauth/callback`
 const ADMIN = 'a'.repeat(40)
 const ALL_SCOPES =
   'openid email https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy'
+const CALENDAR_ONLY_ONE = 'openid email https://www.googleapis.com/auth/calendar.freebusy'
 
 const realFetch = globalThis.fetch
 afterEach(() => {
@@ -51,7 +52,12 @@ function makeD1() {
 }
 function makeKV() {
   const m = new Map()
-  return { m, get: async (k) => m.get(k) ?? null, put: async (k, v) => void m.set(k, v) }
+  return {
+    m,
+    get: async (k) => m.get(k) ?? null,
+    put: async (k, v) => void m.set(k, v),
+    list: async ({ prefix = '' } = {}) => ({ keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }),
+  }
 }
 function makeEnv() {
   return {
@@ -64,10 +70,10 @@ function makeEnv() {
     ONBOARDING_DB: makeD1(),
   }
 }
-function mockGoogle({ scope = ALL_SCOPES, refresh = 'rt-new', ok = true } = {}) {
+function mockGoogle({ scope = ALL_SCOPES, refresh = 'rt-new', ok = true, sub = 'g-123' } = {}) {
   const calls = { token: 0, revoked: [] }
   const idToken =
-    'h.' + Buffer.from(JSON.stringify({ sub: 'g-123', email: 'owner@example.com' })).toString('base64url') + '.s'
+    'h.' + Buffer.from(JSON.stringify({ sub, email: 'owner@example.com' })).toString('base64url') + '.s'
   globalThis.fetch = async (url, init) => {
     if (url === oauth.GOOGLE_TOKEN_URL) {
       calls.token++
@@ -289,14 +295,19 @@ test('happy path stores an encrypted token under the invite customer only', asyn
   assert.match(r.headers.get('Set-Cookie'), /Max-Age=0/)
 })
 
-test('replayed callback is rejected and the new grant revoked', async () => {
+test('replayed callback is rejected; the new grant is revoked unless it would end the stored connection', async () => {
   const env = makeEnv()
-  const g = mockGoogle({ refresh: 'rt-replay' })
+  mockGoogle({ refresh: 'rt-first' })
   const s = await begin(env, await issue(env))
   assert.equal((await finish(env, s)).status, 200)
+  const same = mockGoogle({ refresh: 'rt-replay' })
   assert.equal((await finish(env, s, { code: 'code-2' })).status, 410)
-  assert.ok(g.revoked.includes('rt-replay'))
+  assert.deepEqual(same.revoked, [], 'same account: revoking would end the connection just stored')
+  const other = mockGoogle({ refresh: 'rt-replay-2', sub: 'g-attacker' })
+  assert.equal((await finish(env, s, { code: 'code-3' })).status, 410)
+  assert.deepEqual(other.revoked, ['rt-replay-2'])
   assert.equal(env.GOOGLE_TOKENS.m.size, 1)
+  assert.equal(await oauth.decrypt(env, JSON.parse(env.GOOGLE_TOKENS.m.get('google:acme-dental')).refreshToken), 'rt-first')
 })
 
 test('state mismatch, missing cookie, and forged cookie are rejected before token exchange', async () => {
@@ -327,17 +338,54 @@ test('missing calendar scope is refused and revoked', async () => {
   assert.equal(env.GOOGLE_TOKENS.m.size, 0)
 })
 
-test('connect over an existing connection is refused; reconnect replaces and revokes the old grant', async () => {
+test('connect over an existing connection is refused; reconnect with another Google account revokes the old grant', async () => {
   const env = makeEnv()
   mockGoogle({ refresh: 'rt-1' })
   assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'connect')))).status, 200)
-  mockGoogle({ refresh: 'rt-2' })
+  const g2 = mockGoogle({ refresh: 'rt-2' })
   assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'connect')))).status, 409)
-  const g3 = mockGoogle({ refresh: 'rt-3' })
+  assert.deepEqual(g2.revoked, [], 'same account already connected: its shared grant is not revoked')
+  const g3 = mockGoogle({ refresh: 'rt-3', sub: 'g-other' })
   assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'reconnect')))).status, 200)
   const rec = JSON.parse(env.GOOGLE_TOKENS.m.get('google:acme'))
   assert.equal(await oauth.decrypt(env, rec.refreshToken), 'rt-3')
-  assert.ok(g3.revoked.includes('rt-1'), 'old grant revoked')
+  assert.deepEqual(g3.revoked, ['rt-1'], 'old account grant revoked')
+})
+
+// Google ties all of one user's refresh tokens for a client to one grant: revoking any of them can end
+// every connection of that account. Same-account reconnects and failures must therefore not revoke.
+test('grant safety: same-account reconnect replaces the token without revoking anything', async () => {
+  const env = makeEnv()
+  mockGoogle({ refresh: 'rt-1' })
+  assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'connect')))).status, 200)
+  const g = mockGoogle({ refresh: 'rt-2' })
+  assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'reconnect')))).status, 200)
+  assert.equal(await oauth.decrypt(env, JSON.parse(env.GOOGLE_TOKENS.m.get('google:acme')).refreshToken), 'rt-2')
+  assert.deepEqual(g.revoked, [])
+})
+
+test('grant safety: a failed connect does not revoke when the account powers another business', async () => {
+  const env = makeEnv()
+  mockGoogle({ refresh: 'rt-1' })
+  assert.equal((await finish(env, await begin(env, await issue(env, 'biz-one', 'connect')))).status, 200)
+  const link = await issue(env, 'biz-two', 'connect')
+  const g = mockGoogle({ refresh: 'rt-2', scope: CALENDAR_ONLY_ONE })
+  assert.equal((await finish(env, await begin(env, link))).status, 400)
+  assert.deepEqual(g.revoked, [], 'biz-one keeps working')
+  const g2 = mockGoogle({ refresh: 'rt-3', sub: 'g-stranger', scope: CALENDAR_ONLY_ONE })
+  assert.equal((await finish(env, await begin(env, await issue(env, 'biz-three', 'connect')))).status, 400)
+  assert.deepEqual(g2.revoked, ['rt-3'], 'an unused grant of another account is still revoked')
+})
+
+test('grant safety: an incomplete key listing or a missing account id never revokes', async () => {
+  const env = makeEnv()
+  assert.equal(await oauth.grantInUse(env, undefined), true)
+  env.GOOGLE_TOKENS.list = async () => ({ keys: [], list_complete: false })
+  assert.equal(await oauth.grantInUse(env, 'g-123'), true)
+  env.GOOGLE_TOKENS.list = async () => {
+    throw new Error('KV down')
+  }
+  assert.equal(await oauth.grantInUse(env, 'g-123'), true)
 })
 
 // ---- storage failure after Google approves ----
@@ -505,11 +553,11 @@ test('migration rollback: restoring the archived record works again with the old
   assert.equal(g.lastBody.client_id, 'old-cid.apps.example')
 })
 
-test('migration: same-client reconnect still revokes the replaced grant', async () => {
+test('migration: same-client reconnect by another account still revokes the replaced grant', async () => {
   const env = migratingEnv()
   mockGoogle({ refresh: 'rt-1' })
   assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'connect')))).status, 200)
-  const g = mockGoogle({ refresh: 'rt-2' })
+  const g = mockGoogle({ refresh: 'rt-2', sub: 'g-other' })
   assert.equal((await finish(env, await begin(env, await issue(env, 'acme', 'reconnect')))).status, 200)
   assert.deepEqual(g.revoked, ['rt-1'])
   assert.equal([...env.GOOGLE_TOKENS.m.keys()].filter((k) => k.startsWith('google-archive:')).length, 0)

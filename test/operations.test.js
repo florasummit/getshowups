@@ -89,7 +89,7 @@ beforeEach(async () => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
     PLATFORM_ADMIN_EMAILS: 'Ops@GetShowUps.com, second@getshowups.com',
   }
   stripe = { checkout: () => [200, { url: 'https://checkout.stripe.com/c/test' }], portal: () => [200, { url: 'https://billing.stripe.com/p/test' }] }

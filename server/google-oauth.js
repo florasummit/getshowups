@@ -119,6 +119,35 @@ export async function revokeToken(token, env) {
   }
 }
 
+// Google ties every refresh token a user gives one OAuth client to a single grant: revoking any of
+// them can end all of that user's access for the client, including connections stored for other
+// businesses. Returns true when a stored connection (google:<customer>) for this Google account and
+// client exists, so callers keep it working by not revoking. Unknown → true (never revoke blindly).
+export async function grantInUse(env, sub, clientId = env.GOOGLE_CLIENT_ID) {
+  if (!sub) return true
+  try {
+    const listed = await env.GOOGLE_TOKENS.list({ prefix: 'google:' })
+    if (!listed.list_complete) return true
+    for (const { name } of listed.keys) {
+      const raw = await env.GOOGLE_TOKENS.get(name)
+      if (!raw) continue
+      const rec = JSON.parse(raw)
+      if (rec.googleSub === sub && rec.clientId === clientId) return true
+    }
+    return false
+  } catch (err) {
+    console.error('Grant usage check failed:', err?.message)
+    return true
+  }
+}
+
+// Revokes a token only if no stored connection still depends on the same Google grant.
+export async function revokeUnlessInUse(token, sub, env, clientId) {
+  if (await grantInUse(env, sub, clientId)) return false
+  await revokeToken(token, env)
+  return true
+}
+
 // Bearer-token check for /api/admin/* routes. Compares fixed-length digests so timing does not
 // leak the token length or prefix.
 export async function isAdmin(request, env) {

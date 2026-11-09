@@ -4,7 +4,8 @@
 // 2. Exchanges the code server-side with the client secret + PKCE verifier.
 // 3. Requires every calendar scope to be granted.
 // 4. Atomically consumes the invite in D1, only for the session that claimed it. A replayed
-//    callback, a reused invite, or another session fails here, and the new Google grant is revoked.
+//    callback, a reused invite, or another session fails here, and the new Google grant is revoked
+//    (unless the same Google account already has a stored connection for this client).
 // 5. Stores the encrypted refresh token under the customer from the invite record. If storage
 //    fails, the new Google grant is revoked and the invite is released so the link can be retried.
 // Tokens are never sent to the browser.
@@ -20,7 +21,7 @@ import {
   missingConfig,
   page,
   readCookie,
-  revokeToken,
+  revokeUnlessInUse,
   stateCookie,
   timingSafeEqual,
 } from '../../../../server/google-oauth.js'
@@ -97,14 +98,18 @@ export async function onRequestGet({ request, env }) {
     return page(502, 'Calendar not connected', 'Google could not complete the connection. Please try again.', clear)
   }
   const grant = tokens.refresh_token || tokens.access_token
+  const claims = idTokenClaims(tokens.id_token || '')
+  // Undo Google's new grant on failure, unless the same Google account already has a working stored
+  // connection for this client (revoking would end that connection too).
+  const undo = (token) => revokeUnlessInUse(token, claims.sub, env)
 
   const granted = new Set((tokens.scope || '').split(' '))
   if (!CALENDAR_SCOPES.every((s) => granted.has(s))) {
-    if (grant) await revokeToken(grant, env)
+    if (grant) await undo(grant)
     return page(400, 'Calendar access needed', 'Please allow both calendar permissions on the Google screen. Use your link again to retry.', clear)
   }
   if (!tokens.refresh_token) {
-    if (grant) await revokeToken(grant, env)
+    if (grant) await undo(grant)
     return page(400, 'Calendar not connected', 'Google did not return long-term access. Please start again from your link.', clear)
   }
 
@@ -115,21 +120,20 @@ export async function onRequestGet({ request, env }) {
   } catch (err) {
     // The invite was not changed, so the same link still works.
     console.error('Invite check failed:', err?.message)
-    await revokeToken(tokens.refresh_token, env)
+    await undo(tokens.refresh_token)
     return saveFailed(true)
   }
   if (!invite) {
-    await revokeToken(tokens.refresh_token, env)
+    await undo(tokens.refresh_token)
     return page(410, 'Link not valid', 'This calendar connection link was already used or has expired. Please ask GetShowUps for a new link.', clear)
   }
 
   const key = `google:${invite.customer}`
-  const claims = idTokenClaims(tokens.id_token || '')
   let existing
   try {
     existing = await env.GOOGLE_TOKENS.get(key)
     if (invite.purpose === 'connect' && existing) {
-      await revokeToken(tokens.refresh_token, env)
+      await undo(tokens.refresh_token)
       return page(409, 'Already connected', 'A calendar is already connected for this account. Ask GetShowUps for a reconnect link to replace it.', clear)
     }
     await env.GOOGLE_TOKENS.put(
@@ -148,7 +152,7 @@ export async function onRequestGet({ request, env }) {
     // Nothing was stored. Undo Google's new grant, then give the invite back so the same
     // link can be retried instead of being burned.
     console.error('Saving Google connection failed:', err?.message)
-    await revokeToken(tokens.refresh_token, env)
+    await undo(tokens.refresh_token)
     let released = false
     try {
       released = await releaseInvite(env.ONBOARDING_DB, saved.inviteHash, saved.sessionId, consumedAt)
@@ -160,14 +164,18 @@ export async function onRequestGet({ request, env }) {
 
   await track(env, existing ? 'calendar_reconnected' : 'calendar_connected', { id: `calendar:${invite.customer}:${consumedAt}`, customer: invite.customer })
 
-  // Reconnect. Same OAuth client: revoke the replaced grant so the old refresh token stops working.
-  // Different client (a client migration): keep the old encrypted record under an archive key and do
-  // not revoke it, so the previous connection can be restored if the migration is rolled back.
+  // Reconnect. Same OAuth client: revoke the replaced grant so the old refresh token stops working,
+  // but only when it belongs to a different Google account that no other stored connection uses (the
+  // same account shares one grant with the token just stored). Different client (a client migration):
+  // keep the old encrypted record under an archive key and do not revoke it, so the previous
+  // connection can be restored if the migration is rolled back.
   if (existing) {
     try {
       const previous = JSON.parse(existing)
       if (previous.clientId && previous.clientId === env.GOOGLE_CLIENT_ID) {
-        await revokeToken(await decrypt(env, previous.refreshToken), env)
+        if (previous.googleSub && previous.googleSub !== claims.sub) {
+          await revokeUnlessInUse(await decrypt(env, previous.refreshToken), previous.googleSub, env)
+        }
       } else {
         await env.GOOGLE_TOKENS.put(`google-archive:${invite.customer}:${consumedAt}`, existing)
       }
