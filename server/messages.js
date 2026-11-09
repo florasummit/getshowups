@@ -140,11 +140,15 @@ const timeOnly = (ts, tz) => whenText(ts, tz, { hour: 'numeric', minute: '2-digi
 const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need)
 
 // Returns { subject, text, sms } for one message row (joined with its business, lead, appointment).
+// 'at_customer' businesses visit the lead, so their messages talk about a visit to the service
+// address and ask the lead to confirm access, not to "be there".
 export async function render(env, m) {
   const biz = m.biz
   const hi = `Hi ${firstName(m.lead_name)},`
   const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you requested an appointment on their booking page. Reply to this email to reach ${biz}.`
   const confirmed = Boolean(m.confirmed_at)
+  const visit = m.appointment_mode === 'at_customer'
+  const place = m.street ? ` at ${m.street}` : ''
   switch (m.kind) {
     case 'lead_followup_1':
     case 'lead_followup_2': {
@@ -159,6 +163,13 @@ export async function render(env, m) {
     case 'confirmation': {
       const url = await confirmUrl(env, m.appointment_id)
       const when = longWhen(m.start_at, m.timezone)
+      if (visit) {
+        return {
+          subject: `${biz} visit booked: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
+          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
+          sms: `${biz}: visit booked${place} for ${when}. Confirm access: ${url} Reply STOP to opt out.`,
+        }
+      }
       return {
         subject: `You're booked with ${biz}: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
         text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
@@ -170,6 +181,14 @@ export async function render(env, m) {
       const url = await confirmUrl(env, m.appointment_id)
       const soon = m.kind === 'reminder_2h'
       const when = soon ? `today at ${timeOnly(m.start_at, m.timezone)}` : longWhen(m.start_at, m.timezone)
+      if (visit) {
+        const access = confirmed ? 'Thanks for confirming.' : `Please confirm ${biz} can access the property:\n${url}`
+        return {
+          subject: `Reminder: ${biz} visit ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
+          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nNeed to change the time? Reply to this email.${footer}`,
+          sms: `${biz}: reminder of your visit${place} ${when}.${confirmed ? '' : ` Confirm access: ${url}`} Reply STOP to opt out.`,
+        }
+      }
       const ask = confirmed ? 'See you then!' : `Please confirm you'll be there:\n${url}`
       return {
         subject: `Reminder: ${biz} ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
@@ -179,6 +198,13 @@ export async function render(env, m) {
     }
     case 'no_show_rebook': {
       const url = await resumeUrl(env, m.customer, m.lead_id)
+      if (visit) {
+        return {
+          subject: `Your ${biz} visit didn't happen: pick a new time`,
+          text: `${hi}\n\n${biz} wasn't able to complete your scheduled visit${place}. If you still need help, pick a new time here:\n${url}${footer}`,
+          sms: `${biz}: we couldn't complete your scheduled visit. Pick a new time: ${url} Reply STOP to opt out.`,
+        }
+      }
       return {
         subject: `Sorry we missed you: pick a new time with ${biz}`,
         text: `${hi}\n\nIt looks like we missed each other for your appointment with ${biz}. If you still need help, pick a new time here:\n${url}${footer}`,
@@ -191,6 +217,8 @@ export async function render(env, m) {
 
 const DUE_SQL = `
   SELECT m.*, c.name AS biz, c.timezone, c.status AS cstatus,
+         (SELECT ss.appointment_mode FROM service_settings ss WHERE ss.customer = m.customer) AS appointment_mode,
+         (SELECT la.street FROM lead_addresses la WHERE la.lead_id = m.lead_id AND la.customer = m.customer) AS street,
          coalesce((SELECT cs.automations FROM customer_settings cs WHERE cs.customer = m.customer), 1) AS automations,
          l.name AS lead_name, l.email AS lead_email, l.phone AS lead_phone, l.need, l.status AS lead_status,
          (SELECT 1 FROM sms_consents sc WHERE sc.lead_id = m.lead_id AND sc.customer = m.customer) AS sms_consent,

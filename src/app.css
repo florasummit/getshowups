@@ -306,6 +306,85 @@
   color: var(--white);
 }
 
+.choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.choice-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--white);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+
+.choice-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-option:has(input:checked) {
+  border-color: var(--ink-900);
+  background: var(--ink-900);
+  color: var(--white);
+}
+
+.choice-option:has(input:focus-visible) {
+  outline: 2px solid var(--orange-500);
+  outline-offset: 2px;
+}
+
+@media (max-width: 380px) {
+  .choice {
+    grid-template-columns: 1fr;
+  }
+}
+
+.address {
+  gap: 8px;
+}
+
+.address-row {
+  display: grid;
+  grid-template-columns: 1fr 72px 104px;
+  gap: 8px;
+}
+
+.result {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.value-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.value-form input {
+  width: 96px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+}
+
 /* ---------- setup steps ---------- */
 .steps-bar {
   display: flex;
@@ -433,7 +512,10 @@
 .row-actions {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  max-width: 100%;
 }
 
 .tag {

@@ -9,6 +9,7 @@ const ERRORS = {
   invalid_hours: 'End time must be after start time.',
   invalid_workdays: 'Choose at least one day.',
   invalid_slot_minutes: 'Choose an appointment length.',
+  invalid_mode: 'Choose where appointments happen.',
   already_exists: 'Your business was just created. Refreshing…',
 }
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
@@ -17,6 +18,7 @@ export function BusinessForm({ customer, submitLabel, onSaved }) {
   const [name, setName] = useState(customer?.name || '')
   const [timezone, setTimezone] = useState(customer?.timezone || browserTimeZone())
   const [zips, setZips] = useState((customer?.serviceZips || []).join(', '))
+  const [mode, setMode] = useState(customer?.appointmentMode || 'at_business')
   const [state, setState] = useState({})
 
   const submit = async (e) => {
@@ -28,7 +30,7 @@ export function BusinessForm({ customer, submitLabel, onSaved }) {
     } catch {
       source = undefined
     }
-    const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, source } })
+    const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, appointmentMode: mode, source } })
     if (status === 200 || status === 201) return onSaved?.(data)
     if (data.error === 'already_exists') return onSaved?.(data)
     setState({ error: errorText(data.error) })
@@ -40,6 +42,20 @@ export function BusinessForm({ customer, submitLabel, onSaved }) {
         <span>Business name</span>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required autoComplete="organization" autoFocus={!customer} />
       </label>
+      <fieldset className="field">
+        <legend>Where do appointments happen?</legend>
+        <div className="choice" role="radiogroup">
+          {[
+            ['at_business', 'At my location'],
+            ['at_customer', 'At the customer’s location'],
+          ].map(([value, label]) => (
+            <label key={value} className="choice-option">
+              <input type="radio" name="appointmentMode" value={value} checked={mode === value} onChange={() => setMode(value)} />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <label className="field">
         <span>Time zone</span>
         <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
@@ -114,7 +130,7 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
         </label>
       </div>
       <label className="field">
-        <span>Appointment length</span>
+        <span>{customer.appointmentMode === 'at_customer' ? 'Visit length' : 'Appointment length'}</span>
         <select value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))}>
           {[...new Set([slotMinutes, ...LENGTHS])].sort((a, b) => a - b).map((m) => (
             <option key={m} value={m}>

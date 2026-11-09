@@ -130,6 +130,7 @@ function Appointment({ a, tz, children }) {
         <p className="row-sub">
           {when(a.start, tz)} · <a href={`tel:${a.phone}`}>{a.phone}</a>
         </p>
+        {a.address && <p className="row-sub">{a.address}</p>}
         <p className="row-note">{a.need}</p>
       </div>
       {children}
@@ -137,25 +138,78 @@ function Appointment({ a, tz, children }) {
   )
 }
 
-function Outcome({ a, tz, onDone }) {
+const recordOutcome = (body) => api('/api/dashboard/outcome', { method: 'POST', body })
+
+// Appointment happened or not; for on-site visits also whether the job was done (arriving ≠ done).
+function Outcome({ a, tz, visit, onDone }) {
   const [busy, setBusy] = useState(false)
-  const mark = async (outcome) => {
+  const mark = async (body) => {
     setBusy(true)
-    const { status } = await api('/api/dashboard/outcome', { method: 'POST', body: { id: a.id, outcome } })
+    const { status } = await recordOutcome({ id: a.id, ...body })
     if (status === 200) onDone()
     else setBusy(false)
   }
+  const choices = visit
+    ? [
+        ['Couldn’t visit', { outcome: 'no_show' }, 'btn-quiet'],
+        ['Visited, not done', { outcome: 'showed', work: 'not_completed' }, 'btn-quiet'],
+        ['Job done', { outcome: 'showed', work: 'completed' }, 'btn-primary'],
+      ]
+    : [
+        ['No-show', { outcome: 'no_show' }, 'btn-quiet'],
+        ['Showed', { outcome: 'showed' }, 'btn-primary'],
+      ]
   return (
     <Appointment a={a} tz={tz}>
       <div className="row-actions">
-        <button type="button" className="btn btn-sm btn-quiet" disabled={busy} onClick={() => mark('no_show')}>
-          No-show
-        </button>
-        <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => mark('showed')}>
-          Showed
-        </button>
+        {choices.map(([label, body, cls]) => (
+          <button key={label} type="button" className={`btn btn-sm ${cls}`} disabled={busy} onClick={() => mark(body)}>
+            {label}
+          </button>
+        ))}
       </div>
     </Appointment>
+  )
+}
+
+const money = (cents) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100)
+
+function resultLabel(a, visit) {
+  if (a.status === 'no_show') return [visit ? 'Couldn’t visit' : 'No-show', 'tag--bad']
+  if (!visit) return ['Showed', 'tag--ok']
+  if (a.work === 'completed') return ['Job done', 'tag--ok']
+  if (a.work === 'not_completed') return ['Visited, not done', '']
+  return ['Visited', '']
+}
+
+// Optional, self-reported value of a job booked through the booking page.
+function ReportedValue({ a, onDone }) {
+  const [editing, setEditing] = useState(false)
+  const [amount, setAmount] = useState(a.valueCents != null ? String(a.valueCents / 100) : '')
+  const [error, setError] = useState('')
+  const save = async (e) => {
+    e.preventDefault()
+    const cents = amount.trim() === '' ? null : Math.round(Number(amount) * 100)
+    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) return setError('Enter an amount like 250')
+    const { status } = await recordOutcome({ id: a.id, outcome: 'showed', work: a.work ?? undefined, valueCents: cents })
+    if (status === 200) {
+      setEditing(false)
+      onDone()
+    } else setError('Couldn’t save. Try again.')
+  }
+  if (!editing) {
+    return (
+      <button type="button" className="link-btn" onClick={() => setEditing(true)}>
+        {a.valueCents != null ? money(a.valueCents) : 'Add job value'}
+      </button>
+    )
+  }
+  return (
+    <form className="value-form" onSubmit={save}>
+      <input aria-label="Job value in dollars" inputMode="decimal" placeholder="$" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+      <button className="btn btn-sm btn-primary">Save</button>
+      {error && <span className="fine">{error}</span>}
+    </form>
   )
 }
 
@@ -204,6 +258,7 @@ function Automations({ a, onChange }) {
 
 function Overview({ me }) {
   const tz = me.customer.timezone
+  const visit = me.customer.appointmentMode === 'at_customer'
   const [data, setData] = useState(null)
   const [error, setError] = useState(false)
   const load = useCallback(
@@ -252,10 +307,20 @@ function Overview({ me }) {
               ['Booked', data.stats.booked],
               ['Booking rate', pct(data.stats.bookingRate)],
               ['Confirmed', data.stats.confirmed],
-              ['Showed', data.stats.showed],
-              ['No-shows', data.stats.noShow],
-              ['Show rate', pct(data.stats.showRate)],
+              ...(visit
+                ? [
+                    ['Visits', data.stats.showed],
+                    ['Couldn’t visit', data.stats.noShow],
+                    ['Jobs done', data.stats.completed],
+                    ['Completion rate', pct(data.stats.completionRate)],
+                  ]
+                : [
+                    ['Showed', data.stats.showed],
+                    ['No-shows', data.stats.noShow],
+                    ['Show rate', pct(data.stats.showRate)],
+                  ]),
               ['Messages sent', data.automation.sent],
+              ...(data.stats.reportedValueCents != null ? [['Reported job value', money(data.stats.reportedValueCents)]] : []),
             ].map(([label, value]) => (
               <div key={label} className="stat">
                 <p className="stat-value">{value}</p>
@@ -263,16 +328,19 @@ function Overview({ me }) {
               </div>
             ))}
           </section>
-          <p className="fine stats-note">Last 30 days</p>
+          <p className="fine stats-note">
+            Last 30 days
+            {data.stats.reportedValueCents != null && ' · Job value is what you reported for jobs booked here, not revenue caused by GetShowUps.'}
+          </p>
 
           <Automations a={data.automation} onChange={load} />
 
           {data.needsOutcome.length > 0 && (
             <section className="card">
-              <h2 className="card-title">Did they show up?</h2>
+              <h2 className="card-title">{visit ? 'How did the visit go?' : 'Did they show up?'}</h2>
               <ul className="rows">
                 {data.needsOutcome.map((a) => (
-                  <Outcome key={a.id} a={a} tz={tz} onDone={load} />
+                  <Outcome key={a.id} a={a} tz={tz} visit={visit} onDone={load} />
                 ))}
               </ul>
             </section>
@@ -287,7 +355,7 @@ function Overview({ me }) {
                 ))}
               </ul>
             ) : (
-              <p className="empty">No upcoming appointments. Share your booking page to get the next one.</p>
+              <p className="empty">No upcoming {visit ? 'visits' : 'appointments'}. Share your booking page to get the next one.</p>
             )}
           </section>
 
@@ -305,6 +373,7 @@ function Overview({ me }) {
                       <p className="row-sub">
                         <a href={`tel:${l.phone}`}>{l.phone}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
                       </p>
+                      {l.address && <p className="row-sub">{l.address}</p>}
                       <p className="row-note">{l.need}</p>
                     </div>
                   </li>
@@ -319,7 +388,10 @@ function Overview({ me }) {
               <ul className="rows">
                 {data.recent.map((a) => (
                   <Appointment key={a.id} a={a} tz={tz}>
-                    <span className={`tag ${a.status === 'showed' ? 'tag--ok' : 'tag--bad'}`}>{a.status === 'showed' ? 'Showed' : 'No-show'}</span>
+                    <div className="result">
+                      <span className={`tag ${resultLabel(a, visit)[1]}`}>{resultLabel(a, visit)[0]}</span>
+                      {a.status === 'showed' && <ReportedValue a={a} onDone={load} />}
+                    </div>
                   </Appointment>
                 ))}
               </ul>

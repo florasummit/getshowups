@@ -428,7 +428,7 @@ test('booking page: only fully set-up businesses are bookable', async () => {
 
 test('booking page: real open slots exclude Google busy time and booked appointments; no private data', async () => {
   const first = (await book.info('alpha')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['askZip', 'name', 'offerSms', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.deepEqual(Object.keys(first).sort(), ['appointmentMode', 'askZip', 'name', 'offerSms', 'slotMinutes', 'slots', 'status', 'timezone'])
   assert.equal(first.offerSms, false, 'no SMS provider configured → no SMS consent offered')
   assert.equal(first.status, 'ok')
   const [s0, s1] = first.slots
@@ -549,7 +549,7 @@ test('results: outcomes only on past appointments; show rate and follow-up list'
   assert.equal((await post(outcome, '/api/dashboard/outcome', { id: ids[1], outcome: 'no_show' }, { cookie })).status, 200)
   assert.equal((await post(outcome, '/api/dashboard/outcome', { id: ids[1], outcome: 'cancelled' }, { cookie })).status, 400)
   ov = (await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie })).json()
-  assert.deepEqual(ov.stats, { leads: 3, booked: 2, confirmed: 0, showed: 1, noShow: 1, bookingRate: 67, showRate: 50 })
+  assert.deepEqual(ov.stats, { leads: 3, booked: 2, confirmed: 0, showed: 1, noShow: 1, bookingRate: 67, showRate: 50, completed: 0, notCompleted: 0, completionRate: null, reportedValueCents: null, valuedJobs: 0 })
   assert.equal(ov.needsOutcome.length, 0)
   assert.equal(ov.recent.length, 2)
   // The no-show reopens its lead: it is back on the follow-up list (and can rebook from a message link).

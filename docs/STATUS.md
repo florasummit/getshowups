@@ -13,6 +13,19 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Appointment modes: at_business / at_customer (local only, not deployed)
+- [x] Migration 0005 (additive): service_settings, lead_addresses, appointment_outcomes
+- [x] Business setting "Where do appointments happen?"; existing businesses stay at_business
+- [x] at_customer: validated US service address; ZIP from the address drives service area; address on the
+  Google Calendar event location; kept out of logs, events, and platform admin views
+- [x] Mode-specific booking page, confirmation/reminder/rebook emails, confirm page, dashboard labels
+- [x] Outcome model: visit happened (showed/no_show) separate from work completed; optional reported job value
+  labelled as association, never as revenue caused by GetShowUps; platform shows incremental revenue as not measured
+- [x] Tests: modes.test.js (14) + modes.spec.js (5); at_business regression suites unchanged
+- Needs approval: run 0005 on production, deploy, set PoolThru (poolthru-llc) to at_customer.
+
+## In progress
+
 ### Revenue engine (Level 2): built and tested locally, NOT deployed (2026-11-09)
 - Lead follow-ups (+15 min, +24 h) with a signed "pick a time" link that resumes booking for the same lead.
 - Booking confirmation + reminders (24 h, 2 h) with a signed "confirm I'll be there" link → appointment_confirmations.

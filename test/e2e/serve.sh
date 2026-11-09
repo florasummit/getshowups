@@ -51,7 +51,21 @@ d1 "
     ('seed-lead-resume', '$E2E_AUTO_CUSTOMER', 'Riley Resume', 'riley@example.net', '555-010-0101', 'Pool opening', 'new', 'x', $NOW, $NOW),
     ('seed-lead-confirm', '$E2E_AUTO_CUSTOMER', 'Casey Confirm', 'casey@example.net', '555-010-0102', 'Leak check', 'booked', 'x', $NOW, $NOW);
   INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
-    ('0123456789abcdef0123456789abcdef', '$E2E_AUTO_CUSTOMER', 'seed-lead-confirm', $((NOW + 259200000)), $((NOW + 262800000)), 'booked', 'seed-event-2', $NOW, $NOW);"
+    ('0123456789abcdef0123456789abcdef', '$E2E_AUTO_CUSTOMER', 'seed-lead-confirm', $((NOW + 259200000)), $((NOW + 262800000)), 'booked', 'seed-event-2', $NOW, $NOW);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_HOME_CUSTOMER', 'E2E Home Service', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES ('$E2E_HOME_CUSTOMER', 'at_customer', $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-home.example', '$E2E_HOME_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_HOME_SESSION_TOKEN")', 'owner@e2e-home.example', $NOW, $FAR);
+  INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES
+    ('seed-lead-visit', '$E2E_HOME_CUSTOMER', 'Val Visit', 'val@example.net', '555-010-0105', 'Green pool cleanup', '29403', 'booked', 'x', $PAST, $PAST),
+    ('seed-lead-visit-2', '$E2E_HOME_CUSTOMER', 'Mo Mobile', 'mo@example.net', '555-010-0106', 'Filter check', '29403', 'booked', 'x', $PAST, $PAST);
+  INSERT INTO lead_addresses (lead_id, customer, street, unit, city, state, zip, created_at) VALUES
+    ('seed-lead-visit', '$E2E_HOME_CUSTOMER', '7 Harbor Way', '', 'Charleston', 'SC', '29403', $PAST),
+    ('seed-lead-visit-2', '$E2E_HOME_CUSTOMER', '9 Marsh Rd', '', 'Charleston', 'SC', '29403', $PAST);
+  INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
+    ('seed-appt-visit', '$E2E_HOME_CUSTOMER', 'seed-lead-visit', $PAST, $((PAST + 3600000)), 'booked', 'seed-event-3', $PAST, $PAST),
+    ('seed-appt-visit-2', '$E2E_HOME_CUSTOMER', 'seed-lead-visit-2', $((PAST - 3600000)), $PAST, 'booked', 'seed-event-4', $PAST, $PAST);"
 
 RECORD=$(K="$E2E_TOKEN_ENCRYPTION_KEY" C="$E2E_CUSTOMER" node --input-type=module -e "
   import { encrypt } from './server/google-oauth.js'
@@ -63,6 +77,9 @@ npx wrangler kv key put "google:$E2E_CUSTOMER" "$RECORD" --binding GOOGLE_TOKENS
   -c test/e2e/wrangler.e2e.toml >/dev/null
 SPARE=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_SPARE_CUSTOMER\"/")
 npx wrangler kv key put "google:$E2E_SPARE_CUSTOMER" "$SPARE" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
+HOMEREC=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_HOME_CUSTOMER\"/")
+npx wrangler kv key put "google:$E2E_HOME_CUSTOMER" "$HOMEREC" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 AUTO=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_AUTO_CUSTOMER\"/")
 npx wrangler kv key put "google:$E2E_AUTO_CUSTOMER" "$AUTO" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \

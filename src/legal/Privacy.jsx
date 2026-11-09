@@ -32,7 +32,7 @@ export default function Privacy() {
         </li>
         <li>
           <strong>People who request an appointment on a booking page:</strong> the name, email address, phone number,
-          service request, and ZIP code they enter. These are shared with that business so it can serve them, and are
+          service request, and ZIP code they enter, and, for businesses that visit their customers, the service address. These are shared with that business so it can serve them, and are
           included in the appointment added to the business’s Google Calendar, which sends you a calendar invitation.
         </li>
         <li>

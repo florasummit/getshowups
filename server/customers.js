@@ -6,7 +6,10 @@ import { track } from './events.js'
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 const ZIP_RE = /^[A-Za-z0-9 -]{3,10}$/
 
-// Returns [error, value]. Fields: name, timezone, serviceZips (array or comma string, optional).
+export const APPOINTMENT_MODES = ['at_business', 'at_customer']
+
+// Returns [error, value]. Fields: name, timezone, serviceZips (array or comma string, optional),
+// appointmentMode ('at_business' default | 'at_customer').
 export function validateBusiness(body) {
   const name = String(body?.name ?? '').trim()
   const timezone = String(body?.timezone ?? '')
@@ -15,7 +18,10 @@ export function validateBusiness(body) {
   if (!name || name.length > 80) return ['invalid_name']
   if (!isValidTimeZone(timezone)) return ['invalid_timezone']
   if (serviceZips.length > 200 || serviceZips.some((z) => !ZIP_RE.test(z))) return ['invalid_zips']
-  return [null, { name, timezone, serviceZips }]
+  // Omitted = keep the current mode (new businesses default to at_business).
+  const appointmentMode = body?.appointmentMode
+  if (appointmentMode !== undefined && !APPOINTMENT_MODES.includes(appointmentMode)) return ['invalid_mode']
+  return [null, { name, timezone, serviceZips, appointmentMode }]
 }
 
 // Returns [error, value]. Fields: workdays [0-6], dayStart/dayEnd 'HH:MM', slotMinutes 15–240.
@@ -69,7 +75,15 @@ export const cleanSource = (v) => {
 
 // Creates a business. With `email`, that person becomes its owner in the same batch (throws on a race,
 // email PK). Admin invitations create the business first and add the owner when they accept.
-export async function createCustomer(env, email, { name, timezone, serviceZips }, { source = 'direct', via = 'self_serve' } = {}, now = Date.now()) {
+const modeStatement = (db, id, mode, now) =>
+  db
+    .prepare(
+      `INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES (?1, ?2, ?3)
+       ON CONFLICT(customer) DO UPDATE SET appointment_mode = ?2, updated_at = ?3`,
+    )
+    .bind(id, mode, now)
+
+export async function createCustomer(env, email, { name, timezone, serviceZips, appointmentMode }, { source = 'direct', via = 'self_serve' } = {}, now = Date.now()) {
   const id = await uniqueCustomerId(env, name)
   const db = env.ONBOARDING_DB
   await db.batch([
@@ -79,16 +93,17 @@ export async function createCustomer(env, email, { name, timezone, serviceZips }
       )
       .bind(id, name, timezone, serviceZips.join(','), cleanSource(source), via, now),
     ...(email ? [db.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?1, ?2, ?3)').bind(email, id, now)] : []),
+    modeStatement(db, id, appointmentMode ?? 'at_business', now),
   ])
   await track(env, 'business_created', { id: `business_created:${id}`, customer: id, props: { source: cleanSource(source), via }, at: now })
   return id
 }
 
-export async function updateBusiness(db, id, { name, timezone, serviceZips }, now = Date.now()) {
-  await db
-    .prepare('UPDATE customers SET name = ?2, timezone = ?3, service_zips = ?4, updated_at = ?5 WHERE id = ?1')
-    .bind(id, name, timezone, serviceZips.join(','), now)
-    .run()
+export async function updateBusiness(db, id, { name, timezone, serviceZips, appointmentMode }, now = Date.now()) {
+  await db.batch([
+    db.prepare('UPDATE customers SET name = ?2, timezone = ?3, service_zips = ?4, updated_at = ?5 WHERE id = ?1').bind(id, name, timezone, serviceZips.join(','), now),
+    ...(appointmentMode ? [modeStatement(db, id, appointmentMode, now)] : []),
+  ])
 }
 
 export async function updateHours(db, id, { slotMinutes, dayStart, dayEnd, workdays }, now = Date.now()) {
@@ -110,7 +125,13 @@ export async function progress(env, customer) {
 
 export async function getCustomer(db, id) {
   return db
-    .prepare('SELECT c.*, coalesce(cs.automations, 1) AS automations FROM customers c LEFT JOIN customer_settings cs ON cs.customer = c.id WHERE c.id = ?1')
+    .prepare(
+      `SELECT c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
+         FROM customers c
+         LEFT JOIN customer_settings cs ON cs.customer = c.id
+         LEFT JOIN service_settings ss ON ss.customer = c.id
+        WHERE c.id = ?1`,
+    )
     .bind(id)
     .first()
 }

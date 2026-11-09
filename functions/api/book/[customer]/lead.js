@@ -14,7 +14,7 @@ export async function onRequestPost({ request, env, params }) {
   }
   const body = await request.json().catch(() => null)
   if (body?.website) return json(400, { error: 'invalid_request' })
-  const [error, lead] = validateLead(body)
+  const [error, lead] = validateLead(body, customer.appointmentMode)
   if (error) return json(400, { error })
   if (customer.serviceZips.length && !lead.zip) return json(400, { error: 'invalid_zip' })
   try {

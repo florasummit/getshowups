@@ -106,6 +106,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
+- Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
+  (business visits; service address required, stored in lead_addresses, put on the calendar event location).
+  appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not
+  (arrival is never completion). value_cents is self-reported booking value: never call it revenue caused by
+  GetShowUps. Service addresses never go to logs, events, or platform admin views. Booked times are start times
+  (no arrival windows).
 - Google ties one user's refresh tokens for a client to ONE grant: never revoke a token that a stored connection for the
   same Google account + client may still use. Use `revokeUnlessInUse()`; `revokeToken()` directly only when unshared.
 - OAuth client migration: stored connections carry `clientId`; `oauthClient()` refreshes with the issuing client

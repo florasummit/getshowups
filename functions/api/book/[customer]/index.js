@@ -16,7 +16,9 @@ export async function onRequestGet({ request, env, params }) {
     name: customer.name,
     timezone: customer.timezone,
     slotMinutes: customer.slotMinutes,
-    askZip: customer.serviceZips.length > 0,
+    // 'at_customer': the business comes to the lead, so the page asks for a service address.
+    appointmentMode: customer.appointmentMode,
+    askZip: customer.appointmentMode !== 'at_customer' && customer.serviceZips.length > 0,
     // Text reminders are offered only when they can actually be sent.
     offerSms: customer.automations && smsConfigured(env),
     status: result.ok ? 'ok' : 'unavailable',

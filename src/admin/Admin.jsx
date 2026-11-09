@@ -54,6 +54,10 @@ function Metrics({ m }) {
     ['Churn (30 days)', b ? pct(b.churn30) : '—'],
     ['Retention (30 days)', pct(m.retention30)],
     ['First booking rate', pct(m.firstBookingRate)],
+    ['Visit rate (on-site businesses)', pct(m.visitRate30)],
+    ['Job completion (on-site businesses)', pct(m.completionRate30)],
+    ['Reported value of booked jobs (30 days)', m.reportedBookingValue30Cents == null ? '—' : money(m.reportedBookingValue30Cents, 'usd')],
+    ['Incremental revenue from GetShowUps', 'Not measured (needs a baseline)'],
     ['CAC', 'Needs cost data'],
     ['LTV', 'Needs cost data'],
     ['Gross margin', 'Needs cost data'],
@@ -460,6 +464,7 @@ function Overview({ me }) {
                 <div className="row-main">
                   <p className="row-title">
                     {c.name} <span className={`tag ${c.onboarding === 'live' ? 'tag--ok' : ''}`}>{ONBOARDING[c.onboarding]}</span>
+                    {c.appointmentMode === 'at_customer' && <span className="tag">On-site</span>}
                   </p>
                   <p className="row-sub">
                     {c.owners || 'No owner yet'} · {c.booked30} booked / {plural(c.leads30, 'lead')} (30d) · {c.subscription ? c.subscription.status : 'no plan'} · since{' '}

@@ -19,6 +19,7 @@ async function load(env, a, k) {
   if (!ID_RE.test(String(a)) || !(await verifyLinkToken(env, 'confirm', a, k))) return null
   return env.ONBOARDING_DB.prepare(
     `SELECT ap.id, ap.customer, ap.start_at, ap.status, c.name, c.timezone,
+            (SELECT ss.appointment_mode FROM service_settings ss WHERE ss.customer = ap.customer) AS appointment_mode,
             (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = ap.id) AS confirmed_at
        FROM appointments ap JOIN customers c ON c.id = ap.customer WHERE ap.id = ?1`,
   )
@@ -28,7 +29,9 @@ async function load(env, a, k) {
 
 const invalid = () => page(404, 'Link not valid', 'This confirmation link is not valid. Please use the link from your most recent message.', HEADERS, '', false)
 const closed = (row) => page(410, 'Can’t confirm online', `This appointment can no longer be confirmed online. Please contact ${row.name} directly.`, HEADERS, '', false)
-const done = (row) => page(200, 'You’re confirmed', `${row.name} · ${when(row.start_at, row.timezone)}. See you then!`, HEADERS, '', false)
+const isVisit = (row) => row.appointment_mode === 'at_customer'
+const done = (row) =>
+  page(200, 'You’re confirmed', `${row.name} · ${when(row.start_at, row.timezone)}. ${isVisit(row) ? 'Thanks for confirming the visit.' : 'See you then!'}`, HEADERS, '', false)
 
 async function handle(request, env, a, k, confirm) {
   const rl = await hitByIp(env, 'confirm', request)
@@ -45,8 +48,10 @@ async function handle(request, env, a, k, confirm) {
   if (row.status !== 'booked' || row.start_at <= now) return closed(row)
   if (row.confirmed_at) return done(row)
   if (!confirm) {
-    const form = `<form method="post" action="/api/appointment/confirm"><input type="hidden" name="a" value="${escapeHtml(a)}"><input type="hidden" name="k" value="${escapeHtml(k)}"><button type="submit">Confirm I’ll be there</button></form>`
-    return page(200, 'Confirm your appointment', `${row.name} · ${when(row.start_at, row.timezone)}`, HEADERS, form, false)
+    const label = isVisit(row) ? 'Confirm the visit' : 'Confirm I’ll be there'
+    const form = `<form method="post" action="/api/appointment/confirm"><input type="hidden" name="a" value="${escapeHtml(a)}"><input type="hidden" name="k" value="${escapeHtml(k)}"><button type="submit">${label}</button></form>`
+    const note = isVisit(row) ? 'Confirm the time works and that the business can access the property.' : ''
+    return page(200, isVisit(row) ? 'Confirm your visit' : 'Confirm your appointment', `${row.name} · ${when(row.start_at, row.timezone)}${note ? `. ${note}` : ''}`, HEADERS, form, false)
   }
   const updated = await env.ONBOARDING_DB.prepare(
     `INSERT OR IGNORE INTO appointment_confirmations (appointment_id, customer, confirmed_at)

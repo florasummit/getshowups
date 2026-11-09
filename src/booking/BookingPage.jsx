@@ -9,7 +9,10 @@ const FIELD_ERRORS = {
   invalid_email: 'Please enter a valid email.',
   invalid_phone: 'Please enter a valid phone number.',
   invalid_need: 'Tell us briefly what you need.',
-  invalid_zip: 'Please enter your ZIP code.',
+  invalid_zip: 'Please enter a valid ZIP code.',
+  invalid_street: 'Please enter the street address, including the number.',
+  invalid_city: 'Please enter the city.',
+  invalid_state: 'Please enter the two-letter state, like SC.',
   rate_limited: 'Too many attempts. Please wait a few minutes and try again.',
 }
 
@@ -58,6 +61,7 @@ export default function BookingPage({ id }) {
           <Details
             id={id}
             askZip={biz.askZip}
+            visit={biz.appointmentMode === 'at_customer'}
             offerSms={biz.offerSms}
             bizName={biz.name}
             onDone={(l) => {
@@ -89,12 +93,17 @@ export default function BookingPage({ id }) {
             <span className="done-mark" aria-hidden="true">
               ✓
             </span>
-            <h1 className="title">You’re booked</h1>
+            <h1 className="title">{biz.appointmentMode === 'at_customer' ? 'Visit booked' : 'You’re booked'}</h1>
             <p className="done-when">{fmt(booked.start, biz.timezone, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
             <p className="done-time">
               {fmt(booked.start, biz.timezone, { hour: 'numeric', minute: '2-digit' })}
               {sameZone(biz.timezone) ? '' : ` (${biz.timezone.replaceAll('_', ' ')})`}
             </p>
+            {lead.street && (
+              <p className="lede">
+                {biz.name} will visit {lead.street}.
+              </p>
+            )}
             <p className="lede">A calendar invitation is on its way to {lead.email || 'your email'}.</p>
           </div>
         )}
@@ -114,22 +123,27 @@ const sameZone = (tz) => {
   }
 }
 
-function Details({ id, askZip, offerSms, bizName, onDone }) {
+function Details({ id, askZip, visit, offerSms, bizName, onDone }) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', need: '', zip: '', website: '', smsConsent: false })
+  const [address, setAddress] = useState({ street: '', unit: '', city: '', state: '', zip: '' })
+  const setA = (k) => (e) => setAddress((a) => ({ ...a, [k]: k === 'state' ? e.target.value.toUpperCase() : e.target.value }))
   const [state, setState] = useState({})
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   const submit = async (e) => {
     e.preventDefault()
     setState({ saving: true })
-    const { status, data } = await api(`/api/book/${id}/lead`, { method: 'POST', body: form })
-    if (status === 201) return onDone({ ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0] })
+    const body = visit ? { ...form, address } : form
+    const { status, data } = await api(`/api/book/${id}/lead`, { method: 'POST', body })
+    if (status === 201) {
+      return onDone({ ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0], street: visit ? address.street.trim() : null })
+    }
     setState({ error: FIELD_ERRORS[data.error] || 'Something went wrong. Please try again.' })
   }
 
   return (
     <form className="form" onSubmit={submit}>
-      <h1 className="title">Book an appointment</h1>
+      <h1 className="title">{visit ? 'Book a visit' : 'Book an appointment'}</h1>
       <label className="field">
         <span>What do you need?</span>
         <textarea value={form.need} onChange={set('need')} rows={2} maxLength={500} required autoFocus />
@@ -154,6 +168,18 @@ function Details({ id, askZip, offerSms, bizName, onDone }) {
         <span>Email</span>
         <input value={form.email} onChange={set('email')} type="email" required autoComplete="email" />
       </label>
+      {visit && (
+        <fieldset className="field address">
+          <legend>Service address</legend>
+          <input aria-label="Street address" placeholder="Street address" value={address.street} onChange={setA('street')} required maxLength={100} autoComplete="address-line1" />
+          <input aria-label="Apt, suite (optional)" placeholder="Apt, suite (optional)" value={address.unit} onChange={setA('unit')} maxLength={20} autoComplete="address-line2" />
+          <div className="address-row">
+            <input aria-label="City" placeholder="City" value={address.city} onChange={setA('city')} required maxLength={60} autoComplete="address-level2" />
+            <input aria-label="State" placeholder="State" value={address.state} onChange={setA('state')} required maxLength={2} autoComplete="address-level1" />
+            <input aria-label="ZIP" placeholder="ZIP" value={address.zip} onChange={setA('zip')} required maxLength={10} inputMode="numeric" autoComplete="postal-code" />
+          </div>
+        </fieldset>
+      )}
       {offerSms && (
         <label className="check">
           <input type="checkbox" checked={form.smsConsent} onChange={(e) => setForm((f) => ({ ...f, smsConsent: e.target.checked }))} />
@@ -216,7 +242,7 @@ function PickTime({ id, biz, lead, refresh, onBooked }) {
   const current = days[Math.min(day, days.length - 1)]
   return (
     <>
-      <h1 className="title">Pick a time</h1>
+      <h1 className="title">{biz.appointmentMode === 'at_customer' ? 'Pick a visit time' : 'Pick a time'}</h1>
       <div className="day-strip" role="tablist" aria-label="Day">
         {days.map((slots, i) => (
           <button

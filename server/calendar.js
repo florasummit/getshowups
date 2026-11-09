@@ -107,7 +107,7 @@ export async function checkConnection(env, customer) {
 // invitation and applies its normal reminders). `id` is chosen by us (base32hex) so a retry after a
 // timeout cannot create a duplicate: Google answers 409 if the first attempt already landed.
 // Returns { ok, eventId } or a sanitized failure with `retryable` (network/timeout/5xx).
-export async function createEvent(env, accessToken, { id, start, end, timeZone, summary, description, attendee }) {
+export async function createEvent(env, accessToken, { id, start, end, timeZone, summary, description, location, attendee }) {
   let res
   try {
     res = await googleFetch(env, `${googleApi(env).calendar}/calendars/primary/events?sendUpdates=all`, {
@@ -117,6 +117,7 @@ export async function createEvent(env, accessToken, { id, start, end, timeZone, 
         id,
         summary,
         description,
+        ...(location ? { location } : {}),
         start: { dateTime: new Date(start).toISOString(), timeZone },
         end: { dateTime: new Date(end).toISOString(), timeZone },
         attendees: [attendee],
