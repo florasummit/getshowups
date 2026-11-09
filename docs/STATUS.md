@@ -30,8 +30,12 @@ Everything below is **local and tested**, not in production.
 - Not done: email provider, Stripe account/plans, public Google app verification, cancellation/reschedule,
   session/invite purge job, cron (follow-ups run when the admin console loads).
 
-- Google Cloud migration M1+M2 done (new project `getshowups`, client `380394286094-cume4v…`); M3 (Cloudflare
-  secrets) awaiting approval. Old project untouched. See docs/LAUNCH.md.
+- 2026-11-09 00:53Z: launch release `9c1bcef` LIVE (deployment 2c7f07ff). D1 migrations 0002/0003 applied (14 tables);
+  pre-release backup: Time Travel bookmark 0000000b-00000000-0000511e-1d9da13728f07191fe8dfeb5f824b61a + local export.
+  New Google client active for sign-in/connect; PoolThru health `healthy`, `oauthClient: legacy`.
+  2026-11-09: PoolThru on new client (M4 done). Canonical customer = `poolthru-llc` (self-serve duplicate of `poolthru`).
+  Test booking verified + cleaned up; /admin verified. Next: deploy /privacy and publish Google app before
+  ~2026-11-16 (Testing tokens expire after 7 days), then legacy cleanup plan in docs/LAUNCH.md.
 
 ## Decisions
 

@@ -30,6 +30,9 @@ export default function Footer() {
             <li>
               <a href="/dashboard">Log in</a>
             </li>
+            <li>
+              <a href="/privacy">Privacy</a>
+            </li>
           </ul>
         </nav>
       </div>

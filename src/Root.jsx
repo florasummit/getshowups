@@ -5,6 +5,7 @@ import App from './App.jsx'
 const Dashboard = lazy(() => import('./dashboard/Dashboard.jsx'))
 const BookingPage = lazy(() => import('./booking/BookingPage.jsx'))
 const Admin = lazy(() => import('./admin/Admin.jsx'))
+const Privacy = lazy(() => import('./legal/Privacy.jsx'))
 
 // First-touch acquisition source (utm_source or ref), kept on this device for signup attribution.
 try {
@@ -22,6 +23,13 @@ export default function Root() {
     return (
       <Suspense fallback={null}>
         <BookingPage id={booking[1]} />
+      </Suspense>
+    )
+  }
+  if (path === '/privacy' || path === '/privacy/') {
+    return (
+      <Suspense fallback={null}>
+        <Privacy />
       </Suspense>
     )
   }

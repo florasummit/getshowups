@@ -717,3 +717,28 @@
     gap: 2px;
   }
 }
+
+/* ---------- legal pages ---------- */
+.legal {
+  max-width: 720px;
+  padding-top: 40px;
+  line-height: 1.6;
+}
+
+.legal h2 {
+  margin-top: 32px;
+  font-size: 1.15rem;
+}
+
+.legal p,
+.legal ul {
+  margin-top: 12px;
+}
+
+.legal ul {
+  padding-left: 1.25em;
+}
+
+.legal li + li {
+  margin-top: 8px;
+}

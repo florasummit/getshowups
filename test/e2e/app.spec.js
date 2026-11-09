@@ -170,6 +170,15 @@ test.describe('read-only pages @mobile', () => {
     await expect(page.getByRole('heading', { name: 'This booking page isn’t available' })).toBeVisible()
   })
 
+  test('privacy policy page (required for Google app publishing)', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('link', { name: 'Privacy' }).click()
+    await expect(page).toHaveURL(/\/privacy$/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible()
+    await expect(page.getByText('including the Limited Use requirements')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  })
+
   test('dashboard home layout', async ({ page, context }) => {
     await useSession(context, fixtures.E2E_SESSION_TOKEN)
     await page.goto('/dashboard')
