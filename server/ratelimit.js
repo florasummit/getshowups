@@ -12,6 +12,8 @@ export const RULES = {
   bookLeadPerBusiness: { limit: 100, windowSec: 3600 }, // POST lead (per business, caps spam floods)
   bookAppointment: { limit: 15, windowSec: 600 }, // POST appointment (per IP)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
+  confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
+  cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
 }
 
 const clientIp = (request) => request.headers.get('CF-Connecting-IP') || 'local'

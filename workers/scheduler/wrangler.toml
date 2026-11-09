@@ -1,0 +1,15 @@
+# Scheduler Worker: every 5 minutes it asks the Pages app to send due messages.
+# Lives in its own folder on purpose: a wrangler config at the repo root would override the
+# Pages project's dashboard bindings. Deploy (requires approval):
+#   cd workers/scheduler && npx wrangler deploy && npx wrangler secret put CRON_SECRET
+# CRON_SECRET must equal the CRON_SECRET secret on the Pages project.
+name = "getshowups-scheduler"
+main = "src/index.js"
+compatibility_date = "2026-11-08"
+workers_dev = false
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+SITE_URL = "https://getshowups.com"

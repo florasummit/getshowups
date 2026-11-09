@@ -20,6 +20,7 @@ done
 # Seed fake data (hashes only for sessions):
 #   e2e-pool  — fully set up, Google "connected" (encrypted fake token for the mock), one past booking
 #   e2e-other — business created, calendar not connected yet
+#   e2e-auto  — set up; one unbooked lead (resume link) and one future booking (confirm link)
 hash() { node -e "process.stdout.write(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex'))" "$1"; }
 NOW=$(node -e 'process.stdout.write(String(Date.now()))')
 FAR=$((NOW + 86400000))
@@ -43,7 +44,14 @@ d1 "
   INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
     ('seed-lead-past', '$E2E_CUSTOMER', 'Pat Past', 'pat@example.net', '555-010-0100', 'Filter repair', 'booked', 'x', $PAST, $PAST);
   INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
-    ('seed-appt-past', '$E2E_CUSTOMER', 'seed-lead-past', $PAST, $((PAST + 3600000)), 'booked', 'seed-event', $PAST, $PAST);"
+    ('seed-appt-past', '$E2E_CUSTOMER', 'seed-lead-past', $PAST, $((PAST + 3600000)), 'booked', 'seed-event', $PAST, $PAST);
+  INSERT INTO customers (id, name, timezone, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_AUTO_CUSTOMER', 'E2E Auto Co', 'America/New_York', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
+    ('seed-lead-resume', '$E2E_AUTO_CUSTOMER', 'Riley Resume', 'riley@example.net', '555-010-0101', 'Pool opening', 'new', 'x', $NOW, $NOW),
+    ('seed-lead-confirm', '$E2E_AUTO_CUSTOMER', 'Casey Confirm', 'casey@example.net', '555-010-0102', 'Leak check', 'booked', 'x', $NOW, $NOW);
+  INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
+    ('0123456789abcdef0123456789abcdef', '$E2E_AUTO_CUSTOMER', 'seed-lead-confirm', $((NOW + 259200000)), $((NOW + 262800000)), 'booked', 'seed-event-2', $NOW, $NOW);"
 
 RECORD=$(K="$E2E_TOKEN_ENCRYPTION_KEY" C="$E2E_CUSTOMER" node --input-type=module -e "
   import { encrypt } from './server/google-oauth.js'
@@ -55,6 +63,9 @@ npx wrangler kv key put "google:$E2E_CUSTOMER" "$RECORD" --binding GOOGLE_TOKENS
   -c test/e2e/wrangler.e2e.toml >/dev/null
 SPARE=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_SPARE_CUSTOMER\"/")
 npx wrangler kv key put "google:$E2E_SPARE_CUSTOMER" "$SPARE" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
+AUTO=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_AUTO_CUSTOMER\"/")
+npx wrangler kv key put "google:$E2E_AUTO_CUSTOMER" "$AUTO" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \

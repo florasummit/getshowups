@@ -13,6 +13,20 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Revenue engine (Level 2): built and tested locally, NOT deployed (2026-11-09)
+- Lead follow-ups (+15 min, +24 h) with a signed "pick a time" link that resumes booking for the same lead.
+- Booking confirmation + reminders (24 h, 2 h) with a signed "confirm I'll be there" link → appointment_confirmations.
+- No-show: reopens the lead and sends a rebook invitation after 30 min (skipped if the owner corrects the outcome).
+- Email via Resend (code existed; reused). SMS via Twilio (new; consent checkbox shown only when configured).
+- Scheduler: workers/scheduler cron (every 5 min) → POST /api/cron/run (CRON_SECRET). Also runs onboarding follow-ups.
+- Dashboard: Leads, Booked, Booking rate, Confirmed, Showed, No-shows, Show rate, Messages sent; automation card + toggle.
+- Migration 0004 (new tables only). Privacy policy + DATA_REQUESTS.md updated for messages/SMS.
+- Launch gate (fails closed): without MESSAGES_LIVE=true, messages go only to MESSAGE_TEST_RECIPIENTS (a secret);
+  others are skipped as test_mode (lead messages) or held pending (account outbox). Dashboard shows "in testing".
+- Tests: 127 unit (12 new in test/automation.test.js) + 39 Playwright (4 new). No live message has been sent.
+- To go live (each needs approval): migration 0004 → deploy → Resend domain + RESEND_API_KEY/EMAIL_FROM →
+  CRON_SECRET on Pages + scheduler Worker deploy → (later) Twilio + A2P 10DLC approval.
+
 ### Launch release (awaiting approval — see docs/LAUNCH.md)
 Everything below is **local and tested**, not in production.
 - [x] Self-service onboarding, PoolThru linking, booking page, appointment engine, results dashboard
@@ -35,8 +49,9 @@ Everything below is **local and tested**, not in production.
   New Google client active for sign-in/connect; PoolThru health `healthy`, `oauthClient: legacy`.
   Privacy requests: manual runbook in docs/DATA_REQUESTS.md (contact brandon@getshowups.com).
   2026-11-09: PoolThru on new client (M4 done). Canonical customer = `poolthru-llc` (self-serve duplicate of `poolthru`).
-  Test booking verified + cleaned up; /admin verified. Next: deploy /privacy and publish Google app before
-  ~2026-11-16 (Testing tokens expire after 7 days), then legacy cleanup plan in docs/LAUNCH.md.
+  Test booking verified + cleaned up; /admin verified. /privacy live; Google app In production; grant-safety fix
+  (4b8c48f); poolthru-llc reconnected on production token; legacy fallback code removed (5f04af9).
+  Next: after 2026-11-16 01:00Z verify poolthru-llc health, then remove legacy credentials (checklist in LAUNCH.md).
 
 ## Decisions
 

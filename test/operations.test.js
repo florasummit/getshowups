@@ -280,6 +280,7 @@ test('email: nothing is marked sent without a provider; provider success and ret
 
   env.RESEND_API_KEY = 're_SECRET'
   env.EMAIL_FROM = 'GetShowUps <hello@getshowups.com>'
+  env.MESSAGES_LIVE = 'true'
   const r = await call(pInvites, 'POST', '/api/platform/invites', { cookie, body: { email: 'b@alpha.example', customer: 'alpha' } })
   assert.equal(r.json().email, 'sent')
   assert.equal(db.sql.prepare("SELECT count(*) c FROM email_outbox WHERE status = 'sent'").get().c, 2)

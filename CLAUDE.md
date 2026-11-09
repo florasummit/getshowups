@@ -38,6 +38,9 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
                      invite-action, status, plans. Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
+  api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records)
+  api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
+  api/dashboard/automations  POST: turn automatic messages on/off
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
@@ -50,11 +53,15 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ratelimit.js       D1 fixed-window rate limits (hashed IP / business keys, fails open)
   platform.js        Platform-admin authorization (PLATFORM_ADMIN_EMAILS) + audit()
   accounts.js        Account invitations (issue/peek/accept/resend/revoke) + onboarding follow-ups
-  email.js           Email outbox; delivers only via configured Resend (RESEND_API_KEY, EMAIL_FROM)
+  email.js           Email outbox + sendEmail(); delivers only via configured Resend (RESEND_API_KEY, EMAIL_FROM)
+  messages.js        Lead follow-ups, confirmation, reminders, no-show rebook: schedule rows, re-check at send time
+  sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
+  links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)
-migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md)
+migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
+workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
 test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config
 docs/                WORKFLOW.md (how we build), STATUS.md (decisions, progress, next actions)
@@ -91,7 +98,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Public and sign-in endpoints call `hitByIp()` / `hit()` from server/ratelimit.js; add a rule for new ones.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`. Admin views show counts, never lead/appointment contact details.
-- Never mark an email as sent unless the provider accepted it. Never store card data or invent prices
+- Never mark an email or text as sent unless the provider accepted it. Due messages without a provider are skipped
+  (`no_provider`), never sent later in a burst. Texts only with recorded consent (sms_consents); consent is offered only
+  when SMS is configured. Messages to leads re-check relevance at send time (`skipReason()`).
+- Launch gate fails closed: unless `MESSAGES_LIVE` is exactly `true`, email/SMS go only to `MESSAGE_TEST_RECIPIENTS`
+  (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval.
+- Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
 - Google ties one user's refresh tokens for a client to ONE grant: never revoke a token that a stored connection for the

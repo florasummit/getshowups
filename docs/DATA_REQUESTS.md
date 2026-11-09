@@ -43,6 +43,9 @@ Access request: export the rows above and send them to the verified requester.
 Deletion request:
 
 ```bash
+q "DELETE FROM messages WHERE lead_id IN (SELECT id FROM leads WHERE lower(email)='$EMAIL');"
+q "DELETE FROM sms_consents WHERE lead_id IN (SELECT id FROM leads WHERE lower(email)='$EMAIL');"
+q "DELETE FROM appointment_confirmations WHERE appointment_id IN (SELECT a.id FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE lower(l.email)='$EMAIL');"
 q "DELETE FROM appointments WHERE lead_id IN (SELECT id FROM leads WHERE lower(email)='$EMAIL');"
 q "DELETE FROM events WHERE id IN (SELECT 'lead:' || id FROM leads WHERE lower(email)='$EMAIL');"
 q "DELETE FROM leads WHERE lower(email)='$EMAIL';"
@@ -85,6 +88,10 @@ Deletion, in this order:
    (revoking can end that business's access too).
 3. Database rows:
    ```bash
+   q "DELETE FROM messages WHERE customer='$CUST';"
+   q "DELETE FROM sms_consents WHERE customer='$CUST';"
+   q "DELETE FROM appointment_confirmations WHERE customer='$CUST';"
+   q "DELETE FROM customer_settings WHERE customer='$CUST';"
    q "DELETE FROM appointments WHERE customer='$CUST';"
    q "DELETE FROM leads WHERE customer='$CUST';"
    q "DELETE FROM email_outbox WHERE customer='$CUST';"
@@ -105,3 +112,4 @@ Deletion, in this order:
 - Local backup exports in `~/getshowups-backups/` (delete any that contain the person's data).
 - Cloudflare request logs (short retention, no form contents).
 - Copies outside GetShowUps: the business's Google Calendar and any emails Google sent.
+- Delivered messages: Resend (email) and Twilio (text) keep their own delivery logs for their retention period.

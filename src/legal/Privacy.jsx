@@ -36,6 +36,13 @@ export default function Privacy() {
           included in the appointment added to the business’s Google Calendar, which sends you a calendar invitation.
         </li>
         <li>
+          <strong>Appointment messages:</strong> if the business has automatic messages turned on, we email you on its
+          behalf about your request and appointment: a reminder to pick a time if you haven’t booked, a booking
+          confirmation, reminders before the appointment with a link to confirm you’ll attend, and an invitation to
+          rebook if the appointment was missed. We send text messages only if you tick the box to receive them; you can
+          reply STOP to any text to opt out. We record whether each message was sent and whether you confirmed.
+        </li>
+        <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
           contact details, the campaign source of a first visit (for example a utm_source link), one-way hashed IP
           addresses kept briefly to limit abuse, and standard request logs processed by our hosting provider.
@@ -71,10 +78,11 @@ export default function Privacy() {
       <h2>Sharing</h2>
       <p>
         Appointment requests are shared with the business the request was made to. We use service providers to run
-        GetShowUps: Cloudflare for hosting and storage, and Google for sign-in and calendars. If we turn on account email
-        or paid plans, we will also use an email delivery provider to send account emails and Stripe to process
-        payments; we never receive or store full card numbers. We do not sell or share personal information for
-        advertising. We may disclose information if required by law.
+        GetShowUps: Cloudflare for hosting and storage, Google for sign-in and calendars, Resend to deliver email, and
+        Twilio to deliver text messages. If we turn on paid plans, we will also use Stripe to process payments; we never
+        receive or store full card numbers. We do not sell or share personal information for advertising. We do not
+        share mobile phone numbers or text-message consent with third parties for their marketing. We may disclose
+        information if required by law.
       </p>
 
       <h2>Storage and security</h2>

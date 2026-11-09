@@ -5,6 +5,26 @@ import { track } from './events.js'
 
 export const emailConfigured = (env) => Boolean(env.RESEND_API_KEY && env.EMAIL_FROM)
 
+// Launch gate (fails closed): unless MESSAGES_LIVE is exactly 'true', email and texts go only to the
+// addresses/phone numbers listed in MESSAGE_TEST_RECIPIENTS (comma-separated; stored as a secret so no
+// address is committed). Everything else is held (outbox) or skipped as 'test_mode' (lead messages).
+export const messagesLive = (env) => env.MESSAGES_LIVE === 'true'
+const normalize = (v) => {
+  const s = String(v ?? '').trim().toLowerCase()
+  if (s.includes('@')) return s
+  const d = s.replace(/\D/g, '')
+  return d.length === 10 ? `+1${d}` : d ? `+${d}` : ''
+}
+export function recipientAllowed(env, to) {
+  if (messagesLive(env)) return true
+  const target = normalize(to)
+  if (!target) return false
+  return String(env.MESSAGE_TEST_RECIPIENTS ?? '')
+    .split(',')
+    .map(normalize)
+    .some((r) => r && r === target)
+}
+
 // Returns true if newly queued, false if this dedupe id already exists.
 export async function enqueue(env, { id, to, customer = null, template, subject, body }, now = Date.now()) {
   const res = await env.ONBOARDING_DB.prepare(
@@ -16,21 +36,37 @@ export async function enqueue(env, { id, to, customer = null, template, subject,
   return (res?.meta?.changes ?? res?.changes ?? 0) > 0
 }
 
-async function deliver(env, msg) {
+// Sends one plain-text email through Resend. fromName/replyTo are optional (messages to a business's
+// leads go out as "<Business> via GetShowUps" with replies to the business owner).
+// Returns { ok, providerId } or { ok: false, error } with an allowlisted code.
+export async function sendEmail(env, { id, to, subject, text, fromName, replyTo }) {
+  if (!recipientAllowed(env, to)) return { ok: false, error: 'test_mode', permanent: true }
+  const address = String(env.EMAIL_FROM).match(/<([^>]+)>/)?.[1] || String(env.EMAIL_FROM).trim()
+  const name = fromName ? String(fromName).replace(/["<>\r\n\\]/g, '').slice(0, 70) : null
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': msg.id },
-      body: JSON.stringify({ from: env.EMAIL_FROM, to: [msg.to_email], subject: msg.subject, text: msg.body }),
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': id },
+      body: JSON.stringify({
+        from: name ? `"${name}" <${address}>` : env.EMAIL_FROM,
+        to: [to],
+        subject,
+        text,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
       signal: AbortSignal.timeout(8000),
     })
-    return res.ok ? { ok: true } : { ok: false, error: `http_${res.status}` }
+    const body = await res.json().catch(() => ({}))
+    return res.ok ? { ok: true, providerId: typeof body.id === 'string' ? body.id.slice(0, 64) : null } : { ok: false, error: `http_${res.status}` }
   } catch {
     return { ok: false, error: 'network_error' }
   }
 }
 
-// Sends pending messages (max 3 attempts each). No-op when no provider is configured.
+const deliver = (env, msg) => sendEmail(env, { id: msg.id, to: msg.to_email, subject: msg.subject, text: msg.body })
+
+// Sends pending messages (max 3 attempts each). No-op when no provider is configured. In test mode,
+// messages to non-test recipients stay pending (held, not attempted).
 export async function flushOutbox(env, now = Date.now(), limit = 20) {
   if (!emailConfigured(env)) return { configured: false, sent: 0, failed: 0 }
   const db = env.ONBOARDING_DB
@@ -38,6 +74,7 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
   let sent = 0
   let failed = 0
   for (const msg of results) {
+    if (!recipientAllowed(env, msg.to_email)) continue
     const r = await deliver(env, msg)
     if (r.ok) {
       sent++

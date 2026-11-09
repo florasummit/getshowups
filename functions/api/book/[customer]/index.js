@@ -4,6 +4,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { openSlots } from '../../../../server/booking.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
+import { smsConfigured } from '../../../../server/sms.js'
 
 export async function onRequestGet({ request, env, params }) {
   const { customer, response } = await bookableCustomer(env, params)
@@ -16,6 +17,8 @@ export async function onRequestGet({ request, env, params }) {
     timezone: customer.timezone,
     slotMinutes: customer.slotMinutes,
     askZip: customer.serviceZips.length > 0,
+    // Text reminders are offered only when they can actually be sent.
+    offerSms: customer.automations && smsConfigured(env),
     status: result.ok ? 'ok' : 'unavailable',
     slots: result.ok ? result.slots.map((s) => new Date(s.start).toISOString()) : [],
   })

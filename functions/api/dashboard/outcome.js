@@ -8,6 +8,6 @@ export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
   const body = await request.json().catch(() => ({}))
-  const result = await setOutcome(env, session.customer.id, body?.id, body?.outcome)
+  const result = await setOutcome(env, session.customer, body?.id, body?.outcome)
   return result.ok ? json(200, result.appointment) : json(result.httpStatus, { error: result.error })
 }

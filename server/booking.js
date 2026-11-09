@@ -5,6 +5,8 @@ import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
 import { EMAIL_RE } from './auth.js'
 import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlot } from './calendar.js'
 import { track } from './events.js'
+import { verifyLinkToken } from './links.js'
+import { scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
 
 export const BOOKING_DAYS = 14
 const DAY = 24 * 60 * 60 * 1000
@@ -13,6 +15,9 @@ const DAY = 24 * 60 * 60 * 1000
 export const STALE_PENDING_MS = 2 * 60 * 1000
 const hexId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
 const PHONE_RE = /^[0-9+().\-\s]{7,25}$/
+// Version of the SMS consent checkbox text on the booking page (src/booking/BookingPage.jsx).
+export const SMS_CONSENT_WORDING = 'booking-sms-v1'
+const hasSmsConsent = async (db, leadId) => Boolean(await db.prepare('SELECT 1 AS y FROM sms_consents WHERE lead_id = ?1').bind(leadId).first())
 
 const clean = (v, max) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
 
@@ -24,6 +29,7 @@ export function validateLead(body) {
     phone: clean(body?.phone, 25),
     need: clean(body?.need, 500),
     zip: clean(body?.zip, 10).toUpperCase(),
+    smsConsent: body?.smsConsent === true,
   }
   if (lead.name.length < 2) return ['invalid_name']
   if (!EMAIL_RE.test(lead.email)) return ['invalid_email']
@@ -37,14 +43,22 @@ export async function createLead(env, customer, lead, now = Date.now()) {
   const qualified = customer.serviceZips.length === 0 || customer.serviceZips.includes(lead.zip)
   const id = randomToken(12)
   const token = randomToken(32)
-  await db
+  const insertLead = db
     .prepare(
       `INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)`,
     )
     .bind(id, customer.id, lead.name, lead.email, lead.phone, lead.need, lead.zip, qualified ? 'new' : 'unqualified', await sha256Hex(token), now)
-    .run()
+  if (lead.smsConsent) {
+    await db.batch([
+      insertLead,
+      db.prepare('INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES (?1, ?2, ?3, ?4)').bind(id, customer.id, SMS_CONSENT_WORDING, now),
+    ])
+  } else {
+    await insertLead.run()
+  }
   await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified }, at: now })
+  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent: lead.smsConsent }, now)
   return { id, token, qualified }
 }
 
@@ -72,7 +86,10 @@ const OPERATIONAL = new Set(['calendar_unavailable', 'calendar_error', 'booking_
 export async function bookAppointment(env, customer, input, now = Date.now()) {
   const result = await book(env, customer, input, now)
   if (result.ok) {
-    await track(env, 'appointment_booked', { id: `booked:${result.appointment.id}`, customer: customer.id, at: now })
+    const { id, leadId, smsConsent, start } = result.appointment
+    await track(env, 'appointment_booked', { id: `booked:${id}`, customer: customer.id, at: now })
+    await scheduleAppointmentMessages(env, customer, { id, leadId, smsConsent, start }, now)
+    result.appointment = { id, start, end: result.appointment.end }
   } else if (OPERATIONAL.has(result.error)) {
     await track(env, 'booking_failed', { customer: customer.id, props: { error: result.error }, at: now })
   }
@@ -84,7 +101,10 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
   if (typeof leadId !== 'string' || typeof leadToken !== 'string' || !Number.isInteger(start)) return fail(400, 'invalid_request')
 
   const lead = await db.prepare('SELECT * FROM leads WHERE id = ?1 AND customer = ?2').bind(leadId, customer.id).first()
-  if (!lead || !timingSafeEqual(await sha256Hex(leadToken), lead.token_hash)) return fail(404, 'lead_not_found')
+  // The browser that created the lead holds leadToken; a "pick a time" link in a follow-up message
+  // carries a signed token for the same lead instead.
+  const tokenOk = lead && (timingSafeEqual(await sha256Hex(leadToken), lead.token_hash) || (await verifyLinkToken(env, 'lead', lead.id, leadToken)))
+  if (!tokenOk) return fail(404, 'lead_not_found')
   if (lead.status === 'unqualified') return fail(409, 'not_qualified')
   if (lead.status === 'booked') return fail(409, 'already_booked')
   if (!isOfferedSlot({ rules: customer, now, days: BOOKING_DAYS, start })) return fail(409, 'slot_unavailable')
@@ -168,22 +188,32 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
     await release().catch(() => {})
     return fail(503, 'storage_error')
   }
-  return { ok: true, appointment: { id, start, end } }
+  return { ok: true, appointment: { id, start, end, leadId: lead.id, smsConsent: await hasSmsConsent(db, lead.id) } }
 }
 
-// Owner marks a past appointment as showed / no-show (or corrects it).
-export async function setOutcome(env, customerId, id, outcome, now = Date.now()) {
+// Owner marks a past appointment as showed / no-show (or corrects it). A no-show reopens the lead
+// (status 'new') so it can book again and shows under "Haven't booked yet"; correcting it to showed
+// before they rebook closes the lead again.
+export async function setOutcome(env, customer, id, outcome, now = Date.now()) {
   const db = env.ONBOARDING_DB
   if (!['showed', 'no_show'].includes(outcome) || typeof id !== 'string') return fail(400, 'invalid_request')
   const row = await db
     .prepare(
-      "UPDATE appointments SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2 AND status IN ('booked', 'showed', 'no_show') AND start_at <= ?4 RETURNING id, status",
+      "UPDATE appointments SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2 AND status IN ('booked', 'showed', 'no_show') AND start_at <= ?4 RETURNING id, status, lead_id",
     )
-    .bind(id, customerId, outcome, now)
+    .bind(id, customer.id, outcome, now)
     .first()
   if (!row) return fail(404, 'not_found')
-  await track(env, 'appointment_outcome', { id: `outcome:${id}`, customer: customerId, props: { outcome }, at: now, replace: true })
-  return { ok: true, appointment: row }
+  const [from, to] = outcome === 'no_show' ? ['booked', 'new'] : ['new', 'booked']
+  const lead = await db
+    .prepare('UPDATE leads SET status = ?4, updated_at = ?5 WHERE id = ?1 AND customer = ?2 AND status = ?3 RETURNING id')
+    .bind(row.lead_id, customer.id, from, to, now)
+    .first()
+  if (outcome === 'no_show' && lead) {
+    await scheduleNoShowMessage(env, customer, { id, leadId: row.lead_id, smsConsent: await hasSmsConsent(db, row.lead_id) }, now)
+  }
+  await track(env, 'appointment_outcome', { id: `outcome:${id}`, customer: customer.id, props: { outcome }, at: now, replace: true })
+  return { ok: true, appointment: { id: row.id, status: row.status } }
 }
 
 // Results and work lists for the dashboard home (last 30 days + upcoming).
@@ -193,14 +223,17 @@ export async function overview(db, customerId, now = Date.now()) {
   const leads = await one('SELECT count(*) AS n FROM leads WHERE customer = ?1 AND created_at >= ?2', since)
   const counts = await one(
     `SELECT
-       sum(CASE WHEN status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS booked,
-       sum(CASE WHEN status = 'showed' THEN 1 ELSE 0 END) AS showed,
-       sum(CASE WHEN status = 'no_show' THEN 1 ELSE 0 END) AS no_show
-     FROM appointments WHERE customer = ?1 AND created_at >= ?2`,
+       sum(CASE WHEN a.status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS booked,
+       sum(CASE WHEN a.status IN ('booked','showed','no_show') AND ac.appointment_id IS NOT NULL THEN 1 ELSE 0 END) AS confirmed,
+       count(DISTINCT CASE WHEN a.status IN ('booked','showed','no_show') THEN a.lead_id END) AS booked_leads,
+       sum(CASE WHEN a.status = 'showed' THEN 1 ELSE 0 END) AS showed,
+       sum(CASE WHEN a.status = 'no_show' THEN 1 ELSE 0 END) AS no_show
+     FROM appointments a LEFT JOIN appointment_confirmations ac ON ac.appointment_id = a.id
+     WHERE a.customer = ?1 AND a.created_at >= ?2`,
     since,
   )
   const list = async (sql, ...args) => (await db.prepare(sql).bind(customerId, ...args).all()).results
-  const apptCols = 'a.id, a.start_at, a.end_at, a.status, l.name, l.phone, l.email, l.need'
+  const apptCols = 'a.id, a.start_at, a.end_at, a.status, (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed_at, l.name, l.phone, l.email, l.need'
   const upcoming = await list(
     `SELECT ${apptCols} FROM appointments a JOIN leads l ON l.id = a.lead_id
       WHERE a.customer = ?1 AND a.status = 'booked' AND a.start_at > ?2 ORDER BY a.start_at LIMIT 25`,
@@ -222,13 +255,28 @@ export async function overview(db, customerId, now = Date.now()) {
   )
   const showed = counts?.showed ?? 0
   const noShow = counts?.no_show ?? 0
-  const appt = (r) => ({ id: r.id, start: new Date(r.start_at).toISOString(), end: new Date(r.end_at).toISOString(), status: r.status, name: r.name, phone: r.phone, email: r.email, need: r.need })
+  const appt = (r) => ({
+    id: r.id,
+    start: new Date(r.start_at).toISOString(),
+    end: new Date(r.end_at).toISOString(),
+    status: r.status,
+    confirmed: Boolean(r.confirmed_at),
+    name: r.name,
+    phone: r.phone,
+    email: r.email,
+    need: r.need,
+  })
+  const leadCount = leads?.n ?? 0
+  const booked = counts?.booked ?? 0
   return {
     stats: {
-      leads: leads?.n ?? 0,
-      booked: counts?.booked ?? 0,
+      leads: leadCount,
+      booked,
+      confirmed: counts?.confirmed ?? 0,
       showed,
       noShow,
+      // Share of leads (last 30 days) that booked; capped because a rebooking or an older lead can book in the window.
+      bookingRate: leadCount ? Math.min(100, Math.round(((counts?.booked_leads ?? 0) / leadCount) * 100)) : null,
       showRate: showed + noShow ? Math.round((showed / (showed + noShow)) * 100) : null,
     },
     upcoming: upcoming.map(appt),

@@ -123,7 +123,10 @@ function Appointment({ a, tz, children }) {
   return (
     <li className="row">
       <div className="row-main">
-        <p className="row-title">{a.name}</p>
+        <p className="row-title">
+          {a.name}
+          {a.status === 'booked' && a.confirmed && <span className="tag tag--ok">Confirmed</span>}
+        </p>
         <p className="row-sub">
           {when(a.start, tz)} · <a href={`tel:${a.phone}`}>{a.phone}</a>
         </p>
@@ -153,6 +156,49 @@ function Outcome({ a, tz, onDone }) {
         </button>
       </div>
     </Appointment>
+  )
+}
+
+const pct = (v) => (v === null ? '—' : `${v}%`)
+
+// Automatic follow-ups & reminders: what is on, and whether messages can actually be delivered.
+function Automations({ a, onChange }) {
+  const [busy, setBusy] = useState(false)
+  const toggle = async () => {
+    setBusy(true)
+    await api('/api/dashboard/automations', { method: 'POST', body: { enabled: !a.enabled } })
+    await onChange()
+    setBusy(false)
+  }
+  const channels = [a.email && 'email', a.sms && 'text'].filter(Boolean)
+  const live = a.enabled && channels.length > 0
+  const testing = live && a.testMode
+  return (
+    <section className="card" aria-label="Automatic follow-ups">
+      <h2 className="card-title">Automatic follow-ups</h2>
+      <div className="form">
+        <p className={`status status--${live ? 'ok' : 'bad'}`} data-automation={testing ? 'test_mode' : live ? 'live' : a.enabled ? 'no_provider' : 'off'}>
+          <span className="status-dot" aria-hidden="true" />
+          {!a.enabled ? 'Off' : testing ? 'On, in testing (not sending to your customers yet)' : live ? `On · ${channels.join(' and ')}` : 'On, but not sending yet'}
+        </p>
+        <p className="fine">
+          {a.enabled && testing
+            ? 'We’re testing message delivery, so follow-ups and reminders go only to GetShowUps test addresses for now. We’ll let you know when it’s live.'
+            : a.enabled && !live
+            ? 'Message delivery isn’t connected yet, so follow-ups and reminders are not being sent. We’ll let you know when it’s live.'
+            : 'Leads who don’t book get a “pick a time” message. Booked customers get a confirmation and reminders 24 hours and 2 hours before, with a link to confirm. No-shows get an invitation to rebook.'}
+        </p>
+        {(a.scheduled > 0 || a.failed > 0 || a.notSent > 0) && (
+          <p className="fine">
+            {a.scheduled} scheduled{a.failed > 0 && ` · ${a.failed} failed`}
+            {a.notSent > 0 && ` · ${a.notSent} not sent (${testing ? 'testing' : 'delivery not connected'})`}
+          </p>
+        )}
+        <button type="button" className="btn btn-quiet btn-block" disabled={busy} onClick={toggle}>
+          {a.enabled ? 'Turn off' : 'Turn on'}
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -204,8 +250,12 @@ function Overview({ me }) {
             {[
               ['Leads', data.stats.leads],
               ['Booked', data.stats.booked],
+              ['Booking rate', pct(data.stats.bookingRate)],
+              ['Confirmed', data.stats.confirmed],
               ['Showed', data.stats.showed],
-              ['Show rate', data.stats.showRate === null ? '—' : `${data.stats.showRate}%`],
+              ['No-shows', data.stats.noShow],
+              ['Show rate', pct(data.stats.showRate)],
+              ['Messages sent', data.automation.sent],
             ].map(([label, value]) => (
               <div key={label} className="stat">
                 <p className="stat-value">{value}</p>
@@ -214,6 +264,8 @@ function Overview({ me }) {
             ))}
           </section>
           <p className="fine stats-note">Last 30 days</p>
+
+          <Automations a={data.automation} onChange={load} />
 
           {data.needsOutcome.length > 0 && (
             <section className="card">

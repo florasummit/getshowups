@@ -742,3 +742,24 @@
 .legal li + li {
   margin-top: 8px;
 }
+
+/* SMS consent on the booking form: unchecked by default, explicit wording. */
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.row-title .tag {
+  margin-left: 8px;
+}

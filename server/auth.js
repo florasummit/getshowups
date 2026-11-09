@@ -40,6 +40,7 @@ export function customerFromRow(row) {
     workdays: String(row.workdays).split(',').filter(Boolean).map(Number),
     hoursConfirmed: Boolean(row.hours_confirmed_at),
     status: row.status || 'active',
+    automations: row.automations !== 0,
     createdAt: row.created_at,
   }
 }
@@ -49,10 +50,11 @@ export async function getSession(request, env, now = Date.now()) {
   const token = readCookie(request, SESSION_COOKIE)
   if (!token || !TOKEN_RE.test(token)) return null
   const row = await env.ONBOARDING_DB.prepare(
-    `SELECT s.token_hash, s.email, c.*
+    `SELECT s.token_hash, s.email, c.*, coalesce(cs.automations, 1) AS automations
        FROM sessions s
        LEFT JOIN customer_users u ON u.email = s.email
        LEFT JOIN customers c ON c.id = u.customer
+       LEFT JOIN customer_settings cs ON cs.customer = c.id
       WHERE s.token_hash = ?1 AND s.expires_at > ?2`,
   )
     .bind(await sha256Hex(token), now)

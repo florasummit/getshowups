@@ -15,8 +15,13 @@ const FIELD_ERRORS = {
 
 export default function BookingPage({ id }) {
   const [page, setPage] = useState({ loading: true })
-  const [step, setStep] = useState('details')
-  const [lead, setLead] = useState(null)
+  // A "pick a time" link from a follow-up message carries the lead id and a signed token.
+  const [resume] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    return q.get('lead') && q.get('k') ? { leadId: q.get('lead'), leadToken: q.get('k'), qualified: true } : null
+  })
+  const [step, setStep] = useState(resume ? 'time' : 'details')
+  const [lead, setLead] = useState(resume)
   const [booked, setBooked] = useState(null)
 
   const loadSlots = () =>
@@ -53,6 +58,8 @@ export default function BookingPage({ id }) {
           <Details
             id={id}
             askZip={biz.askZip}
+            offerSms={biz.offerSms}
+            bizName={biz.name}
             onDone={(l) => {
               setLead(l)
               setStep(l.qualified ? 'time' : 'outside')
@@ -88,7 +95,7 @@ export default function BookingPage({ id }) {
               {fmt(booked.start, biz.timezone, { hour: 'numeric', minute: '2-digit' })}
               {sameZone(biz.timezone) ? '' : ` (${biz.timezone.replaceAll('_', ' ')})`}
             </p>
-            <p className="lede">A calendar invitation is on its way to {lead.email}.</p>
+            <p className="lede">A calendar invitation is on its way to {lead.email || 'your email'}.</p>
           </div>
         )}
       </section>
@@ -107,8 +114,8 @@ const sameZone = (tz) => {
   }
 }
 
-function Details({ id, askZip, onDone }) {
-  const [form, setForm] = useState({ name: '', phone: '', email: '', need: '', zip: '', website: '' })
+function Details({ id, askZip, offerSms, bizName, onDone }) {
+  const [form, setForm] = useState({ name: '', phone: '', email: '', need: '', zip: '', website: '', smsConsent: false })
   const [state, setState] = useState({})
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
@@ -147,6 +154,15 @@ function Details({ id, askZip, onDone }) {
         <span>Email</span>
         <input value={form.email} onChange={set('email')} type="email" required autoComplete="email" />
       </label>
+      {offerSms && (
+        <label className="check">
+          <input type="checkbox" checked={form.smsConsent} onChange={(e) => setForm((f) => ({ ...f, smsConsent: e.target.checked }))} />
+          <span>
+            Text me about this appointment (confirmation and reminders) from {bizName} via GetShowUps. Message frequency varies. Msg &amp; data
+            rates may apply. Reply STOP to opt out, HELP for help. Not required to book. <a href="/privacy">Privacy</a>
+          </span>
+        </label>
+      )}
       <input className="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={form.website} onChange={set('website')} name="website" />
       {state.error && (
         <p className="form-error" role="alert">

@@ -109,5 +109,8 @@ export async function progress(env, customer) {
 }
 
 export async function getCustomer(db, id) {
-  return db.prepare('SELECT * FROM customers WHERE id = ?1').bind(id).first()
+  return db
+    .prepare('SELECT c.*, coalesce(cs.automations, 1) AS automations FROM customers c LEFT JOIN customer_settings cs ON cs.customer = c.id WHERE c.id = ?1')
+    .bind(id)
+    .first()
 }
