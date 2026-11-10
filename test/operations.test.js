@@ -362,7 +362,7 @@ test('billing: checkout offers the trial once, then the portal manages changes',
 })
 
 async function signed(event, { secret = WHSEC, t = Math.floor(Date.now() / 1000) } = {}) {
-  const raw = JSON.stringify(event)
+  const raw = JSON.stringify({ livemode: false, ...event }) // real Stripe events always carry livemode
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const sig = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${raw}`))), (b) => b.toString(16).padStart(2, '0')).join('')
   return call(webhook, 'POST', '/api/stripe/webhook', { raw, headers: { 'Stripe-Signature': `t=${t},v1=${sig}` } })
@@ -417,6 +417,38 @@ test('webhook: processing failure returns 500 and allows Stripe to retry', async
   assert.equal((await signed(subEvent('evt_9', 'customer.subscription.created', 100, { status: 'active' }))).status, 500)
   db.fail = null
   assert.equal((await signed(subEvent('evt_9', 'customer.subscription.created', 100, { status: 'active' }))).json().handled, true)
+})
+
+test('live billing guard: live keys are not configured and live-mode events are refused unless STRIPE_LIVE_ENABLED', async () => {
+  configureStripe()
+  seed('alpha')
+  env.STRIPE_SECRET_KEY = 'sk_live_SECRET'
+  assert.equal((await signed(subEvent('evt_l1', 'customer.subscription.created', 100, { status: 'active' }))).status, 503, 'live key alone → billing off')
+  env.STRIPE_SECRET_KEY = 'sk_test_SECRET'
+  const live = await signed({ ...subEvent('evt_l2', 'customer.subscription.created', 100, { status: 'active' }), livemode: true })
+  assert.deepEqual([live.status, live.json().error], [400, 'livemode_not_enabled'])
+  assert.equal(db.sql.prepare('SELECT count(*) c FROM stripe_events').get().c, 0, 'refused event is not recorded')
+  assert.equal(db.sql.prepare('SELECT count(*) c FROM subscriptions').get().c, 0)
+  env.STRIPE_LIVE_ENABLED = 'true'
+  env.STRIPE_SECRET_KEY = 'sk_live_SECRET'
+  assert.equal((await signed({ ...subEvent('evt_l3', 'customer.subscription.created', 100, { status: 'active' }), livemode: true })).status, 200, 'explicitly enabled → accepted')
+  delete env.STRIPE_LIVE_ENABLED
+})
+
+test('webhook: current API shapes (2025-03-31+): period end on items, invoice metadata under parent', async () => {
+  configureStripe()
+  seed('alpha')
+  await addPlan(await admin())
+  const ev = subEvent('evt_b1', 'customer.subscription.created', 100, { status: 'active', current_period_end: undefined })
+  ev.data.object.items.data[0].current_period_end = 1910000000
+  await signed(ev)
+  const s = db.sql.prepare("SELECT status, current_period_end FROM subscriptions WHERE customer = 'alpha'").get()
+  assert.deepEqual([s.status, s.current_period_end], ['active', 1910000000 * 1000])
+  // Invoice for a Stripe customer we have not seen yet, identified via parent.subscription_details.metadata.
+  seed('beta')
+  const inv = { id: 'evt_b2', type: 'invoice.payment_failed', created: 200, data: { object: { id: 'in_9', customer: 'cus_unknown', parent: { type: 'subscription_details', subscription_details: { subscription: 'sub_9', metadata: { customer: 'beta' } } } } } }
+  assert.equal((await signed(inv)).json().handled, true)
+  assert.equal(db.sql.prepare("SELECT count(*) c FROM events WHERE type = 'payment_failed' AND customer = 'beta'").get().c, 1)
 })
 
 test('monthlyCents normalizes intervals and quantities', () => {

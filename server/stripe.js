@@ -5,7 +5,11 @@
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
 
-export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET)
+// Live billing is a separate, explicit decision: unless STRIPE_LIVE_ENABLED is exactly 'true', only
+// test-mode keys (sk_test_/rk_test_) count as configured, and live-mode events are refused.
+export const stripeLiveEnabled = (env) => env.STRIPE_LIVE_ENABLED === 'true'
+const testKey = (k) => /^(sk|rk)_test_/.test(String(k || ''))
+export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && (testKey(env.STRIPE_SECRET_KEY) || stripeLiveEnabled(env)))
 const API = 'https://api.stripe.com/v1'
 const TOLERANCE_SECONDS = 300
 
@@ -110,7 +114,9 @@ export function monthlyCents(subscription) {
 }
 
 async function customerFor(db, obj) {
-  const fromMeta = obj?.metadata?.customer || obj?.client_reference_id || obj?.subscription_details?.metadata?.customer
+  // Invoices: subscription metadata is at parent.subscription_details (API 2025-03-31+); older versions
+  // used subscription_details at the top level.
+  const fromMeta = obj?.metadata?.customer || obj?.client_reference_id || obj?.parent?.subscription_details?.metadata?.customer || obj?.subscription_details?.metadata?.customer
   if (fromMeta && (await db.prepare('SELECT 1 FROM customers WHERE id = ?1').bind(fromMeta).first())) return fromMeta
   if (obj?.customer) return (await db.prepare('SELECT customer FROM subscriptions WHERE stripe_customer_id = ?1').bind(obj.customer).first())?.customer ?? null
   return null
@@ -123,6 +129,10 @@ async function upsertSubscription(env, customer, event, sub) {
   if (prior && prior.last_event_at > at) return // an older event arriving late: ignore
   const status = event.type === 'customer.subscription.deleted' ? 'canceled' : STATUS[sub.status] || 'incomplete'
   const priceId = sub.items?.data?.[0]?.price?.id
+  // The billing period end lives on subscription items since API 2025-03-31; older versions had it on
+  // the subscription. Use whichever is present (latest item end when several).
+  const itemEnds = (sub.items?.data || []).map((i) => i.current_period_end).filter(Number.isFinite)
+  const periodEnd = sub.current_period_end ?? (itemEnds.length ? Math.max(...itemEnds) : null)
   const plan = priceId ? await db.prepare('SELECT id FROM plans WHERE stripe_price_id = ?1').bind(priceId).first() : null
   await db
     .prepare(
@@ -131,7 +141,7 @@ async function upsertSubscription(env, customer, event, sub) {
        ON CONFLICT(customer) DO UPDATE SET stripe_customer_id = ?2, stripe_subscription_id = ?3, plan_id = ?4, status = ?5, mrr_cents = ?6,
          currency = ?7, current_period_end = ?8, cancel_at_period_end = ?9, last_event_at = ?10, updated_at = ?11`,
     )
-    .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, sub.current_period_end ? sub.current_period_end * 1000 : null, sub.cancel_at_period_end ? 1 : 0, at, Date.now())
+    .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, sub.cancel_at_period_end ? 1 : 0, at, Date.now())
     .run()
   if (prior?.status !== status) {
     const type = status === 'canceled' ? 'subscription_canceled' : !prior || prior.status === 'incomplete' || prior.status === 'canceled' ? 'subscription_started' : 'subscription_status_changed'

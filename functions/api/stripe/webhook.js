@@ -2,7 +2,7 @@
 // is processed once (stripe_events). On a processing error the receipt is removed and 500 returned
 // so Stripe retries.
 import { json } from '../../../server/google-oauth.js'
-import { handleEvent, stripeConfigured, verifySignature } from '../../../server/stripe.js'
+import { handleEvent, stripeConfigured, stripeLiveEnabled, verifySignature } from '../../../server/stripe.js'
 
 export async function onRequestPost({ request, env }) {
   if (!stripeConfigured(env) || !env.ONBOARDING_DB) return json(503, { error: 'not_configured' })
@@ -17,6 +17,8 @@ export async function onRequestPost({ request, env }) {
     return json(400, { error: 'invalid_payload' })
   }
   if (typeof event?.id !== 'string' || typeof event?.type !== 'string') return json(400, { error: 'invalid_payload' })
+  // A live-mode event while live billing is not enabled is refused and never recorded.
+  if (event.livemode !== false && !stripeLiveEnabled(env)) return json(400, { error: 'livemode_not_enabled' })
 
   const db = env.ONBOARDING_DB
   const receipt = await db.prepare('INSERT OR IGNORE INTO stripe_events (id, type, received_at) VALUES (?1, ?2, ?3)').bind(event.id, event.type, Date.now()).run()
