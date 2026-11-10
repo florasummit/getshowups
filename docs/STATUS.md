@@ -13,6 +13,40 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+## Product roadmap (source of truth; set 2026-11-10)
+
+One product: Advertising → Website → Lead → (optional) Qualification → Booking → Confirmation → Reminders →
+Show-up → Reporting. $499/month founding plan; ad spend separate; no guaranteed results. Priorities: real paying
+customer first, then a complete simple experience, automation, low cost, reliability. Milestones in order (each:
+inspect, build only what's missing, test, safe preview, report blockers, stop for approvals):
+
+- **A. AI website generation**: built on branch release/ai-websites (see below). Needs: AI binding approval + deploy.
+- **B. Live Stripe payments and the full paying-customer journey**: code exists (sandbox verified). Needs: live keys,
+  live price, STRIPE_LIVE_ENABLED, one real payment test (approval).
+- **C. Lead capture, optional qualification, follow-up**: booking, outcomes and email automation exist
+  (MESSAGES_LIVE off). To do: direct vs qualify vs route-to-human setting and an industry playbook (PoolThru first).
+  Evaluate GHL conversations before any custom messaging. SMS needs A2P registration. Rescheduling/cancel links and
+  missed-call follow-up (telephony) are still missing.
+- **D. Google Ads**: OAuth, accounts, plan drafts, budget approval, paused-campaign creation, optimizer and
+  attribution exist behind ADS_ENABLED / ADS_LIVE_LAUNCH. Needs: Google Ads developer token (Basic access), OAuth
+  verification for the adwords scope, a real test account; then spend → leads → bookings → show-ups reporting.
+- Onboarding target: sign up/pay → confirm details → keep or generate website → calendar → (optional) Google Ads →
+  direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
+
+### Milestone A: AI website generation (branch release/ai-websites, NOT deployed) (2026-11-10)
+- Flow: Create my website → one Workers AI request (Mistral Small 3.1 24B) → choose a design from 3 side-by-side
+  previews of the stored result → private draft → large desktop preview with a phone toggle → simple editor and
+  photos → publish. Onboarding also offers "I already have a website" (keeps it; booking link shown at the end).
+- Model choice (real Workers AI evaluation, 3 business profiles, 2 prompt rounds): mistral-small-3.1 had 3/3
+  valid JSON, ~5 s and the best copy. llama-3.3-70b: valid JSON but flat copy and 9x the output price. llama-4-scout:
+  11–21 s. gpt-oss-120b and qwen3/3.8: unreliable JSON. Through the app on local workerd with the real model: 2/2
+  ai, 3.8–4.8 s, ~440 in / ~230 out tokens, $0.00028 per generation, 0 fields rejected.
+- Safety: facts only from records; the claims filter plus the invented-number check, falling back to the template
+  per field; never changes the draft or live site without the owner applying or publishing.
+- Migration 0010 (additive): website_generations (content, tokens, cost_micros, latency, rejected fields).
+- Tests: 259 unit (website-ai.test.js +7), 55 Playwright (generator flow, AI stand-in that also checks the filter).
+- Needs approval: the Workers AI binding `AI` on the Pages project (production), migration 0010, deploy.
+
 ### Managed websites + simpler dashboard (branch release/managed-websites, NOT deployed) (2026-11-10)
 - Website engine: one server-side renderer (server/site-render.js) for /p/:id, connected domains and the owner's
   private preview. Script-free HTML with a strict CSP, mobile-first, SEO tags + LocalBusiness JSON-LD. Three styles,

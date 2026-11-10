@@ -23,6 +23,7 @@ export const RULES = {
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
   domain: { limit: 30, windowSec: 600 }, //          POST /api/dashboard/domain (per business; each check does DNS lookups)
   assetUpload: { limit: 40, windowSec: 3600 }, //    POST /api/dashboard/website/assets (per business)
+  websiteGenerate: { limit: 10, windowSec: 86400 }, // POST website generate (per business; one AI request each)
 }
 
 const clientIp = (request) => request.headers.get('CF-Connecting-IP') || 'local'

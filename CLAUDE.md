@@ -76,6 +76,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
   website.js         Website content (validate, generate), drafts, versions/rollback, hosting entitlement (hostingStatus)
+  website-ai.js      AI website copy: one Workers AI request (binding AI, model WEBSITE_MODEL), facts from records only,
+                     claims + invented-number filter, stored in website_generations; template fallback
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
@@ -162,6 +164,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN
   and CLOUDFLARE_API_MOCK_ORIGIN are loopback-only test vars.
+- AI website copy: the model writes prose only; names, services, prices, area and phone always come from records.
+  Every field passes the claims filter and the invented-number check, otherwise the template text is used. A
+  generation never changes the draft or live site (apply → private draft; publish → live). Previews, design
+  switches, edits and site visits never call the model. Limits: 10/day (rate limit) + MONTHLY_GENERATIONS per business.
+  The production `AI` binding on the Pages project needs approval. AI_API_MOCK_ORIGIN is a loopback-only test var.
 - Pilot / invited / admin-created businesses are never billed: no plan card, checkout refused (no placeholder rows).
 - Test records (testdata.js) are listed with a tag and excluded from every count; never deleted.
 - Attendance changes are always reversible and recorded in appointment_changes.

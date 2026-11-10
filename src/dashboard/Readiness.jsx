@@ -15,7 +15,7 @@ const TEXT = {
   },
   calendar: { label: 'Google Calendar', healthy: 'Connected', default: 'Needs reconnecting' },
   hours: { label: 'Booking hours', ok: 'Set', action: 'Not set' },
-  page: { label: 'Website', published: 'Live', draft: 'Not published yet', none: 'Not created yet' },
+  page: { label: 'Website', published: 'Live', draft: 'Not published yet', none: 'Not created yet', existing: 'Using your own website. Add your booking link to it.' },
   domain: { label: 'Your domain', connected: 'Connected', pending: 'Waiting for your DNS record', verifying: 'Verifying', securing: 'Securing your website', needs_attention: 'Needs attention' },
   booking: { label: 'Bookings', has_bookings: 'Receiving bookings', no_bookings_yet: 'No bookings yet. Share your page to get your first one.' },
   email: { label: 'Email confirmations & reminders', live: 'On', activating: 'Activating soon. We’ll tell you when they start sending.' },

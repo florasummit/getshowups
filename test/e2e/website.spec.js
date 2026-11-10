@@ -49,8 +49,11 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await page.getByRole('button', { name: 'Finish my website' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Website' })).toBeVisible()
   await expect(page.getByText('Not published yet')).toBeVisible()
+  await page.getByRole('button', { name: 'Create my website' }).click()
+  await page.getByRole('button', { name: 'Use Clean' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit text and photos' })).toBeVisible()
   await page.getByLabel('Headline').fill('Pool care in Charleston')
-  await page.getByText('Bold').click()
+  await page.getByRole('radio', { name: 'Bold' }).click()
   await expect(page.getByText('All changes saved')).toBeVisible()
   // Upload a main photo (resized in the browser, stored by the server, private until published).
   await page.getByText('Logo and photos').click()
@@ -58,14 +61,12 @@ test('owner edits, previews and publishes the website; visitors book through it 
   const thumb = page.locator('.image-pick', { hasText: 'Main photo' }).locator('img')
   await expect(thumb).toBeVisible()
   const photo = await thumb.getAttribute('src')
-  expect(await thumb.evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
+  await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByText('All changes saved')).toBeVisible()
   expect((await page.context().request.get(photo, { headers: { Cookie: '' } })).status(), 'private before publishing').toBe(404)
-  if (mobile) await page.getByRole('tab', { name: 'Preview' }).click()
   const frame = page.frameLocator('iframe[title="Website preview"]')
   await expect(frame.getByRole('heading', { level: 1, name: 'Pool care in Charleston' })).toBeVisible()
   await noOverflow()
-  if (mobile) await page.getByRole('tab', { name: 'Edit' }).click()
 
   // Publish requires the consent checkbox.
   await page.getByRole('button', { name: 'Publish website' }).first().click()
@@ -78,7 +79,7 @@ test('owner edits, previews and publishes the website; visitors book through it 
   // Visitors: server-rendered site, ad parameters carried to booking.
   await page.goto(`/p/${id}?utm_source=google&utm_campaign=camp12345678`)
   await expect(page.getByRole('heading', { name: 'Pool care in Charleston', level: 1 })).toBeVisible()
-  expect(await page.locator('img.hero-photo').evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
+  await expect.poll(() => page.locator('img.hero-photo').evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByRole('heading', { level: 2, name: mobile ? 'Book a visit' : 'Book an appointment' })).toBeVisible()
   await noOverflow()
   await page.getByRole('link', { name: mobile ? 'Book a visit' : 'Book a time' }).first().click()

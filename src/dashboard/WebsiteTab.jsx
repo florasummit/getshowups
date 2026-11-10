@@ -4,6 +4,7 @@ import { api, fmt } from '../lib/api.js'
 import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
+import WebsiteGenerator from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -54,7 +55,8 @@ function HostingNotice({ hosting }) {
 export default function WebsiteTab() {
   const [data, setData] = useWebsite()
   const [stamp, setStamp] = useState(0)
-  const [pane, setPane] = useState('edit')
+  const [rewrite, setRewrite] = useState(false)
+  const [editorKey, setEditorKey] = useState(0)
   const [publishing, setPublishing] = useState(false)
   const [more, setMore] = useState({})
   if (!data) return <div aria-busy="true" />
@@ -89,7 +91,7 @@ export default function WebsiteTab() {
         )}
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
-          {(!w.published || w.changed) && (
+          {!w.generated && (!w.published || w.changed) && (
             <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
@@ -112,21 +114,38 @@ export default function WebsiteTab() {
         )}
       </section>
 
-      <div className="segmented segmented--tabs" role="tablist" aria-label="Edit or preview">
-        {['edit', 'preview'].map((p) => (
-          <button key={p} type="button" role="tab" aria-selected={pane === p} onClick={() => setPane(p)}>
-            {p === 'edit' ? 'Edit' : 'Preview'}
-          </button>
-        ))}
-      </div>
-      <div className={`site-workspace site-workspace--${pane}`}>
-        <section className="card site-editor" aria-label="Edit website">
-          <WebsiteEditor initial={w.draft} colors={data.options.colors} onSaved={refresh} />
-        </section>
-        <section className="site-preview-wrap" aria-label="Preview">
-          <WebsitePreview stamp={stamp} />
-        </section>
-      </div>
+      <section className="card" aria-label="Create with AI">
+        {w.generated || rewrite ? (
+          <WebsiteGenerator
+            hasDraft={!w.generated}
+            intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
+            onApplied={(d) => {
+              setRewrite(false)
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }}
+          />
+        ) : (
+          <div className="generator-row">
+            <p className="fine">Want fresh wording? We can write it again from your business details.</p>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setRewrite(true)}>
+              Write it again
+            </button>
+          </div>
+        )}
+      </section>
+
+      {!w.generated && (
+        <>
+          <section className="site-preview-wrap" aria-label="Preview">
+            <WebsitePreview stamp={stamp} />
+          </section>
+          <section className="card site-editor" aria-label="Edit website">
+            <h2 className="card-title">Edit text and photos</h2>
+            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} onSaved={refresh} />
+          </section>
+        </>
+      )}
 
       <section className="card">
         <h2 className="card-title">Website address</h2>

@@ -12,6 +12,7 @@ import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import { PublishBox } from './WebsiteTab.jsx'
+import WebsiteGenerator from './WebsiteGenerator.jsx'
 
 const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
 const PLAN_KEY = 'gsu_plan'
@@ -47,7 +48,7 @@ export default function Setup({ me, reload }) {
             ))}
           </ol>
         )}
-        <section key={current} className={`panel enter ${current === 'website' || current === 'publish' ? 'panel--wide' : current === 'address' ? 'panel--medium' : 'panel--narrow'}`} aria-labelledby="step-title">
+        <section key={current} className={`panel enter ${current === 'website' || current === 'publish' ? 'panel--wide panel--site' : current === 'address' ? 'panel--medium' : 'panel--narrow'}`} aria-labelledby="step-title">
           <Step
             id={current}
             me={me}
@@ -473,43 +474,102 @@ function HoursStep({ customer, onDone }) {
   )
 }
 
-// ---------- 7. Website: generated from the answers, edited in place, saved automatically ----------
+// ---------- 7. Website: generate (or keep the current site) → choose design → preview → edit ----------
 function WebsiteStep({ onDone, back }) {
-  const [data] = useWebsite()
+  const [data, setData] = useWebsite()
   const latest = useRef(null)
   const [stamp, setStamp] = useState(0)
+  const [editorKey, setEditorKey] = useState(0)
+  const [keep, setKeep] = useState(false)
   const [state, setState] = useState({})
   if (!data) return <div aria-busy="true" />
   if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
+  const w = data.website
   const next = async () => {
     setState({ busy: true })
-    const { status } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'save', content: latest.current || data.website.draft } })
+    const { status } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'save', content: latest.current || w.draft } })
     if (status === 200) return onDone()
     setState({ error: 'Please check the highlighted text, then continue.' })
   }
-  return (
-    <div className="page-step">
+  const keepCurrent = async () => {
+    setState({ busy: true })
+    await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'keep_website' } })
+    onDone()
+  }
+  if (w.generated) {
+    return (
       <div className="form">
         <h1 id="step-title" className="title">
-          Here’s your website
+          Create your website
         </h1>
-        <p className="lede">We built it from your answers. Change anything you like. It saves as you go.</p>
-        <WebsiteEditor initial={data.website.draft} colors={data.options.colors} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
-        {state.error && (
-          <p className="form-error" role="alert">
-            {state.error}
-          </p>
+        {!keep ? (
+          <>
+            <WebsiteGenerator
+              intro="We’ll write a professional website from your answers. You pick the design, check everything, and nothing is public until you publish."
+              onApplied={(d) => {
+                setData(d)
+                setStamp((n) => n + 1)
+              }}
+            />
+            <button type="button" className="link-btn" onClick={() => setKeep(true)}>
+              I already have a website
+            </button>
+          </>
+        ) : (
+          <div className="stack">
+            <p className="lede">No problem. Keep your current website and add a “Book now” link to it. You’ll get the link at the end of setup. You can create a GetShowUps website later.</p>
+            <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={keepCurrent}>
+              Keep my current website
+            </button>
+            <button type="button" className="link-btn" onClick={() => setKeep(false)}>
+              Create a website instead
+            </button>
+          </div>
         )}
-        <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={next}>
-          Continue
-        </button>
         {back && (
           <button type="button" className="link-btn" onClick={back}>
             Back
           </button>
         )}
       </div>
+    )
+  }
+  return (
+    <div className="form">
+      <h1 id="step-title" className="title">
+        Here’s your website
+      </h1>
+      <p className="lede">Check it on a computer and a phone. Change anything you like below; it saves as you go.</p>
       <WebsitePreview stamp={stamp} />
+      <details className="more">
+        <summary>Edit text and photos</summary>
+        <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
+      </details>
+      <details className="more">
+        <summary>Write it again</summary>
+        <WebsiteGenerator
+          hasDraft
+          onApplied={(d) => {
+            setData(d)
+            latest.current = null
+            setEditorKey((k) => k + 1)
+            setStamp((n) => n + 1)
+          }}
+        />
+      </details>
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={next}>
+        Continue
+      </button>
+      {back && (
+        <button type="button" className="link-btn" onClick={back}>
+          Back
+        </button>
+      )}
     </div>
   )
 }
@@ -557,12 +617,12 @@ function PublishStep({ onDone, back }) {
     onDone()
   }
   return (
-    <div className="page-step">
-      <div className="form">
+    <div className="form">
         <h1 id="step-title" className="title">
           Preview and publish
         </h1>
         <p className="lede">This is exactly what customers will see. Publish when you’re happy. You can change it any time.</p>
+        <WebsitePreview stamp={0} />
         <PublishBox
           data={data}
           label="Publish my website"
@@ -578,8 +638,6 @@ function PublishStep({ onDone, back }) {
             Back
           </button>
         )}
-      </div>
-      <WebsitePreview stamp={0} />
     </div>
   )
 }
@@ -599,6 +657,10 @@ function LaunchStep({ me, onDone }) {
         You’re all set
       </h1>
       <Readiness compact />
+      <div className="field">
+        <span>Your booking link (add it to your website, Google profile or social pages)</span>
+        <input readOnly value={me.bookingUrl} onFocus={(e) => e.target.select()} aria-label="Your booking link" />
+      </div>
       <a className="btn btn-quiet btn-block" href={me.bookingUrl} target="_blank" rel="noreferrer">
         See my booking page
       </a>

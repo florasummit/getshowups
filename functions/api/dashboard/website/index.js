@@ -5,6 +5,8 @@
 //        { action: 'unpublish' }                   take the site offline (content kept)
 //        { action: 'restore', version }            make an earlier published version live again
 //        { action: 'regenerate' }                  a fresh draft from the business details (not saved)
+//        { action: 'generate' }                    AI copy from the business details, stored (draft untouched)
+//        { action: 'apply', generationId, template? }  make a stored generation the private draft (images kept)
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../../server/auth.js'
 import { track } from '../../../../server/events.js'
@@ -12,6 +14,8 @@ import { approvedClaimsFor } from '../../../../server/landing.js'
 import { assetIdsFor, COLORS, generateContent, hostingStatus, isHosted, loadWebsite, publish, restore, saveDraft, TEMPLATES, unpublish, validateContent } from '../../../../server/website.js'
 import { listAssets } from '../../../../server/assets.js'
 import { domainFor } from '../../../../server/domains.js'
+import { aiConfigured, generateWebsite, getGeneration } from '../../../../server/website-ai.js'
+import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 
 async function state(env, customer) {
   const db = env.ONBOARDING_DB
@@ -24,6 +28,7 @@ async function state(env, customer) {
     assets,
     // Bookable = calendar connected and hours saved; a site without booking isn't published.
     ready: customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`)),
+    writer: aiConfigured(env), // AI copy available (otherwise the template is used)
     options: { templates: TEMPLATES, colors: COLORS },
   }
 }
@@ -48,6 +53,27 @@ export async function onRequestPost({ request, env }) {
   const customer = session.customer
   try {
     if (action === 'regenerate') return json(200, { content: await generateContent(db, customer) })
+    if (action === 'generate') {
+      const rl = await hit(env, 'websiteGenerate', customer.id)
+      if (rl.limited) return tooManyJson(rl.retryAfter)
+      const r = await generateWebsite(env, customer)
+      await track(env, 'website_generated', { customer: customer.id, props: { source: r.generation.source } })
+      return json(200, { generation: r.generation })
+    }
+    if (action === 'apply') {
+      const g = await getGeneration(db, customer.id, body.generationId)
+      if (!g) return json(404, { error: 'not_found' })
+      const current = (await loadWebsite(db, customer)).draft
+      // The owner's photos stay; the chosen design replaces the template. Only the private draft changes.
+      const [errors, content] = validateContent(
+        { ...g.content, template: body.template ?? g.content.template, logo: current.logo, hero: current.hero, photos: current.photos },
+        await approvedClaimsFor(db, customer.id),
+        await assetIdsFor(db, customer.id),
+      )
+      if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
+      await saveDraft(db, customer.id, content)
+      return json(200, await state(env, customer))
+    }
     if (action === 'save' || action === 'publish') {
       const [errors, content] = validateContent(body.content, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })

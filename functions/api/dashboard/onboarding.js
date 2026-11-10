@@ -2,6 +2,7 @@
 //   GET  → { readiness: { items, next } }   (live calendar check included)
 //   POST { action: 'check_availability' } → { slots, status }   (the same data the booking page shows)
 //   POST { action: 'address', choice: 'getshowups' | 'own' | 'buy' } → records the website address choice
+//   POST { action: 'keep_website' } → keep the owner's current website (no GetShowUps website)
 //   POST { action: 'keep_private' } → finish without publishing yet (publish later from Website)
 //   POST { action: 'finish' }   → finishes onboarding (plan, details, services, calendar, hours, website)
 import { json } from '../../../server/google-oauth.js'
@@ -50,6 +51,10 @@ export async function onRequestPost({ request, env }) {
     case 'address':
       if (!['getshowups', 'own', 'buy'].includes(body.choice)) return json(400, { error: 'invalid_request' })
       await markStep(db, customer.id, 'address', body.choice)
+      return json(200, { ok: true })
+    case 'keep_website':
+      // The owner keeps their current website and links to their booking page from it.
+      await markStep(db, customer.id, 'website', 'existing')
       return json(200, { ok: true })
     case 'keep_private':
       await markStep(db, customer.id, 'publish', 'private')

@@ -122,6 +122,23 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/__health') return send(res, 200, { ok: true })
   if (url.pathname === '/__events') return send(res, 200, events)
+  // Workers AI stand-in (AI_API_MOCK_ORIGIN): deterministic website copy built from the facts it is given.
+  // The about text deliberately contains an unapproved claim, so the app's filter must drop it.
+  if (url.pathname.startsWith('/ai/run/') && req.method === 'POST') {
+    const facts = JSON.parse(JSON.parse(raw).messages.at(-1).content.match(/\{[\s\S]*\}/)[0])
+    const first = String(facts.services[0] || facts.whatTheyDo || 'Service').split(' (')[0]
+    return send(res, 200, {
+      response: {
+        headline: `Dependable ${first.toLowerCase()} near you`,
+        intro: `${facts.businessName} makes it easy to get ${first.toLowerCase()} on your schedule. Booking online takes about a minute.`,
+        about: 'We are the best in town, satisfaction guaranteed.',
+        services: facts.services.map((s) => ({ name: String(s).split(' (')[0], description: `What is included with ${String(s).split(' (')[0].toLowerCase()}, explained simply.` })),
+        seoTitle: `${facts.businessName} | ${first}`,
+        seoDescription: `Book ${first.toLowerCase()} with ${facts.businessName} online.`,
+      },
+      usage: { prompt_tokens: 450, completion_tokens: 250 },
+    })
+  }
   // DNS-over-HTTPS stand-in (DNS_API_MOCK_ORIGIN): records set by tests via /__dns; empty otherwise.
   if (url.pathname === '/dns-query') {
     const type = url.searchParams.get('type')

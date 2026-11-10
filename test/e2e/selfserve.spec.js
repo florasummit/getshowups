@@ -85,14 +85,24 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Sat' }).click()
   await page.getByRole('button', { name: 'Continue' }).click()
 
-  // Website: generated from the answers, edited in place (autosaved), private until published.
+  // Website: written from the answers in one AI request (local stand-in), design chosen, private until published.
+  await expect(page.getByRole('heading', { name: 'Create your website' })).toBeVisible()
+  await page.getByRole('button', { name: 'Create my website' }).click()
+  await expect(page.getByText('Choose a design.')).toBeVisible()
+  await expect(page.frameLocator('iframe[title="Bold design"]').getByRole('heading', { level: 1 })).toHaveText('Dependable weekly pool cleaning near you')
+  await page.getByRole('button', { name: 'Use Bold' }).click()
   await expect(page.getByRole('heading', { name: 'Here’s your website' })).toBeVisible()
-  await expect(page.getByLabel('Headline')).toHaveValue('Weekly pool cleaning in Charleston')
   const frame = page.frameLocator('iframe[title="Website preview"]')
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Dependable weekly pool cleaning near you')
   await expect(frame.getByText('From $150/month').first()).toBeVisible()
   await expect(frame.getByText('Call (843) 555-0142').first()).toBeVisible()
   await expect(frame.getByText('Only you can see this')).toBeVisible()
+  await expect(frame.getByText('satisfaction guaranteed')).toHaveCount(0) // the filter dropped the model's claim
+  await page.getByRole('button', { name: 'Phone' }).click()
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
   expect((await page.request.get(`/p/${id}`)).status()).toBe(404)
+  await page.getByText('Edit text and photos').click()
+  await expect(page.getByLabel('Headline')).toHaveValue('Dependable weekly pool cleaning near you')
   await page.getByLabel('Introduction').fill('Friendly, reliable pool care across Charleston.')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(frame.getByText('Friendly, reliable pool care across Charleston.')).toBeVisible()
@@ -116,7 +126,7 @@ test('new customer: get started → pay → onboard → publish → book → man
     await page.getByRole('button', { name: 'Connect' }).click()
     await expect(page.getByRole('alert')).toContainText('www.harborpoolcare.example')
     await page.getByRole('button', { name: 'www.harborpoolcare.example' }).click()
-    await expect(page.getByText('Step 1 of 2: verify you own www.harborpoolcare.example.')).toBeVisible()
+    await expect(page.getByText('Step 1 of 2: verify you own www.harborpoolcare.example.')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('_getshowups.www.harborpoolcare.example')).toBeVisible()
     await expect(page.getByText('Waiting for your record')).toBeVisible()
   }
@@ -143,7 +153,7 @@ test('new customer: get started → pay → onboard → publish → book → man
 
   // A customer books through the published landing page; the event lands on the (mock) calendar.
   await page.goto(`/p/${id}`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Weekly pool cleaning in Charleston' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Dependable weekly pool cleaning near you' })).toBeVisible()
   await noOverflow()
   await page.getByRole('link', { name: 'Book a time' }).first().click()
   const lead = `lead-${mobile ? 'm' : 'd'}@example.net`

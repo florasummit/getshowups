@@ -90,10 +90,12 @@ export async function onboardingSteps(env, customer, { calendar }) {
     getSubscription(db, customer.id),
     getProfile(db, customer.id),
     websiteSummary(db, customer.id),
-    db.prepare('SELECT step FROM onboarding_marks WHERE customer = ?1').bind(customer.id).all(),
+    db.prepare('SELECT step, value FROM onboarding_marks WHERE customer = ?1').bind(customer.id).all(),
     domainFor(env, customer.id),
   ])
   const marked = new Set(marks.results.map((m) => m.step))
+  // "Keep my current website": no GetShowUps website, so the address and publish steps don't apply.
+  const keeps = marks.results.some((m) => m.step === 'website' && m.value === 'existing')
   const billing = sub ? sub.status : 'required'
   const steps = [
     { id: 'business', done: true },
@@ -104,17 +106,17 @@ export async function onboardingSteps(env, customer, { calendar }) {
     { id: 'calendar', done: calendar },
     { id: 'hours', done: customer.hoursConfirmed },
     // Businesses that finished onboarding before these steps existed are not sent back into setup.
-    { id: 'website', done: site.exists || Boolean(signup.onboarded_at) },
+    { id: 'website', done: site.exists || keeps || Boolean(signup.onboarded_at) },
     // Website address: the GetShowUps address, or the owner's domain (connecting continues in the background).
-    { id: 'address', done: marked.has('address') || Boolean(domain) || Boolean(signup.onboarded_at) },
+    { id: 'address', done: marked.has('address') || keeps || Boolean(domain) || Boolean(signup.onboarded_at) },
     // Published, or the owner chose to keep it private for now.
-    { id: 'publish', done: site.published || marked.has('publish') || Boolean(signup.onboarded_at) },
+    { id: 'publish', done: site.published || marked.has('publish') || keeps || Boolean(signup.onboarded_at) },
     { id: 'launch', done: Boolean(signup.onboarded_at) },
   ]
   return { selfServe: true, steps, billing, planId: signup.plan_id }
 }
 
-export const MARKS = ['address', 'publish']
+export const MARKS = ['address', 'publish', 'website']
 export async function markStep(db, customerId, step, value = null, now = Date.now()) {
   if (!MARKS.includes(step)) throw new Error('bad step')
   await db.prepare('INSERT INTO onboarding_marks (customer, step, value, at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(customer, step) DO UPDATE SET value = ?3, at = ?4').bind(customerId, step, value, now).run()
@@ -132,13 +134,14 @@ export async function markSignup(db, customerId, field, now = Date.now()) {
 // and abandoned (an 'incomplete' placeholder without a subscription) is not a plan to fix.
 export async function readiness(env, customer, { calendarStatus } = {}) {
   const db = env.ONBOARDING_DB
-  const [sub, site, signup, appts, domain] = await Promise.all([
+  const [sub, site, signup, appts, domain, keep] = await Promise.all([
     getSubscription(db, customer.id),
     websiteSummary(db, customer.id),
     getSignup(db, customer.id),
     // Real bookings only (test records never count).
     db.prepare(`SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND NOT ${isTestLead('l', '?2')}`).bind(customer.id, internalEmails(env)).first(),
     domainFor(env, customer.id),
+    db.prepare("SELECT 1 AS x FROM onboarding_marks WHERE customer = ?1 AND step = 'website' AND value = 'existing'").bind(customer.id).first(),
   ])
   const items = []
   if (signup || sub?.stripeSubscriptionId) {
@@ -151,7 +154,11 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
   }
   items.push({ id: 'calendar', state: calendarStatus === 'healthy' ? 'ok' : 'action', detail: calendarStatus || 'unknown' })
   items.push({ id: 'hours', state: customer.hoursConfirmed ? 'ok' : 'action' })
-  items.push({ id: 'page', state: site.published ? 'ok' : 'action', detail: site.published ? 'published' : site.exists ? 'draft' : 'none' })
+  items.push(
+    keep && !site.published
+      ? { id: 'page', state: 'ok', detail: 'existing' }
+      : { id: 'page', state: site.published ? 'ok' : 'action', detail: site.published ? 'published' : site.exists ? 'draft' : 'none' },
+  )
   if (domain) {
     items.push({ id: 'domain', state: domain.status === 'connected' ? 'ok' : domain.status === 'needs_attention' || domain.step === 'verify' || domain.step === 'point' ? 'action' : 'pending', detail: domain.status, step: domain.step })
   }

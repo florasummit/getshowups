@@ -47,23 +47,48 @@ export function SaveStatus({ status }) {
   )
 }
 
-export function WebsitePreview({ stamp, live = false, title = 'Website preview' }) {
-  const [device, setDevice] = useState('phone')
+// A page rendered at real desktop width (scaled to fit) or phone width. `query` selects what to render.
+export function ScaledFrame({ src, title, width = 1280, height = 860 }) {
+  const box = useRef(null)
+  const [scale, setScale] = useState(0.5)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setScale(Math.min(1, e.contentRect.width / width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [width])
+  return (
+    <div ref={box} className="scaled-frame" style={{ height: Math.round(height * scale) }}>
+      <iframe title={title} src={src} sandbox="allow-same-origin" loading="lazy" style={{ width, height, transform: `scale(${scale})` }} />
+    </div>
+  )
+}
+
+export function WebsitePreview({ stamp, live = false, title = 'Website preview', query = '' }) {
+  const [device, setDevice] = useState('desktop')
+  const src = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}${query}v=${stamp}`
   return (
     <figure className="site-preview">
       <div className="site-preview-bar">
         <figcaption className="fine">{live ? 'Your live website' : 'Preview · only you can see this'}</figcaption>
         <div className="segmented" role="group" aria-label="Preview size">
-          {['phone', 'desktop'].map((d) => (
+          {['desktop', 'phone'].map((d) => (
             <button key={d} type="button" aria-pressed={device === d} onClick={() => setDevice(d)}>
               {d === 'phone' ? 'Phone' : 'Computer'}
             </button>
           ))}
         </div>
       </div>
-      <div className={`site-preview-frame site-preview-frame--${device}`}>
-        <iframe title={title} src={`/api/dashboard/website/preview?${live ? 'live=1&' : ''}v=${stamp}`} sandbox="allow-same-origin" loading="lazy" />
-      </div>
+      {device === 'desktop' ? (
+        <div className="site-preview-frame">
+          <ScaledFrame title={title} src={src} />
+        </div>
+      ) : (
+        <div className="site-preview-frame site-preview-frame--phone">
+          <iframe title={title} src={src} sandbox="allow-same-origin" loading="lazy" />
+        </div>
+      )}
     </figure>
   )
 }
