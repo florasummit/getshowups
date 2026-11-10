@@ -1,7 +1,7 @@
 // The complete self-serve customer journey on the real Pages Functions (local workerd):
 // homepage → Get started → Google sign-in (mock) → business name → founding plan → Stripe Checkout
-// (local Stripe stand-in that sends Stripe-signed webhooks) → guided onboarding → landing page publish
-// → booking → dashboard → billing portal cancellation. Runs on desktop and on a phone with separate accounts.
+// (local Stripe stand-in that sends Stripe-signed webhooks) → guided onboarding → generated website →
+// address / own domain → preview → publish → booking → dashboard → billing portal cancellation. Runs on desktop and on a phone with separate accounts.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle } from './helpers.js'
@@ -55,7 +55,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Subscribe' }).click()
 
   // Access follows the signed webhook.
-  await expect(page.getByRole('heading', { name: 'About your business' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'Let’s get your website ready' })).toBeVisible({ timeout: 30_000 })
   const billing = await (await page.request.get('/api/dashboard/billing')).json()
   expect(billing.subscription).toMatchObject({ status: 'active', planId: 'founding', cancelAtPeriodEnd: false })
 
@@ -85,35 +85,66 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Sat' }).click()
   await page.getByRole('button', { name: 'Continue' }).click()
 
-  // Landing page: drafted from the details, previewed privately, published only with explicit consent.
-  await expect(page.getByRole('heading', { name: 'Your landing page' })).toBeVisible()
+  // Website: generated from the answers, edited in place (autosaved), private until published.
+  await expect(page.getByRole('heading', { name: 'Here’s your website' })).toBeVisible()
   await expect(page.getByLabel('Headline')).toHaveValue('Weekly pool cleaning in Charleston')
-  const preview = page.getByRole('figure', { name: 'Preview of your landing page' })
-  await expect(preview.getByText('Weekly pool cleaning · From $150/month')).toBeVisible()
-  await expect(preview.getByText('Call (843) 555-0142')).toBeVisible()
-  expect((await page.request.get(`/api/page/${id}`)).status()).toBe(404)
-  await expect(page.getByRole('button', { name: 'Publish my page' })).toBeDisabled()
-  await page.getByRole('checkbox').check()
-  await page.getByRole('button', { name: 'Publish my page' }).click()
-
-  // Booking test → launch checklist (honest about what is not live) → dashboard.
-  await expect(page.getByRole('heading', { name: 'Check your booking page' })).toBeVisible()
-  await expect(page.getByText(/open times over the next two weeks/)).toBeVisible()
+  const frame = page.frameLocator('iframe[title="Website preview"]')
+  await expect(frame.getByText('From $150/month').first()).toBeVisible()
+  await expect(frame.getByText('Call (843) 555-0142').first()).toBeVisible()
+  await expect(frame.getByText('Only you can see this')).toBeVisible()
+  expect((await page.request.get(`/p/${id}`)).status()).toBe(404)
+  await page.getByLabel('Introduction').fill('Friendly, reliable pool care across Charleston.')
+  await expect(page.getByText('All changes saved')).toBeVisible()
+  await expect(frame.getByText('Friendly, reliable pool care across Charleston.')).toBeVisible()
+  if (!mobile) {
+    // Claims filter: an unconfirmed guarantee is refused with a plain explanation.
+    await page.getByText('About and service area').click()
+    await page.getByLabel(/Facts about your business/).fill('Satisfaction guaranteed')
+    await expect(page.getByRole('alert')).toContainText('guarantees')
+    await page.getByLabel(/Facts about your business/).fill('')
+    await expect(page.getByText('All changes saved')).toBeVisible()
+  }
+  await noOverflow()
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('heading', { name: 'You’re ready to take bookings' })).toBeVisible()
+
+  // Address: GetShowUps address by default; the desktop owner starts connecting their own domain.
+  await expect(page.getByRole('heading', { name: 'Choose your website address' })).toBeVisible()
+  await expect(page.getByText(`/p/${id}`)).toBeVisible()
+  if (!mobile) {
+    await page.getByText('Use your own domain').click()
+    await page.getByLabel('Enter your domain').fill('harborpoolcare.example')
+    await page.getByRole('button', { name: 'Connect' }).click()
+    await expect(page.getByRole('alert')).toContainText('www.harborpoolcare.example')
+    await page.getByRole('button', { name: 'www.harborpoolcare.example' }).click()
+    await expect(page.getByText('Step 1 of 2: verify you own www.harborpoolcare.example.')).toBeVisible()
+    await expect(page.getByText('_getshowups.www.harborpoolcare.example')).toBeVisible()
+    await expect(page.getByText('Waiting for your record')).toBeVisible()
+  }
+  await noOverflow()
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  // Preview and publish, only with explicit consent.
+  await expect(page.getByRole('heading', { name: 'Preview and publish' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Publish my website' })).toBeDisabled()
+  await page.getByRole('checkbox').check()
+  await page.getByRole('button', { name: 'Publish my website' }).click()
+
+  // Done: honest checklist (what's live, what's coming) → dashboard.
+  await expect(page.getByRole('heading', { name: 'You’re all set' })).toBeVisible()
   const list = page.locator('.checklist')
   await expect(list.locator('.checklist-item--ok', { hasText: 'Founding plan' })).toBeVisible()
-  await expect(list.locator('.checklist-item--ok', { hasText: 'Landing page' })).toBeVisible()
+  await expect(list.locator('.checklist-item--ok', { hasText: 'Website' })).toBeVisible()
   await expect(list.getByText('Activating soon', { exact: false })).toBeVisible()
-  await expect(list.locator('.checklist-item--off', { hasText: 'Text messages' })).toBeVisible()
   await page.getByRole('button', { name: 'Go to my dashboard' }).click()
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
-  await expect(page.getByText('Share your booking link to get your first booking')).toBeVisible()
+  await expect(page.getByText('Live and taking bookings')).toBeVisible()
+  await expect(page.getByText(mobile ? 'Share your booking link to get your first booking' : 'Finish connecting your domain')).toBeVisible()
   await noOverflow()
 
   // A customer books through the published landing page; the event lands on the (mock) calendar.
   await page.goto(`/p/${id}`)
   await expect(page.getByRole('heading', { level: 1, name: 'Weekly pool cleaning in Charleston' })).toBeVisible()
+  await noOverflow()
   await page.getByRole('link', { name: 'Book a time' }).first().click()
   const lead = `lead-${mobile ? 'm' : 'd'}@example.net`
   await page.getByLabel('What do you need?').fill('Weekly cleaning')
@@ -130,7 +161,7 @@ test('new customer: get started → pay → onboard → publish → book → man
 
   // Owner manages billing: schedule cancellation in the portal; the dashboard reflects it.
   await page.goto('/dashboard')
-  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByRole('button', { name: 'Manage billing' }).click()
   await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel subscription' }).click()

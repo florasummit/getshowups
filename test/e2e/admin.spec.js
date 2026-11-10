@@ -90,14 +90,16 @@ test('admin-assisted setup: invite → owner signs in with Google → joins → 
   await expect(page.locator('.row--link', { hasText: 'Blue Wave Pools' })).toContainText('Connect calendar')
 })
 
-test('existing (non self-serve) business keeps its dashboard and can choose the plan in Settings', async ({ page, context }) => {
+test('existing pilot (non self-serve) business keeps its dashboard and is never asked to pay', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
   const billing = await (await page.request.get('/api/dashboard/billing')).json()
-  expect(billing).toMatchObject({ configured: true, subscription: null })
-  expect(billing.plans.map((p) => [p.id, p.trialDays])).toEqual([['founding', 0]])
+  expect(billing).toMatchObject({ configured: true, billed: false, subscription: null })
+  const checkout = await page.request.post('/api/dashboard/billing', { data: { action: 'checkout', plan: 'founding' }, headers: { Origin: new URL(page.url() === 'about:blank' ? 'http://127.0.0.1' : page.url()).origin } })
+  expect([403, 409]).toContain(checkout.status())
   await page.goto('/dashboard')
   await expect(page.getByRole('heading', { level: 1, name: fixtures.E2E_CUSTOMER_NAME })).toBeVisible()
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Plan' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Choose GetShowUps Founding' })).toBeVisible()
+  await expect(page.getByText('Fix your plan')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Booking hours' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Plan' })).toHaveCount(0)
 })

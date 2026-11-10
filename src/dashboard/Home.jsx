@@ -1,14 +1,16 @@
-// Dashboard home: booking link, results, who to mark, what's next, who to call. Settings in one view.
+// Dashboard after setup. Four places: Overview (is it working, what needs me), Appointments,
+// Website, Settings. Nothing technical; billing appears only when billing needs attention.
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
-import { BusinessForm, HoursForm } from './forms.jsx'
+import { BusinessForm, HoursForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
+import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
 
 const Ads = lazy(() => import('./Ads.jsx'))
-const LandingSettings = lazy(() => import('./LandingSettings.jsx'))
 const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
+const WebsiteTab = lazy(() => import('./WebsiteTab.jsx'))
 
 export function SignOut({ email, label = 'Sign out' }) {
   const signOut = async () => {
@@ -25,11 +27,11 @@ export function SignOut({ email, label = 'Sign out' }) {
   )
 }
 
-// Billing (shown only when Stripe and at least one plan are configured).
+// ---------- billing (only for businesses that pay; pilots never see it) ----------
 function useBilling() {
   const [billing, setBilling] = useState(null)
   useEffect(() => {
-    api('/api/dashboard/billing').then(({ status, data }) => setBilling(status === 200 && data.configured ? data : null))
+    api('/api/dashboard/billing').then(({ status, data }) => setBilling(status === 200 && data.configured && data.billed ? data : null))
   }, [])
   return billing
 }
@@ -41,7 +43,8 @@ async function openBilling(body, setState) {
   setState({ error: 'Billing is unavailable right now. Please try again.' })
 }
 
-const SUB_LABEL = { trialing: 'Free trial', active: 'Active', past_due: 'Payment failed', canceled: 'Canceled', incomplete: 'Incomplete' }
+const SUB_LABEL = { trialing: 'Free trial', active: 'Active', past_due: 'Payment failed', canceled: 'Ended', incomplete: 'Not completed' }
+const shortDate = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric' })
 
 function BillingCard({ billing }) {
   const [state, setState] = useState({})
@@ -57,7 +60,7 @@ function BillingCard({ billing }) {
             {billing.plans.find((p) => p.id === sub.planId)?.name || 'Subscription'} · {SUB_LABEL[sub.status]}
             {sub.currentPeriodEnd && (
               <span className="status-detail">
-                {sub.cancelAtPeriodEnd ? 'Ends' : 'Renews'} {fmt(new Date(sub.currentPeriodEnd).toISOString(), undefined, { month: 'short', day: 'numeric' })}
+                {sub.cancelAtPeriodEnd ? 'Ends' : 'Renews'} {shortDate(sub.currentPeriodEnd)}
               </span>
             )}
           </p>
@@ -69,11 +72,14 @@ function BillingCard({ billing }) {
         <div className="form">
           {billing.plans.map((p) => (
             <button key={p.id} type="button" className="btn btn-primary btn-block" disabled={state.busy} onClick={() => openBilling({ action: 'checkout', plan: p.id }, setState)}>
-              {!sub && p.trialDays > 0 ? `Start ${p.trialDays}-day trial · ${p.name}` : `Choose ${p.name}`}
+              {sub?.status === 'canceled' ? `Reactivate ${p.name}` : `Choose ${p.name}`}
             </button>
           ))}
         </div>
       )}
+      <p className="fine">
+        If you cancel, your website stays online until the end of the period you paid for, plus 14 days to move. Your domain is always yours, and you can download your website content from the Website tab.
+      </p>
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
@@ -83,21 +89,10 @@ function BillingCard({ billing }) {
   )
 }
 
-// One quiet, actionable notice for account problems.
 function AccountNotice({ customer, billing }) {
   const [state, setState] = useState({})
-  const pastDue = billing?.subscription?.status === 'past_due'
-  const ended = billing?.subscription?.status === 'canceled'
-  if (customer.status !== 'suspended' && !pastDue && !ended) {
-    return null
-  }
-  if (ended && customer.status !== 'suspended') {
-    return (
-      <div className="notice enter" role="status">
-        <p>Your GetShowUps plan has ended. Reactivate it in Settings to keep your page and reminders running.</p>
-      </div>
-    )
-  }
+  const s = billing?.subscription?.status
+  if (customer.status !== 'suspended' && s !== 'past_due') return null
   return (
     <div className="notice enter" role="status">
       <p>{customer.status === 'suspended' ? 'Your booking page is paused.' : 'Your last payment didn’t go through.'}</p>
@@ -114,7 +109,7 @@ function AccountNotice({ customer, billing }) {
   )
 }
 
-function CopyLink({ url }) {
+function CopyLink({ url, label = 'Copy link' }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -122,307 +117,155 @@ function CopyLink({ url }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {
-      window.prompt('Copy your booking link', url)
+      window.prompt('Copy your link', url)
     }
   }
   return (
-    <button type="button" className="btn btn-primary" onClick={copy}>
-      {copied ? 'Copied' : 'Copy link'}
+    <button type="button" className="btn btn-quiet" onClick={copy}>
+      {copied ? 'Copied' : label}
     </button>
   )
 }
 
-const when = (iso, tz) => fmt(iso, tz, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-
-function Appointment({ a, tz, children }) {
-  return (
-    <li className="row">
-      <div className="row-main">
-        <p className="row-title">
-          {a.name}
-          {a.status === 'booked' && a.confirmed && <span className="tag tag--ok">Confirmed</span>}
-        </p>
-        <p className="row-sub">
-          {when(a.start, tz)} · <a href={`tel:${a.phone}`}>{a.phone}</a>
-        </p>
-        {a.address && <p className="row-sub">{a.address}</p>}
-        <p className="row-note">{a.need}</p>
-      </div>
-      {children}
-    </li>
-  )
-}
-
-const recordOutcome = (body) => api('/api/dashboard/outcome', { method: 'POST', body })
-
-// Appointment happened or not; for on-site visits also whether the job was done (arriving ≠ done).
-function Outcome({ a, tz, visit, onDone }) {
-  const [busy, setBusy] = useState(false)
-  const mark = async (body) => {
-    setBusy(true)
-    const { status } = await recordOutcome({ id: a.id, ...body })
-    if (status === 200) onDone()
-    else setBusy(false)
-  }
-  const choices = visit
-    ? [
-        ['Couldn’t visit', { outcome: 'no_show' }, 'btn-quiet'],
-        ['Visited, not done', { outcome: 'showed', work: 'not_completed' }, 'btn-quiet'],
-        ['Job done', { outcome: 'showed', work: 'completed' }, 'btn-primary'],
-      ]
-    : [
-        ['No-show', { outcome: 'no_show' }, 'btn-quiet'],
-        ['Showed', { outcome: 'showed' }, 'btn-primary'],
-      ]
-  return (
-    <Appointment a={a} tz={tz}>
-      <div className="row-actions">
-        {choices.map(([label, body, cls]) => (
-          <button key={label} type="button" className={`btn btn-sm ${cls}`} disabled={busy} onClick={() => mark(body)}>
-            {label}
-          </button>
-        ))}
-      </div>
-    </Appointment>
-  )
-}
-
-const money = (cents) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100)
-
-function resultLabel(a, visit) {
-  if (a.status === 'no_show') return [visit ? 'Couldn’t visit' : 'No-show', 'tag--bad']
-  if (!visit) return ['Showed', 'tag--ok']
-  if (a.work === 'completed') return ['Job done', 'tag--ok']
-  if (a.work === 'not_completed') return ['Visited, not done', '']
-  return ['Visited', '']
-}
-
-// Optional, self-reported value of a job booked through the booking page.
-function ReportedValue({ a, onDone }) {
-  const [editing, setEditing] = useState(false)
-  const [amount, setAmount] = useState(a.valueCents != null ? String(a.valueCents / 100) : '')
-  const [error, setError] = useState('')
-  const save = async (e) => {
-    e.preventDefault()
-    const cents = amount.trim() === '' ? null : Math.round(Number(amount) * 100)
-    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) return setError('Enter an amount like 250')
-    const { status } = await recordOutcome({ id: a.id, outcome: 'showed', work: a.work ?? undefined, valueCents: cents })
-    if (status === 200) {
-      setEditing(false)
-      onDone()
-    } else setError('Couldn’t save. Try again.')
-  }
-  if (!editing) {
-    return (
-      <button type="button" className="link-btn" onClick={() => setEditing(true)}>
-        {a.valueCents != null ? money(a.valueCents) : 'Add job value'}
-      </button>
-    )
-  }
-  return (
-    <form className="value-form" onSubmit={save}>
-      <input aria-label="Job value in dollars" inputMode="decimal" placeholder="$" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
-      <button className="btn btn-sm btn-primary">Save</button>
-      {error && <span className="fine">{error}</span>}
-    </form>
-  )
-}
-
-const pct = (v) => (v === null ? '—' : `${v}%`)
-
-// Automatic follow-ups & reminders: what is on, and whether messages can actually be delivered.
-function Automations({ a, onChange }) {
-  const [busy, setBusy] = useState(false)
-  const toggle = async () => {
-    setBusy(true)
-    await api('/api/dashboard/automations', { method: 'POST', body: { enabled: !a.enabled } })
-    await onChange()
-    setBusy(false)
-  }
-  const channels = [a.email && 'email', a.sms && 'text'].filter(Boolean)
-  const live = a.enabled && channels.length > 0
-  const testing = live && a.testMode
-  return (
-    <section className="card" aria-label="Automatic follow-ups">
-      <h2 className="card-title">Automatic follow-ups</h2>
-      <div className="form">
-        <p className={`status status--${live ? 'ok' : 'bad'}`} data-automation={testing ? 'test_mode' : live ? 'live' : a.enabled ? 'no_provider' : 'off'}>
-          <span className="status-dot" aria-hidden="true" />
-          {!a.enabled ? 'Off' : testing ? 'On, in testing (not sending to your customers yet)' : live ? `On · ${channels.join(' and ')}` : 'On, but not sending yet'}
-        </p>
-        <p className="fine">
-          {a.enabled && testing
-            ? 'We’re testing message delivery, so follow-ups and reminders go only to GetShowUps test addresses for now. We’ll let you know when it’s live.'
-            : a.enabled && !live
-            ? 'Message delivery isn’t connected yet, so follow-ups and reminders are not being sent. We’ll let you know when it’s live.'
-            : 'Leads who don’t book get a “pick a time” message. Booked customers get a confirmation and reminders 24 hours and 2 hours before, with a link to confirm. No-shows get an invitation to rebook.'}
-        </p>
-        {(a.scheduled > 0 || a.failed > 0 || a.notSent > 0) && (
-          <p className="fine">
-            {a.scheduled} scheduled{a.failed > 0 && ` · ${a.failed} failed`}
-            {a.notSent > 0 && ` · ${a.notSent} not sent (${testing ? 'testing' : 'delivery not connected'})`}
-          </p>
-        )}
-        <button type="button" className="btn btn-quiet btn-block" disabled={busy} onClick={toggle}>
-          {a.enabled ? 'Turn off' : 'Turn on'}
-        </button>
-      </div>
-    </section>
-  )
-}
-
-function Overview({ me }) {
-  const tz = me.customer.timezone
-  const visit = me.customer.appointmentMode === 'at_customer'
+// ---------- overview ----------
+function useOverview() {
   const [data, setData] = useState(null)
-  const [error, setError] = useState(false)
   const load = useCallback(
     () =>
       api('/api/dashboard/overview').then(({ status, data: d }) => {
-        if (status === 200) {
-          setData(d)
-          setError(false)
-        } else setError(true)
+        setData(status === 200 ? d : { failed: true })
       }),
     [],
   )
   useEffect(() => {
     load()
   }, [load])
+  return [data, load]
+}
 
+function useSite() {
+  const [site, setSite] = useState(null)
+  useEffect(() => {
+    api('/api/dashboard/website').then(({ status, data }) => setSite(status === 200 ? data : null))
+  }, [])
+  return site
+}
+
+function WebsiteCard({ me, site, go }) {
+  const w = site?.website
+  const url = site ? (site.domain?.status === 'connected' ? site.domain.url : site.url) : null
+  return (
+    <section className="card card--hero enter" aria-label="Your website">
+      <p className="eyebrow-sm">Your website</p>
+      {!site ? (
+        <p className="fine">Checking…</p>
+      ) : w?.published ? (
+        <>
+          <a className="booking-url" href={url} target="_blank" rel="noreferrer">
+            {url.replace(/^https?:\/\//, '')}
+          </a>
+          <p className="hero-status">
+            <span className="status-dot status-dot--ok" aria-hidden="true" /> Live and taking bookings
+          </p>
+          <div className="card-actions">
+            <a className="btn btn-primary" href={url} target="_blank" rel="noreferrer">
+              View website
+            </a>
+            <CopyLink url={url} />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="hero-title">Your website isn’t published yet.</p>
+          <div className="card-actions">
+            <button type="button" className="btn btn-primary" onClick={() => go('website')}>
+              Finish my website
+            </button>
+            <CopyLink url={me.bookingUrl} label="Copy booking link" />
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+function Stats({ stats, visit }) {
+  const recorded = stats.showed + stats.noShow
+  const rows = [
+    ['Leads', stats.leads],
+    ['Bookings', stats.booked],
+    [visit ? 'Visits' : 'Show-ups', stats.showed],
+  ]
+  // Rates only once there are enough outcomes to mean something.
+  if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`])
+  if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`])
+  return (
+    <section aria-label="Last 30 days">
+      <div className={`stats stats--${rows.length}`}>
+        {rows.map(([label, value]) => (
+          <div key={label} className="stat">
+            <p className="stat-value">{value}</p>
+            <p className="stat-label">{label}</p>
+          </div>
+        ))}
+      </div>
+      <p className="fine stats-note">Last 30 days</p>
+    </section>
+  )
+}
+
+function Overview({ me, data, reload, go, site }) {
+  const tz = me.customer.timezone
+  const visit = me.customer.appointmentMode === 'at_customer'
   return (
     <>
-      <section className="card card--hero enter">
-        <p className="eyebrow-sm">Your booking page</p>
-        <a className="booking-url" href={me.bookingUrl} target="_blank" rel="noreferrer">
-          {me.bookingUrl.replace(/^https?:\/\//, '')}
-        </a>
-        <div className="card-actions">
-          <CopyLink url={me.bookingUrl} />
-          <a className="btn btn-quiet" href={me.bookingUrl} target="_blank" rel="noreferrer">
-            Open
-          </a>
-        </div>
-      </section>
-
-      {error && (
+      <WebsiteCard me={me} site={site} go={go} />
+      <NextStep onOpen={go} skip={site && !site.website?.published ? ['page'] : []} />
+      {data?.failed && (
         <p className="form-error" role="alert">
           Couldn’t load your results.{' '}
-          <button type="button" className="link-btn" onClick={load}>
+          <button type="button" className="link-btn" onClick={reload}>
             Retry
           </button>
         </p>
       )}
-
-      {data && (
+      {data && !data.failed && (
         <div className="enter">
-          <section aria-label="Last 30 days" className="stats">
-            {[
-              ['Leads', data.stats.leads],
-              ['Booked', data.stats.booked],
-              ['Booking rate', pct(data.stats.bookingRate)],
-              ['Confirmed', data.stats.confirmed],
-              ...(visit
-                ? [
-                    ['Visits', data.stats.showed],
-                    ['Couldn’t visit', data.stats.noShow],
-                    ['Jobs done', data.stats.completed],
-                    ['Completion rate', pct(data.stats.completionRate)],
-                  ]
-                : [
-                    ['Showed', data.stats.showed],
-                    ['No-shows', data.stats.noShow],
-                    ['Show rate', pct(data.stats.showRate)],
-                  ]),
-              ['Messages sent', data.automation.sent],
-              ...(data.stats.reportedValueCents != null ? [['Reported job value', money(data.stats.reportedValueCents)]] : []),
-            ].map(([label, value]) => (
-              <div key={label} className="stat">
-                <p className="stat-value">{value}</p>
-                <p className="stat-label">{label}</p>
-              </div>
-            ))}
-          </section>
-          <p className="fine stats-note">
-            Last 30 days
-            {data.stats.reportedValueCents != null && ' · Job value is what you reported for jobs booked here, not revenue caused by GetShowUps.'}
-          </p>
-
-          <Automations a={data.automation} onChange={load} />
-
+          <Stats stats={data.stats} visit={visit} />
           {data.needsOutcome.length > 0 && (
             <section className="card">
-              <h2 className="card-title">{visit ? 'How did the visit go?' : 'Did they show up?'}</h2>
-              <ul className="rows">
-                {data.needsOutcome.map((a) => (
-                  <Outcome key={a.id} a={a} tz={tz} visit={visit} onDone={load} />
-                ))}
-              </ul>
+              <h2 className="card-title">{visit ? 'How did these visits go?' : 'Did they show up?'}</h2>
+              <OutcomeList items={data.needsOutcome.slice(0, 3)} tz={tz} visit={visit} onDone={reload} simple />
+              {data.needsOutcome.length > 3 && (
+                <button type="button" className="link-btn" onClick={() => go('appointments')}>
+                  See all {data.needsOutcome.length}
+                </button>
+              )}
             </section>
           )}
-
           <section className="card">
             <h2 className="card-title">Upcoming</h2>
             {data.upcoming.length ? (
               <ul className="rows">
-                {data.upcoming.map((a) => (
-                  <Appointment key={a.id} a={a} tz={tz} />
+                {data.upcoming.slice(0, 3).map((a) => (
+                  <Appointment key={a.id} a={a} tz={tz} compact />
                 ))}
               </ul>
             ) : (
-              <p className="empty">No upcoming {visit ? 'visits' : 'appointments'}. Share your booking page to get the next one.</p>
+              <p className="empty">No upcoming {visit ? 'visits' : 'appointments'} yet.</p>
             )}
+            <button type="button" className="link-btn" onClick={() => go('appointments')}>
+              All appointments
+            </button>
           </section>
-
-          {data.followUp.length > 0 && (
-            <section className="card">
-              <h2 className="card-title">Haven’t booked yet</h2>
-              <ul className="rows">
-                {data.followUp.map((l) => (
-                  <li key={l.id} className="row">
-                    <div className="row-main">
-                      <p className="row-title">
-                        {l.name}
-                        {l.status === 'unqualified' && <span className="tag">Outside service area</span>}
-                      </p>
-                      <p className="row-sub">
-                        <a href={`tel:${l.phone}`}>{l.phone}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
-                      </p>
-                      {l.address && <p className="row-sub">{l.address}</p>}
-                      <p className="row-note">{l.need}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {data.recent.length > 0 && (
-            <section className="card">
-              <h2 className="card-title">Recent results</h2>
-              <ul className="rows">
-                {data.recent.map((a) => (
-                  <Appointment key={a.id} a={a} tz={tz}>
-                    <div className="result">
-                      <span className={`tag ${resultLabel(a, visit)[1]}`}>{resultLabel(a, visit)[0]}</span>
-                      {a.status === 'showed' && <ReportedValue a={a} onDone={load} />}
-                    </div>
-                  </Appointment>
-                ))}
-              </ul>
-            </section>
-          )}
         </div>
       )}
     </>
   )
 }
 
-const CAL_STATUS = {
-  healthy: ['Connected', 'ok'],
-  not_connected: ['Not connected', 'bad'],
-  reconnect_required: ['Needs reconnecting', 'bad'],
-}
+// ---------- settings ----------
+const CAL_STATUS = { healthy: ['Connected', 'ok'], not_connected: ['Not connected', 'bad'], reconnect_required: ['Needs reconnecting', 'bad'] }
 
 function CalendarSettings() {
   const [status, setStatus] = useState(null)
@@ -446,21 +289,64 @@ function CalendarSettings() {
       ) : (
         <p className="fine">Checking…</p>
       )}
-      <button type="button" className={`btn btn-block ${tone === 'ok' ? 'btn-quiet' : 'btn-primary'}`} onClick={reconnect} disabled={busy || !status}>
-        {busy ? 'Opening Google…' : 'Reconnect Google Calendar'}
+      {tone !== 'ok' || !status ? (
+        <button type="button" className="btn btn-block btn-primary" onClick={reconnect} disabled={busy || !status}>
+          {busy ? 'Opening Google…' : 'Reconnect Google Calendar'}
+        </button>
+      ) : (
+        <button type="button" className="link-btn" onClick={reconnect} disabled={busy}>
+          Use a different calendar
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Reminders: on/off and whether they're actually sending yet. Never shown as a failure.
+function Reminders() {
+  const [a, setA] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => api('/api/dashboard/overview').then(({ status, data }) => status === 200 && setA(data.automation)), [])
+  useEffect(() => {
+    load()
+  }, [load])
+  if (!a) return <div aria-busy="true" />
+  const sending = a.enabled && (a.email || a.sms) && !a.testMode
+  const toggle = async () => {
+    setBusy(true)
+    await api('/api/dashboard/automations', { method: 'POST', body: { enabled: !a.enabled } })
+    await load()
+    setBusy(false)
+  }
+  return (
+    <div className="form">
+      <p className="fine" data-automation={!a.enabled ? 'off' : sending ? 'live' : 'activating'}>
+        {!a.enabled
+          ? 'Off. Customers won’t get reminders.'
+          : sending
+            ? 'On. Customers get a confirmation and reminders before their appointment.'
+            : 'On. Email confirmations and reminders are activating soon; we’ll let you know when they start sending.'}
+      </p>
+      <button type="button" className="link-btn" disabled={busy} onClick={toggle}>
+        {a.enabled ? 'Turn reminders off' : 'Turn reminders on'}
       </button>
     </div>
   )
 }
 
-function Settings({ me, reload, onClose, billing }) {
+function Settings({ me, reload, billing }) {
   const c = me.customer
   return (
     <div className="enter">
-      <button type="button" className="link-btn back-btn" onClick={onClose}>
-        ← Back
-      </button>
-      <h1 className="title">Settings</h1>
+      <h1 className="title title--page">Settings</h1>
+      <section className="card">
+        <h2 className="card-title">Business</h2>
+        <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} />
+      </section>
+      <section className="card">
+        <h2 className="card-title">Details on your website</h2>
+        <ProfileForm />
+      </section>
       <section className="card">
         <h2 className="card-title">Booking hours</h2>
         <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} />
@@ -470,11 +356,10 @@ function Settings({ me, reload, onClose, billing }) {
         <CalendarSettings />
       </section>
       <section className="card">
-        <h2 className="card-title">Your landing page</h2>
-        <Suspense fallback={<div aria-busy="true" />}>
-          <LandingSettings />
-        </Suspense>
+        <h2 className="card-title">Reminders</h2>
+        <Reminders />
       </section>
+      {billing && <BillingCard billing={billing} />}
       {me.features?.ghl && (
         <section className="card">
           <h2 className="card-title">GoHighLevel</h2>
@@ -483,54 +368,81 @@ function Settings({ me, reload, onClose, billing }) {
           </Suspense>
         </section>
       )}
-      {billing && <BillingCard billing={billing} />}
-      <section className="card">
-        <h2 className="card-title">Business</h2>
-        <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} />
-      </section>
     </div>
   )
 }
 
+// ---------- shell ----------
+const TABS = [
+  ['overview', 'Overview'],
+  ['appointments', 'Appointments'],
+  ['website', 'Website'],
+  ['settings', 'Settings'],
+]
+const tabFromPath = () => {
+  const t = window.location.pathname.split('/')[2]
+  return ['appointments', 'website', 'settings', 'ads'].includes(t) ? t : 'overview'
+}
+
 export default function Home({ me, reload }) {
-  const [view, setView] = useState('home')
+  const [view, setView] = useState(tabFromPath)
   const billing = useBilling()
+  const [data, loadOverview] = useOverview()
+  const site = useSite()
+  const tabs = me.features?.ads ? [...TABS.slice(0, 3), ['ads', 'Ads'], TABS[3]] : TABS
+  useEffect(() => {
+    const onPop = () => setView(tabFromPath())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  const go = (where) => {
+    const tab = where === 'billing' ? 'settings' : where
+    if (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable) return openBilling({ action: 'portal' }, () => {})
+    window.history.pushState(null, '', tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`)
+    setView(tab)
+    window.scrollTo(0, 0)
+  }
   return (
-    <div className="app">
+    <div className={`app${view === 'website' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
-        <div className="header-nav">
-          {me.features?.ads && (
-            <button type="button" className="link-btn" onClick={() => setView(view === 'ads' ? 'home' : 'ads')} aria-pressed={view === 'ads'}>
-              Ads
-            </button>
-          )}
-          <button type="button" className="link-btn" onClick={() => setView(view === 'settings' ? 'home' : 'settings')} aria-pressed={view === 'settings'}>
-            Settings
-          </button>
-          <SignOut email={me.email} />
-        </div>
+        <SignOut email={me.email} />
       </header>
+      <nav className="tabs" aria-label="Dashboard">
+        {tabs.map(([id, label]) => (
+          <a
+            key={id}
+            href={id === 'overview' ? '/dashboard' : `/dashboard/${id}`}
+            aria-current={view === id ? 'page' : undefined}
+            onClick={(e) => {
+              e.preventDefault()
+              go(id)
+            }}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
       <main className="app-main">
-        {view === 'home' ? (
+        {view === 'overview' && (
           <>
             <h1 className="title title--page">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} />
-            <NextStep onOpen={(where) => (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable ? openBilling({ action: 'portal' }, () => {}) : setView('settings'))} />
-            <Overview me={me} />
+            <Overview me={me} data={data} reload={loadOverview} go={go} site={site} />
           </>
-        ) : view === 'ads' ? (
-          <>
-            <button type="button" className="link-btn back-btn" onClick={() => setView('home')}>
-              ← Back
-            </button>
-            <Suspense fallback={<div aria-busy="true" />}>
-              <Ads />
-            </Suspense>
-          </>
-        ) : (
-          <Settings me={me} reload={reload} billing={billing} onClose={() => setView('home')} />
         )}
+        {view === 'appointments' && <Appointments me={me} data={data && !data.failed ? data : null} reload={loadOverview} />}
+        {view === 'website' && (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <WebsiteTab />
+          </Suspense>
+        )}
+        {view === 'ads' && (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Ads />
+          </Suspense>
+        )}
+        {view === 'settings' && <Settings me={me} reload={reload} billing={billing} />}
       </main>
     </div>
   )

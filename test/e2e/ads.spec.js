@@ -11,7 +11,7 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   // Each project gets its own seeded business so the flow starts from scratch in both.
   await useSession(context, testInfo.project.name === 'mobile' ? fixtures.E2E_HOME_SESSION_TOKEN : fixtures.E2E_SESSION_TOKEN)
   await page.goto('/dashboard')
-  await page.getByRole('button', { name: 'Ads' }).click()
+  await page.getByRole('link', { name: 'Ads', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
 
   await page.getByLabel('What kind of business?').fill('Pool service')

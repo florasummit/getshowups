@@ -25,7 +25,8 @@ src/                 React marketing site (Vite → dist/). Browser code only.
   config/ghl.js      Public embed URLs from VITE_* env (booking calendar / GHL form)
   Root.jsx           Chooses marketing site, /dashboard, or /book/:id (app pages are lazy chunks)
   dashboard/         Sign-in → self-serve onboarding (Setup.jsx: business → plan → details → services → calendar →
-                     hours → page → test → launch; older businesses: business → calendar → hours) → Home + Settings
+                     hours → website → address → publish → launch; older businesses: business → calendar → hours) →
+                     Home.jsx tabs: Overview · Appointments · Website (WebsiteTab, WebsiteEditor, DomainSettings) · Settings
   booking/           Public booking page /book/:id (details → time → booked)
   admin/             Platform console /admin (metrics, attention, customers, detail, invites, plans, email)
   lib/               api.js (fetch + formatting), connect.js (calendar connect hand-off)
@@ -46,7 +47,10 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
-  api/dashboard/landing  Owner landing page (GET draft/saved, POST save/publish).  api/page/[customer]: public page data
+  api/dashboard/website/ Website: index (GET state; POST save|publish|unpublish|restore|regenerate), preview (owner-only
+                     HTML), assets (image upload), export (owner's content + images as JSON)
+  api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
+  p/[customer]       Public website (server-rendered).  site-assets/[id]: website images.  _middleware.js: domain routing
   api/ads/google/     Google Ads connect: start, callback, accounts.  api/ads/meta/: start, callback, accounts, webhook (leads)
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
@@ -70,7 +74,11 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ads/               spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
-  landing.js         Business landing page: template draft, claims filter, publish
+  landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
+  website.js         Website content (validate, generate), drafts, versions/rollback, hosting entitlement (hostingStatus)
+  site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
+  assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
+  domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
   onboarding.js      Self-serve signup plan, ordered onboarding steps (derived from data), business profile, readiness
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
@@ -147,6 +155,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Validate customer IDs with `CUSTOMER_RE` before any storage lookup.
 - Google scopes are least-privilege (`calendar.events.owned`, `calendar.freebusy`). Adding a scope needs approval.
 - Tests use the fake values in `test/e2e/fixtures.env` and mocked Google. Never real credentials.
+
+- Websites: one renderer, no scripts on business sites, every text through the claims filter, drafts private until
+  an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content.
+- Domains: never attach a hostname before its TXT proof; never claim "connected" without the HTTPS check; never touch
+  a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN
+  and CLOUDFLARE_API_MOCK_ORIGIN are loopback-only test vars.
+- Pilot / invited / admin-created businesses are never billed: no plan card, checkout refused (no placeholder rows).
+- Test records (testdata.js) are listed with a tag and excluded from every count; never deleted.
+- Attendance changes are always reversible and recorded in appointment_changes.
 
 ## Requires explicit human approval
 

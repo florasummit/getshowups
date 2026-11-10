@@ -15,7 +15,8 @@ const TEXT = {
   },
   calendar: { label: 'Google Calendar', healthy: 'Connected', default: 'Needs reconnecting' },
   hours: { label: 'Booking hours', ok: 'Set', action: 'Not set' },
-  page: { label: 'Landing page', published: 'Published', draft: 'Draft (private). Publish it in Settings.', none: 'Not created' },
+  page: { label: 'Website', published: 'Live', draft: 'Not published yet', none: 'Not created yet' },
+  domain: { label: 'Your domain', connected: 'Connected', pending: 'Waiting for your DNS record', verifying: 'Verifying', securing: 'Securing your website', needs_attention: 'Needs attention' },
   booking: { label: 'Bookings', has_bookings: 'Receiving bookings', no_bookings_yet: 'No bookings yet. Share your page to get your first one.' },
   email: { label: 'Email confirmations & reminders', live: 'On', activating: 'Activating soon. We’ll tell you when they start sending.' },
   sms: { label: 'Text messages', not_available_yet: 'Not available yet' },
@@ -65,14 +66,17 @@ const NEXT = {
   subscription: ['Fix your plan', 'billing'],
   calendar: ['Reconnect Google Calendar', 'settings'],
   hours: ['Set your booking hours', 'settings'],
-  page: ['Publish your landing page', 'settings'],
+  page: ['Publish your website', 'website'],
+  domain: ['Finish connecting your domain', 'website'],
   share: ['Share your booking link to get your first booking', null],
 }
-export function NextStep({ onOpen }) {
+// `skip`: items already shown elsewhere on the page (e.g. the website card), so they aren't repeated.
+export function NextStep({ onOpen, skip = [] }) {
   const [r, setR] = useState(null)
   const [open, setOpen] = useState(false)
-  if (r && !r.next) return null
-  const next = r ? NEXT[r.next] : null
+  const id = r && (r.items.find((i) => i.state === 'action' && !skip.includes(i.id))?.id ?? (r.next === 'share' ? 'share' : null))
+  if (r && !id) return null
+  const next = r ? NEXT[id] : null
   return (
     <section className="card next-step" aria-label="Next step">
       <p className="eyebrow-sm">Next step</p>
@@ -80,7 +84,7 @@ export function NextStep({ onOpen }) {
       <div className="card-actions">
         {next?.[1] && (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpen(next[1])}>
-            {next[1] === 'billing' ? 'Fix billing' : 'Fix this'}
+            {next[1] === 'billing' ? 'Fix billing' : next[1] === 'website' ? 'Open website' : 'Fix this'}
           </button>
         )}
         <button type="button" className="link-btn" aria-expanded={open} onClick={() => setOpen(!open)}>

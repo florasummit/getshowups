@@ -1,17 +1,19 @@
 // Guided setup. The server decides the ordered steps from saved data (server/onboarding.js), so setup
 // resumes at the right place on any device. Self-serve: business → payment → details → services →
-// calendar → hours → page → test → launch. Older businesses keep business → calendar → hours.
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+// calendar → hours → website → address → publish → launch. Older businesses keep business → calendar → hours.
+import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo.jsx'
-import { api, browserTimeZone, fmt, timeZones } from '../lib/api.js'
+import { api, browserTimeZone, timeZones } from '../lib/api.js'
 import { BusinessForm, HoursForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { SignOut } from './Home.jsx'
 import Readiness from './Readiness.jsx'
+import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
+import { useWebsite } from './website-data.js'
+import DomainSettings from './DomainSettings.jsx'
+import { PublishBox } from './WebsiteTab.jsx'
 
-const LandingPreview = lazy(() => import('../landing/LandingPage.jsx'))
-
-const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', page: 'Page', test: 'Test', launch: 'Launch' }
+const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
 const PLAN_KEY = 'gsu_plan'
 const storedPlan = () => {
   try {
@@ -45,7 +47,7 @@ export default function Setup({ me, reload }) {
             ))}
           </ol>
         )}
-        <section key={current} className={`panel enter ${current === 'page' ? 'panel--wide' : 'panel--narrow'}`} aria-labelledby="step-title">
+        <section key={current} className={`panel enter ${current === 'website' || current === 'publish' ? 'panel--wide' : current === 'address' ? 'panel--medium' : 'panel--narrow'}`} aria-labelledby="step-title">
           <Step
             id={current}
             me={me}
@@ -70,9 +72,10 @@ function Step({ id, me, done, back }) {
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
   if (id === 'calendar') return <CalendarStep onBack={back} />
   if (id === 'hours') return <HoursStep customer={customer} onDone={done} />
-  if (id === 'page') return <PageStep onDone={done} back={back} />
-  if (id === 'test') return <TestStep me={me} onDone={done} back={back} />
-  return <LaunchStep onDone={done} />
+  if (id === 'website') return <WebsiteStep onDone={done} back={back} />
+  if (id === 'address') return <AddressStep onDone={done} back={back} />
+  if (id === 'publish') return <PublishStep onDone={done} back={back} />
+  return <LaunchStep me={me} onDone={done} />
 }
 
 function LegacyBusiness({ customer, onDone }) {
@@ -257,8 +260,9 @@ function DetailsStep({ customer, onDone }) {
   return (
     <form className="form" onSubmit={submit}>
       <h1 id="step-title" className="title">
-        About your business
+        Let’s get your website ready
       </h1>
+      <p className="lede">A few quick questions. We’ll build your website from your answers.</p>
       <label className="field">
         <span>Business name</span>
         <input name="name" defaultValue={customer.name} maxLength={80} required autoComplete="organization" />
@@ -469,59 +473,35 @@ function HoursStep({ customer, onDone }) {
   )
 }
 
-// ---------- 7. Landing page: draft → preview → publish with explicit authorization ----------
-function PageStep({ onDone, back }) {
-  const [data, setData] = useState(null)
-  const [draft, setDraft] = useState(null)
-  const [ok, setOk] = useState(false)
+// ---------- 7. Website: generated from the answers, edited in place, saved automatically ----------
+function WebsiteStep({ onDone, back }) {
+  const [data] = useWebsite()
+  const latest = useRef(null)
+  const [stamp, setStamp] = useState(0)
   const [state, setState] = useState({})
-  useEffect(() => {
-    Promise.all([api('/api/dashboard/landing'), api('/api/dashboard/me'), api('/api/dashboard/profile')]).then(([l, m, p]) => {
-      setData({ url: l.data.url, name: m.data.customer.name, mode: m.data.customer.appointmentMode, phone: p.data.profile?.phone || '', id: m.data.customer.id })
-      setDraft(l.data.page)
-    })
-  }, [])
-  if (!draft) return <div aria-busy="true" />
-  const save = async (publish) => {
+  if (!data) return <div aria-busy="true" />
+  if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
+  const next = async () => {
     setState({ busy: true })
-    const { status, data: d } = await api('/api/dashboard/landing', { method: 'POST', body: { ...draft, publish } })
+    const { status } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'save', content: latest.current || data.website.draft } })
     if (status === 200) return onDone()
-    setState({ error: d.fields?.some((f) => f.endsWith('unapproved_claim')) ? 'Please remove promises like guarantees, discounts, ratings or credentials you haven’t confirmed with us.' : 'Please check the headline and introduction.' })
+    setState({ error: 'Please check the highlighted text, then continue.' })
   }
-  const set = (k) => (e) => setDraft({ ...draft, [k]: e.target.value })
   return (
     <div className="page-step">
       <div className="form">
         <h1 id="step-title" className="title">
-          Your landing page
+          Here’s your website
         </h1>
-        <p className="lede">We drafted it from your details. Edit anything, check the preview, then publish when you’re happy.</p>
-        <label className="field">
-          <span>Headline</span>
-          <input value={draft.headline} onChange={set('headline')} maxLength={80} />
-        </label>
-        <label className="field">
-          <span>Introduction</span>
-          <textarea rows={3} value={draft.intro} onChange={set('intro')} maxLength={400} />
-        </label>
-        <label className="field">
-          <span>Service area</span>
-          <input value={draft.area} onChange={set('area')} maxLength={200} />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
-          <span>The details are accurate and I want this page to be public at {data.url.replace(/^https?:\/\//, '')}.</span>
-        </label>
+        <p className="lede">We built it from your answers. Change anything you like. It saves as you go.</p>
+        <WebsiteEditor initial={data.website.draft} colors={data.options.colors} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}
           </p>
         )}
-        <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!ok || state.busy} onClick={() => save(true)}>
-          Publish my page
-        </button>
-        <button type="button" className="btn btn-quiet btn-block" disabled={state.busy} onClick={() => save(false)}>
-          Save as a private draft for now
+        <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={next}>
+          Continue
         </button>
         {back && (
           <button type="button" className="link-btn" onClick={back}>
@@ -529,53 +509,33 @@ function PageStep({ onDone, back }) {
           </button>
         )}
       </div>
-      <figure className="preview" aria-label="Preview of your landing page">
-        <figcaption className="fine">Preview (not public until you publish)</figcaption>
-        <div className="preview-frame">
-          <Suspense fallback={<div aria-busy="true" />}>
-            <LandingPreview id={data.id} preview={{ name: data.name, appointmentMode: data.mode, phone: data.phone, ...draft }} />
-          </Suspense>
-        </div>
-      </figure>
+      <WebsitePreview stamp={stamp} />
     </div>
   )
 }
 
-// ---------- 8. Booking test ----------
-function TestStep({ me, onDone, back }) {
-  const [check, setCheck] = useState(null)
-  useEffect(() => {
-    api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'check_availability' } }).then(({ status, data }) => setCheck(status === 200 ? data : { status: 'unavailable', slots: 0 }))
-  }, [])
+// ---------- 8. Address: GetShowUps address (default), your own domain, or a new one ----------
+function AddressStep({ onDone, back }) {
+  const [data] = useWebsite()
+  const [domain, setDomain] = useState(null)
+  const [busy, setBusy] = useState(false)
+  if (!data) return <div aria-busy="true" />
   const next = async () => {
-    await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'tested' } })
+    setBusy(true)
+    await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'address', choice: domain || data.domain ? 'own' : 'getshowups' } })
     onDone()
   }
-  const tz = me.customer.timezone
   return (
     <div className="form">
       <h1 id="step-title" className="title">
-        Check your booking page
+        Choose your website address
       </h1>
-      {!check ? (
-        <p className="fine">Checking your open times…</p>
-      ) : check.status === 'ok' && check.slots > 0 ? (
-        <p className="status status--ok">
-          <span className="status-dot" aria-hidden="true" />
-          {check.slots} open times over the next two weeks. First: {fmt(check.first, tz, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-        </p>
-      ) : (
-        <p className="notice-soft" role="alert">
-          No open times found. Check your booking hours, or that your calendar isn’t fully busy.
-        </p>
-      )}
-      <p className="lede">Open your booking page to see exactly what customers see. If you make a test booking, it goes on your Google Calendar like a real one, and a time can’t be booked twice.</p>
-      <a className="btn btn-quiet btn-block" href={me.bookingUrl} target="_blank" rel="noreferrer">
-        Open my booking page
-      </a>
-      <button type="button" className="btn btn-primary btn-lg btn-block" onClick={next}>
+      <p className="lede">Start with your free GetShowUps address. You can connect your own domain now or any time later.</p>
+      <DomainSettings siteUrl={data.url || ''} compact onChange={(d) => setDomain(d.domain)} />
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={next}>
         Continue
       </button>
+      <p className="fine">Connecting a domain keeps going in the background. Your website works on your GetShowUps address meanwhile.</p>
       {back && (
         <button type="button" className="link-btn" onClick={back}>
           Back
@@ -585,8 +545,47 @@ function TestStep({ me, onDone, back }) {
   )
 }
 
-// ---------- 9. Launch checklist ----------
-function LaunchStep({ onDone }) {
+// ---------- 9. Preview and publish (explicit approval) ----------
+function PublishStep({ onDone, back }) {
+  const [data] = useWebsite()
+  const [busy, setBusy] = useState(false)
+  if (!data) return <div aria-busy="true" />
+  if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
+  const later = async () => {
+    setBusy(true)
+    await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'keep_private' } })
+    onDone()
+  }
+  return (
+    <div className="page-step">
+      <div className="form">
+        <h1 id="step-title" className="title">
+          Preview and publish
+        </h1>
+        <p className="lede">This is exactly what customers will see. Publish when you’re happy. You can change it any time.</p>
+        <PublishBox
+          data={data}
+          label="Publish my website"
+          onDone={onDone}
+          secondary={
+            <button type="button" className="btn btn-quiet btn-block" disabled={busy} onClick={later}>
+              Keep it private for now
+            </button>
+          }
+        />
+        {back && (
+          <button type="button" className="link-btn" onClick={back}>
+            Back
+          </button>
+        )}
+      </div>
+      <WebsitePreview stamp={0} />
+    </div>
+  )
+}
+
+// ---------- 10. Done ----------
+function LaunchStep({ me, onDone }) {
   const [state, setState] = useState({})
   const finish = async () => {
     setState({ busy: true })
@@ -597,9 +596,13 @@ function LaunchStep({ onDone }) {
   return (
     <div className="form">
       <h1 id="step-title" className="title">
-        You’re ready to take bookings
+        You’re all set
       </h1>
-      <Readiness />
+      <Readiness compact />
+      <a className="btn btn-quiet btn-block" href={me.bookingUrl} target="_blank" rel="noreferrer">
+        See my booking page
+      </a>
+      <p className="fine">A booking you make there goes on your Google Calendar like a real one. We mark bookings from your own email as tests, so they don’t count in your results.</p>
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}

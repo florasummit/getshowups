@@ -10,18 +10,18 @@ const APPT = '0123456789abcdef0123456789abcdef'
 
 test.describe.configure({ timeout: 60_000 })
 
-test('dashboard: automatic follow-ups card is honest about delivery and can be switched off and on', async ({ page, context }) => {
+test('settings: reminders are honest about delivery (activating, never a false "on") and can be switched off and on', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  await page.goto('/dashboard/settings')
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Reminders' }) })
+  await expect(card.locator('[data-automation="activating"]')).toContainText('activating soon')
+  await card.getByRole('button', { name: 'Turn reminders off' }).click()
+  await expect(card.locator('[data-automation="off"]')).toBeVisible()
+  await card.getByRole('button', { name: 'Turn reminders on' }).click()
+  await expect(card.locator('[data-automation="activating"]')).toBeVisible()
+  // The overview no longer shows internal message counters.
   await page.goto('/dashboard')
-  const card = page.getByRole('region', { name: 'Automatic follow-ups' })
-  await expect(card.locator('[data-automation="no_provider"]')).toHaveText('On, but not sending yet')
-  await expect(card.getByText('not being sent')).toBeVisible()
-  await expect(page.locator('.stat', { hasText: 'Messages sent' }).locator('.stat-value')).toHaveText('0')
-  await expect(page.locator('.stat', { hasText: 'Booking rate' })).toBeVisible()
-  await card.getByRole('button', { name: 'Turn off' }).click()
-  await expect(card.locator('[data-automation="off"]')).toHaveText('Off')
-  await card.getByRole('button', { name: 'Turn on' }).click()
-  await expect(card.locator('[data-automation="no_provider"]')).toBeVisible()
+  await expect(page.locator('.stat', { hasText: 'Messages sent' })).toHaveCount(0)
 })
 
 test('booking page does not offer text messages when no SMS provider is configured', async ({ page }) => {

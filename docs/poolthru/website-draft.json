@@ -1,0 +1,19 @@
+{
+  "template": "clean",
+  "color": "teal",
+  "headline": "Pool cleaning and maintenance in Charleston, SC",
+  "intro": "Weekly and one-time pool service, plus pool closing and winterization. Tell us what you need and pick a time online. It takes about a minute.",
+  "about": "PoolThru Pool Care looks after residential pools in Charleston, SC. Choose regular weekly service, a single visit when you need one, or a full closing before winter.",
+  "services": [
+    { "name": "Weekly pool service", "price": "", "description": "Cleaning and maintenance every week, so your water stays clean and ready to swim." },
+    { "name": "One-time pool service", "price": "", "description": "A single visit to get your pool clean and back in shape." },
+    { "name": "Pool closing and winterization", "price": "", "description": "Lowering the water level, balancing chemicals and covering your pool for the cold months." }
+  ],
+  "area": "Charleston, SC (29403)",
+  "highlights": [],
+  "logo": null,
+  "hero": null,
+  "photos": [],
+  "seoTitle": "PoolThru Pool Care | Pool cleaning in Charleston, SC",
+  "seoDescription": "Weekly and one-time pool cleaning, plus pool closing and winterization, in Charleston, SC. Book online in about a minute."
+}

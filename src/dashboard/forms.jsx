@@ -1,5 +1,5 @@
 // Business and booking-hours forms, shared by setup and settings.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
 
 const ERRORS = {
@@ -146,6 +146,63 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
       )}
       <button className="btn btn-primary btn-lg btn-block" disabled={state.saving}>
         {state.saving ? 'Saving…' : state.saved ? 'Saved ✓' : submitLabel}
+      </button>
+    </form>
+  )
+}
+
+// Business details shown on the website (phone, what you do, towns, description).
+export function ProfileForm({ onSaved }) {
+  const [p, setP] = useState(undefined)
+  const [state, setState] = useState({})
+  useEffect(() => {
+    api('/api/dashboard/profile').then(({ status, data }) => setP(status === 200 ? data.profile || {} : {}))
+  }, [])
+  if (p === undefined) return <div aria-busy="true" />
+  const submit = async (e) => {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    setState({ saving: true })
+    const { status, data } = await api('/api/dashboard/profile', {
+      method: 'POST',
+      body: { phone: f.get('phone'), industry: f.get('industry'), description: f.get('description'), cities: f.get('cities'), services: p.services || [] },
+    })
+    if (status === 200) {
+      setP(data.profile)
+      setState({ saved: true })
+      onSaved?.()
+    } else setState({ error: data.fields?.includes('phone') ? 'Enter a 10-digit US phone number, or leave it empty.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the details and try again.' })
+  }
+  return (
+    <form className="form" onSubmit={submit}>
+      <label className="field">
+        <span>Business phone <em>(shown on your website)</em></span>
+        <input name="phone" type="tel" defaultValue={p.phone || ''} autoComplete="tel" inputMode="tel" />
+      </label>
+      <label className="field">
+        <span>What do you do?</span>
+        <input name="industry" defaultValue={p.industry || ''} maxLength={60} required placeholder="Pool service" />
+      </label>
+      <label className="field">
+        <span>Towns you serve <em>(comma separated)</em></span>
+        <input name="cities" defaultValue={(p.cities || []).join(', ')} />
+      </label>
+      <label className="field">
+        <span>Short description <em>(optional)</em></span>
+        <textarea name="description" rows={3} maxLength={400} defaultValue={p.description || ''} />
+      </label>
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      {state.saved && (
+        <p className="fine" role="status">
+          Saved.
+        </p>
+      )}
+      <button className="btn btn-quiet btn-block" disabled={state.saving}>
+        Save details
       </button>
     </form>
   )

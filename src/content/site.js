@@ -17,7 +17,7 @@ export const steps = [
     id: 'capture',
     title: 'Capture',
     icon: 'inbox',
-    body: 'Your own landing page and booking form collect every inquiry in one place, so no lead sits unseen in an inbox.',
+    body: 'Your own website, with booking built in, collects every inquiry in one place, so no lead sits unseen in an inbox.',
   },
   {
     id: 'qualify',
@@ -54,8 +54,8 @@ export const steps = [
 export const features = [
   {
     icon: 'bolt',
-    title: 'Live in minutes',
-    body: 'Answer a few questions and GetShowUps drafts your landing page from your services and service area. You review it and publish.',
+    title: 'Your website, done for you',
+    body: 'Answer a few questions and GetShowUps builds a mobile-friendly website from your services and service area. Preview it, edit anything, and publish. Hosting included.',
   },
   {
     icon: 'calendar',
@@ -91,7 +91,8 @@ export const pricing = {
   badge: 'Founding customers',
   note: 'Billed monthly. No free trial, no setup fee, cancel any time from your billing page.',
   includes: [
-    'Your own landing page, ready in minutes',
+    'A professional website, built and hosted for you',
+    'Use your GetShowUps address or connect your own domain',
     'Online booking straight into your Google Calendar',
     'Service-area screening for every lead',
     'Email confirmations, reminders and follow-ups',
@@ -115,8 +116,12 @@ export const faqs = [
     a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.',
   },
   {
-    q: 'Will my page say things I didn’t approve?',
-    a: 'No. Your landing page is drafted from what you tell us and stays private until you publish it. Promises like guarantees, discounts, ratings or credentials are never added unless you’ve confirmed them.',
+    q: 'Will my website say things I didn’t approve?',
+    a: 'No. Your website is drafted from what you tell us and stays private until you publish it. Promises like guarantees, discounts, ratings or credentials are never added unless you’ve confirmed them.',
+  },
+  {
+    q: 'Can I use my own domain? What if I cancel?',
+    a: 'Yes. Your website works on a free GetShowUps address, and you can connect a domain you own (like www.yourbusiness.com) from your dashboard. Your domain always stays yours. If you cancel, your website stays online until the end of the period you paid for plus 14 days, you can download your text and photos, and you can point your domain anywhere else.',
   },
   {
     q: 'What does it cost?',

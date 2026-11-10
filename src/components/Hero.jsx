@@ -11,8 +11,8 @@ export default function Hero() {
           Turn More Leads Into Appointments That <span className="text-accent">Actually Show Up</span>
         </h1>
         <p className="hero-sub">
-          GetShowUps gives your business a landing page that books leads straight onto your Google Calendar, reminds
-          them, and tracks who actually shows up. Set up in minutes, $499/month.
+          GetShowUps builds and hosts your business website, books leads straight onto your Google Calendar, reminds
+          them, and tracks who actually shows up. $499/month.
         </p>
         <div className="hero-actions">
           <a href={getStarted.href} className="btn btn-primary btn-lg">

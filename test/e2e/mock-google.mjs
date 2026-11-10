@@ -10,6 +10,7 @@ import { createHmac } from 'node:crypto'
 const APP = `http://127.0.0.1:${process.env.E2E_PORT || 8788}`
 const WHSEC = process.env.E2E_STRIPE_WEBHOOK_SECRET || ''
 const stripe = { customers: new Map(), sessions: new Map(), subs: new Map(), n: 0 }
+const dnsRecords = new Map()
 const nextId = (p) => `${p}_e2e${++stripe.n}`
 async function sendEvent(type, object, { times = 1 } = {}) {
   const event = { id: nextId('evt'), type, created: Math.floor(Date.now() / 1000), livemode: false, data: { object } }
@@ -121,6 +122,17 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/__health') return send(res, 200, { ok: true })
   if (url.pathname === '/__events') return send(res, 200, events)
+  // DNS-over-HTTPS stand-in (DNS_API_MOCK_ORIGIN): records set by tests via /__dns; empty otherwise.
+  if (url.pathname === '/dns-query') {
+    const type = url.searchParams.get('type')
+    const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
+    return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
+  }
+  if (url.pathname === '/__dns' && req.method === 'POST') {
+    const body = JSON.parse(raw)
+    dnsRecords.set(`${body.type}:${body.name}`, body.values)
+    return send(res, 200, { ok: true })
+  }
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/__stripe/')) {
     if ((await stripeMock(req, res, url, raw)) !== null || res.writableEnded) return
   }

@@ -13,6 +13,41 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Managed websites + simpler dashboard (branch release/managed-websites, NOT deployed) (2026-11-10)
+- Website engine: one server-side renderer (server/site-render.js) for /p/:id, connected domains and the owner's
+  private preview. Script-free HTML with a strict CSP, mobile-first, SEO tags + LocalBusiness JSON-LD. Three styles,
+  seven accent colours, logo/hero/gallery images, services with prices/descriptions, about, area, facts, search text.
+  Every text goes through the claims filter.
+- Content model: websites (private draft) + website_versions (every publish kept; restore = rollback).
+  Unpublish keeps the content. A business's published legacy landing page stays live as version 1 when it first
+  saves. The old landing API and React page were retired (one system).
+- Images: browser-resized, byte-sniffed JPEG/PNG/WebP ≤ 1 MB, 30 per business, stored in D1 (no new
+  infrastructure). Public only while a live version uses them.
+- Hosting follows the plan: pilots are always hosted. Self-serve sites are hosted while paid (including past_due),
+  then for 14 days after the paid period ends, then show "unavailable" (content kept; resubscribing restores).
+- Domains: TXT ownership proof (_getshowups.<host>) → attach via the Cloudflare Pages domains API → CNAME → certificate
+  + HTTPS check → Connected. Hostnames are globally unique; nothing is attached before proof; apex domains are steered
+  to www with a forward. Middleware routes connected hosts; other paths redirect. Cron re-checks (bounded). Owners can
+  disconnect, which detaches it while the content stays. **Live provider not configured** (needs CF_API_TOKEN /
+  CF_ACCOUNT_ID / CF_PAGES_PROJECT, approval). Until then a verified domain waits in "verifying" and admin is flagged.
+- Dashboard: Overview (website status, 3 stats, one next step, outcomes to record, upcoming), Appointments,
+  Website, Settings. No internal counters; reminders read "activating soon". Billing appears only for billed businesses.
+- PoolThru billing alert fixed at the root: an abandoned checkout had left an 'incomplete' placeholder (no
+  subscription) and readiness treated it as a plan to fix. Billing now applies only to self-serve signups or real
+  subscriptions, and checkout is refused for pilots (no placeholder rows). No financial records were changed.
+- Attendance: showed ↔ no-show ↔ "not sure yet" (clear), always correctable. An Undo follows each mark.
+  appointment_changes keeps the history, and counts come from the current status (no double counting).
+- Test data: leads from @getshowups.com, platform admins or the business's own users count as tests automatically,
+  and owners can mark or unmark them (test_marks). Tests are listed with a "Test" tag and excluded from dashboard and
+  admin metrics. Nothing is deleted. PoolThru's 2 existing internal test bookings are excluded with no data change.
+- Migration 0009 (additive): websites, website_versions, website_assets, website_domains, appointment_changes,
+  test_marks, onboarding_marks.
+- Onboarding: … hours → website (generated, edit + live preview) → address (GetShowUps / own domain / buy) →
+  preview & publish (consent; or keep private) → done.
+- PoolThru pilot: draft in docs/poolthru/website-draft.json; review and cutover plan in docs/poolthru/MIGRATION.md.
+- Tests: 251 unit, 55 Playwright. Mocked: DNS, hosting provider, HTTPS probe, Stripe, Google. Not live-verified: the
+  custom-domain provider calls.
+
 ### Customer-ready MVP: self-serve signup → checkout → guided onboarding (local, NOT deployed) (2026-11-10)
 - Homepage: one Get started path (/dashboard?plan=founding), Sign in for existing customers, honest copy (no AI
   texting / missed-call / simulation claims; SMS and ads labelled coming soon), founding plan $499/month, no trial,
