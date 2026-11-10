@@ -153,7 +153,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByLabel('Email').fill(lead)
   await page.getByLabel('ZIP', { exact: true }).fill('29403')
   await page.getByRole('button', { name: 'Choose a time' }).click()
-  await page.locator('.slot').nth(5).click()
+  await page.locator('.slot').last().click() // any offered time; the first date may have only a few left late in the day
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: /booked/i })).toBeVisible()
   const events = await (await page.request.get(`${mock}/__events`)).json()
