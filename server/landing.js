@@ -19,17 +19,23 @@ export async function approvedClaimsFor(db, customerId) {
 
 // Deterministic template draft. Nothing here is a claim about quality, price or speed.
 export async function generateDraft(db, customer) {
-  const p = await adProfile(db, customer.id)
-  const services = (p?.services?.length ? p.services : []).slice(0, LIMITS.services)
+  // Business profile from onboarding first; the ads profile is the fallback for older businesses.
+  const bp = await db.prepare('SELECT industry, description, services, cities FROM business_profiles WHERE customer = ?1').bind(customer.id).first()
+  const p = bp
+    ? { industry: bp.industry, services: JSON.parse(bp.services).map((x) => (x.price ? `${x.name} · ${x.price}` : x.name)), area: { cities: JSON.parse(bp.cities) }, claims: (await adProfile(db, customer.id))?.claims || [], description: bp.description }
+    : await adProfile(db, customer.id)
+  const services = (p?.services?.length ? p.services : []).slice(0, LIMITS.services).map((x) => x.slice(0, LIMITS.service))
   const cities = p?.area?.cities || []
   const zips = p?.area?.zips?.length ? p.area.zips : customer.serviceZips
   const area = cities.length ? cities.join(', ') : zips.length ? `ZIP codes ${zips.slice(0, 12).join(', ')}${zips.length > 12 ? ' and nearby' : ''}` : ''
-  const lead = services[0] || p?.industry || 'Service'
+  const lead = (services[0] || p?.industry || 'Service').split(' · ')[0]
   const where = cities[0] ? ` in ${cities[0]}` : ''
   const visit = customer.appointmentMode === 'at_customer'
   return {
     headline: `${lead}${where}`.slice(0, LIMITS.headline),
-    intro: (visit
+    intro: (p?.description
+      ? p.description
+      : visit
       ? `${customer.name} comes to you. Tell us what you need and pick a time that works for you; it takes about a minute.`
       : `Tell ${customer.name} what you need and pick a time that works for you; it takes about a minute.`
     ).slice(0, LIMITS.intro),

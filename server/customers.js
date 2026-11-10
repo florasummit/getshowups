@@ -2,6 +2,7 @@
 import { CUSTOMER_RE } from './invites.js'
 import { isValidTimeZone } from './calendar.js'
 import { track } from './events.js'
+import { onboardingSteps } from './onboarding.js'
 
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 const ZIP_RE = /^[A-Za-z0-9 -]{3,10}$/
@@ -83,7 +84,7 @@ const modeStatement = (db, id, mode, now) =>
     )
     .bind(id, mode, now)
 
-export async function createCustomer(env, email, { name, timezone, serviceZips, appointmentMode }, { source = 'direct', via = 'self_serve' } = {}, now = Date.now()) {
+export async function createCustomer(env, email, { name, timezone, serviceZips, appointmentMode }, { source = 'direct', via = 'self_serve', planId = null } = {}, now = Date.now()) {
   const id = await uniqueCustomerId(env, name)
   const db = env.ONBOARDING_DB
   await db.batch([
@@ -94,6 +95,8 @@ export async function createCustomer(env, email, { name, timezone, serviceZips, 
       .bind(id, name, timezone, serviceZips.join(','), cleanSource(source), via, now),
     ...(email ? [db.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?1, ?2, ?3)').bind(email, id, now)] : []),
     modeStatement(db, id, appointmentMode ?? 'at_business', now),
+    // Self-serve signup on a paid plan: recorded atomically with the business so it can never skip billing.
+    ...(planId ? [db.prepare('INSERT INTO self_signups (customer, plan_id, created_at) VALUES (?1, ?2, ?3)').bind(id, planId, now)] : []),
   ])
   await track(env, 'business_created', { id: `business_created:${id}`, customer: id, props: { source: cleanSource(source), via }, at: now })
   return id
@@ -116,11 +119,14 @@ export async function updateHours(db, id, { slotMinutes, dayStart, dayEnd, workd
 }
 
 // Onboarding progress is derived from saved data, so setup always resumes at the right step.
+// Setup progress. `steps` is the ordered onboarding (see server/onboarding.js); `complete` is true when
+// every step is done. Legacy businesses keep business → calendar → hours.
 export async function progress(env, customer) {
-  if (!customer) return { business: false, calendar: false, hours: false, complete: false }
+  if (!customer) return { business: false, calendar: false, hours: false, complete: false, selfServe: false, billing: 'not_required', steps: [{ id: 'business', done: false }] }
   const calendar = Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`))
   const hours = customer.hoursConfirmed
-  return { business: true, calendar, hours, complete: calendar && hours }
+  const o = await onboardingSteps(env, customer, { calendar })
+  return { business: true, calendar, hours, complete: o.steps.every((s) => s.done), ...o }
 }
 
 export async function getCustomer(db, id) {

@@ -23,6 +23,9 @@ import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
 import * as customers from '../functions/api/admin/customers.js'
 
+// Legacy setup fields; businesses without a self-serve signup are never asked to pay or do extra steps.
+const legacy = (p) => (assert.equal(p.selfServe, false), assert.equal(p.billing, 'not_required'), { business: p.business, calendar: p.calendar, hours: p.hours, complete: p.complete })
+
 const ORIGIN = 'https://getshowups.com'
 const ADMIN = 'admin-token-'.padEnd(48, 'x')
 const CLIENT_ID = 'cid.apps.googleusercontent.com'
@@ -241,7 +244,7 @@ test('login: openid+email only; any verified Google account gets a session (self
   assert.match(cb.res.headers.getSetCookie().find((c) => c.startsWith('__Host-gsu_session=')), /HttpOnly; Secure; SameSite=Lax; Max-Age=604800$/)
   const body = (await call(me, 'GET', '/api/dashboard/me', { cookie })).json()
   assert.equal(body.customer, null)
-  assert.deepEqual(body.progress, { business: false, calendar: false, hours: false, complete: false })
+  assert.deepEqual(legacy(body.progress), { business: false, calendar: false, hours: false, complete: false })
   const row = db.sql.prepare("SELECT token_hash FROM sessions WHERE email = 'new.owner@example.org'").get()
   assert.equal(row.token_hash, await sha256Hex(cookie.split('=')[1]))
 })
@@ -307,7 +310,7 @@ test('onboarding: new user creates a business, connects, sets hours, and setup c
   const id = created.json().id
   assert.equal(id, 'new-pools')
   let state = (await call(me, 'GET', '/api/dashboard/me', { cookie })).json()
-  assert.deepEqual(state.progress, { business: true, calendar: false, hours: false, complete: false })
+  assert.deepEqual(legacy(state.progress), { business: true, calendar: false, hours: false, complete: false })
   assert.deepEqual(state.customer.serviceZips, ['60601', '60602'])
   assert.equal(state.bookingUrl, `${ORIGIN}/book/new-pools`)
 
@@ -319,7 +322,7 @@ test('onboarding: new user creates a business, connects, sets hours, and setup c
   kv.set('google:new-pools', await kvRecord('new-pools', SECRETS.rtA, 'cal@newpools.example')) // what the existing callback stores
   assert.equal((await post(hours, '/api/dashboard/hours', { workdays: [1, 2, 3, 4, 5, 6], dayStart: '08:00', dayEnd: '16:00', slotMinutes: 90 }, { cookie })).status, 200)
   state = (await call(me, 'GET', '/api/dashboard/me', { cookie })).json()
-  assert.deepEqual(state.progress, { business: true, calendar: true, hours: true, complete: true })
+  assert.deepEqual(legacy(state.progress), { business: true, calendar: true, hours: true, complete: true })
   assert.equal(state.customer.slotMinutes, 90)
   assert.equal((await book.info('new-pools')).status, 200)
 })
@@ -367,7 +370,7 @@ test('existing business (PoolThru path): admin links owner, calendar connection 
   const { cookie } = await signIn('care@poolthru.example')
   const state = (await call(me, 'GET', '/api/dashboard/me', { cookie })).json()
   assert.equal(state.customer.id, 'poolthru')
-  assert.deepEqual(state.progress, { business: true, calendar: true, hours: false, complete: false })
+  assert.deepEqual(legacy(state.progress), { business: true, calendar: true, hours: false, complete: false })
   const before = kv.get('google:poolthru')
   await post(hours, '/api/dashboard/hours', { workdays: [1, 2, 3, 4, 5], dayStart: '09:00', dayEnd: '17:00', slotMinutes: 60 }, { cookie })
   assert.equal(kv.get('google:poolthru'), before)

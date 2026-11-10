@@ -13,5 +13,7 @@ export async function onRequestGet({ request, env, params }) {
   const page = await getPage(env.ONBOARDING_DB, customer.id)
   if (!page?.published) return json(404, { error: 'not_found' })
   const { headline, intro, services, area, highlights } = page
-  return json(200, { name: customer.name, appointmentMode: customer.appointmentMode, headline, intro, services, area, highlights })
+  // The business's own public phone number (entered by the owner), if any.
+  const phone = (await env.ONBOARDING_DB.prepare('SELECT phone FROM business_profiles WHERE customer = ?1').bind(customer.id).first())?.phone || ''
+  return json(200, { name: customer.name, appointmentMode: customer.appointmentMode, headline, intro, services, area, highlights, phone })
 }

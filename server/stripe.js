@@ -10,7 +10,11 @@ import { track } from './events.js'
 export const stripeLiveEnabled = (env) => env.STRIPE_LIVE_ENABLED === 'true'
 const testKey = (k) => /^(sk|rk)_test_/.test(String(k || ''))
 export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && (testKey(env.STRIPE_SECRET_KEY) || stripeLiveEnabled(env)))
-const API = 'https://api.stripe.com/v1'
+// STRIPE_API_MOCK_ORIGIN is a loopback-only test override (e2e); never set in production.
+const apiBase = (env) => {
+  const o = env?.STRIPE_API_MOCK_ORIGIN
+  return typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? `${o}/v1` : 'https://api.stripe.com/v1'
+}
 const TOLERANCE_SECONDS = 300
 
 export async function listPlans(db, { includeInactive = false } = {}) {
@@ -31,12 +35,16 @@ function form(params, prefix = '', out = new URLSearchParams()) {
   return out
 }
 
-async function stripePost(env, path, params) {
+async function stripePost(env, path, params, { idempotencyKey, method = 'POST' } = {}) {
   try {
-    const res = await fetch(`${API}${path}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form(params),
+    const res = await fetch(`${apiBase(env)}${path}${method === 'GET' ? `?${form(params)}` : ''}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+        ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
+      body: method === 'POST' ? form(params) : undefined,
       signal: AbortSignal.timeout(10000),
     })
     const body = await res.json().catch(() => ({}))
@@ -50,23 +58,50 @@ async function stripePost(env, path, params) {
 export async function getSubscription(db, customerId) {
   const s = await db.prepare('SELECT * FROM subscriptions WHERE customer = ?1').bind(customerId).first()
   return s
-    ? { status: s.status, planId: s.plan_id, currentPeriodEnd: s.current_period_end, cancelAtPeriodEnd: Boolean(s.cancel_at_period_end), stripeCustomerId: s.stripe_customer_id }
+    ? { status: s.status, planId: s.plan_id, currentPeriodEnd: s.current_period_end, cancelAtPeriodEnd: Boolean(s.cancel_at_period_end), stripeCustomerId: s.stripe_customer_id, stripeSubscriptionId: s.stripe_subscription_id }
     : null
 }
 
+// Starts (or resumes) Stripe Checkout for one business. The business's Stripe customer is created once
+// (idempotency key) and stored before Checkout, so every session and subscription hangs off the same
+// customer. Before opening Checkout we ask Stripe whether that customer already has a subscription
+// (covers a payment whose webhook has not arrived yet) and reuse a still-open session if there is one.
+const LIVE_SUB = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']
 export async function createCheckout(env, { customer, email, planId, origin }) {
-  const plan = await env.ONBOARDING_DB.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()
+  const db = env.ONBOARDING_DB
+  const plan = await db.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()
   if (!plan) return { ok: false, httpStatus: 404, error: 'plan_not_found' }
-  const existing = await getSubscription(env.ONBOARDING_DB, customer.id)
+  const existing = await getSubscription(db, customer.id)
   if (existing && existing.status !== 'canceled' && existing.status !== 'incomplete') return { ok: false, httpStatus: 409, error: 'use_portal' }
+  const neverSubscribed = !existing || (existing.status === 'incomplete' && !existing.stripeSubscriptionId)
+
+  let stripeCustomer = existing?.stripeCustomerId
+  if (!stripeCustomer) {
+    const c = await stripePost(env, '/customers', { email, metadata: { customer: customer.id } }, { idempotencyKey: `gsu-customer-${customer.id}` })
+    if (!c.ok) return c
+    stripeCustomer = c.body.id
+    await db
+      .prepare(
+        `INSERT INTO subscriptions (customer, stripe_customer_id, status, last_event_at, updated_at) VALUES (?1, ?2, 'incomplete', 0, ?3)
+         ON CONFLICT(customer) DO UPDATE SET stripe_customer_id = coalesce(subscriptions.stripe_customer_id, ?2), updated_at = ?3`,
+      )
+      .bind(customer.id, stripeCustomer, Date.now())
+      .run()
+  } else {
+    const subs = await stripePost(env, '/subscriptions', { customer: stripeCustomer, status: 'all', limit: 10 }, { method: 'GET' })
+    if (!subs.ok) return subs
+    if ((subs.body.data || []).some((x) => LIVE_SUB.includes(x.status))) return { ok: false, httpStatus: 409, error: 'use_portal' }
+    const open = await stripePost(env, '/checkout/sessions', { customer: stripeCustomer, status: 'open', limit: 5 }, { method: 'GET' })
+    const resume = open.ok && (open.body.data || []).find((x) => x.url && x.metadata?.plan === plan.id && x.mode === 'subscription')
+    if (resume) return { ok: true, url: resume.url, resumed: true }
+  }
   const r = await stripePost(env, '/checkout/sessions', {
     mode: 'subscription',
     client_reference_id: customer.id,
-    customer: existing?.stripeCustomerId || undefined,
-    customer_email: existing?.stripeCustomerId ? undefined : email,
+    customer: stripeCustomer,
     line_items: { 0: { price: plan.stripe_price_id, quantity: 1 } },
-    // A trial is offered only to a business that has never subscribed.
-    subscription_data: { metadata: { customer: customer.id, plan: plan.id }, trial_period_days: !existing && plan.trial_days > 0 ? plan.trial_days : undefined },
+    // A trial is offered only to a business that has never subscribed (the founding plan has none).
+    subscription_data: { metadata: { customer: customer.id, plan: plan.id }, trial_period_days: neverSubscribed && plan.trial_days > 0 ? plan.trial_days : undefined },
     metadata: { customer: customer.id, plan: plan.id },
     success_url: `${origin}/dashboard?billing=success`,
     cancel_url: `${origin}/dashboard?billing=canceled`,

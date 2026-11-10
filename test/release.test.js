@@ -16,6 +16,9 @@ import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
 
+// Legacy setup fields; businesses without a self-serve signup are never asked to pay or do extra steps.
+const legacy = (p) => (assert.equal(p.selfServe, false), assert.equal(p.billing, 'not_required'), { business: p.business, calendar: p.calendar, hours: p.hours, complete: p.complete })
+
 const ORIGIN = 'https://getshowups.com'
 const ADMIN = 'admin-token-'.padEnd(48, 'x')
 const CLIENT_ID = 'cid.apps.googleusercontent.com'
@@ -341,7 +344,7 @@ test('migrations: 0002 is additive and idempotent over production state; PoolThr
   const state = new URL(start.res.headers.get('Location')).searchParams.get('state')
   const cb = await call(loginCallback, 'GET', `/api/auth/google/callback?code=c&state=${state}`, { headers: { Cookie: start.res.headers.get('Set-Cookie').split(';')[0] } })
   const cookie = cb.res.headers.getSetCookie().find((c) => c.startsWith('__Host-gsu_session=')).split(';')[0]
-  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { headers: { Cookie: cookie } })).json().progress, { business: true, calendar: true, hours: false, complete: false })
+  assert.deepEqual(legacy((await call(me, 'GET', '/api/dashboard/me', { headers: { Cookie: cookie } })).json().progress), { business: true, calendar: true, hours: false, complete: false })
   await call(hours, 'POST', '/api/dashboard/hours', { headers: { Cookie: cookie }, body: { workdays: [0, 1, 2, 3, 4, 5, 6], dayStart: '00:00', dayEnd: '23:00', slotMinutes: 60 } })
   const { body } = await leadAndSlot()
   assert.equal((await appt(body)).status, 201)

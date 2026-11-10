@@ -23,6 +23,9 @@ import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
 
+// Legacy setup fields; businesses without a self-serve signup are never asked to pay or do extra steps.
+const legacy = (p) => (assert.equal(p.selfServe, false), assert.equal(p.billing, 'not_required'), { business: p.business, calendar: p.calendar, hours: p.hours, complete: p.complete })
+
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
 const WHSEC = 'whsec_test_secret'
@@ -92,7 +95,13 @@ beforeEach(async () => {
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
     PLATFORM_ADMIN_EMAILS: 'Ops@GetShowUps.com, second@getshowups.com',
   }
-  stripe = { checkout: () => [200, { url: 'https://checkout.stripe.com/c/test' }], portal: () => [200, { url: 'https://billing.stripe.com/p/test' }] }
+  stripe = {
+    checkout: () => [200, { url: 'https://checkout.stripe.com/c/test' }],
+    portal: () => [200, { url: 'https://billing.stripe.com/p/test' }],
+    customer: () => [200, { id: 'cus_new' }],
+    subscriptions: () => [200, { data: [] }],
+    openSessions: () => [200, { data: [] }],
+  }
   resend = () => [200, { id: 'email_1' }]
   origFetch = globalThis.fetch
   globalThis.fetch = async (url, init = {}) => {
@@ -103,6 +112,9 @@ beforeEach(async () => {
     else if (u.endsWith('/freeBusy')) out = [200, { calendars: { primary: { busy: [] } } }]
     else if (u.endsWith('/events?sendUpdates=all')) out = [200, { id: JSON.parse(init.body).id }]
     else if (u === 'https://api.stripe.com/v1/checkout/sessions') out = stripe.checkout(new URLSearchParams(init.body))
+    else if (u.startsWith('https://api.stripe.com/v1/checkout/sessions?')) out = stripe.openSessions(new URL(u).searchParams)
+    else if (u === 'https://api.stripe.com/v1/customers') out = stripe.customer(new URLSearchParams(init.body), init.headers)
+    else if (u.startsWith('https://api.stripe.com/v1/subscriptions?')) out = stripe.subscriptions(new URL(u).searchParams)
     else if (u === 'https://api.stripe.com/v1/billing_portal/sessions') out = stripe.portal(new URLSearchParams(init.body))
     else if (u === 'https://api.resend.com/emails') out = resend(JSON.parse(init.body))
     else throw new Error(`unexpected ${u}`)
@@ -223,7 +235,7 @@ test('assisted setup: admin creates business + invite; owner accepts and authori
   assert.equal((await call(accept, 'POST', '/api/dashboard/accept-invite', { cookie: ownerCookie, body: { token } })).status, 200)
   const state = (await call(me, 'GET', '/api/dashboard/me', { cookie: ownerCookie })).json()
   assert.equal(state.customer.id, 'sunny-pools')
-  assert.deepEqual(state.progress, { business: true, calendar: false, hours: false, complete: false })
+  assert.deepEqual(legacy(state.progress), { business: true, calendar: false, hours: false, complete: false })
   assert.equal((await call(accept, 'POST', '/api/dashboard/accept-invite', { cookie: await session('new2@owner.example'), body: { token } })).status, 404, 'single use')
 })
 
@@ -350,10 +362,22 @@ test('billing: checkout offers the trial once, then the portal manages changes',
   assert.equal(sent.get('line_items[0][price]'), 'price_TEST123')
   assert.equal(sent.get('subscription_data[trial_period_days]'), '14')
   assert.equal(sent.get('client_reference_id'), 'alpha')
-  assert.equal(sent.get('customer_email'), 'owner@alpha.example')
+  assert.equal(sent.get('customer'), 'cus_new', 'Stripe customer created first and reused')
+  const created = fetches.find((f) => f.url.endsWith('/v1/customers'))
+  assert.equal(created.init.headers['Idempotency-Key'], 'gsu-customer-alpha')
+  assert.equal(new URLSearchParams(created.init.body).get('metadata[customer]'), 'alpha')
+  assert.equal(db.sql.prepare("SELECT stripe_customer_id s FROM subscriptions WHERE customer = 'alpha'").get().s, 'cus_new')
   assert.equal(fetches.find((f) => f.url.endsWith('/checkout/sessions')).init.headers.Authorization, 'Bearer sk_test_SECRET')
 
-  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, status, updated_at) VALUES ('alpha', 'cus_1', 'active', 1)").run()
+  // Returning before paying: the still-open session is resumed, no new customer or session is made.
+  stripe.openSessions = () => [200, { data: [{ url: 'https://checkout.stripe.com/c/open', mode: 'subscription', metadata: { plan: 'starter' } }] }]
+  const before = fetches.length
+  assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })).json().url, 'https://checkout.stripe.com/c/open')
+  assert.ok(!fetches.slice(before).some((f) => f.url.endsWith('/v1/customers') || f.url.endsWith('/checkout/sessions')))
+  // Paid in Stripe but the webhook has not arrived yet: no second subscription.
+  stripe.subscriptions = (q) => (assert.equal(q.get('customer'), 'cus_new'), [200, { data: [{ status: 'active' }] }])
+  assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })).json().error, 'use_portal')
+  db.sql.prepare("UPDATE subscriptions SET stripe_customer_id = 'cus_1', status = 'active' WHERE customer = 'alpha'").run()
   assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })).json().error, 'use_portal')
   const portal = await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'portal' } })
   assert.equal(portal.json().url, 'https://billing.stripe.com/p/test')

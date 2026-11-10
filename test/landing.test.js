@@ -89,7 +89,7 @@ test('publish → public; unapproved claims rejected; unpublish → 404; public 
   assert.equal((await call(landing, 'POST', { cookie: c, body: { ...page, publish: true } })).json.page.published, true)
   const pub = await call(publicPage, 'GET', { params: { customer: 'pools' } })
   assert.equal(pub.status, 200)
-  assert.deepEqual(Object.keys(pub.json).sort(), ['appointmentMode', 'area', 'headline', 'highlights', 'intro', 'name', 'services'])
+  assert.deepEqual(Object.keys(pub.json).sort(), ['appointmentMode', 'area', 'headline', 'highlights', 'intro', 'name', 'phone', 'services'])
   assert.ok(!pub.text.includes('owner@pools.example'))
   await call(landing, 'POST', { cookie: c, body: { ...page, publish: false } })
   assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools' } })).status, 404)

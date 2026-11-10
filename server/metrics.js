@@ -14,7 +14,8 @@ export async function customerRows(env, now = Date.now()) {
               (SELECT count(*) FROM account_invites i WHERE i.customer = c.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2) AS pending_invites,
               (SELECT min(i.created_at) FROM account_invites i WHERE i.customer = c.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2) AS oldest_invite,
               (SELECT count(*) FROM events e WHERE e.customer = c.id AND e.type = 'booking_failed' AND e.at >= ?3) AS failures7,
-              s.status AS sub_status, s.plan_id, s.mrr_cents, coalesce(ss.appointment_mode, 'at_business') AS appointment_mode
+              s.status AS sub_status, s.plan_id, s.mrr_cents, s.cancel_at_period_end, coalesce(ss.appointment_mode, 'at_business') AS appointment_mode,
+              (SELECT 1 FROM self_signups x WHERE x.customer = c.id) AS self_serve
          FROM customers c LEFT JOIN subscriptions s ON s.customer = c.id LEFT JOIN service_settings ss ON ss.customer = c.id
         ORDER BY c.created_at DESC`,
     )
@@ -30,6 +31,10 @@ export async function customerRows(env, now = Date.now()) {
     const attention = []
     if (r.status === 'suspended') attention.push('suspended')
     if (r.sub_status === 'past_due') attention.push('past_due')
+    if (r.sub_status === 'canceled') attention.push('subscription_ended')
+    if (r.cancel_at_period_end && r.sub_status !== 'canceled') attention.push('cancel_scheduled')
+    // Self-serve signup that never completed checkout within a day.
+    if (r.self_serve && (!r.sub_status || r.sub_status === 'incomplete') && now - r.created_at > DAY) attention.push('checkout_abandoned')
     if (r.failures7 > 0) attention.push('booking_failures')
     if (hours && !calendar) attention.push('calendar_disconnected')
     if (onboarding !== 'live' && onboarding !== 'suspended' && now - r.created_at > DAY) attention.push('setup_stalled')
