@@ -1,14 +1,15 @@
 // /api/dashboard/onboarding — guided-setup actions and the launch checklist.
 //   GET  → { readiness: { items, next } }   (live calendar check included)
 //   POST { action: 'check_availability' } → { slots, status }   (the same data the booking page shows)
-//   POST { action: 'tested' }   → marks the booking test step done
-//   POST { action: 'finish' }   → finishes onboarding (calendar, hours and a saved page required)
+//   POST { action: 'address', choice: 'getshowups' | 'own' | 'buy' } → records the website address choice
+//   POST { action: 'keep_private' } → finish without publishing yet (publish later from Website)
+//   POST { action: 'finish' }   → finishes onboarding (plan, details, services, calendar, hours, website)
 import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { connect, freeBusy } from '../../../server/calendar.js'
 import { openSlots } from '../../../server/booking.js'
 import { progress } from '../../../server/customers.js'
-import { getSignup, markSignup, readiness } from '../../../server/onboarding.js'
+import { getSignup, markSignup, markStep, readiness } from '../../../server/onboarding.js'
 import { track } from '../../../server/events.js'
 
 async function calendarStatus(env, customerId) {
@@ -46,9 +47,16 @@ export async function onRequestPost({ request, env }) {
     case 'tested':
       await markSignup(db, customer.id, 'test_checked_at')
       return json(200, { ok: true })
+    case 'address':
+      if (!['getshowups', 'own', 'buy'].includes(body.choice)) return json(400, { error: 'invalid_request' })
+      await markStep(db, customer.id, 'address', body.choice)
+      return json(200, { ok: true })
+    case 'keep_private':
+      await markStep(db, customer.id, 'publish', 'private')
+      return json(200, { ok: true })
     case 'finish': {
       const p = await progress(env, customer)
-      const required = ['payment', 'details', 'services', 'calendar', 'hours', 'page']
+      const required = ['payment', 'details', 'services', 'calendar', 'hours', 'website']
       const missing = p.steps.filter((s) => required.includes(s.id) && !s.done).map((s) => s.id)
       if (missing.length) return json(409, { error: 'steps_incomplete', missing })
       await markSignup(db, customer.id, 'test_checked_at')

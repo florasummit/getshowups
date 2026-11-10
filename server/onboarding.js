@@ -3,6 +3,8 @@
 // launch-readiness checklist shown at the end of onboarding and on the dashboard.
 import { unapprovedClaims } from './ads/spec.js'
 import { getSubscription, listPlans, stripeConfigured } from './stripe.js'
+import { websiteSummary } from './website.js'
+import { domainFor } from './domains.js'
 
 const PAID = ['active', 'trialing', 'past_due'] // past_due: paid before, in Stripe's retry window
 
@@ -71,7 +73,7 @@ export async function saveProfile(db, customerId, p, now = Date.now()) {
 
 // ---------- steps ----------
 // Legacy businesses (no self_signups row): business → calendar → hours, exactly as before.
-// Self-serve: business → payment → details → services → calendar → hours → page → test → launch.
+// Self-serve: business → payment → details → services → calendar → hours → website → address → publish → launch.
 export async function onboardingSteps(env, customer, { calendar }) {
   const db = env.ONBOARDING_DB
   const signup = customer ? await getSignup(db, customer.id) : null
@@ -83,11 +85,14 @@ export async function onboardingSteps(env, customer, { calendar }) {
     ]
     return { selfServe: false, steps, billing: 'not_required' }
   }
-  const [sub, profile, page] = await Promise.all([
+  const [sub, profile, site, marks, domain] = await Promise.all([
     getSubscription(db, customer.id),
     getProfile(db, customer.id),
-    db.prepare('SELECT published FROM landing_pages WHERE customer = ?1').bind(customer.id).first(),
+    websiteSummary(db, customer.id),
+    db.prepare('SELECT step FROM onboarding_marks WHERE customer = ?1').bind(customer.id).all(),
+    domainFor(env, customer.id),
   ])
+  const marked = new Set(marks.results.map((m) => m.step))
   const billing = sub ? sub.status : 'required'
   const steps = [
     { id: 'business', done: true },
@@ -97,11 +102,20 @@ export async function onboardingSteps(env, customer, { calendar }) {
     { id: 'services', done: Boolean(profile?.services?.length) },
     { id: 'calendar', done: calendar },
     { id: 'hours', done: customer.hoursConfirmed },
-    { id: 'page', done: Boolean(page) },
-    { id: 'test', done: Boolean(signup.test_checked_at) },
+    { id: 'website', done: site.exists },
+    // Website address: the GetShowUps address, or the owner's domain (connecting continues in the background).
+    { id: 'address', done: marked.has('address') || Boolean(domain) },
+    // Published, or the owner chose to keep it private for now.
+    { id: 'publish', done: site.published || marked.has('publish') },
     { id: 'launch', done: Boolean(signup.onboarded_at) },
   ]
   return { selfServe: true, steps, billing, planId: signup.plan_id }
+}
+
+export const MARKS = ['address', 'publish']
+export async function markStep(db, customerId, step, value = null, now = Date.now()) {
+  if (!MARKS.includes(step)) throw new Error('bad step')
+  await db.prepare('INSERT INTO onboarding_marks (customer, step, value, at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(customer, step) DO UPDATE SET value = ?3, at = ?4').bind(customerId, step, value, now).run()
 }
 
 export async function markSignup(db, customerId, field, now = Date.now()) {
@@ -111,26 +125,33 @@ export async function markSignup(db, customerId, field, now = Date.now()) {
 
 // ---------- readiness ----------
 // Honest status of everything the customer depends on. state: ok | action | pending | off.
+// Billing appears only for businesses that are billed: self-serve signups, or a business with a real
+// Stripe subscription. Pilot/invited businesses are never asked to pay; a checkout someone opened
+// and abandoned (an 'incomplete' placeholder without a subscription) is not a plan to fix.
 export async function readiness(env, customer, { calendarStatus } = {}) {
   const db = env.ONBOARDING_DB
-  const [sub, page, signup, appts] = await Promise.all([
+  const [sub, site, signup, appts, domain] = await Promise.all([
     getSubscription(db, customer.id),
-    db.prepare('SELECT published FROM landing_pages WHERE customer = ?1').bind(customer.id).first(),
+    websiteSummary(db, customer.id),
     getSignup(db, customer.id),
     db.prepare('SELECT count(*) AS n FROM appointments WHERE customer = ?1').bind(customer.id).first(),
+    domainFor(env, customer.id),
   ])
   const items = []
-  if (signup || sub) {
+  if (signup || sub?.stripeSubscriptionId) {
     const s = sub?.status
     items.push({
       id: 'subscription',
-      state: s === 'active' || s === 'trialing' ? (sub.cancelAtPeriodEnd ? 'action' : 'ok') : s === 'past_due' ? 'action' : 'action',
-      detail: s === 'active' ? (sub.cancelAtPeriodEnd ? 'cancel_scheduled' : 'active') : s || 'not_started',
+      state: (s === 'active' || s === 'trialing') && !sub.cancelAtPeriodEnd ? 'ok' : 'action',
+      detail: s === 'active' || s === 'trialing' ? (sub.cancelAtPeriodEnd ? 'cancel_scheduled' : 'active') : s || 'not_started',
     })
   }
   items.push({ id: 'calendar', state: calendarStatus === 'healthy' ? 'ok' : 'action', detail: calendarStatus || 'unknown' })
   items.push({ id: 'hours', state: customer.hoursConfirmed ? 'ok' : 'action' })
-  items.push({ id: 'page', state: page?.published ? 'ok' : 'action', detail: page ? (page.published ? 'published' : 'draft') : 'none' })
+  items.push({ id: 'page', state: site.published ? 'ok' : 'action', detail: site.published ? 'published' : site.exists ? 'draft' : 'none' })
+  if (domain) {
+    items.push({ id: 'domain', state: domain.status === 'connected' ? 'ok' : domain.status === 'needs_attention' || domain.step === 'verify' || domain.step === 'point' ? 'action' : 'pending', detail: domain.status, step: domain.step })
+  }
   items.push({ id: 'booking', state: (appts?.n ?? 0) > 0 ? 'ok' : 'pending', detail: (appts?.n ?? 0) > 0 ? 'has_bookings' : 'no_bookings_yet' })
   items.push({ id: 'email', state: env.MESSAGES_LIVE === 'true' ? 'ok' : 'pending', detail: env.MESSAGES_LIVE === 'true' ? 'live' : 'activating' })
   items.push({ id: 'sms', state: 'off', detail: 'not_available_yet' })

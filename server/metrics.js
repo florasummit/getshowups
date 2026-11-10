@@ -1,4 +1,7 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
+// Test records (server/testdata.js) are excluded from every count.
+import { internalEmails, isTestLead } from './testdata.js'
+import { providerConfigured } from './domains.js'
 const DAY = 24 * 60 * 60 * 1000
 
 export async function customerRows(env, now = Date.now()) {
@@ -8,9 +11,13 @@ export async function customerRows(env, now = Date.now()) {
     .prepare(
       `SELECT c.id, c.name, c.source, c.created_via, c.status, c.created_at, c.hours_confirmed_at,
               (SELECT group_concat(email, ', ') FROM customer_users u WHERE u.customer = c.id) AS owners,
-              (SELECT count(*) FROM leads l WHERE l.customer = c.id AND l.created_at >= ?1) AS leads30,
-              (SELECT count(*) FROM appointments a WHERE a.customer = c.id AND a.status IN ('booked','showed','no_show') AND a.created_at >= ?1) AS booked30,
-              (SELECT max(a.created_at) FROM appointments a WHERE a.customer = c.id AND a.status IN ('booked','showed','no_show')) AS last_booking,
+              (SELECT count(*) FROM leads l WHERE l.customer = c.id AND l.created_at >= ?1 AND NOT ${isTestLead('l', '?4')}) AS leads30,
+              (SELECT count(*) FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = c.id AND a.status IN ('booked','showed','no_show') AND a.created_at >= ?1 AND NOT ${isTestLead('l', '?4')}) AS booked30,
+              (SELECT max(a.created_at) FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = c.id AND a.status IN ('booked','showed','no_show') AND NOT ${isTestLead('l', '?4')}) AS last_booking,
+              (SELECT count(*) FROM leads l WHERE l.customer = c.id AND ${isTestLead('l', '?4')}) AS test_leads,
+              (SELECT status FROM website_domains d WHERE d.customer = c.id AND d.status <> 'removed') AS domain_status,
+              (SELECT detail FROM website_domains d WHERE d.customer = c.id AND d.status <> 'removed') AS domain_detail,
+              (SELECT live_version IS NOT NULL FROM websites w WHERE w.customer = c.id) AS site_live,
               (SELECT count(*) FROM account_invites i WHERE i.customer = c.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2) AS pending_invites,
               (SELECT min(i.created_at) FROM account_invites i WHERE i.customer = c.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2) AS oldest_invite,
               (SELECT count(*) FROM events e WHERE e.customer = c.id AND e.type = 'booking_failed' AND e.at >= ?3) AS failures7,
@@ -19,7 +26,7 @@ export async function customerRows(env, now = Date.now()) {
          FROM customers c LEFT JOIN subscriptions s ON s.customer = c.id LEFT JOIN service_settings ss ON ss.customer = c.id
         ORDER BY c.created_at DESC`,
     )
-    .bind(since30, now, now - 7 * DAY)
+    .bind(since30, now, now - 7 * DAY, internalEmails(env))
     .all()
 
   const rows = []
@@ -36,6 +43,9 @@ export async function customerRows(env, now = Date.now()) {
     // Self-serve signup that never completed checkout within a day.
     if (r.self_serve && (!r.sub_status || r.sub_status === 'incomplete') && now - r.created_at > DAY) attention.push('checkout_abandoned')
     if (r.failures7 > 0) attention.push('booking_failures')
+    // Domains: ownership proven but hosting can't attach it yet, or a connected domain stopped working.
+    if (r.domain_status === 'verifying' && (r.domain_detail === 'provider_error' || !providerConfigured(env))) attention.push('domain_activation')
+    if (r.domain_status === 'needs_attention') attention.push('domain_problem')
     if (hours && !calendar) attention.push('calendar_disconnected')
     if (onboarding !== 'live' && onboarding !== 'suspended' && now - r.created_at > DAY) attention.push('setup_stalled')
     if (r.oldest_invite && now - r.oldest_invite > 3 * DAY) attention.push('invite_pending')
@@ -56,6 +66,8 @@ export async function customerRows(env, now = Date.now()) {
       booked30: r.booked30,
       lastBooking: r.last_booking,
       pendingInvites: r.pending_invites,
+      testLeads: r.test_leads,
+      website: { live: Boolean(r.site_live), domain: r.domain_status || null },
       subscription: r.sub_status ? { status: r.sub_status, planId: r.plan_id, mrrCents: r.mrr_cents } : null,
       attention,
     })
@@ -76,7 +88,13 @@ export async function growth(env, rows, now = Date.now()) {
   const customers = await one("SELECT count(*) AS total, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active FROM customers")
   const activated = { n: rows.filter((r) => r.calendarConnected && r.onboarding !== 'invited' && r.onboarding !== 'calendar' && r.onboarding !== 'hours').length }
   const firstBooked = { n: rows.filter((r) => r.lastBooking && r.calendarConnected).length }
-  const leads = await one("SELECT sum(CASE WHEN status <> 'unqualified' THEN 1 ELSE 0 END) AS qualified, sum(CASE WHEN status = 'booked' THEN 1 ELSE 0 END) AS booked, count(*) AS total FROM leads WHERE created_at >= ?1", since30)
+  const internal = internalEmails(env)
+  const leads = await one(
+    `SELECT sum(CASE WHEN status <> 'unqualified' THEN 1 ELSE 0 END) AS qualified, sum(CASE WHEN status = 'booked' THEN 1 ELSE 0 END) AS booked, count(*) AS total
+       FROM leads l WHERE created_at >= ?1 AND NOT ${isTestLead('l', '?2')}`,
+    since30,
+    internal,
+  )
   // Outcomes split by appointment mode: attendance for at_business; visit happened vs job completed
   // for at_customer (a technician arriving is not a completed job).
   const outcomes = await one(
@@ -91,15 +109,18 @@ export async function growth(env, rows, now = Date.now()) {
        sum(CASE WHEN a.status = 'showed' AND ao.value_cents IS NOT NULL THEN 1 ELSE 0 END) AS valued
      FROM appointments a
      JOIN (SELECT c.id, coalesce(ss.appointment_mode, 'at_business') AS mode FROM customers c LEFT JOIN service_settings ss ON ss.customer = c.id) m ON m.id = a.customer
+     JOIN leads l ON l.id = a.lead_id
      LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer
-     WHERE a.start_at >= ?1`,
+     WHERE a.start_at >= ?1 AND NOT ${isTestLead('l', '?2')}`,
     since30,
+    internal,
   )
   const retained = await one(
-    `SELECT count(*) AS cohort, sum(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.customer = c.id AND a.created_at >= ?2 AND a.status IN ('booked','showed','no_show')) THEN 1 ELSE 0 END) AS active
+    `SELECT count(*) AS cohort, sum(CASE WHEN EXISTS (SELECT 1 FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = c.id AND a.created_at >= ?2 AND a.status IN ('booked','showed','no_show') AND NOT ${isTestLead('l', '?3')}) THEN 1 ELSE 0 END) AS active
        FROM customers c WHERE c.hours_confirmed_at IS NOT NULL AND c.hours_confirmed_at < ?1`,
     since30,
     since30,
+    internal,
   )
   const subs = await one(
     "SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions",

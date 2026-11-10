@@ -21,6 +21,8 @@ export const RULES = {
   adsCreative: { limit: 12, windowSec: 3600 }, //    POST /api/dashboard/ads/creative generate (per business)
   adsWrite: { limit: 60, windowSec: 600 }, //        other ads writes (per business)
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
+  domain: { limit: 30, windowSec: 600 }, //          POST /api/dashboard/domain (per business; each check does DNS lookups)
+  assetUpload: { limit: 40, windowSec: 3600 }, //    POST /api/dashboard/website/assets (per business)
 }
 
 const clientIp = (request) => request.headers.get('CF-Connecting-IP') || 'local'

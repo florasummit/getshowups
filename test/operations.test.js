@@ -351,6 +351,7 @@ test('billing: hidden and refused when Stripe is not configured', async () => {
 
 test('billing: checkout offers the trial once, then the portal manages changes', async () => {
   seed('alpha')
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('alpha', 'starter', 1)").run() // a billed (self-serve) business
   configureStripe()
   await addPlan(await admin())
   const owner = await session('owner@alpha.example')

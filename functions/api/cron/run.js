@@ -1,6 +1,6 @@
 // POST /api/cron/run — called every 5 minutes by the scheduler Worker (workers/scheduler).
 // Auth: Authorization: Bearer <CRON_SECRET> (32+ chars). Sends due lead messages, queues onboarding
-// follow-ups, and flushes the account email outbox. Returns counts only.
+// follow-ups, flushes the account email outbox, and checks customer domains. Returns counts only.
 import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server/google-oauth.js'
 import { processDueMessages } from '../../../server/messages.js'
 import { queueFollowUps } from '../../../server/accounts.js'
@@ -9,6 +9,7 @@ import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer } from '../../../server/ads/campaigns.js'
 import { runOptimizer } from '../../../server/ads/optimizer.js'
 import { pollVideos } from '../../../server/ads/creative.js'
+import { checkDueDomains } from '../../../server/domains.js'
 
 // Ads work runs after messages and never fails the run (each step reports its own error code).
 async function adsStep(label, fn) {
@@ -36,7 +37,8 @@ export async function onRequestPost({ request, env }) {
       optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: pauseForOptimizer })),
       videos: await adsStep('videos', () => pollVideos(env)),
     }
-    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed }, ads })
+    const domains = await adsStep('domains', () => checkDueDomains(env))
+    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

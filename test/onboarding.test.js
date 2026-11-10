@@ -1,5 +1,5 @@
 // Self-serve onboarding: Get started → business on the founding plan → payment gate (Stripe webhook
-// decides) → details → services → calendar → hours → page → test → launch. Legacy businesses keep their
+// decides) → details → services → calendar → hours → website → address → publish → launch. Legacy businesses keep their
 // three-step setup and are never asked to pay. node:sqlite D1, Map KV, mocked Google; no network.
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
@@ -12,8 +12,8 @@ import * as business from '../functions/api/dashboard/business.js'
 import * as profile from '../functions/api/dashboard/profile.js'
 import * as onboarding from '../functions/api/dashboard/onboarding.js'
 import * as hours from '../functions/api/dashboard/hours.js'
-import * as landing from '../functions/api/dashboard/landing.js'
-import * as publicPage from '../functions/api/page/[customer].js'
+import * as website from '../functions/api/dashboard/website/index.js'
+import * as publicSite from '../functions/p/[customer].js'
 import * as webhook from '../functions/api/stripe/webhook.js'
 
 const ORIGIN = 'https://getshowups.com'
@@ -51,7 +51,13 @@ async function call(mod, method, { cookie, body, params, origin = ORIGIN, path =
   if (method === 'POST' && origin) h.Origin = origin
   const res = await mod[method === 'GET' ? 'onRequestGet' : 'onRequestPost']({ request: new Request(`${ORIGIN}${path}`, { method, headers: h, body: raw ?? (body && JSON.stringify(body)) }), env, params })
   const text = await res.text()
-  return { status: res.status, json: JSON.parse(text || 'null') }
+  let parsed = null
+  try {
+    parsed = JSON.parse(text || 'null')
+  } catch {
+    parsed = null // HTML (public website)
+  }
+  return { status: res.status, json: parsed, text }
 }
 async function deliver(event) {
   const raw = JSON.stringify({ livemode: false, ...event })
@@ -109,7 +115,7 @@ test('get started: name only creates the business on the founding plan; payment 
   const p = (await call(me, 'GET', { cookie })).json.progress
   assert.equal(p.selfServe, true)
   assert.equal(p.billing, 'required')
-  assert.deepEqual(p.steps.map((s) => s.id), ['business', 'payment', 'details', 'services', 'calendar', 'hours', 'page', 'test', 'launch'])
+  assert.deepEqual(p.steps.map((s) => s.id), ['business', 'payment', 'details', 'services', 'calendar', 'hours', 'website', 'address', 'publish', 'launch'])
   assert.deepEqual(p.steps.filter((s) => s.done).map((s) => s.id), ['business'])
   // Same account cannot create a second business.
   assert.equal((await call(business, 'POST', { cookie, body: { name: 'Again', timezone: 'America/New_York', serviceZips: '' } })).status, 200, 'second POST updates the same business')
@@ -158,34 +164,55 @@ test('profile: validation, phone formatting, claims filter, and tenant isolation
   assert.equal((await call(profile, 'GET', {})).status, 401)
 })
 
-test('full self-serve journey: steps advance from saved data; finish requires the core steps; page drafted from profile', async () => {
+test('full self-serve journey: steps advance from saved data; finish requires the core steps; website drafted from profile', async () => {
   const { cookie, id } = await newSignup()
   assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'finish' } })).json.missing.length, 6)
   await activate(id)
   await call(profile, 'POST', { cookie, body: { industry: 'Pool service', phone: '(843) 555-0123', cities: ['Charleston'], description: 'Family-run pool care across Charleston.' } })
-  assert.deepEqual(await stepsOf(cookie), { business: true, payment: true, details: true, services: false, calendar: false, hours: false, page: false, test: false, launch: false })
+  assert.deepEqual(await stepsOf(cookie), { business: true, payment: true, details: true, services: false, calendar: false, hours: false, website: false, address: false, publish: false, launch: false })
   await call(profile, 'POST', { cookie, body: { industry: 'Pool service', phone: '(843) 555-0123', cities: ['Charleston'], description: 'Family-run pool care across Charleston.', services: [{ name: 'Weekly pool cleaning', price: 'From $150/month' }, { name: 'Green pool cleanup', price: '' }], requireServices: true } })
   await connectCalendar(id)
   assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'check_availability' } })).json.error, 'hours_required')
   assert.equal((await call(hours, 'POST', { cookie, body: { workdays: [1, 2, 3, 4, 5], dayStart: '08:00', dayEnd: '17:00', slotMinutes: 60 } })).status, 200)
-  const draft = (await call(landing, 'GET', { cookie })).json.page
+  const w = (await call(website, 'GET', { cookie })).json
+  assert.equal(w.website.generated, true)
+  const draft = w.website.draft
   assert.equal(draft.headline, 'Weekly pool cleaning in Charleston')
   assert.equal(draft.intro, 'Family-run pool care across Charleston.')
-  assert.deepEqual(draft.services, ['Weekly pool cleaning · From $150/month', 'Green pool cleanup'])
-  // Draft saved privately: page step done, page still not public.
-  await call(landing, 'POST', { cookie, body: { ...draft, publish: false } })
-  assert.equal((await call(publicPage, 'GET', { params: { customer: id } })).status, 404)
+  assert.deepEqual(draft.services.map((x) => [x.name, x.price]), [['Weekly pool cleaning', 'From $150/month'], ['Green pool cleanup', '']])
+  // Draft saved privately: website step done, site still not public.
+  assert.equal((await call(website, 'POST', { cookie, body: { action: 'save', content: draft } })).status, 200)
+  assert.equal((await call(publicSite, 'GET', { params: { customer: id } })).status, 404)
+  assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'address', choice: 'getshowups' } })).status, 200)
   const avail = await call(onboarding, 'POST', { cookie, body: { action: 'check_availability' } })
   assert.equal(avail.json.status, 'ok')
   assert.ok(avail.json.slots > 0)
-  await call(onboarding, 'POST', { cookie, body: { action: 'tested' } })
+  // Publishing needs explicit confirmation.
+  assert.equal((await call(website, 'POST', { cookie, body: { action: 'publish', content: draft } })).json.error, 'confirmation_required')
+  assert.equal((await call(website, 'POST', { cookie, body: { action: 'publish', content: draft, confirm: true } })).status, 200)
   assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'finish' } })).status, 200)
   const p = (await call(me, 'GET', { cookie })).json.progress
   assert.equal(p.complete, true)
-  // Publishing (explicit) makes the page public with the business phone.
-  await call(landing, 'POST', { cookie, body: { ...draft, publish: true } })
-  const pub = await call(publicPage, 'GET', { params: { customer: id } })
-  assert.deepEqual([pub.status, pub.json.phone], [200, '(843) 555-0123'])
+  const pub = await call(publicSite, 'GET', { params: { customer: id } })
+  assert.equal(pub.status, 200)
+  assert.ok(pub.text.includes('(843) 555-0123') && pub.text.includes('Weekly pool cleaning in Charleston'))
+})
+
+test('onboarding: the owner can keep the website private and finish; publishing later works', async () => {
+  const { cookie, id } = await newSignup()
+  await activate(id)
+  await call(profile, 'POST', { cookie, body: { industry: 'Pool service', services: [{ name: 'Cleaning' }], requireServices: true } })
+  await connectCalendar(id)
+  await call(hours, 'POST', { cookie, body: { workdays: [1, 2, 3, 4, 5], dayStart: '08:00', dayEnd: '17:00', slotMinutes: 60 } })
+  const draft = (await call(website, 'GET', { cookie })).json.website.draft
+  await call(website, 'POST', { cookie, body: { action: 'save', content: draft } })
+  assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'address', choice: 'nonsense' } })).status, 400)
+  await call(onboarding, 'POST', { cookie, body: { action: 'address', choice: 'own' } })
+  await call(onboarding, 'POST', { cookie, body: { action: 'keep_private' } })
+  const steps = await stepsOf(cookie)
+  assert.deepEqual([steps.website, steps.address, steps.publish, steps.launch], [true, true, true, false])
+  assert.equal((await call(onboarding, 'POST', { cookie, body: { action: 'finish' } })).status, 200)
+  assert.equal((await call(publicSite, 'GET', { params: { customer: id } })).status, 404, 'kept private')
 })
 
 test('readiness is honest: messaging activating, SMS and ads not available, next action points at what is missing', async () => {

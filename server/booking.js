@@ -7,6 +7,7 @@ import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlo
 import { track } from './events.js'
 import { verifyLinkToken } from './links.js'
 import { scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
+import { isTestLead } from './testdata.js'
 
 export const BOOKING_DAYS = 14
 const DAY = 24 * 60 * 60 * 1000
@@ -241,29 +242,40 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
   return { ok: true, appointment: { id, start, end, leadId: lead.id, smsConsent: await hasSmsConsent(db, lead.id) } }
 }
 
-// Owner records what happened after an appointment (or corrects it).
-//   outcome: 'showed' = the appointment / visit happened; 'no_show' = it did not.
+// Owner records what happened after an appointment, or corrects it at any time.
+//   outcome: 'showed' = the appointment / visit happened; 'no_show' = it did not;
+//            'clear' = undo: back to "not recorded yet" (booked).
 //   work (optional, only with 'showed'): 'completed' | 'not_completed' — whether the job was done.
 //     A technician arriving is a 'showed' visit; it is not a completed job unless work says so.
 //   valueCents (optional, only with 'showed'): self-reported value of the booked job.
+// Allowed: booked → showed | no_show; showed ↔ no_show; showed | no_show → booked (clear). Only for
+// appointments that have started; cancelled appointments can't get an outcome. Every change is kept
+// in appointment_changes (who, when, from → to); counts always come from the current status, so a
+// correction never double counts.
 // A no-show reopens the lead (status 'new') so it can book again and shows under "Haven't booked yet";
-// correcting it to showed before they rebook closes the lead again.
+// correcting it before they rebook closes the lead again (the pending rebook message is then skipped).
 const MAX_VALUE_CENTS = 100000000
-export async function setOutcome(env, customer, id, outcome, { work, valueCents } = {}, now = Date.now()) {
+export async function setOutcome(env, customer, id, outcome, { work, valueCents, by = 'owner' } = {}, now = Date.now()) {
   const db = env.ONBOARDING_DB
-  if (!['showed', 'no_show'].includes(outcome) || typeof id !== 'string') return fail(400, 'invalid_request')
+  if (!['showed', 'no_show', 'clear'].includes(outcome) || typeof id !== 'string') return fail(400, 'invalid_request')
   if (work !== undefined && work !== null && !['completed', 'not_completed'].includes(work)) return fail(400, 'invalid_work')
   if (valueCents !== undefined && valueCents !== null && (!Number.isInteger(valueCents) || valueCents < 0 || valueCents > MAX_VALUE_CENTS)) {
     return fail(400, 'invalid_value')
   }
-  if (outcome === 'no_show' && (work != null || valueCents != null)) return fail(400, 'invalid_request')
+  if (outcome !== 'showed' && (work != null || valueCents != null)) return fail(400, 'invalid_request')
+  const to = outcome === 'clear' ? 'booked' : outcome
+  const before = await db
+    .prepare("SELECT status FROM appointments WHERE id = ?1 AND customer = ?2 AND status IN ('booked', 'showed', 'no_show') AND start_at <= ?3")
+    .bind(id, customer.id, now)
+    .first()
+  if (!before) return fail(404, 'not_found')
   const row = await db
     .prepare(
-      "UPDATE appointments SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2 AND status IN ('booked', 'showed', 'no_show') AND start_at <= ?4 RETURNING id, status, lead_id",
+      "UPDATE appointments SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2 AND status = ?5 AND start_at <= ?4 RETURNING id, status, lead_id",
     )
-    .bind(id, customer.id, outcome, now)
+    .bind(id, customer.id, to, now, before.status)
     .first()
-  if (!row) return fail(404, 'not_found')
+  if (!row) return fail(409, 'changed') // someone else changed it at the same moment; reload
   if (outcome === 'showed' && (work != null || valueCents != null)) {
     await db
       .prepare(
@@ -273,16 +285,22 @@ export async function setOutcome(env, customer, id, outcome, { work, valueCents 
       .bind(id, customer.id, work ?? null, valueCents ?? null, now)
       .run()
   } else {
-    // A visit that didn't happen has no work or value; a bare 'showed' clears earlier details.
+    // A visit that didn't happen (or an undone outcome) has no work or value; a bare 'showed' clears earlier details.
     await db.prepare('DELETE FROM appointment_outcomes WHERE appointment_id = ?1 AND customer = ?2').bind(id, customer.id).run()
   }
-  const [from, to] = outcome === 'no_show' ? ['booked', 'new'] : ['new', 'booked']
+  const [from, leadTo] = outcome === 'no_show' ? ['booked', 'new'] : ['new', 'booked']
   const lead = await db
     .prepare('UPDATE leads SET status = ?4, updated_at = ?5 WHERE id = ?1 AND customer = ?2 AND status = ?3 RETURNING id')
-    .bind(row.lead_id, customer.id, from, to, now)
+    .bind(row.lead_id, customer.id, from, leadTo, now)
     .first()
   if (outcome === 'no_show' && lead) {
     await scheduleNoShowMessage(env, customer, { id, leadId: row.lead_id, smsConsent: await hasSmsConsent(db, row.lead_id) }, now)
+  }
+  if (before.status !== to || outcome === 'showed') {
+    await db
+      .prepare('INSERT INTO appointment_changes (appointment_id, customer, from_status, to_status, work, changed_by, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
+      .bind(id, customer.id, before.status, to, outcome === 'showed' ? (work ?? null) : null, String(by).slice(0, 200), now)
+      .run()
   }
   await track(env, 'appointment_outcome', { id: `outcome:${id}`, customer: customer.id, props: { outcome, work: work ?? null }, at: now, replace: true })
   return { ok: true, leadId: row.lead_id, appointment: { id: row.id, status: row.status, work: outcome === 'showed' ? (work ?? null) : null, valueCents: outcome === 'showed' ? (valueCents ?? null) : null } }
@@ -292,10 +310,12 @@ const addressOf = (r) => (r.street ? formatAddress({ street: r.street, unit: r.u
 
 // Results and work lists for the dashboard home (last 30 days + upcoming). Service addresses are
 // included only for this business's own lists.
-export async function overview(db, customerId, now = Date.now()) {
+// Test records (server/testdata.js) are listed with test: true and left out of every count.
+// `internal`: JSON list from internalEmails(env).
+export async function overview(db, customerId, now = Date.now(), internal = '[]') {
   const since = now - 30 * DAY
   const one = (sql, ...args) => db.prepare(sql).bind(customerId, ...args).first()
-  const leads = await one('SELECT count(*) AS n FROM leads WHERE customer = ?1 AND created_at >= ?2', since)
+  const leads = await one(`SELECT count(*) AS n FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`, since, internal)
   const counts = await one(
     `SELECT
        sum(CASE WHEN a.status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS booked,
@@ -308,36 +328,43 @@ export async function overview(db, customerId, now = Date.now()) {
        sum(CASE WHEN a.status = 'showed' THEN ao.value_cents ELSE 0 END) AS value_cents,
        sum(CASE WHEN a.status = 'showed' AND ao.value_cents IS NOT NULL THEN 1 ELSE 0 END) AS valued
      FROM appointments a
+     JOIN leads l ON l.id = a.lead_id
      LEFT JOIN appointment_confirmations ac ON ac.appointment_id = a.id
      LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer
-     WHERE a.customer = ?1 AND a.created_at >= ?2`,
+     WHERE a.customer = ?1 AND a.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`,
     since,
+    internal,
   )
   const list = async (sql, ...args) => (await db.prepare(sql).bind(customerId, ...args).all()).results
   const apptCols = `a.id, a.start_at, a.end_at, a.status, (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed_at,
-    l.name, l.phone, l.email, l.need, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ao.work, ao.value_cents`
+    l.id AS lead_id, l.name, l.phone, l.email, l.need, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ao.work, ao.value_cents`
+  const testCol = (param) => `${isTestLead('l', param)} AS is_test`
   const apptFrom = `appointments a JOIN leads l ON l.id = a.lead_id
     LEFT JOIN lead_addresses la ON la.lead_id = l.id AND la.customer = a.customer
     LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer`
   const upcoming = await list(
-    `SELECT ${apptCols} FROM ${apptFrom}
+    `SELECT ${apptCols}, ${testCol('?3')} FROM ${apptFrom}
       WHERE a.customer = ?1 AND a.status = 'booked' AND a.start_at > ?2 ORDER BY a.start_at LIMIT 25`,
     now,
+    internal,
   )
   const needsOutcome = await list(
-    `SELECT ${apptCols} FROM ${apptFrom}
+    `SELECT ${apptCols}, ${testCol('?3')} FROM ${apptFrom}
       WHERE a.customer = ?1 AND a.status = 'booked' AND a.start_at <= ?2 ORDER BY a.start_at DESC LIMIT 25`,
     now,
+    internal,
   )
   const recent = await list(
-    `SELECT ${apptCols} FROM ${apptFrom}
-      WHERE a.customer = ?1 AND a.status IN ('showed','no_show') ORDER BY a.start_at DESC LIMIT 10`,
+    `SELECT ${apptCols}, ${testCol('?2')} FROM ${apptFrom}
+      WHERE a.customer = ?1 AND a.status IN ('showed','no_show') ORDER BY a.start_at DESC LIMIT 25`,
+    internal,
   )
   const followUp = await list(
-    `SELECT l.id, l.name, l.phone, l.email, l.need, l.status, l.created_at, la.street, la.unit, la.city, la.state, la.zip AS address_zip
+    `SELECT l.id, l.name, l.phone, l.email, l.need, l.status, l.created_at, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ${testCol('?3')}
        FROM leads l LEFT JOIN lead_addresses la ON la.lead_id = l.id AND la.customer = l.customer
       WHERE l.customer = ?1 AND l.status IN ('new','unqualified') AND l.created_at >= ?2 ORDER BY l.created_at DESC LIMIT 25`,
     since,
+    internal,
   )
   const showed = counts?.showed ?? 0
   const noShow = counts?.no_show ?? 0
@@ -354,6 +381,8 @@ export async function overview(db, customerId, now = Date.now()) {
     address: addressOf(r),
     work: r.status === 'showed' ? (r.work ?? null) : null,
     valueCents: r.status === 'showed' ? (r.value_cents ?? null) : null,
+    leadId: r.lead_id,
+    test: Boolean(r.is_test),
   })
   const completed = counts?.completed ?? 0
   const notCompleted = counts?.not_completed ?? 0
@@ -381,6 +410,6 @@ export async function overview(db, customerId, now = Date.now()) {
     upcoming: upcoming.map(appt),
     needsOutcome: needsOutcome.map(appt),
     recent: recent.map(appt),
-    followUp: followUp.map((r) => ({ id: r.id, name: r.name, phone: r.phone, email: r.email, need: r.need, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
+    followUp: followUp.map((r) => ({ id: r.id, leadId: r.id, test: Boolean(r.is_test), name: r.name, phone: r.phone, email: r.email, need: r.need, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
   }
 }
