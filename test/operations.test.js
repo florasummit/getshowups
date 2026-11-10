@@ -451,6 +451,16 @@ test('webhook: current API shapes (2025-03-31+): period end on items, invoice me
   assert.equal(db.sql.prepare("SELECT count(*) c FROM events WHERE type = 'payment_failed' AND customer = 'beta'").get().c, 1)
 })
 
+test('webhook: portal cancellation via cancel_at (current API) is recorded as scheduled', async () => {
+  configureStripe()
+  seed('alpha')
+  await signed(subEvent('evt_c1', 'customer.subscription.created', 100, { status: 'active' }))
+  await signed(subEvent('evt_c2', 'customer.subscription.updated', 200, { status: 'active', cancel_at_period_end: false, cancel_at: 1910000000 }))
+  assert.equal(db.sql.prepare("SELECT cancel_at_period_end c FROM subscriptions WHERE customer = 'alpha'").get().c, 1)
+  await signed(subEvent('evt_c3', 'customer.subscription.updated', 300, { status: 'active', cancel_at_period_end: false, cancel_at: null }))
+  assert.equal(db.sql.prepare("SELECT cancel_at_period_end c FROM subscriptions WHERE customer = 'alpha'").get().c, 0, 'owner undid the cancellation')
+})
+
 test('monthlyCents normalizes intervals and quantities', () => {
   const sub = (amount, interval, count = 1, quantity = 1) => ({ items: { data: [{ quantity, price: { unit_amount: amount, recurring: { interval, interval_count: count } } }] } })
   assert.equal(monthlyCents(sub(12000, 'year')), 1000)

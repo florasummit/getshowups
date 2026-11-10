@@ -133,6 +133,9 @@ async function upsertSubscription(env, customer, event, sub) {
   // the subscription. Use whichever is present (latest item end when several).
   const itemEnds = (sub.items?.data || []).map((i) => i.current_period_end).filter(Number.isFinite)
   const periodEnd = sub.current_period_end ?? (itemEnds.length ? Math.max(...itemEnds) : null)
+  // A scheduled cancellation: older API versions set cancel_at_period_end; current versions (seen with
+  // 2026-10-28 from the customer portal) set cancel_at and leave cancel_at_period_end false.
+  const cancelScheduled = Boolean(sub.cancel_at_period_end || (sub.cancel_at && status !== 'canceled'))
   const plan = priceId ? await db.prepare('SELECT id FROM plans WHERE stripe_price_id = ?1').bind(priceId).first() : null
   await db
     .prepare(
@@ -141,7 +144,7 @@ async function upsertSubscription(env, customer, event, sub) {
        ON CONFLICT(customer) DO UPDATE SET stripe_customer_id = ?2, stripe_subscription_id = ?3, plan_id = ?4, status = ?5, mrr_cents = ?6,
          currency = ?7, current_period_end = ?8, cancel_at_period_end = ?9, last_event_at = ?10, updated_at = ?11`,
     )
-    .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, sub.cancel_at_period_end ? 1 : 0, at, Date.now())
+    .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, cancelScheduled ? 1 : 0, at, Date.now())
     .run()
   if (prior?.status !== status) {
     const type = status === 'canceled' ? 'subscription_canceled' : !prior || prior.status === 'incomplete' || prior.status === 'canceled' ? 'subscription_started' : 'subscription_status_changed'
