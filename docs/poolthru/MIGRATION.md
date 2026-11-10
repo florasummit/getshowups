@@ -27,8 +27,10 @@ choice; I have not changed it.
 
 ## 2. Review the draft (no production change)
 
-- Local file: open `poolthru-preview.html` from the session scratchpad. It is rendered by the production engine
-  with the inert preview links. A visit-mode variant, `poolthru-preview-visit-mode.html`, sits next to it.
+- **Local preview (real site engine, isolated data):** run `npm run preview:poolthru`, then open
+  http://127.0.0.1:8795/p/poolthru-llc. It uses a throwaway local database seeded only with PoolThru's public
+  details and this draft, fake credentials, and a local calendar stand-in. Production is never touched, and
+  "Book a time" opens a local booking page that cannot create real bookings. Stop it with Ctrl+C.
 - After the release is deployed (approval), the owner can review it privately in Dashboard → Website.
   Loading `website-draft.json` into PoolThru's **private draft** is a production write (**approval**). Nothing is
   public until the owner ticks the consent box and presses Publish.

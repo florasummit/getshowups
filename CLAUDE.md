@@ -158,7 +158,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 
 - Websites: one renderer, no scripts on business sites, every text through the claims filter, drafts private until
   an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content.
-- Domains: never attach a hostname before its TXT proof; never claim "connected" without the HTTPS check; never touch
+- Domains: never attach a hostname before its TXT proof; never claim "connected" without DNS pointing at us AND hosting reporting the domain active with a validated
+  certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN
   and CLOUDFLARE_API_MOCK_ORIGIN are loopback-only test vars.
 - Pilot / invited / admin-created businesses are never billed: no plan card, checkout refused (no placeholder rows).

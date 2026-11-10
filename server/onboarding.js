@@ -5,6 +5,7 @@ import { unapprovedClaims } from './ads/spec.js'
 import { getSubscription, listPlans, stripeConfigured } from './stripe.js'
 import { websiteSummary } from './website.js'
 import { domainFor } from './domains.js'
+import { internalEmails, isTestLead } from './testdata.js'
 
 const PAID = ['active', 'trialing', 'past_due'] // past_due: paid before, in Stripe's retry window
 
@@ -102,11 +103,12 @@ export async function onboardingSteps(env, customer, { calendar }) {
     { id: 'services', done: Boolean(profile?.services?.length) },
     { id: 'calendar', done: calendar },
     { id: 'hours', done: customer.hoursConfirmed },
-    { id: 'website', done: site.exists },
+    // Businesses that finished onboarding before these steps existed are not sent back into setup.
+    { id: 'website', done: site.exists || Boolean(signup.onboarded_at) },
     // Website address: the GetShowUps address, or the owner's domain (connecting continues in the background).
-    { id: 'address', done: marked.has('address') || Boolean(domain) },
+    { id: 'address', done: marked.has('address') || Boolean(domain) || Boolean(signup.onboarded_at) },
     // Published, or the owner chose to keep it private for now.
-    { id: 'publish', done: site.published || marked.has('publish') },
+    { id: 'publish', done: site.published || marked.has('publish') || Boolean(signup.onboarded_at) },
     { id: 'launch', done: Boolean(signup.onboarded_at) },
   ]
   return { selfServe: true, steps, billing, planId: signup.plan_id }
@@ -134,7 +136,8 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
     getSubscription(db, customer.id),
     websiteSummary(db, customer.id),
     getSignup(db, customer.id),
-    db.prepare('SELECT count(*) AS n FROM appointments WHERE customer = ?1').bind(customer.id).first(),
+    // Real bookings only (test records never count).
+    db.prepare(`SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND NOT ${isTestLead('l', '?2')}`).bind(customer.id, internalEmails(env)).first(),
     domainFor(env, customer.id),
   ])
   const items = []

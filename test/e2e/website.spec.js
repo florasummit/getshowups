@@ -4,6 +4,34 @@
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
+import { deflateSync } from 'node:zlib'
+
+// A real 64×48 PNG (solid teal), built here so no binary fixture is committed.
+function png(w = 64, h = 48) {
+  const crc = (buf) => {
+    let c = ~0
+    for (const b of buf) {
+      c ^= b
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1))
+    }
+    return ~c >>> 0
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const td = Buffer.concat([Buffer.from(type), data])
+    const c = Buffer.alloc(4)
+    c.writeUInt32BE(crc(td))
+    return Buffer.concat([len, td, c])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0)
+  ihdr.writeUInt32BE(h, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  const rows = Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, Buffer.from([15, 118, 110]))])))
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))])
+}
 
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 
@@ -24,6 +52,15 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await page.getByLabel('Headline').fill('Pool care in Charleston')
   await page.getByText('Bold').click()
   await expect(page.getByText('All changes saved')).toBeVisible()
+  // Upload a main photo (resized in the browser, stored by the server, private until published).
+  await page.getByText('Logo and photos').click()
+  await page.locator('.image-pick', { hasText: 'Main photo' }).locator('input[type=file]').setInputFiles({ name: 'pool.png', mimeType: 'image/png', buffer: png() })
+  const thumb = page.locator('.image-pick', { hasText: 'Main photo' }).locator('img')
+  await expect(thumb).toBeVisible()
+  const photo = await thumb.getAttribute('src')
+  expect(await thumb.evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
+  await expect(page.getByText('All changes saved')).toBeVisible()
+  expect((await page.context().request.get(photo, { headers: { Cookie: '' } })).status(), 'private before publishing').toBe(404)
   if (mobile) await page.getByRole('tab', { name: 'Preview' }).click()
   const frame = page.frameLocator('iframe[title="Website preview"]')
   await expect(frame.getByRole('heading', { level: 1, name: 'Pool care in Charleston' })).toBeVisible()
@@ -41,6 +78,7 @@ test('owner edits, previews and publishes the website; visitors book through it 
   // Visitors: server-rendered site, ad parameters carried to booking.
   await page.goto(`/p/${id}?utm_source=google&utm_campaign=camp12345678`)
   await expect(page.getByRole('heading', { name: 'Pool care in Charleston', level: 1 })).toBeVisible()
+  expect(await page.locator('img.hero-photo').evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByRole('heading', { level: 2, name: mobile ? 'Book a visit' : 'Book an appointment' })).toBeVisible()
   await noOverflow()
   await page.getByRole('link', { name: mobile ? 'Book a visit' : 'Book a time' }).first().click()

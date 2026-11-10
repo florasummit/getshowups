@@ -205,7 +205,10 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
     await set(db, hostname, { status: 'needs_attention', detail: 'provider_error' }, now)
     return 'needs_attention'
   }
-  if (pointed && active && (await probe(hostname, r.verify_token))) {
+  // Connected = DNS points at us, hosting reports the domain active with its certificate validated, and
+  // (when reachable from our servers) an HTTPS request returns this business's site check.
+  const certified = p.ok && p.validation === 'active' && p.verification === 'active'
+  if (pointed && active && ((await probe(hostname, r.verify_token)) || certified)) {
     await set(db, hostname, { status: 'connected', detail: null, connected_at: r.connected_at || now }, now)
     return 'connected'
   }

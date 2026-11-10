@@ -12,7 +12,8 @@
     "test:e2e": "playwright test",
     "check:functions": "wrangler pages functions build ./functions --outdir .wrangler/functions-check --compatibility-date 2026-11-08",
     "verify": "oxlint --deny-warnings && npm test && npm run build && npm run check:functions",
-    "verify:all": "npm run verify && npm run test:e2e"
+    "verify:all": "npm run verify && npm run test:e2e",
+    "preview:poolthru": "bash scripts/preview-poolthru.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",

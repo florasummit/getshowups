@@ -45,7 +45,11 @@ _Update at the end of every task. Newest first._
 - Onboarding: … hours → website (generated, edit + live preview) → address (GetShowUps / own domain / buy) →
   preview & publish (consent; or keep private) → done.
 - PoolThru pilot: draft in docs/poolthru/website-draft.json; review and cutover plan in docs/poolthru/MIGRATION.md.
-- Tests: 251 unit, 55 Playwright. Mocked: DNS, hosting provider, HTTPS probe, Stripe, Google. Not live-verified: the
+- Release verification (2026-11-10): fixed onboarded self-serve businesses being sent back into setup, a
+  domain status that could get stuck at "Securing" when the HTTPS check can't reach the domain, and readiness
+  counting test bookings. 0009 was verified on a fresh production export. Real image upload is e2e-tested on workerd.
+  Local PoolThru preview: `npm run preview:poolthru`. Runbook: docs/RELEASE-managed-websites.md.
+- Tests: 252 unit, 55 Playwright. Mocked: DNS, hosting provider, HTTPS probe, Stripe, Google. Not live-verified: the
   custom-domain provider calls.
 
 ### Customer-ready MVP: self-serve signup → checkout → guided onboarding (local, NOT deployed) (2026-11-10)

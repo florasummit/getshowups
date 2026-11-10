@@ -339,6 +339,10 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   provider.domains.get('www.poolsco.com').status = 'active'
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeOk }), 'connected')
+  // Without a reachable HTTPS check, a validated certificate from hosting is required instead.
+  db.sql.prepare("UPDATE website_domains SET status = 'securing' WHERE hostname = 'www.poolsco.com'").run()
+  Object.assign(provider.domains.get('www.poolsco.com'), { validation_data: { status: 'active' }, verification_data: { status: 'active' } })
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'connected')
   const ok = (await call(domain, 'GET', { cookie: c })).json
   assert.deepEqual([ok.domain.status, ok.domain.url], ['connected', 'https://www.poolsco.com'])
   assert.ok(!JSON.stringify(ok).includes('cf_SECRET_TOKEN'))
@@ -507,6 +511,16 @@ test('attendance: only the business’s own, already-started, non-cancelled appo
   assert.equal(db.sql.prepare('SELECT count(*) n FROM appointment_changes').get().n, 0)
 })
 
+test('self-serve businesses that finished onboarding before the website steps existed stay on their dashboard', async () => {
+  const { progress } = await import('../server/customers.js')
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at, onboarded_at) VALUES ('pools', 'founding', 1, 2)").run()
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, updated_at) VALUES ('pools', 'cus_1', 'sub_1', 'active', 1)").run()
+  db.sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('pools', '', 'Pool service', '', '[{\"name\":\"Cleaning\",\"price\":\"\"}]', '[]', 1)").run()
+  const p = await progress(env, { id: 'pools', hoursConfirmed: true })
+  assert.equal(p.selfServe, true)
+  assert.equal(p.complete, true)
+})
+
 // ---------- test data ----------
 
 test('test records: internal and owner-made bookings are tagged and excluded from results; owners can re-mark', async () => {
@@ -530,6 +544,10 @@ test('test records: internal and owner-made bookings are tagged and excluded fro
   // Admin metrics exclude tests too.
   const rows = await customerRows(env)
   assert.equal(rows.find((r) => r.id === 'pools').booked30, 1)
+  const ready = await readiness(env, { id: 'salon', hoursConfirmed: true }, { calendarStatus: 'healthy' })
+  appointment('salon', { email: 'owner@salon.example' })
+  assert.equal((await readiness(env, { id: 'salon', hoursConfirmed: true }, { calendarStatus: 'healthy' })).items.find((i) => i.id === 'booking').state, 'pending', 'a test booking is not "receiving bookings"')
+  assert.equal(ready.next, 'page', 'next step is the website, not a false "receiving bookings"')
   const g = await growth(env, rows)
   assert.equal(g.showUpRate30, 100)
   // Isolation and validation.
