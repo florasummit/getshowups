@@ -28,6 +28,18 @@ function pendingInvite() {
     return null
   }
 }
+// "Get started" sends visitors to /dashboard?plan=founding; the plan survives the Google round trip.
+const PLAN_KEY = 'gsu_plan'
+function pendingPlan() {
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('plan')
+    if (fromUrl && /^[a-z0-9-]{1,40}$/.test(fromUrl)) localStorage.setItem(PLAN_KEY, fromUrl)
+    return localStorage.getItem(PLAN_KEY)
+  } catch {
+    return null
+  }
+}
+
 const clearInvite = () => {
   try {
     sessionStorage.removeItem(INVITE_KEY)
@@ -36,15 +48,20 @@ const clearInvite = () => {
   }
 }
 
-function SignIn({ invite }) {
+function SignIn({ invite, plan }) {
   const message = LOGIN_ERRORS[new URLSearchParams(window.location.search).get('login_error')]
+  const signup = plan && !invite
   return (
     <main className="center-page">
       <div className="panel panel--narrow enter">
         <Logo href="/" />
-        <h1 className="title">{invite ? `Join ${invite.businessName}` : 'Welcome'}</h1>
+        <h1 className="title">{invite ? `Join ${invite.businessName}` : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
         <p className="lede">
-          {invite ? `Sign in with the Google account for ${invite.email}.` : 'Sign in to set up or manage your booking page.'}
+          {invite
+            ? `Sign in with the Google account for ${invite.email}.`
+            : signup
+              ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month founding plan.'
+              : 'Sign in to manage your booking page.'}
         </p>
         {message && (
           <p className="form-error" role="alert">
@@ -54,7 +71,20 @@ function SignIn({ invite }) {
         <a className="btn btn-primary btn-lg btn-block" href="/api/auth/google/start">
           Continue with Google
         </a>
-        <p className="fine">We only use your email address to sign you in.</p>
+        <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage.</p>
+        {!invite && (
+          <p className="fine">
+            {signup ? (
+              <>
+                Already have an account? <a href="/dashboard">Sign in</a>
+              </>
+            ) : (
+              <>
+                New to GetShowUps? <a href="/dashboard?plan=founding">Create an account</a>
+              </>
+            )}
+          </p>
+        )}
       </div>
     </main>
   )
@@ -87,12 +117,13 @@ function InviteProblem({ error, expected, email }) {
 export default function Dashboard() {
   const [me, setMe] = useState({ loading: true })
   const [invite] = useState(pendingInvite)
+  const [plan] = useState(pendingPlan)
   const [invitePreview, setInvitePreview] = useState(null)
   const [inviteError, setInviteError] = useState(null)
 
   // Resolves the account, accepting a pending invitation first when the user has no business yet.
   const resolve = useCallback(async () => {
-    const { status, data } = await api('/api/dashboard/me')
+    const { status, data } = await api(`/api/dashboard/me${plan ? `?plan=${encodeURIComponent(plan)}` : ''}`)
     if (status === 200 && invite && !data.customer) {
       const r = await api('/api/dashboard/accept-invite', { method: 'POST', body: { token: invite } })
       if (r.status === 200) {
@@ -104,7 +135,7 @@ export default function Dashboard() {
     }
     if (status === 200 && invite) clearInvite()
     return { me: status === 200 ? { data } : status === 401 ? { signedOut: true } : { error: true } }
-  }, [invite])
+  }, [invite, plan])
 
   const load = useCallback(
     () =>
@@ -124,7 +155,7 @@ export default function Dashboard() {
   }, [load, invite])
 
   if (me.loading) return <main className="center-page" aria-busy="true" />
-  if (me.signedOut) return <SignIn invite={invitePreview} />
+  if (me.signedOut) return <SignIn invite={invitePreview} plan={plan} />
   if (me.error) {
     return (
       <main className="center-page">

@@ -4,6 +4,7 @@ import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
 import { BusinessForm, HoursForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
+import { NextStep } from './Readiness.jsx'
 
 const Ads = lazy(() => import('./Ads.jsx'))
 const LandingSettings = lazy(() => import('./LandingSettings.jsx'))
@@ -86,7 +87,17 @@ function BillingCard({ billing }) {
 function AccountNotice({ customer, billing }) {
   const [state, setState] = useState({})
   const pastDue = billing?.subscription?.status === 'past_due'
-  if (customer.status !== 'suspended' && !pastDue) return null
+  const ended = billing?.subscription?.status === 'canceled'
+  if (customer.status !== 'suspended' && !pastDue && !ended) {
+    return null
+  }
+  if (ended && customer.status !== 'suspended') {
+    return (
+      <div className="notice enter" role="status">
+        <p>Your GetShowUps plan has ended. Reactivate it in Settings to keep your page and reminders running.</p>
+      </div>
+    )
+  }
   return (
     <div className="notice enter" role="status">
       <p>{customer.status === 'suspended' ? 'Your booking page is paused.' : 'Your last payment didn’t go through.'}</p>
@@ -505,6 +516,7 @@ export default function Home({ me, reload }) {
           <>
             <h1 className="title title--page">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} />
+            <NextStep onOpen={(where) => (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable ? openBilling({ action: 'portal' }, () => {}) : setView('settings'))} />
             <Overview me={me} />
           </>
         ) : view === 'ads' ? (

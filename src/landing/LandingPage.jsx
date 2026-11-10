@@ -4,14 +4,16 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import '../app.css'
 
-export default function LandingPage({ id }) {
-  const [state, setState] = useState({ loading: true })
+// `preview`: render the owner's unpublished draft (onboarding/settings) without fetching; links are inert.
+export default function LandingPage({ id, preview }) {
+  const [state, setState] = useState(preview ? { data: preview } : { loading: true })
   useEffect(() => {
+    if (preview) return
     api(`/api/page/${id}`).then(({ status, data }) => {
       setState(status === 200 ? { data } : { missing: status === 404, error: status !== 404 })
       if (status === 200) document.title = `${data.headline} | ${data.name}`
     })
-  }, [id])
+  }, [id, preview])
 
   if (state.loading) return <main className="center-page" aria-busy="true" />
   if (!state.data) {
@@ -24,20 +26,27 @@ export default function LandingPage({ id }) {
       </main>
     )
   }
-  const p = state.data
+  const p = preview || state.data
   const visit = p.appointmentMode === 'at_customer'
   // Carry utm/gclid to the booking page so the lead is attributed to the ad that brought them.
-  const book = `/book/${id}${window.location.search}`
+  const book = preview ? undefined : `/book/${id}${window.location.search}`
+  const inert = preview ? { onClick: (e) => e.preventDefault(), 'aria-disabled': true, tabIndex: -1 } : {}
+  const tel = p.phone ? `tel:+1${p.phone.replace(/\D/g, '')}` : null
   const cta = visit ? 'Book a visit' : 'Book a time'
   return (
-    <main className="landing">
+    <main className={preview ? 'landing landing--preview' : 'landing'}>
       <header className="landing-hero">
         <p className="booking-biz">{p.name}</p>
         <h1 className="title">{p.headline}</h1>
         <p className="lede">{p.intro}</p>
-        <a className="btn btn-primary btn-block landing-cta" href={book}>
+        <a className="btn btn-primary btn-block landing-cta" href={book} {...inert}>
           {cta}
         </a>
+        {tel && (
+          <a className="btn btn-quiet btn-block" href={preview ? undefined : tel} {...inert}>
+            Call {p.phone}
+          </a>
+        )}
       </header>
 
       {p.services.length > 0 && (
@@ -72,7 +81,7 @@ export default function LandingPage({ id }) {
         {p.area && <p className="fine">Service area: {p.area}</p>}
       </section>
 
-      <a className="btn btn-primary btn-block landing-cta" href={book}>
+      <a className="btn btn-primary btn-block landing-cta" href={book} {...inert}>
         {cta}
       </a>
       <p className="fine landing-foot">
