@@ -13,6 +13,27 @@ _Update at the end of every task. Newest first._
 
 ## In progress
 
+### Customer-ready MVP: self-serve signup → checkout → guided onboarding (local, NOT deployed) (2026-11-10)
+- Homepage: one Get started path (/dashboard?plan=founding), Sign in for existing customers, honest copy (no AI
+  texting / missed-call / simulation claims; SMS and ads labelled coming soon), founding plan $499/month, no trial,
+  ad spend separate. Meta descriptions updated.
+- Account: Google sign-in (existing auth; Google-verified email, no passwords). Plan survives the OAuth round trip.
+  Business name only, then checkout; one business per account.
+- Billing: Stripe customer created first (idempotency key), duplicate-subscription guard against Stripe, open-session
+  resume, cancel/decline handled, access follows the signed webhook; existing businesses unaffected.
+- Onboarding (resumable, server-derived): details (phone, industry, towns, ZIPs, description, mode, timezone) →
+  services (suggested, with prices) → calendar (existing OAuth; live health check, reconnect) → hours → landing page
+  (draft from profile, live preview, publish only with explicit consent) → availability check → launch checklist.
+- Dashboard: Next step card (readiness), plan-ended notice; admin attention flags: checkout_abandoned,
+  cancel_scheduled, subscription_ended.
+- Migration 0008 (additive): self_signups, business_profiles. Tested on the latest production backup: 2 new tables,
+  33 existing unchanged, integrity ok; PoolThru has no self_signups row.
+- Tests: 233 unit, 54 Playwright (selfserve.spec: full journey on desktop and phone with a local Stripe stand-in that
+  sends Stripe-signed webhooks). Real Stripe sandbox: customer-first checkout, resume, duplicate guard all PASS.
+  e2e mock calendars are now per business (fixed cross-spec slot races at the root).
+- Needs approval: deploy + migration 0008; then a production sandbox journey with a temporary test business.
+
+
 ### Launch completion: release candidate on branch release/ads-mvp (2026-11-09), NOT pushed or deployed
 - Production D1 backup taken (read-only export, 39 rows, kept locally in the session scratchpad, not committed).
   Migrations 0006 + 0007 applied twice to a restored copy: 12 new tables, all 21 existing tables byte-identical,

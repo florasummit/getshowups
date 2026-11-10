@@ -24,7 +24,8 @@ src/                 React marketing site (Vite → dist/). Browser code only.
   content/           Copy and data (site.js, simulation.js); edit copy here, not in components
   config/ghl.js      Public embed URLs from VITE_* env (booking calendar / GHL form)
   Root.jsx           Chooses marketing site, /dashboard, or /book/:id (app pages are lazy chunks)
-  dashboard/         Sign-in → Setup (business, calendar, hours) → Home (results, outcomes) + Settings
+  dashboard/         Sign-in → self-serve onboarding (Setup.jsx: business → plan → details → services → calendar →
+                     hours → page → test → launch; older businesses: business → calendar → hours) → Home + Settings
   booking/           Public booking page /book/:id (details → time → booked)
   admin/             Platform console /admin (metrics, attention, customers, detail, invites, plans, email)
   lib/               api.js (fetch + formatting), connect.js (calendar connect hand-off)
@@ -41,6 +42,8 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
+  api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
+  api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
   api/dashboard/landing  Owner landing page (GET draft/saved, POST save/publish).  api/page/[customer]: public page data
@@ -68,6 +71,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         Business landing page: template draft, claims filter, publish
+  onboarding.js      Self-serve signup plan, ordered onboarding steps (derived from data), business profile, readiness
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
@@ -89,7 +93,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Every new user-facing flow gets a Playwright smoke test in `test/e2e/`. Import `test` from `./test.js`
   (it blocks all external network). Mock Google with `context.route`.
 - No new dependencies without a clear reason stated in the PR/summary.
-- Marketing copy: no testimonials, logos, or performance claims; pricing labeled proposed; simulation labeled fictional.
+- Marketing copy: no testimonials, logos, or performance claims. Describe only what works today; label anything not live
+  as coming soon. Founding plan $499/month, no trial, ad spend separate. Get started → /dashboard?plan=founding.
 
 ## Security rules (non-negotiable)
 
@@ -117,6 +122,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. Automation may pause or recommend, never raise budgets or resume. Every spec goes
   through validateSpec(); AI output never reaches a platform unvalidated. Ad mock origins are loopback-only test vars.
+- Self-serve billing: when Stripe is configured and a plan is active, every new self-serve business gets a self_signups
+  row (same batch as the business) and must pay before onboarding; access follows the verified webhook. Businesses
+  without that row (PoolThru, invited, admin-created) keep the legacy setup and are never asked to pay. After onboarding,
+  billing problems are dashboard notices (no automatic lock-out). Checkout creates the Stripe customer first
+  (idempotency key), refuses if Stripe already has a subscription, and resumes an open session.
+- STRIPE_API_MOCK_ORIGIN and STRIPE_LIVE_ENABLED: mock is loopback-only (e2e); live billing needs STRIPE_LIVE_ENABLED=true
+  (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
 - Release switches (off unless exactly 'true'): ADS_ENABLED (Ads tab + /api/dashboard/ads/* + /api/ads/* connect),
   ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
   in production requires approval.
