@@ -90,11 +90,14 @@ test('admin-assisted setup: invite → owner signs in with Google → joins → 
   await expect(page.locator('.row--link', { hasText: 'Blue Wave Pools' })).toContainText('Connect calendar')
 })
 
-test('billing stays hidden when Stripe is not configured', async ({ page, context }) => {
+test('existing (non self-serve) business keeps its dashboard and can choose the plan in Settings', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
-  expect(await (await page.request.get('/api/dashboard/billing')).json()).toEqual({ configured: false })
+  const billing = await (await page.request.get('/api/dashboard/billing')).json()
+  expect(billing).toMatchObject({ configured: true, subscription: null })
+  expect(billing.plans.map((p) => [p.id, p.trialDays])).toEqual([['founding', 0]])
   await page.goto('/dashboard')
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await expect(page.getByRole('heading', { name: 'Booking hours' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Plan' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.E2E_CUSTOMER_NAME })).toBeVisible()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Plan' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Choose GetShowUps Founding' })).toBeVisible()
 })

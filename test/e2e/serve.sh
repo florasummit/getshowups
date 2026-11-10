@@ -41,6 +41,8 @@ d1 "
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-spare.example', '$E2E_SPARE_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES
     ('$(hash "$E2E_ADMIN_SESSION_TOKEN")', '$E2E_PLATFORM_ADMIN', $NOW, $FAR);
+  INSERT INTO plans (id, name, stripe_price_id, trial_days, entitlements, active, created_at) VALUES
+    ('founding', 'GetShowUps Founding', 'price_E2EFOUNDING', 0, '{}', 1, $NOW);
   INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
     ('seed-lead-past', '$E2E_CUSTOMER', 'Pat Past', 'pat@example.net', '555-010-0100', 'Filter repair', 'booked', 'x', $PAST, $PAST);
   INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
@@ -67,23 +69,20 @@ d1 "
     ('seed-appt-visit', '$E2E_HOME_CUSTOMER', 'seed-lead-visit', $PAST, $((PAST + 3600000)), 'booked', 'seed-event-3', $PAST, $PAST),
     ('seed-appt-visit-2', '$E2E_HOME_CUSTOMER', 'seed-lead-visit-2', $((PAST - 3600000)), $PAST, 'booked', 'seed-event-4', $PAST, $PAST);"
 
-RECORD=$(K="$E2E_TOKEN_ENCRYPTION_KEY" C="$E2E_CUSTOMER" node --input-type=module -e "
+# One seeded Google connection per business (its own refresh token → its own mock calendar), like real
+# businesses that each connect their own Google account.
+record() {
+  K="$E2E_TOKEN_ENCRYPTION_KEY" C="$1" node --input-type=module -e "
   import { encrypt } from './server/google-oauth.js'
-  const refreshToken = await encrypt({ TOKEN_ENCRYPTION_KEY: process.env.K }, 'mock-refresh-seeded')
+  const refreshToken = await encrypt({ TOKEN_ENCRYPTION_KEY: process.env.K }, 'mock-refresh-seeded-' + process.env.C)
   process.stdout.write(JSON.stringify({ customer: process.env.C, googleSub: 'seed', email: 'cal@e2e-pool.example',
     scope: 'openid email https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy',
-    refreshToken, connectedAt: new Date().toISOString() }))")
-npx wrangler kv key put "google:$E2E_CUSTOMER" "$RECORD" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
-SPARE=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_SPARE_CUSTOMER\"/")
-npx wrangler kv key put "google:$E2E_SPARE_CUSTOMER" "$SPARE" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
-HOMEREC=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_HOME_CUSTOMER\"/")
-npx wrangler kv key put "google:$E2E_HOME_CUSTOMER" "$HOMEREC" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
-AUTO=$(printf '%s' "$RECORD" | sed "s/\"customer\":\"$E2E_CUSTOMER\"/\"customer\":\"$E2E_AUTO_CUSTOMER\"/")
-npx wrangler kv key put "google:$E2E_AUTO_CUSTOMER" "$AUTO" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
+    refreshToken, connectedAt: new Date().toISOString() }))"
+}
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER"; do
+  npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+    -c test/e2e/wrangler.e2e.toml >/dev/null
+done
 
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --compatibility-date 2026-11-08 --persist-to "$STATE" --show-interactive-dev-session=false \
@@ -94,5 +93,8 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TOKEN_ENCRYPTION_KEY="$E2E_TOKEN_ENCRYPTION_KEY" \
   --binding ADMIN_API_TOKEN="$E2E_ADMIN_API_TOKEN" \
   --binding ADS_ENABLED=true \
+  --binding STRIPE_SECRET_KEY="$E2E_STRIPE_SECRET_KEY" \
+  --binding STRIPE_WEBHOOK_SECRET="$E2E_STRIPE_WEBHOOK_SECRET" \
+  --binding STRIPE_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding GOOGLE_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN"

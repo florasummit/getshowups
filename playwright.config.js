@@ -29,7 +29,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node test/e2e/mock-google.mjs',
-      env: { E2E_GOOGLE_MOCK_PORT: fixtures.E2E_GOOGLE_MOCK_PORT, E2E_GOOGLE_CLIENT_ID: fixtures.E2E_GOOGLE_CLIENT_ID },
+      env: { E2E_GOOGLE_MOCK_PORT: fixtures.E2E_GOOGLE_MOCK_PORT, E2E_GOOGLE_CLIENT_ID: fixtures.E2E_GOOGLE_CLIENT_ID, E2E_PORT: fixtures.E2E_PORT, E2E_STRIPE_WEBHOOK_SECRET: fixtures.E2E_STRIPE_WEBHOOK_SECRET },
       url: `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}/__health`,
       reuseExistingServer: false,
     },

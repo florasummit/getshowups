@@ -3,7 +3,7 @@
 // OAuth handlers: tests stop the browser at Google's URL and return with a mock authorization code.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
-import { returnFromGoogle, useSession } from './helpers.js'
+import { useSession } from './helpers.js'
 
 const site = `http://127.0.0.1:${fixtures.E2E_PORT}`
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
@@ -20,37 +20,7 @@ async function fillLead(page, { name, email, need = 'Weekly pool cleaning' }) {
 // Serial (shared state) and generous timeouts: each step makes several real Function → mock-Google calls.
 test.describe.configure({ mode: 'serial', timeout: 60_000 })
 
-test('new owner: Google sign-in → business → connect calendar → hours → dashboard', async ({ page }) => {
-  const email = fixtures.E2E_NEW_USER_EMAIL
-  await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
-  await returnFromGoogle(page, '**/api/google/oauth/start', 'POST', '/api/google/oauth/callback', `connect:${email}`)
-
-  await page.goto('/dashboard')
-  await page.getByRole('link', { name: 'Continue with Google' }).click()
-  await expect(page.getByRole('heading', { name: 'Let’s set up your booking page' })).toBeVisible()
-  await expect(page.locator('[aria-current="step"]')).toContainText('Business')
-
-  await page.getByLabel('Business name').fill('Fresh Water Pools')
-  await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
-
-  // Reloading resumes at the same step (progress is stored server-side).
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Connect Google Calendar' }).click()
-  await expect(page.getByRole('heading', { name: 'Google Calendar connected' })).toBeVisible()
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  await expect(page.getByRole('heading', { name: 'When can customers book?' })).toBeVisible()
-  await page.getByRole('button', { name: 'Sat' }).click()
-  await page.getByRole('button', { name: 'Finish setup' }).click()
-
-  await expect(page.getByRole('heading', { level: 1, name: 'Fresh Water Pools' })).toBeVisible()
-  await expect(page.locator('.booking-url')).toHaveText('127.0.0.1:8788/book/fresh-water-pools')
-  await expect(page.getByText('No upcoming appointments.')).toBeVisible()
-  expect((await page.request.get('/api/book/fresh-water-pools')).status()).toBe(200)
-})
+// New-owner signup (Get started → plan → onboarding) is covered end to end in selfserve.spec.js.
 
 test('lead books a real appointment; owner sees it', async ({ page, context }) => {
   await page.goto(`/book/${fixtures.E2E_CUSTOMER}`)
