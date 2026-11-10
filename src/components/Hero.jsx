@@ -1,25 +1,25 @@
 import Icon from './Icon.jsx'
-import { steps } from '../content/site.js'
+import { getStarted, steps } from '../content/site.js'
 
 export default function Hero() {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="hero-glow" aria-hidden="true" />
       <div className="container hero-inner">
-        <p className="eyebrow eyebrow--dark">AI appointment conversion for service businesses</p>
+        <p className="eyebrow eyebrow--dark">Online booking for home service businesses</p>
         <h1 id="hero-title">
           Turn More Leads Into Appointments That <span className="text-accent">Actually Show Up</span>
         </h1>
         <p className="hero-sub">
-          GetShowUps responds to every new lead in moments, qualifies them by text, books them onto your calendar, and
-          keeps them reminded until they walk through your door.
+          GetShowUps gives your business a landing page that books leads straight onto your Google Calendar, reminds
+          them, and tracks who actually shows up. Set up in minutes, $499/month.
         </p>
         <div className="hero-actions">
-          <a href="#book-demo" className="btn btn-primary btn-lg">
-            Book a Demo <Icon name="arrow" size={18} />
+          <a href={getStarted.href} className="btn btn-primary btn-lg">
+            {getStarted.label} <Icon name="arrow" size={18} />
           </a>
-          <a href="#simulation" className="btn btn-ghost btn-lg">
-            Try the simulation
+          <a href="#how-it-works" className="btn btn-ghost btn-lg">
+            See how it works
           </a>
         </div>
         <ol className="hero-flow" aria-label="The GetShowUps workflow">

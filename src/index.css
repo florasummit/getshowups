@@ -1074,6 +1074,14 @@ svg {
   color: var(--orange-700);
 }
 
+.price-alt {
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.93rem;
+  font-weight: 600;
+}
+
 .price-fine {
   margin-top: 16px;
   color: var(--text-muted);

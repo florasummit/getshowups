@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import Logo from './Logo.jsx'
-import { navLinks } from '../content/site.js'
+import { getStarted, navLinks } from '../content/site.js'
 
 export default function Header() {
   const [open, setOpen] = useState(false)
@@ -44,10 +44,10 @@ export default function Header() {
           </ul>
         </nav>
         <a href="/dashboard" className="header-login">
-          Log in
+          Sign in
         </a>
-        <a href="#book-demo" className="btn btn-primary btn-sm header-cta">
-          Book a Demo
+        <a href={getStarted.href} className="btn btn-primary btn-sm header-cta">
+          {getStarted.label}
         </a>
         <button
           type="button"
@@ -71,10 +71,10 @@ export default function Header() {
           ))}
         </ul>
         <a href="/dashboard" className="btn btn-ghost btn-block">
-          Log in
+          Sign in
         </a>
-        <a href="#book-demo" className="btn btn-primary btn-block" onClick={close}>
-          Book a Demo
+        <a href={getStarted.href} className="btn btn-primary btn-block" onClick={close}>
+          {getStarted.label}
         </a>
       </nav>
     </header>

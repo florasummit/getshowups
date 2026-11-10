@@ -17,17 +17,25 @@ test('homepage renders headline, metadata, and all sections', async ({ page }) =
   await expect(page).toHaveTitle(/GetShowUps/)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Turn More Leads Into Appointments That Actually Show Up')
   await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /appointment/)
-  for (const id of ['how-it-works', 'features', 'simulation', 'pricing', 'book-demo', 'faq']) {
+  for (const id of ['how-it-works', 'features', 'pricing', 'book-demo', 'faq']) {
     await expect(page.locator(`#${id}`)).toBeAttached()
   }
 })
 
-test('every Book a Demo link targets the booking section', async ({ page }) => {
-  const links = page.locator('a[href="#book-demo"]')
-  // header, mobile nav, hero, pricing, footer CTA, footer link (+1 when the simulation finishes)
-  await expect(links).toHaveCount(6)
-  await page.getByRole('main').getByRole('link', { name: /Book a Demo/ }).first().click()
-  await expect(page.locator('#book-demo')).toBeInViewport()
+test('one Get started action: every start link carries the founding plan to sign-up', async ({ page }) => {
+  const starts = page.locator('a[href="/dashboard?plan=founding"]')
+  // header, mobile nav, hero, pricing, footer CTA
+  await expect(starts).toHaveCount(5)
+  await expect(page.getByRole('main').getByRole('link', { name: /Get started/ }).first()).toBeVisible()
+  await expect(page.locator('a[href="/dashboard"]').first()).toHaveText('Sign in')
+  // The sign-up screen itself is exercised in selfserve.spec.js (signed out, /api/dashboard/me is a 401 there).
+})
+
+test('no unsupported claims: no simulation, AI texting, or missed-call promises on the page', async ({ page }) => {
+  await expect(page.locator('#simulation')).toHaveCount(0)
+  const text = await page.locator('body').innerText()
+  for (const claim of [/AI assistant/i, /qualifies them by text/i, /missed[- ]call text/i, /instant SMS/i]) expect(text).not.toMatch(claim)
+  await expect(page.getByText('Text messaging and ad management are coming soon', { exact: false })).toBeVisible()
 })
 
 test('booking section is honest when no calendar is configured', async ({ page }) => {
@@ -37,24 +45,11 @@ test('booking section is honest when no calendar is configured', async ({ page }
   await expect(section.locator('input, textarea, form')).toHaveCount(0)
 })
 
-test('simulation is labeled and steps through scenarios', async ({ page }) => {
-  const sim = page.locator('#simulation')
-  await expect(sim.getByText('Simulation only.')).toBeVisible()
-  await expect(sim.getByText('Step 1 of 13')).toBeVisible()
-  await sim.getByRole('button', { name: 'Next step' }).click()
-  await expect(sim.getByText('Step 2 of 13')).toBeVisible()
-  await sim.getByRole('button', { name: 'Missed call' }).click()
-  await expect(sim.getByRole('button', { name: 'Missed call' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(sim.getByText('Step 1 of 16')).toBeVisible()
-  await sim.getByRole('button', { name: 'Next step' }).click()
-  await sim.getByRole('button', { name: 'Reset' }).click()
-  await expect(sim.getByText('Step 1 of 16')).toBeVisible()
-})
-
-test('pricing is marked as proposed and FAQ expands', async ({ page }) => {
+test('pricing shows the founding plan, no trial, ad spend separate; FAQ expands', async ({ page }) => {
   const pricing = page.locator('#pricing')
   await expect(pricing.locator('.price-amount')).toContainText('$499/month')
-  await expect(pricing.getByText('Proposed pricing')).toBeVisible()
+  await expect(pricing.getByText('No free trial', { exact: false })).toBeVisible()
+  await expect(pricing.getByText('Advertising spend is separate', { exact: false })).toBeVisible()
   const item = page.locator('#faq details').first()
   await item.locator('summary').click()
   await expect(item).toHaveAttribute('open', '')

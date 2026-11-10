@@ -4,99 +4,101 @@
 export const navLinks = [
   { href: '#how-it-works', label: 'How it works' },
   { href: '#features', label: 'Features' },
-  { href: '#simulation', label: 'Simulation' },
   { href: '#pricing', label: 'Pricing' },
   { href: '#faq', label: 'FAQ' },
 ]
 
+// Primary call to action: start the founding plan (sign in with Google → business → Stripe Checkout).
+export const getStarted = { href: '/dashboard?plan=founding', label: 'Get started' }
+
+// Steps and features describe only what works today; anything not yet live says so.
 export const steps = [
   {
     id: 'capture',
     title: 'Capture',
     icon: 'inbox',
-    body: 'Web forms, ads, calls, and texts land in one pipeline, so no inquiry sits unseen in an inbox.',
+    body: 'Your own landing page and booking form collect every inquiry in one place, so no lead sits unseen in an inbox.',
   },
   {
     id: 'qualify',
     title: 'Qualify',
     icon: 'sparkles',
-    body: 'An AI assistant asks your screening questions by text and routes good-fit leads forward.',
+    body: 'Leads outside the area you serve are flagged before they can book, so your calendar only fills with jobs you want.',
   },
   {
     id: 'book',
     title: 'Book',
     icon: 'calendar',
-    body: 'Qualified leads pick a real open slot from your calendar without a phone-tag back-and-forth.',
+    body: 'Leads pick a real open time from your Google Calendar. No phone tag, and a time can never be booked twice.',
   },
   {
     id: 'remind',
     title: 'Remind',
     icon: 'bell',
-    body: 'Timed SMS and email reminders confirm the appointment and make rescheduling easy.',
+    body: 'Confirmation and reminder emails with a one-tap “I’ll be there”. Text reminders are coming soon.',
   },
   {
     id: 'show',
     title: 'Show Up',
     icon: 'check',
-    body: 'Mark each appointment as showed or no-show so you can see exactly where leads drop off.',
+    body: 'Mark each appointment as showed or no-show and see exactly where leads drop off.',
   },
   {
     id: 'follow',
     title: 'Follow Up',
     icon: 'refresh',
-    body: 'No-shows get a reschedule path, and completed visits get a next-step or review request.',
+    body: 'Leads who don’t book get a follow-up, and no-shows get an easy way to pick a new time.',
   },
 ]
 
 export const features = [
   {
     icon: 'bolt',
-    title: 'Instant lead response',
-    body: 'Every new inquiry gets a personalized text right away — including nights and weekends when your front desk is closed.',
-  },
-  {
-    icon: 'sparkles',
-    title: 'AI qualification',
-    body: 'Configure the questions that matter to your business. The assistant collects answers conversationally and flags leads that need a human.',
+    title: 'Live in minutes',
+    body: 'Answer a few questions and GetShowUps drafts your landing page from your services and service area. You review it and publish.',
   },
   {
     icon: 'calendar',
-    title: 'Appointment scheduling',
-    body: 'Leads book directly into your availability, with buffers, service types, and staff calendars respected.',
+    title: 'Real-time booking',
+    body: 'Customers book straight into your Google Calendar using your hours and appointment length. Busy times are hidden automatically.',
+  },
+  {
+    icon: 'sparkles',
+    title: 'Service-area screening',
+    body: 'Tell us the ZIP codes you serve and every lead is checked before booking.',
   },
   {
     icon: 'bell',
-    title: 'SMS & email reminders',
-    body: 'Confirmation and reminder sequences you control — timing, wording, and channel — with one-tap confirm or reschedule.',
-  },
-  {
-    icon: 'phoneMissed',
-    title: 'Missed-call follow-up',
-    body: 'When a call goes unanswered, the caller gets a text back so the conversation continues instead of going to a competitor.',
+    title: 'Confirmations & reminders',
+    body: 'Email confirmations, reminders and follow-ups that stop as soon as a lead books. Text messages are coming soon.',
   },
   {
     icon: 'chart',
     title: 'Show-up tracking',
-    body: 'See booked, confirmed, showed, and no-show counts for every lead source, so you know which channels actually produce visits.',
+    body: 'See leads, bookings, confirmations, show-ups and no-shows in one simple dashboard.',
+  },
+  {
+    icon: 'phoneMissed',
+    title: 'Ads, when you’re ready',
+    body: 'Google and Meta ad campaigns are coming for founding customers. You approve every dollar, and ad spend is paid directly to Google or Meta.',
   },
 ]
 
 export const pricing = {
-  name: 'Introductory plan',
+  name: 'Founding plan',
   price: 499,
   period: 'month',
-  badge: 'Proposed pricing',
-  note: 'This is proposed introductory pricing and may change before launch. Final terms will be confirmed with you during your demo.',
+  badge: 'Founding customers',
+  note: 'Billed monthly. No free trial, no setup fee, cancel any time from your billing page.',
   includes: [
-    'Instant SMS response to new leads',
-    'AI qualification flow tailored to your services',
-    'Online booking into your calendar',
-    'SMS & email reminder sequences',
-    'Missed-call text-back',
+    'Your own landing page, ready in minutes',
+    'Online booking straight into your Google Calendar',
+    'Service-area screening for every lead',
+    'Email confirmations, reminders and follow-ups',
     'Show-up and no-show tracking',
-    'Guided setup during onboarding',
+    'Direct help from the founding team',
   ],
-  excludes: 'Carrier SMS fees and A2P 10DLC registration costs may be billed separately.',
+  excludes: 'Advertising spend is separate and paid directly to Google or Meta. Text messaging and ad management are coming soon for founding customers.',
 }
 
 export const faqs = [
@@ -109,23 +111,19 @@ export const faqs = [
     a: 'Appointment-driven service businesses: home services, dental and medical practices, med spas, salons, fitness studios, legal and financial consultations, and similar teams that live or die by booked, attended appointments.',
   },
   {
-    q: 'Does it work with GoHighLevel?',
-    a: 'Yes — GetShowUps is being built on GoHighLevel. If you already use GHL, we can work within your existing sub-account. If you don’t, we set up the account as part of onboarding.',
+    q: 'Do I need any other software?',
+    a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.',
   },
   {
-    q: 'Is the AI going to say things I didn’t approve?',
-    a: 'You approve the qualification questions, tone, and boundaries during setup. Conversations that fall outside those boundaries are handed off to your team instead of being improvised.',
+    q: 'Will my page say things I didn’t approve?',
+    a: 'No. Your landing page is drafted from what you tell us and stays private until you publish it. Promises like guarantees, discounts, ratings or credentials are never added unless you’ve confirmed them.',
   },
   {
-    q: 'Is $499/month the final price?',
-    a: 'No. $499/month is proposed introductory pricing and may change. We’ll confirm current pricing and what’s included on your demo call before you commit to anything.',
+    q: 'What does it cost?',
+    a: 'The founding plan is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta.',
   },
   {
-    q: 'What do I need for SMS to work?',
-    a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. We’ll walk through what your business needs during the demo.',
-  },
-  {
-    q: 'Is the simulation on this page real?',
-    a: 'No. The interactive simulation uses a fictional business and scripted messages to illustrate the workflow. Nothing in it is sent, stored, or connected to a live system.',
+    q: 'When will text messages work?',
+    a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, confirmations and reminders go by email.',
   },
 ]

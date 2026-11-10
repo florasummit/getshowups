@@ -1,6 +1,6 @@
 import Icon from './Icon.jsx'
 import SectionHeading from './SectionHeading.jsx'
-import { pricing } from '../content/site.js'
+import { getStarted, pricing } from '../content/site.js'
 
 export default function Pricing() {
   return (
@@ -9,8 +9,8 @@ export default function Pricing() {
         <SectionHeading
           id="pricing-title"
           eyebrow="Pricing"
-          title="Simple introductory pricing"
-          intro="One plan while we onboard our first businesses."
+          title="One plan for founding customers"
+          intro="Everything you need to start taking bookings. Ad spend is separate."
         />
         <div className="price-card">
           <div className="price-head">
@@ -31,8 +31,11 @@ export default function Pricing() {
               </li>
             ))}
           </ul>
-          <a href="#book-demo" className="btn btn-primary btn-lg btn-block">
-            Book a Demo
+          <a href={getStarted.href} className="btn btn-primary btn-lg btn-block">
+            {getStarted.label}
+          </a>
+          <a href="#book-demo" className="price-alt">
+            Questions first? Book a call
           </a>
           <p className="price-fine">{pricing.excludes}</p>
         </div>

@@ -12,7 +12,7 @@ test('configured calendar renders as an embed with a new-tab fallback', async ({
   // Arrive the way a visitor does. (A direct /#book-demo link does not scroll, because React
   // renders after the browser's fragment scroll; the lazy iframe would then never load.)
   await page.goto('/')
-  await page.getByRole('main').getByRole('link', { name: /Book a Demo/ }).first().click()
+  await page.locator('#pricing').getByRole('link', { name: 'Questions first? Book a call' }).click()
   const section = page.locator('#book-demo')
   const frame = section.locator('iframe')
   await expect(frame).toHaveAttribute('src', fixtures.E2E_BOOKING_URL)
