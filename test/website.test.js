@@ -130,7 +130,7 @@ test('draft is generated from business details, passes the claims filter, and is
   const { json } = await call(website, 'GET', { cookie: c })
   assert.equal(json.website.generated, true)
   assert.equal(json.website.published, false)
-  assert.match(json.website.draft.area, /29403, 29407/)
+  assert.equal(json.website.draft.area, '', 'a bare ZIP list is not shown as the service area (ZIPs still qualify leads)')
   assert.equal(json.url, `${ORIGIN}/p/pools`)
   assert.equal(json.ready, true)
   assert.deepEqual(validateContent(json.website.draft)[0], [], 'generated content passes its own rules')

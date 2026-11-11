@@ -29,18 +29,8 @@ const cleanPara = (s) =>
     .filter(Boolean)
     .join('\n\n')
 
-// Industry-aware defaults so a site reads well before the owner writes anything.
-const TAGLINES = {
-  'pool service': 'Clean, clear water without the hassle.',
-  'lawn care': 'A healthy, tidy lawn without the weekend work.',
-  'house cleaning': 'Come home to a clean house.',
-  'pest control': 'Keep pests out of your home.',
-  hvac: 'Heating and cooling you can count on.',
-  plumbing: 'Plumbing help when you need it.',
-  'pressure washing': 'Make your home look new again.',
-  landscaping: 'Outdoor spaces you’ll enjoy.',
-  'window cleaning': 'Clear windows, inside and out.',
-}
+// Brand name for headlines: the business name without a legal suffix ("Poolthru LLC" → "Poolthru").
+export const brandName = (name) => String(name || '').replace(/[,\s]+(l\.?l\.?c\.?|inc\.?|incorporated|corp\.?|corporation|ltd\.?|pllc|llp)$/i, '').trim() || String(name || '')
 
 function legacyContent(landing) {
   return {
@@ -71,8 +61,9 @@ export async function generateContent(db, customer) {
   const industry = clean(bp?.industry)
   const lead = services[0]?.name || industry || 'Service'
   const where = cities[0] ? ` in ${cities[0]}` : ''
-  const zips = customer.serviceZips || []
-  const area = cities.length ? cities.join(', ') : base?.area || (zips.length ? `ZIP codes ${zips.slice(0, 12).join(', ')}${zips.length > 12 ? ' and nearby' : ''}` : '')
+  // Shown area: towns/cities only. A bare ZIP list reads badly on a website (ZIPs still qualify leads on the
+  // booking page); the owner adds their city in Business details.
+  const area = cities.length ? cities.join(', ') : base?.area || ''
   const visit = customer.appointmentMode === 'at_customer'
   const intro =
     bp?.description ||
@@ -80,7 +71,8 @@ export async function generateContent(db, customer) {
     (visit
       ? `${customer.name} comes to you. Tell us what you need and pick a time that works for you. It takes about a minute.`
       : `Tell ${customer.name} what you need and pick a time that works for you. It takes about a minute.`)
-  const headline = base?.headline || (industry && TAGLINES[industry.toLowerCase()] && !cities[0] ? TAGLINES[industry.toLowerCase()] : `${lead}${where}`)
+  // Template headline: brand + what they do + city. Never ZIP codes (they qualify leads; they don't sell).
+  const headline = base?.headline || `${brandName(customer.name)}: ${lead}${where}`
   const content = {
     template: 'clean',
     color: 'ocean',

@@ -177,7 +177,7 @@ test('full self-serve journey: steps advance from saved data; finish requires th
   const w = (await call(website, 'GET', { cookie })).json
   assert.equal(w.website.generated, true)
   const draft = w.website.draft
-  assert.equal(draft.headline, 'Weekly pool cleaning in Charleston')
+  assert.equal(draft.headline, 'New Pools: Weekly pool cleaning in Charleston', 'brand + service + city')
   assert.equal(draft.intro, 'Family-run pool care across Charleston.')
   assert.deepEqual(draft.services.map((x) => [x.name, x.price]), [['Weekly pool cleaning', 'From $150/month'], ['Green pool cleanup', '']])
   // Draft saved privately: website step done, site still not public.

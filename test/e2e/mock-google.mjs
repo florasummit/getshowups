@@ -131,7 +131,7 @@ createServer(async (req, res) => {
     const first = String(facts.services[0] || facts.whatTheyDo || 'Service').split(' (')[0]
     return send(res, 200, {
       response: {
-        headline: `Dependable ${first.toLowerCase()} near you`,
+        headline: `${facts.brandName}: dependable ${first.toLowerCase()} near you`,
         intro: `${facts.businessName} makes it easy to get ${first.toLowerCase()} on your schedule. Booking online takes about a minute.`,
         about: 'We are the best in town, satisfaction guaranteed.',
         services: facts.services.map((s) => ({ name: String(s).split(' (')[0], description: `What is included with ${String(s).split(' (')[0].toLowerCase()}, explained simply.` })),

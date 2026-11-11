@@ -33,6 +33,17 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
 - Onboarding target: sign up/pay → confirm details → keep or generate website → calendar → (optional) Google Ads →
   direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
 
+
+### Website images and headlines fix (2026-11-10): local, NOT deployed
+- Cause: PoolThru has no business_profiles row in production → industry null → stockFor() fell back to generic
+  home- photos (house, kitchen, living room); a ZIP-only area ("ZIP codes 29403") was given to the AI as the area.
+- Fix: industryKey() from industry → service names → description → name; each industry has only its own photos,
+  palettes, names and art direction; unknown industry → no stock photo (text-led). Stock refs outside the
+  business's industry are rejected on generate and revise. Headlines: brand (legal suffix dropped) + service + city;
+  ZIP codes rejected unless the owner asks; ZIP-only areas aren't shown as copy.
+- Existing drafts and published sites are not modified (PoolThru's live site keeps its current design until a new
+  one is generated and published). Tests: test/website-images.test.js (pool, cleaning, lawn, trades, unknown).
+
 ### AI website design upgrade (branch release/ai-design, NOT deployed; awaiting visual approval) (2026-11-10)
 - The AI now makes structured design decisions, not just copy. One request (Mistral Small 3.1 on Workers AI)
   returns the copy plus three designs chosen from a safe design system (server/site-design.js): palette (8,

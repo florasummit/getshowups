@@ -6,10 +6,10 @@
 // business's records, and every generated sentence passes the claims filter plus a number check
 // (no invented years, ratings, prices or counts). Anything that fails falls back to the template text.
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
-import { generateContent, validateContent, LIMITS } from './website.js'
+import { brandName, generateContent, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
-import { FONTS, LAYOUTS, PALETTES, SECTIONS, SHAPES, diversify, presetDesigns, stockFor, validateDesign } from './site-design.js'
+import { FONTS, LAYOUTS, PALETTES, SECTIONS, SHAPES, directionFor, diversify, industryKey, presetDesigns, stockFor, validateDesign } from './site-design.js'
 
 export const WEBSITE_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct'
 // USD per million tokens (Workers AI list price for WEBSITE_MODEL).
@@ -62,13 +62,15 @@ services: ${Object.entries(LAYOUTS.services).map(([k, v]) => `${k} (${v.toLowerC
 about: ${Object.entries(LAYOUTS.about).map(([k, v]) => `${k} (${v.toLowerCase()})`).join(', ')}
 shape: sharp, soft, round. sections: order of ${SECTIONS.join(', ')} (gallery shows only the owner's own photos).
 Images: "asset:..." are the owner's own photos (prefer them for the hero when present); "stock:..." are licensed example
-photos matched to the industry; "none" means no photo. Typographic hero needs no photo.`
+photos of this business's own industry; "none" means no photo. Only use the images listed. If none are listed, use
+"none" (the typographic hero and text layouts look finished without a photo). Typographic hero needs no photo.`
 
 const RULES = `You are an experienced copywriter for local home-service and appointment businesses.
 Write warm, specific, professional website copy that makes a homeowner want to book.
 
 What to write:
-- headline: a clear benefit plus what they do and where (if an area is given), 4-9 words. Not just the business name.
+- headline: 4-10 words that include the brand name (brandName, exactly) and what they do, plus the city if
+  serviceArea is given (e.g. "<brandName>: weekly pool care in <city>"). Never put ZIP or postal codes in any text.
 - intro: 1-2 sentences: what the business does for the customer and that booking online takes about a minute.
 - about: 2 short paragraphs (60-110 words total) about how the business helps customers and how booking works,
   written from the business's point of view ("we"). Use the business's own description if given.
@@ -89,16 +91,31 @@ Return only JSON matching the schema.`
 
 const DESIGN_RULES = `${DESIGN_GUIDE}
 Create THREE clearly different directions that suit this industry and these customers: each must use a different
-hero layout, a different palette and a different font pairing. Make each feel like a professionally designed
-website for this specific business, e.g. calm and airy, bold and modern, warm and classic.`
+hero layout, a different palette and a different font pairing. Every direction must fit the art direction given in
+the facts (visualDirection); suggested palettes for it: see suggestedPalettes. Name each direction for this
+business's world (e.g. "Clear Water" for a pool service), not generically.`
+
+const ZIP_RE = /\b\d{5}(?:-\d{4})?\b/
+// Service area for copy: towns/cities only. ZIP lists are for qualification, not headlines.
+const copyArea = (profile, base) => {
+  const cities = Array.isArray(profile?.cities) ? profile.cities : []
+  if (cities.length) return cities.join(', ')
+  return base.area && !ZIP_RE.test(base.area) ? base.area : null
+}
+export const industryOf = (customer, profile, base) =>
+  industryKey({ industry: profile?.industry, services: profile?.services?.length ? profile.services : base?.services || [], description: profile?.description, name: customer.name })
 
 export function websiteFacts(customer, profile, base) {
+  const dir = directionFor(industryOf(customer, profile, base))
   return {
     businessName: customer.name,
+    brandName: brandName(customer.name),
     whatTheyDo: profile?.industry || null,
     ownDescription: profile?.description || null,
     services: base.services.map((s) => (s.price ? `${s.name} (${s.price})` : s.name)),
-    serviceArea: base.area || null,
+    serviceArea: copyArea(profile, base),
+    visualDirection: dir.direction,
+    suggestedPalettes: dir.palettes,
     appointments: customer.appointmentMode === 'at_customer' ? 'The business visits the customer at their home or site.' : 'Customers come to the business.',
     bookingOnline: 'Customers can book a time online.',
     phoneListed: Boolean(profile?.phone),
@@ -122,18 +139,22 @@ export function inventedNumbers(text, factsText) {
 
 // Merges model output into the template content. Field by field: any text that is too long, makes an
 // unapproved claim or invents a number is replaced by the template's own text.
-export function mergeGenerated(base, raw, facts, approvedClaims = []) {
+// Options: allowZip (the owner asked for ZIP codes), requireBrand (new generations: headline names the brand).
+export function mergeGenerated(base, raw, facts, approvedClaims = [], { allowZip = false, requireBrand = false } = {}) {
   const factsText = JSON.stringify(facts)
   const out = { ...base }
   const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
-  const ok = (text, max) => text && text.length <= max && !unapprovedClaims(text, approvedClaims).length && !inventedNumbers(text, factsText).length
+  const ok = (text, max) =>
+    text && text.length <= max && !unapprovedClaims(text, approvedClaims).length && !inventedNumbers(text, factsText).length && (allowZip || !ZIP_RE.test(text))
+  const brand = String(facts.brandName || '').toLowerCase()
   const rejected = []
   const take = (field, value, max) => {
     const v = field === 'about' ? String(value ?? '').split(/\n{2,}/).map(clean).filter(Boolean).join('\n\n') : clean(value)
     if (ok(v, max)) out[field] = v
     else if (v) rejected.push(field)
   }
-  take('headline', raw?.headline, LIMITS.headline)
+  if (requireBrand && brand && raw?.headline && !clean(raw.headline).toLowerCase().includes(brand)) rejected.push('headline')
+  else take('headline', raw?.headline, LIMITS.headline)
   take('intro', raw?.intro, LIMITS.intro)
   take('about', raw?.about, LIMITS.about)
   take('seoTitle', raw?.seoTitle, LIMITS.seoTitle)
@@ -175,14 +196,18 @@ const parseOutput = (r) => {
 
 const toRef = (v) => (v === 'none' || v == null ? null : v)
 // Validates a model design; anything invalid is repaired from the matching preset (never rejected outright).
-function repairDesign(raw, preset, assetIds) {
+// Stock photos must belong to this business's industry (`allowedStock`); a photo that still doesn't fit
+// after repair (e.g. an older design's) is dropped, leaving a text-led layout.
+function repairDesign(raw, preset, assetIds, allowedStock) {
   const cand = { ...preset, ...(raw && typeof raw === 'object' ? raw : {}) }
   cand.heroImage = toRef(cand.heroImage)
   cand.aboutImage = toRef(cand.aboutImage)
-  const [errors, d] = validateDesign(cand, assetIds)
+  const [errors, d] = validateDesign(cand, assetIds, allowedStock)
   if (!errors.length) return d
   for (const e of errors) cand[e] = preset[e]
-  return validateDesign(cand, assetIds)[1]
+  const [again] = validateDesign(cand, assetIds, allowedStock)
+  for (const e of again) if (e === 'heroImage' || e === 'aboutImage') cand[e] = null
+  return validateDesign(cand, assetIds, allowedStock)[1]
 }
 
 async function context(env, customer) {
@@ -193,9 +218,14 @@ async function context(env, customer) {
     approvedClaimsFor(db, customer.id),
     db.prepare('SELECT id FROM website_assets WHERE customer = ?1 ORDER BY created_at DESC LIMIT 12').bind(customer.id).all(),
   ])
-  if (profile) profile.services = JSON.parse(profile.services || '[]')
+  if (profile) {
+    profile.services = JSON.parse(profile.services || '[]')
+    profile.cities = JSON.parse(profile.cities || '[]')
+  }
   const assetIds = new Set(assets.results.map((a) => a.id))
-  return { db, base, profile, claims, assetIds }
+  const industry = industryOf(customer, profile, base)
+  const allowedStock = new Set(stockFor(industry).map((s) => s.id))
+  return { db, base, profile, claims, assetIds, industry, allowedStock }
 }
 
 async function store(db, customer, { content, designs, source, usage, latencyMs, rejected, now }) {
@@ -217,12 +247,12 @@ const imageChoices = (assetIds, industry, photos = []) => [...[...new Set([...ph
 // Generates copy + three designs for a business and stores them (website_generations). Never touches the
 // draft or the live site. Returns { ok, generation: { id, content, designs, source } }.
 export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [] } = {}) {
-  const { db, base, profile, claims, assetIds } = await context(env, customer)
+  const { db, base, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
   const used = await monthlyUsed(db, customer.id, now)
   const facts = websiteFacts(customer, profile, base)
   const photos = draftPhotos.filter((id) => assetIds.has(id))
-  const images = imageChoices(assetIds, profile?.industry, photos)
-  const presets = presetDesigns(profile?.industry, photos)
+  const images = imageChoices(assetIds, industry, photos)
+  const presets = presetDesigns(industry, photos)
   let content = base
   let designs = presets
   let source = 'template'
@@ -237,11 +267,11 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
       usage = r?.usage || null
       const raw = parseOutput(r)
       if (raw) {
-        const merged = mergeGenerated(base, raw, facts, claims)
+        const merged = mergeGenerated(base, raw, facts, claims, { requireBrand: true })
         content = merged.content
         rejected = merged.rejected
-        const aiDesigns = (Array.isArray(raw.designs) ? raw.designs : []).slice(0, 3).map((d, i) => repairDesign(d, presets[i], assetIds))
-        designs = diversify(aiDesigns, profile?.industry, photos).map((d, i) => repairDesign(d, presets[i], assetIds))
+        const aiDesigns = (Array.isArray(raw.designs) ? raw.designs : []).slice(0, 3).map((d, i) => repairDesign(d, presets[i], assetIds, allowedStock))
+        designs = diversify(aiDesigns, industry, photos).map((d, i) => repairDesign(d, presets[i], assetIds, allowedStock))
         source = 'ai'
       }
     } catch (err) {
@@ -258,11 +288,12 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   const ask = String(instruction ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
   if (!ask) return { ok: false, httpStatus: 400, error: 'instruction_required' }
   if (!aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
-  const { db, profile, claims, assetIds } = await context(env, customer)
+  const { db, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
   if ((await monthlyUsed(db, customer.id, now)) >= MONTHLY_GENERATIONS) return { ok: false, httpStatus: 429, error: 'monthly_limit' }
   const photos = (draft.photos || []).filter((id) => assetIds.has(id))
-  const images = imageChoices(assetIds, profile?.industry, photos)
-  const preset = draft.design || presetDesigns(profile?.industry, photos)[0]
+  const images = imageChoices(assetIds, industry, photos)
+  const preset = draft.design || presetDesigns(industry, photos)[0]
+  const allowZip = /\bzip|postal/i.test(ask)
   // Facts for the number check: the business details plus the owner's own current text.
   const facts = { ...websiteFacts(customer, profile, draft), currentText: [draft.headline, draft.intro, draft.about, ...draft.services.map((s) => s.description)].join(' ') }
   const current = { headline: draft.headline, intro: draft.intro, about: draft.about, services: draft.services.map((s) => ({ name: s.name, description: s.description })), seoTitle: draft.seoTitle, seoDescription: draft.seoDescription, design: preset }
@@ -277,8 +308,8 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   const latencyMs = Date.now() - t0
   const raw = parseOutput(r)
   if (!raw) return { ok: false, httpStatus: 502, error: 'ai_unavailable' }
-  const merged = mergeGenerated(draft, raw, facts, claims)
-  const design = repairDesign(raw.design, preset, assetIds)
+  const merged = mergeGenerated(draft, raw, facts, claims, { allowZip })
+  const design = repairDesign(raw.design, preset, assetIds, allowedStock)
   const id = await store(db, customer, { content: merged.content, designs: [design], source: 'ai', usage: r?.usage || null, latencyMs, rejected: merged.rejected, now })
   return { ok: true, generation: { id, content: merged.content, designs: [design], source: 'ai', revision: true } }
 }

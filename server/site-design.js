@@ -38,26 +38,66 @@ export const SECTIONS = ['services', 'about', 'gallery', 'process']
 export const STOCK_IDS = new Set(STOCK.map((s) => s.id))
 export const stockById = (id) => STOCK.find((s) => s.id === id)
 
-// Stock photos that suit an industry (generic, non-identifying scenes; never shown as "our work").
-const GROUPS = [
-  [/pool|spa|hot tub/i, 'pool-'],
-  [/clean|maid|janitor|window/i, 'clean-'],
-  [/lawn|landscap|garden|tree|yard|mow/i, 'lawn-|garden-'],
-  [/hvac|plumb|electric|handyman|roof|repair|contractor|construction|remodel|paint|carpent/i, 'tools-'],
-]
-export function stockFor(industry) {
-  const g = GROUPS.find(([re]) => re.test(String(industry || '')))
-  const re = new RegExp(`^(${g ? g[1] : 'home-'})`)
-  const list = STOCK.filter((s) => re.test(s.id))
-  return list.length ? list : STOCK.filter((s) => s.id.startsWith('home-'))
+// Industries we have a visual direction for. Each one has ONLY its own photos (never another industry's),
+// palettes and names that suit it, and a short art direction for the AI. Unknown industry → no stock photo
+// at all (text-led layouts), never a generic house or interior.
+export const INDUSTRIES = {
+  pool: {
+    re: /pool|\bspas?\b|hot ?tubs?/i,
+    photos: /^pool-/,
+    palettes: ['lagoon', 'midnight', 'navy'],
+    names: ['Clear Water', 'Deep End', 'Poolside Classic'],
+    direction: 'clear blue water, sunlit pools and outdoor living; fresh, clean, calm; blues and teals',
+  },
+  cleaning: {
+    re: /clean|maid|janitor|housekeep/i,
+    photos: /^clean-/,
+    palettes: ['lagoon', 'graphite', 'sand'],
+    names: ['Spotless', 'Crisp Modern', 'Warm Home'],
+    direction: 'bright, tidy, airy rooms; light backgrounds, crisp type, a sense of calm order',
+  },
+  lawn: {
+    re: /lawn|landscap|garden|\btrees?\b|\byards?\b|mow|hedge|irrigat/i,
+    photos: /^(lawn|garden)-/,
+    palettes: ['forest', 'sand', 'graphite'],
+    names: ['Green Lawn', 'Natural Earth', 'Clean Cut'],
+    direction: 'healthy green lawns and gardens; natural greens and earth tones; grounded and dependable',
+  },
+  trades: {
+    re: /hvac|heating|air condition|plumb|electric|handyman|roof|repair|contractor|construction|remodel|paint|carpent/i,
+    photos: /^tools-/,
+    palettes: ['navy', 'graphite', 'ember'],
+    names: ['Pro Trade', 'Workshop', 'Solid Build'],
+    direction: 'tools and craftsmanship; strong, dependable, practical; navy, charcoal and warm accents',
+  },
+}
+const NEUTRAL = { palettes: ['lagoon', 'graphite', 'sand'], names: ['Fresh', 'Bold', 'Classic'], direction: 'clean, confident, text-led layouts' }
+
+// Recognises the industry from the business's own details, most specific source first: the industry they
+// chose, then their service names, then their description and name. Returns a key of INDUSTRIES or null.
+export function industryKey({ industry, services = [], description, name } = {}) {
+  const sources = [industry, services.map((s) => (typeof s === 'string' ? s : s?.name)).join(' '), description, name]
+  for (const text of sources) {
+    const hit = Object.entries(INDUSTRIES).find(([, v]) => v.re.test(String(text || '')))
+    if (hit) return hit[0]
+  }
+  return null
+}
+export const directionFor = (key) => INDUSTRIES[key] || NEUTRAL
+
+// Stock photos for an industry key (see industryKey). Unknown → [] (no unrelated photos, ever).
+export function stockFor(key) {
+  const ind = INDUSTRIES[key]
+  return ind ? STOCK.filter((s) => ind.photos.test(s.id)) : []
 }
 
 // Image reference: 'asset:<32 hex>' (owner upload) or 'stock:<id>' (licensed library) or null.
-const imageOk = (ref, assetIds) =>
-  ref == null || (typeof ref === 'string' && ((ref.startsWith('stock:') && STOCK_IDS.has(ref.slice(6))) || (ref.startsWith('asset:') && /^[a-f0-9]{32}$/.test(ref.slice(6)) && (!assetIds || assetIds.has(ref.slice(6))))))
+// `allowedStock` (a Set of stock ids) limits stock photos to the business's own industry.
+const imageOk = (ref, assetIds, allowedStock) =>
+  ref == null || (typeof ref === 'string' && ((ref.startsWith('stock:') && STOCK_IDS.has(ref.slice(6)) && (!allowedStock || allowedStock.has(ref.slice(6)))) || (ref.startsWith('asset:') && /^[a-f0-9]{32}$/.test(ref.slice(6)) && (!assetIds || assetIds.has(ref.slice(6))))))
 
 // Returns [errors[], design]. Unknown values are errors (the generator repairs before saving).
-export function validateDesign(d, assetIds = null) {
+export function validateDesign(d, assetIds = null, allowedStock = null) {
   const errors = []
   if (!d || typeof d !== 'object') return [['design'], null]
   const pick = (v, allowed, field) => (allowed.includes(v) ? v : (errors.push(field), allowed[0]))
@@ -75,26 +115,31 @@ export function validateDesign(d, assetIds = null) {
     heroImage: d.heroImage ?? null,
     aboutImage: d.aboutImage ?? null,
   }
-  if (!imageOk(design.heroImage, assetIds)) errors.push('heroImage')
-  if (!imageOk(design.aboutImage, assetIds)) errors.push('aboutImage')
+  if (!imageOk(design.heroImage, assetIds, allowedStock)) errors.push('heroImage')
+  if (!imageOk(design.aboutImage, assetIds, allowedStock)) errors.push('aboutImage')
   return [errors, design]
 }
 
-// Three deliberately different starting points (used when no AI is available, and to repair AI output).
-export function presetDesigns(industry, photos = []) {
-  const stock = stockFor(industry)
+// Three deliberately different starting points for an industry key (used when no AI is available, and to
+// repair AI output). Owner photos first, then the industry's own stock; with neither, text-led layouts.
+export function presetDesigns(key, photos = []) {
+  const stock = stockFor(key)
+  const dir = directionFor(key)
   const own = photos.map((id) => `asset:${id}`)
-  const img = (i) => own[i] ?? (stock[i % stock.length] ? `stock:${stock[i % stock.length].id}` : null)
+  const img = (i) => own[i] ?? (stock.length ? `stock:${stock[i % stock.length].id}` : null)
+  const [p1, p2, p3] = dir.palettes
+  const [n1, n2, n3] = dir.names
+  const imagery = own.length || stock.length
   return [
-    { name: 'Fresh', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'round', sections: ['services', 'process', 'about', 'gallery'], heroImage: img(0), aboutImage: img(1) },
-    { name: 'Bold', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', about: 'statement', shape: 'sharp', sections: ['services', 'about', 'gallery', 'process'], heroImage: img(2), aboutImage: null },
-    { name: 'Classic', palette: 'sand', fonts: 'editorial', hero: 'typographic', services: 'tiles', about: 'split', shape: 'soft', sections: ['about', 'services', 'process', 'gallery'], heroImage: null, aboutImage: img(3) },
+    { name: n1, palette: p1, fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'round', sections: ['services', 'process', 'about', 'gallery'], heroImage: img(0), aboutImage: img(1) },
+    { name: n2, palette: p2, fonts: 'strong', hero: imagery ? 'immersive' : 'stacked', services: 'rows', about: 'statement', shape: 'sharp', sections: ['services', 'about', 'gallery', 'process'], heroImage: img(2), aboutImage: null },
+    { name: n3, palette: p3, fonts: 'editorial', hero: 'typographic', services: 'tiles', about: imagery ? 'split' : 'plain', shape: 'soft', sections: ['about', 'services', 'process', 'gallery'], heroImage: null, aboutImage: img(3) },
   ]
 }
 
 // Makes three AI designs genuinely different: no two share a hero layout, palette or font pairing.
-export function diversify(designs, industry, photos) {
-  const presets = presetDesigns(industry, photos)
+export function diversify(designs, key, photos) {
+  const presets = presetDesigns(key, photos)
   const out = []
   for (let i = 0; i < 3; i++) {
     const d = { ...(designs[i] || presets[i]) }

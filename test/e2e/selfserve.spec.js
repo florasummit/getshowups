@@ -89,11 +89,11 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('heading', { name: 'Create your website' })).toBeVisible()
   await page.getByRole('button', { name: 'Create my website' }).click()
   await expect(page.getByText('Choose a design.')).toBeVisible()
-  await expect(page.frameLocator('iframe[title="Bold design"]').getByRole('heading', { level: 1 })).toHaveText('Dependable weekly pool cleaning near you')
+  await expect(page.frameLocator('iframe[title="Deep End design"]').getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)
   await page.getByRole('button', { name: 'Use this design' }).nth(1).click()
   await expect(page.getByRole('heading', { name: 'Here’s your website' })).toBeVisible()
   const frame = page.frameLocator('iframe[title="Website preview"]')
-  await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Dependable weekly pool cleaning near you')
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)
   await expect(frame.getByText('From $150/month').first()).toBeVisible()
   await expect(frame.getByText('(843) 555-0142').filter({ visible: true }).first()).toBeVisible()
   await expect(frame.getByText('Only you can see this')).toBeVisible()
@@ -102,7 +102,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
   expect((await page.request.get(`/p/${id}`)).status()).toBe(404)
   await page.getByText('Edit text and photos').click()
-  await expect(page.getByLabel('Headline')).toHaveValue('Dependable weekly pool cleaning near you')
+  await expect(page.getByLabel('Headline')).toHaveValue(`${name}: dependable weekly pool cleaning near you`)
   await page.getByLabel('Introduction').fill('Friendly, reliable pool care across Charleston.')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(frame.getByText('Friendly, reliable pool care across Charleston.')).toBeVisible()
@@ -153,7 +153,7 @@ test('new customer: get started → pay → onboard → publish → book → man
 
   // A customer books through the published landing page; the event lands on the (mock) calendar.
   await page.goto(`/p/${id}`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Dependable weekly pool cleaning near you' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: `${name}: dependable weekly pool cleaning near you` })).toBeVisible()
   await noOverflow()
   await page.getByRole('link', { name: 'Book a time' }).first().click()
   const lead = `lead-${mobile ? 'm' : 'd'}@example.net`

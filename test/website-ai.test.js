@@ -52,7 +52,7 @@ function seed(id, owner) {
   kv.set(`google:${id}`, 'record')
 }
 const GOOD = {
-  headline: 'Clear, clean pools in Charleston',
+  headline: 'pools Co: clear, clean pools in Charleston',
   intro: 'We keep your pool ready to swim, and booking online takes about a minute.',
   about: 'We look after home pools across Charleston.\n\nPick a time online and we take it from there.',
   services: [
@@ -159,7 +159,7 @@ test('fallbacks: no AI binding, bad JSON or a model error give the template (lab
   const customer = { id: 'pools', name: 'pools Co', appointmentMode: 'at_business', serviceZips: ['29403'] }
   delete env.AI
   let r = await generateWebsite(env, customer)
-  assert.deepEqual([r.generation.source, r.generation.content.headline], ['template', 'Weekly pool cleaning in Charleston'])
+  assert.deepEqual([r.generation.source, r.generation.content.headline], ['template', 'pools Co: Weekly pool cleaning in Charleston'])
   env.AI = { run: async () => ({ response: 'not json at all' }) }
   assert.equal((await generateWebsite(env, customer)).generation.source, 'template')
   env.AI = { run: async () => Promise.reject(new Error('capacity')) }
