@@ -125,7 +125,9 @@ createServer(async (req, res) => {
   // Workers AI stand-in (AI_API_MOCK_ORIGIN): deterministic website copy built from the facts it is given.
   // The about text deliberately contains an unapproved claim, so the app's filter must drop it.
   if (url.pathname.startsWith('/ai/run/') && req.method === 'POST') {
-    const facts = JSON.parse(JSON.parse(raw).messages.at(-1).content.match(/\{[\s\S]*\}/)[0])
+    const prompt = JSON.parse(raw).messages.at(-1).content
+    const facts = JSON.parse(prompt.match(/Facts \(JSON\):\n(\{.*\})/)[1])
+    const revision = prompt.includes("Owner's request")
     const first = String(facts.services[0] || facts.whatTheyDo || 'Service').split(' (')[0]
     return send(res, 200, {
       response: {
@@ -135,6 +137,9 @@ createServer(async (req, res) => {
         services: facts.services.map((s) => ({ name: String(s).split(' (')[0], description: `What is included with ${String(s).split(' (')[0].toLowerCase()}, explained simply.` })),
         seoTitle: `${facts.businessName} | ${first}`,
         seoDescription: `Book ${first.toLowerCase()} with ${facts.businessName} online.`,
+        ...(revision
+          ? { headline: `Modern ${first.toLowerCase()} near you`, design: { name: 'Modern', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', about: 'statement', shape: 'sharp', sections: ['services', 'about', 'process'], heroImage: 'none', aboutImage: 'none' } }
+          : {}),
       },
       usage: { prompt_tokens: 450, completion_tokens: 250 },
     })

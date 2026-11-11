@@ -1,6 +1,6 @@
 // GET /api/dashboard/website/preview — the owner's private draft, rendered exactly like the public
 // site (links inert, noindex, frameable only by our own dashboard). ?live=1 shows the live version;
-// ?generation=<id> shows a stored generation; ?template= previews a design without saving (no AI call).
+// ?generation=<id>&option=<n> shows a stored generation's design; ?template= previews a classic style (no AI call).
 import { requireSession } from '../../../../server/auth.js'
 import { liveContent, loadWebsite, TEMPLATES } from '../../../../server/website.js'
 import { getGeneration } from '../../../../server/website-ai.js'
@@ -21,8 +21,10 @@ export async function onRequestGet({ request, env }) {
         ? (await liveContent(db, session.customer.id))?.content
         : (await loadWebsite(db, session.customer)).draft
     if (content && generation) {
+      const g = await getGeneration(db, session.customer.id, generation)
       const draft = (await loadWebsite(db, session.customer)).draft
-      content = { ...content, logo: draft.logo, hero: draft.hero, photos: draft.photos }
+      const option = Number.parseInt(q.get('option') || '0', 10)
+      content = { ...content, design: g.designs[option] ?? content.design ?? null, logo: draft.logo, hero: draft.hero, photos: draft.photos }
     }
     if (content && TEMPLATES.includes(q.get('template'))) content = { ...content, template: q.get('template') }
     if (!content) return htmlResponse(404, renderNotice('Not published yet', 'Publish your website to see it here.'), { preview: true })

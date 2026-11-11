@@ -66,7 +66,7 @@ export function ScaledFrame({ src, title, width = 1280, height = 860 }) {
 }
 
 export function WebsitePreview({ stamp, live = false, title = 'Website preview', query = '' }) {
-  const [device, setDevice] = useState('desktop')
+  const [device, setDevice] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 700 ? 'phone' : 'desktop'))
   const src = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}${query}v=${stamp}`
   return (
     <figure className="site-preview">
@@ -178,7 +178,7 @@ function Photos({ c, set }) {
 }
 
 // `initial`: website content; `colors`: { name: hex }; `onSaved(state)`: after each autosave.
-export default function WebsiteEditor({ initial, colors, onSaved, onEdit, compact = false }) {
+export default function WebsiteEditor({ initial, colors, designOptions, onSaved, onEdit, compact = false }) {
   const [c, setC] = useState(initial)
   const status = useAutosave(c, onSaved)
   const edited = useRef(onEdit)
@@ -195,6 +195,23 @@ export default function WebsiteEditor({ initial, colors, onSaved, onEdit, compac
 
   return (
     <div className="editor">
+      {c.design && designOptions?.palettes ? (
+        <fieldset className="field">
+          <legend>Look</legend>
+          <div className="swatches" role="radiogroup" aria-label="Colours">
+            {Object.entries(designOptions.palettes).map(([name, p]) => (
+              <button key={name} type="button" role="radio" aria-checked={c.design.palette === name} aria-label={p.label} title={p.label} className="swatch swatch--duo" style={{ '--swatch': p.accent, '--swatch-bg': p.bg }} onClick={() => set({ design: { ...c.design, palette: name } })} />
+            ))}
+          </div>
+          <div className="segmented segmented--wrap" role="radiogroup" aria-label="Lettering">
+            {Object.entries(designOptions.fonts).map(([name, label]) => (
+              <button key={name} type="button" role="radio" aria-checked={c.design.fonts === name} onClick={() => set({ design: { ...c.design, fonts: name } })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      ) : (
       <fieldset className="field">
         <legend>Look</legend>
         <div className="segmented segmented--wide" role="radiogroup" aria-label="Style">
@@ -210,6 +227,7 @@ export default function WebsiteEditor({ initial, colors, onSaved, onEdit, compac
           ))}
         </div>
       </fieldset>
+      )}
 
       <label className="field">
         <span>Headline</span>

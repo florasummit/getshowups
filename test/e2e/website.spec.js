@@ -50,10 +50,17 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await expect(page.getByRole('heading', { level: 1, name: 'Website' })).toBeVisible()
   await expect(page.getByText('Not published yet')).toBeVisible()
   await page.getByRole('button', { name: 'Create my website' }).click()
-  await page.getByRole('button', { name: 'Use Clean' }).click()
+  await expect(page.locator('.design-card')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Use this design' }).first().click()
   await expect(page.getByRole('heading', { name: 'Edit text and photos' })).toBeVisible()
+  // Natural-language revision: shown first, applied only when kept.
+  await page.getByRole('button', { name: 'Make it more modern' }).click()
+  await expect(page.getByText('Here’s the new version. Keep it?')).toBeVisible()
+  await expect(page.frameLocator('iframe[title="Website preview"]').getByRole('heading', { level: 1 })).toHaveText(/^Modern /)
+  await page.getByRole('button', { name: 'Keep this' }).click()
+  await expect(page.getByLabel('Describe a change')).toBeVisible()
   await page.getByLabel('Headline').fill('Pool care in Charleston')
-  await page.getByRole('radio', { name: 'Bold' }).click()
+  await page.getByRole('radio', { name: 'Sand' }).click()
   await expect(page.getByText('All changes saved')).toBeVisible()
   // Upload a main photo (resized in the browser, stored by the server, private until published).
   await page.getByText('Logo and photos').click()
@@ -79,8 +86,10 @@ test('owner edits, previews and publishes the website; visitors book through it 
   // Visitors: server-rendered site, ad parameters carried to booking.
   await page.goto(`/p/${id}?utm_source=google&utm_campaign=camp12345678`)
   await expect(page.getByRole('heading', { name: 'Pool care in Charleston', level: 1 })).toBeVisible()
-  await expect.poll(() => page.locator('img.hero-photo').evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
-  await expect(page.getByRole('heading', { level: 2, name: mobile ? 'Book a visit' : 'Book an appointment' })).toBeVisible()
+  // The owner's uploaded main photo is used (not a stock photo), and it loads publicly once published.
+  const hero = page.locator(`.hero img[src="${photo}"], .ab-split img[src="${photo}"]`).first()
+  await expect.poll(() => hero.evaluate((img) => img.complete && img.naturalWidth)).toBeGreaterThan(0)
+  await expect(page.getByRole('heading', { level: 2, name: mobile ? 'Ready when you are.' : 'Book your time today.' })).toBeVisible()
   await noOverflow()
   await page.getByRole('link', { name: mobile ? 'Book a visit' : 'Book a time' }).first().click()
   await expect(page).toHaveURL(new RegExp(`/book/${id}\\?utm_source=google&utm_campaign=camp12345678$`))

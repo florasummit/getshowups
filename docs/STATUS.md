@@ -33,6 +33,29 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
 - Onboarding target: sign up/pay → confirm details → keep or generate website → calendar → (optional) Google Ads →
   direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
 
+### AI website design upgrade (branch release/ai-design, NOT deployed; awaiting visual approval) (2026-11-10)
+- The AI now makes structured design decisions, not just copy. One request (Mistral Small 3.1 on Workers AI)
+  returns the copy plus three designs chosen from a safe design system (server/site-design.js): palette (8,
+  AA-checked, 2 dark), typography (5 self-hosted OFL pairings), hero layout (split / immersive / stacked /
+  typographic), services (cards / numbered rows / tiles), about (split / statement band / plain), shape, section
+  order and photo placement. The server forces the three to differ (hero, palette, fonts) and repairs any invalid
+  choice. No AI-written HTML/CSS/JS.
+- Photos: the owner's uploads first (the main photo always wins), otherwise a curated CC0 stock library of 20 photos
+  in 5 industry groups (public/site-stock, 1600 px + 900 px versions, licence records in server/stock-photos.js).
+  The "Our work" gallery shows only the owner's photos.
+- Revisions: "Describe a change" (free text or suggestions such as "Make it more modern" or "Use my photos") → one
+  request → a pending version shown in the preview → Keep this / Go back. The draft and live site change only when
+  kept and published.
+- Existing sites: content without a design renders through the original renderer unchanged (PoolThru live and
+  draft are unaffected until the owner chooses a design).
+- Measured with the real model through the app (local workerd): create 12.5–14.3 s, 817 in / ~530 out tokens,
+  $0.00058; revise 6.5–9.6 s, ~1,240 in / 320–383 out tokens, $0.00061–0.00065. Limits: 10/day plus 40 per
+  30 days per business; edits, previews, design switches and visits never call the model.
+- Known limitation: the copy can still contain vague, unverifiable phrasing ("our dedicated team", "you can trust")
+  that passes the claims and number filters. The owner reviews everything before publishing.
+- Tests: 265 unit (website-ai.test.js 13), 55 Playwright (design picker, revision keep, owner photo on the public
+  site). Screenshot review gallery generated locally from the running app (session scratchpad, not committed).
+
 ### Milestone A: AI website generation (branch release/ai-websites, NOT deployed) (2026-11-10)
 - Flow: Create my website → one Workers AI request (Mistral Small 3.1 24B) → choose a design from 3 side-by-side
   previews of the stored result → private draft → large desktop preview with a phone toggle → simple editor and

@@ -12,7 +12,7 @@ import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import { PublishBox } from './WebsiteTab.jsx'
-import WebsiteGenerator from './WebsiteGenerator.jsx'
+import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
 const PLAN_KEY = 'gsu_plan'
@@ -481,6 +481,7 @@ function WebsiteStep({ onDone, back }) {
   const [stamp, setStamp] = useState(0)
   const [editorKey, setEditorKey] = useState(0)
   const [keep, setKeep] = useState(false)
+  const [pending, setPending] = useState(null)
   const [state, setState] = useState({})
   if (!data) return <div aria-busy="true" />
   if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
@@ -539,14 +540,23 @@ function WebsiteStep({ onDone, back }) {
       <h1 id="step-title" className="title">
         Here’s your website
       </h1>
-      <p className="lede">Check it on a computer and a phone. Change anything you like below; it saves as you go.</p>
-      <WebsitePreview stamp={stamp} />
+      <p className="lede">Check it on a computer and a phone. Ask for any change in your own words, or edit the text yourself.</p>
+      <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} />
+      <ReviseBox
+        onPreview={setPending}
+        onApplied={(d) => {
+          setData(d)
+          latest.current = null
+          setEditorKey((k) => k + 1)
+          setStamp((n) => n + 1)
+        }}
+      />
       <details className="more">
         <summary>Edit text and photos</summary>
-        <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
+        <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
       </details>
       <details className="more">
-        <summary>Write it again</summary>
+        <summary>Start over with three new designs</summary>
         <WebsiteGenerator
           hasDraft
           onApplied={(d) => {

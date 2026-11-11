@@ -5,6 +5,7 @@
 import { unapprovedClaims } from './ads/spec.js'
 import { approvedClaimsFor } from './landing.js'
 import { getSubscription } from './stripe.js'
+import { validateDesign } from './site-design.js'
 
 export const TEMPLATES = ['clean', 'bold', 'warm']
 // Accent colours, each dark enough for white button text (WCAG AA).
@@ -133,6 +134,12 @@ export function validateContent(body, approvedClaims = [], assetIds = null) {
   if (c.highlights.length > LIMITS.highlights || c.highlights.some((h) => h.length > LIMITS.highlight)) errors.push('highlights')
   if (c.seoTitle.length > LIMITS.seoTitle) errors.push('seoTitle')
   if (c.seoDescription.length > LIMITS.seoDescription) errors.push('seoDescription')
+  // Optional AI-chosen design (layout, palette, type, images) from the safe design system.
+  if (b.design != null) {
+    const [designErrors, design] = validateDesign(b.design, assetIds)
+    if (designErrors.length) errors.push('design')
+    else c.design = design
+  }
   const images = [c.logo, c.hero, ...c.photos].filter(Boolean)
   if (c.photos.length > LIMITS.photos || new Set(c.photos).size !== c.photos.length) errors.push('photos')
   if (images.some((id) => !ASSET_RE.test(id) || (assetIds && !assetIds.has(id)))) errors.push('images')
@@ -172,7 +179,7 @@ export async function liveContent(db, customerId) {
   const legacy = await db.prepare('SELECT * FROM landing_pages WHERE customer = ?1 AND published = 1').bind(customerId).first()
   return legacy ? { version: 0, publishedAt: legacy.published_at, content: { ...defaults(), ...legacyContent(legacy) } } : null
 }
-const defaults = () => ({ template: 'clean', color: 'ocean', about: '', logo: null, hero: null, photos: [], seoTitle: '', seoDescription: '' })
+const defaults = () => ({ template: 'clean', color: 'ocean', about: '', logo: null, hero: null, photos: [], seoTitle: '', seoDescription: '', design: null })
 
 // The owner's view: draft (saved or generated), live version, recent versions.
 export async function loadWebsite(db, customer) {

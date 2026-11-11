@@ -4,7 +4,7 @@ import { api, fmt } from '../lib/api.js'
 import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
-import WebsiteGenerator from './WebsiteGenerator.jsx'
+import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -56,6 +56,7 @@ export default function WebsiteTab() {
   const [data, setData] = useWebsite()
   const [stamp, setStamp] = useState(0)
   const [rewrite, setRewrite] = useState(false)
+  const [pending, setPending] = useState(null)
   const [editorKey, setEditorKey] = useState(0)
   const [publishing, setPublishing] = useState(false)
   const [more, setMore] = useState({})
@@ -126,23 +127,29 @@ export default function WebsiteTab() {
             }}
           />
         ) : (
-          <div className="generator-row">
-            <p className="fine">Want fresh wording? We can write it again from your business details.</p>
-            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setRewrite(true)}>
-              Write it again
+          <>
+            <ReviseBox
+              onPreview={setPending}
+              onApplied={(d) => {
+                refresh(d)
+                setEditorKey((k) => k + 1)
+              }}
+            />
+            <button type="button" className="link-btn" onClick={() => setRewrite(true)}>
+              Start over with three new designs
             </button>
-          </div>
+          </>
         )}
       </section>
 
       {!w.generated && (
         <>
           <section className="site-preview-wrap" aria-label="Preview">
-            <WebsitePreview stamp={stamp} />
+            <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} />
           </section>
           <section className="card site-editor" aria-label="Edit website">
             <h2 className="card-title">Edit text and photos</h2>
-            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} onSaved={refresh} />
+            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} />
           </section>
         </>
       )}

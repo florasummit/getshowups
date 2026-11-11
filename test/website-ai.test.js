@@ -195,3 +195,90 @@ test('onboarding: "keep my current website" completes the website steps without 
   const r = (await call(onboarding, 'GET', { cookie: c })).json
   assert.equal(r.status ?? 200, 200)
 })
+
+// ---------- AI design (layouts from the safe design system) ----------
+import { validateDesign, presetDesigns, diversify, STOCK_IDS, stockFor } from '../server/site-design.js'
+import { renderSite } from '../server/site-render.js'
+import { validateContent } from '../server/website.js'
+
+const DESIGN = { name: 'Fresh', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'round', sections: ['services', 'about'], heroImage: 'stock:pool-water', aboutImage: null }
+
+test('design validation: only named options; images only from the licensed library or the owner’s own uploads', () => {
+  assert.deepEqual(validateDesign(DESIGN)[0], [])
+  assert.deepEqual(validateDesign({ ...DESIGN, palette: '#ff00ff', hero: '<script>' })[0].sort(), ['hero', 'palette'])
+  assert.deepEqual(validateDesign({ ...DESIGN, heroImage: 'https://evil.example/x.jpg' })[0], ['heroImage'])
+  assert.deepEqual(validateDesign({ ...DESIGN, heroImage: 'stock:not-real' })[0], ['heroImage'])
+  assert.deepEqual(validateDesign({ ...DESIGN, heroImage: `asset:${'a'.repeat(32)}` }, new Set())[0], ['heroImage'], 'another business’s photo')
+  assert.deepEqual(validateDesign({ ...DESIGN, sections: ['about', 'about', 'evil'] })[1].sections, ['services', 'about'], 'services always present, no duplicates/unknowns')
+  assert.ok(stockFor('Pool service').every((s) => s.id.startsWith('pool-') && STOCK_IDS.has(s.id)))
+  assert.equal(validateContent({ headline: 'H', intro: 'I', design: { ...DESIGN, fonts: 'comic' } })[0].includes('design'), true)
+})
+
+test('three designs are genuinely different even when the model repeats itself', () => {
+  const same = [DESIGN, DESIGN, DESIGN]
+  const out = diversify(same, 'Pool service', [])
+  assert.equal(new Set(out.map((d) => d.hero)).size, 3)
+  assert.equal(new Set(out.map((d) => d.palette)).size, 3)
+  assert.equal(new Set(out.map((d) => d.fonts)).size, 3)
+  assert.equal(new Set(presetDesigns('HVAC').map((d) => d.hero)).size, 3)
+})
+
+test('renderer: designed sites are escaped, script-free, self-hosted; existing sites without a design render exactly as before', () => {
+  const content = { ...validateContent({ headline: '"><script>alert(1)</script>', intro: 'Pick a time.', about: 'Line one\n\nLine two', services: [{ name: '<b>Weekly</b>', price: '$150', description: 'x' }], area: 'Charleston' })[1] }
+  const biz = { id: 'x', name: 'Evil & Co', appointmentMode: 'at_customer', phone: '(843) 555-0123' }
+  for (const d of presetDesigns('Pool service', ['b'.repeat(32)])) {
+    const html = renderSite(biz, { ...content, design: d, photos: ['b'.repeat(32)] }, { canonical: 'https://x.example/', bookUrl: 'https://getshowups.com/book/x' })
+    assert.ok(!html.includes('<script>alert') && !html.includes('<b>Weekly'), d.name)
+    assert.ok(html.includes('&lt;b&gt;Weekly&lt;/b&gt;') && html.includes('Evil &amp; Co'))
+    assert.ok(html.includes('href="https://getshowups.com/book/x"') && html.includes('href="tel:+18435550123"'), 'booking + call integrated')
+    assert.ok(!/<script(?![^>]*application\/ld\+json)/.test(html), 'no executable scripts')
+    assert.ok(!/https?:\/\/(?!getshowups\.com|x\.example|schema\.org|www\.w3\.org)/.test(html.replace(/https:\/\/getshowups\.com\/book\/x/g, '')), 'no third-party resources')
+    assert.ok(html.includes('/site-fonts/') && html.includes('<h1>'))
+  }
+  // Legacy content (no design) uses the original renderer unchanged.
+  const legacy = renderSite(biz, content, { bookUrl: '/book/x' })
+  assert.ok(!legacy.includes('/site-fonts/') && legacy.includes('class="top"'))
+})
+
+test('generate: three validated designs stored with the copy; model design choices are repaired, never trusted raw', async () => {
+  reply = { response: { ...GOOD, designs: [{ ...DESIGN, palette: 'hotpink' }, { ...DESIGN, heroImage: 'https://evil.example/a.jpg' }, DESIGN] }, usage: { prompt_tokens: 820, completion_tokens: 520 } }
+  const c = await cookieFor('owner@pools.example')
+  const g = (await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.generation
+  assert.equal(g.designs.length, 3)
+  for (const d of g.designs) assert.deepEqual(validateDesign(d)[0], [])
+  assert.equal(new Set(g.designs.map((d) => d.hero)).size, 3)
+  assert.ok(g.designs.every((d) => d.heroImage === null || d.heroImage.startsWith('stock:pool-') || d.heroImage.startsWith('asset:')))
+  for (let i = 0; i < 3; i++) assert.ok((await call(preview, 'GET', { cookie: c, url: `${ORIGIN}/x?generation=${g.id}&option=${i}` })).text.includes('/site-fonts/'))
+  const applied = await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: g.id, option: 2 } })
+  assert.deepEqual(applied.json.website.draft.design, g.designs[2])
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: g.id, option: 7 } })).status, 400)
+  assert.equal(db.sql.prepare('SELECT cost_micros c FROM website_generations').get().c, Math.round(820 * 0.351 + 520 * 0.555))
+})
+
+test('revise: natural-language change becomes a pending version; the draft changes only when kept; claims still filtered', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const g = (await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.generation
+  await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: g.id, option: 0 } })
+  const before = (await call(website, 'GET', { cookie: c })).json.website.draft
+  reply = { response: { ...GOOD, headline: 'Licensed and insured pool experts', design: { ...DESIGN, palette: 'midnight', fonts: 'strong', hero: 'immersive' } }, usage: { prompt_tokens: 1200, completion_tokens: 380 } }
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'Make it more modern and say we are licensed' } })
+  assert.equal(r.status, 200)
+  const rev = r.json.generation
+  assert.deepEqual([rev.designs[0].palette, rev.designs[0].hero], ['midnight', 'immersive'])
+  assert.equal(rev.content.headline, before.headline, 'unapproved claim from the revision is dropped')
+  assert.deepEqual((await call(website, 'GET', { cookie: c })).json.website.draft, before, 'nothing changes until the owner keeps it')
+  await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: rev.id, option: 0 } })
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.design.palette, 'midnight')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: '   ' } })).status, 400)
+  delete env.AI
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'warmer' } })).json.error, 'ai_unavailable')
+})
+
+test('owner photos win: an uploaded main photo replaces the chosen stock photo', () => {
+  const content = { ...validateContent({ headline: 'H', intro: 'I', services: [{ name: 'A' }] })[1], hero: 'c'.repeat(32) }
+  const biz = { id: 'x', name: 'X', appointmentMode: 'at_business', phone: '' }
+  const split = renderSite(biz, { ...content, design: { ...DESIGN, hero: 'split' } }, { bookUrl: '/b' })
+  assert.ok(split.includes(`/site-assets/${'c'.repeat(32)}`) && !split.includes('/site-stock/pool-water'))
+  const typo = renderSite(biz, { ...content, about: 'About us.', design: { ...DESIGN, hero: 'typographic', about: 'split', aboutImage: 'stock:pool-water' } }, { bookUrl: '/b' })
+  assert.ok(typo.includes(`/site-assets/${'c'.repeat(32)}`) && !typo.includes('/site-stock/pool-water'), 'moves to About when the hero has no photo')
+})

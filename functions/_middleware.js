@@ -38,7 +38,7 @@ export async function onRequest(context) {
   const p = url.pathname
   if (p === '/.well-known/getshowups-site') return new Response(site.verify_token.slice(0, 12), { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } })
   if (p === '/' || p === '/index.html') return serveSite(env, request, site.customer)
-  if (p.startsWith('/site-assets/')) return next()
+  if (p.startsWith('/site-assets/') || p.startsWith('/site-stock/') || p.startsWith('/site-fonts/')) return next()
   if (p === '/robots.txt') return text(`User-agent: *\nAllow: /\nSitemap: https://${host}/sitemap.xml\n`)
   if (p === '/sitemap.xml') return text(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://${host}/</loc></url></urlset>\n`, 'application/xml')
   if (p === '/favicon.svg' || p === '/favicon.ico') return next()

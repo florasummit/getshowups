@@ -76,8 +76,15 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
   website.js         Website content (validate, generate), drafts, versions/rollback, hosting entitlement (hostingStatus)
-  website-ai.js      AI website copy: one Workers AI request (binding AI, model WEBSITE_MODEL), facts from records only,
-                     claims + invented-number filter, stored in website_generations; template fallback
+  website-ai.js      AI website design: one Workers AI request (binding AI, model WEBSITE_MODEL) → copy + 3 designs;
+                     revise (natural-language change) → 1 design. Facts from records only; claims + invented-number
+                     filter; designs repaired via site-design.js; stored in website_generations; template fallback
+  site-design.js     The design system the AI chooses from: 8 palettes (AA-checked), 5 font pairings, 4 hero / 3
+                     services / 3 about layouts, shapes, section order, image refs (asset:<id> | stock:<id>).
+                     validateDesign(), presetDesigns(), diversify() (3 designs never share hero/palette/fonts)
+  site-designed.js   Renderer for content.design (escaped, script-free, self-hosted fonts/photos). Content without
+                     a design still uses site-render.js unchanged, so existing sites look exactly the same
+  stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
@@ -164,6 +171,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN
   and CLOUDFLARE_API_MOCK_ORIGIN are loopback-only test vars.
+- AI website design: the model only picks named options from site-design.js and writes prose; it never writes
+  HTML/CSS/JS. Unknown options are repaired from presets. Stock photos: CC0 library only (public/site-stock,
+  generic scenes, no identifiable people), never in the "Our work" gallery (owner photos only); the owner's
+  uploaded main photo always beats a stock choice. Fonts are self-hosted OFL files in public/site-fonts.
 - AI website copy: the model writes prose only; names, services, prices, area and phone always come from records.
   Every field passes the claims filter and the invented-number check, otherwise the template text is used. A
   generation never changes the draft or live site (apply → private draft; publish → live). Previews, design

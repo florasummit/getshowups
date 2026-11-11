@@ -2,6 +2,7 @@
 // script-free HTML page out (same output for getshowups.com/p/:id, a connected domain, and the
 // owner's private preview). Every value is escaped; images come only from this business's uploads.
 import { COLORS } from './website.js'
+import { renderDesigned } from './site-designed.js'
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -85,7 +86,10 @@ a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offse
 `
 
 // biz: { id, name, appointmentMode, phone }  content: website content  opts: { canonical, bookUrl, preview, year }
-export function renderSite(biz, content, { canonical, bookUrl, privacyUrl = '/privacy', preview = false, year = new Date().getUTCFullYear() } = {}) {
+export function renderSite(biz, content, opts = {}) {
+  // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
+  if (content.design) return renderDesigned(biz, content, opts)
+  const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, year = new Date().getUTCFullYear() } = opts
   const c = content
   const accent = COLORS[c.color] || COLORS.ocean
   const visit = biz.appointmentMode === 'at_customer'
@@ -167,7 +171,7 @@ export function htmlResponse(status, html, { preview = false, cache = 'public, m
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': preview ? 'private, no-store' : cache,
-      'Content-Security-Policy': `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors ${preview ? "'self'" : "'none'"}`,
+      'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors ${preview ? "'self'" : "'none'"}`,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       ...(preview && { 'X-Robots-Tag': 'noindex' }),
