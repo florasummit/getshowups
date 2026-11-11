@@ -317,3 +317,43 @@ export async function adResults(db, customer, now = Date.now()) {
 }
 
 export { logAction }
+
+// Advertising results for the main Overview (last 30 days). Real recorded data only:
+//   - spend and clicks come from platform daily metrics; null (unavailable) until any are recorded;
+//   - leads, bookings and show-ups are leads attributed to this business's OWN campaigns
+//     (lead_attribution), excluding test-marked leads; bookings exclude pending reservations and
+//     cancelled appointments, show-ups are appointments marked 'showed';
+//   - cost per booking / per show-up only when there is spend AND a count to divide by.
+export async function adSummary(db, customerId, now = Date.now()) {
+  const since = now - 30 * 86400000
+  const sinceDay = new Date(since).toISOString().slice(0, 10)
+  const m = await db
+    .prepare('SELECT count(*) AS n, coalesce(sum(spend_cents), 0) AS s, coalesce(sum(clicks), 0) AS c FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2')
+    .bind(customerId, sinceDay)
+    .first()
+  const f = await db
+    .prepare(
+      `SELECT count(DISTINCT a.lead_id) AS leads,
+              count(DISTINCT CASE WHEN p.status IN ('booked', 'showed', 'no_show') THEN p.id END) AS booked,
+              count(DISTINCT CASE WHEN p.status = 'showed' THEN p.id END) AS showed
+         FROM lead_attribution a
+         LEFT JOIN appointments p ON p.lead_id = a.lead_id AND p.customer = a.customer
+        WHERE a.customer = ?1 AND a.source IN ('google_ads', 'meta_ad_click', 'meta_lead_form') AND a.created_at >= ?2
+          AND a.lead_id NOT IN (SELECT lead_id FROM test_marks WHERE customer = ?1 AND is_test = 1)`,
+    )
+    .bind(customerId, since)
+    .first()
+  const measured = (m?.n ?? 0) > 0
+  const per = (n) => (measured && n > 0 ? Math.round(m.s / n) : null)
+  const booked = f?.booked ?? 0
+  const showed = f?.showed ?? 0
+  return {
+    spendCents: measured ? m.s : null,
+    clicks: measured ? m.c : null,
+    leads: f?.leads ?? 0,
+    booked,
+    showed,
+    costPerBookingCents: per(booked),
+    costPerShowUpCents: per(showed),
+  }
+}

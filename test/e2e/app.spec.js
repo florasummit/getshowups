@@ -82,7 +82,7 @@ test('owner records show-up results, undoes a mis-tap, and corrects a result lat
   await row.getByRole('button', { name: 'Showed up' }).click()
   await pending.getByRole('button', { name: 'Done', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Did they show up?' })).toHaveCount(0)
-  await expect(page.locator('.stat', { hasText: 'Show-ups' }).locator('.stat-value')).toHaveText('1')
+  await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat', { hasText: 'Show-ups' }).locator('.stat-value')).toHaveText('1')
   // Later correction from Appointments → Past.
   await page.getByRole('link', { name: 'Appointments' }).click()
   const past = page.locator('.card', { has: page.getByRole('heading', { name: 'Past' }) })
@@ -95,7 +95,7 @@ test('owner records show-up results, undoes a mis-tap, and corrects a result lat
   await result.getByRole('button', { name: 'Showed up' }).click()
   await expect(result.locator('.tag--ok')).toHaveText('Showed up')
   await page.getByRole('link', { name: 'Overview' }).click()
-  await expect(page.locator('.stat', { hasText: 'Show-ups' }).locator('.stat-value')).toHaveText('1')
+  await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat', { hasText: 'Show-ups' }).locator('.stat-value')).toHaveText('1')
 })
 
 test('owner updates booking hours in settings', async ({ page, context }) => {
@@ -175,7 +175,7 @@ test.describe('read-only pages @mobile', () => {
     await expect(page.getByRole('heading', { level: 1, name: fixtures.E2E_CUSTOMER_NAME })).toBeVisible()
     await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Website', 'Ads', 'Settings'])
     await expect(page.getByRole('region', { name: 'Your website' })).toBeVisible()
-    await expect(page.locator('.stat')).toHaveCount(3)
+    await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat')).toHaveCount(3)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   })
 })

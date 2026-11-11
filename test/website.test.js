@@ -25,6 +25,7 @@ import * as middleware from '../functions/_middleware.js'
 import * as billing from '../functions/api/dashboard/billing.js'
 import * as outcome from '../functions/api/dashboard/outcome.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
+import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as testMark from '../functions/api/dashboard/test-mark.js'
 import * as ghlRoute from '../functions/api/dashboard/ghl.js'
 import { smsHandledByGhl } from '../server/ghl.js'
@@ -37,8 +38,19 @@ let env, db, kv, dns, provider, origFetch
 function d1() {
   const sql = new DatabaseSync(':memory:')
   for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) sql.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
-  const stmt = (q, args = []) => ({ bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => sql.prepare(q).run(...args) })
-  return { sql, prepare: (q) => stmt(q) }
+  const stmt = (q, args = []) => ({ q, args, bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => sql.prepare(q).run(...args) })
+  // D1 batch: all statements in one transaction.
+  const batch = async (list) => {
+    sql.exec('BEGIN')
+    try {
+      for (const s of list) sql.prepare(s.q).run(...s.args)
+      sql.exec('COMMIT')
+    } catch (e) {
+      sql.exec('ROLLBACK')
+      throw e
+    }
+  }
+  return { sql, prepare: (q) => stmt(q), batch }
 }
 function seed(id, owner, { zips = '29403,29407', bookable = true } = {}) {
   const now = Date.now()
@@ -566,4 +578,55 @@ test('GHL release switch: off → route 404 and SMS never handed to GHL even wit
   assert.equal((await call(ghlRoute, 'GET', { cookie: await cookieFor('owner@pools.example') })).status, 404)
   env.GHL_ENABLED = 'true'
   assert.equal(await smsHandledByGhl(env, 'pools'), true)
+})
+
+// ---------- advertising: website → booking attribution and the Overview row ----------
+
+test('ads: a click that lands on the website keeps its campaign through booking; Overview shows real ad results only', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const now = Date.now()
+  const day = new Date(now).toISOString().slice(0, 10)
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES ('campweb1', 'pools', 'google', 'active', '{}', 1000, 1, 1)").run()
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content(), confirm: true } })).status, 200)
+
+  // Ad click → customer website → its booking link → booking page sends the same parameters with the lead.
+  const site = await call(publicSite, 'GET', { params: { customer: 'pools' }, url: `${ORIGIN}/p/pools?utm_source=google&utm_medium=cpc&utm_campaign=campweb1&gclid=Cj0KCQabc123xyz` })
+  const href = site.text.match(/href="(https:\/\/getshowups\.com\/book\/pools\?[^"]+)"/)[1].replaceAll('&amp;', '&')
+  const attribution = Object.fromEntries(new URL(href).searchParams)
+  assert.deepEqual(attribution, { utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'campweb1', gclid: 'Cj0KCQabc123xyz' })
+  const lead = (n) => call(bookLead, 'POST', { params: { customer: 'pools' }, body: { name: `Ad Lead ${n}`, email: `ad${n}@example.net`, phone: '(843) 555-0142', need: 'Weekly cleaning', zip: '29403', attribution } })
+  const ids = []
+  for (const n of [1, 2, 3, 4]) {
+    const r = await lead(n)
+    assert.equal(r.status, 201, r.text)
+    ids.push(r.json.leadId ?? r.json.id)
+  }
+  const attributed = db.sql.prepare("SELECT source, campaign_id FROM lead_attribution WHERE customer = 'pools' ORDER BY lead_id").all().map((r) => ({ ...r }))
+  assert.equal(attributed.length, 4)
+  assert.ok(attributed.every((a) => a.source === 'google_ads' && a.campaign_id === 'campweb1'), 'credited to the campaign, not a plain booking-page lead')
+
+  // Outcomes: lead 1 booked + showed, lead 2 booked (upcoming), lead 3 no booking, lead 4 is a test record.
+  const appt = (id, leadId, status, startOffset) =>
+    db.sql
+      .prepare("INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, created_at, updated_at) VALUES (?, 'pools', ?, ?, ?, ?, ?, ?)")
+      .run(id, leadId, now + startOffset, now + startOffset + 3600000, status, now, now)
+  appt('a'.repeat(32), ids[0], 'showed', -86400000)
+  appt('b'.repeat(32), ids[1], 'booked', 86400000)
+  appt('c'.repeat(32), ids[3], 'showed', -3600000)
+  db.sql.prepare("INSERT INTO test_marks (lead_id, customer, is_test, marked_by, marked_at) VALUES (?, 'pools', 1, 'owner', ?)").run(ids[3], now)
+  // Noise that must not count: another business's ad lead and spend, a plain booking-page lead.
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES ('campsal1', 'salon', 'google', 'active', '{}', 1000, 1, 1)").run()
+  db.sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, clicks, fetched_at) VALUES ('campsal1', 'salon', ?, 99900, 999, ?)").run(day, now)
+  assert.equal((await call(bookLead, 'POST', { params: { customer: 'pools' }, body: { name: 'Organic', email: 'o@example.net', phone: '(843) 555-0142', need: 'Green pool', zip: '29403' } })).status, 201)
+
+  // Switch off (production today): no advertising row at all.
+  assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads, null)
+  env.ADS_ENABLED = 'true'
+  // No spend recorded yet: spend, clicks and costs are unavailable (null), never zero or estimated.
+  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: null, clicks: null, leads: 3, booked: 2, showed: 1, costPerBookingCents: null, costPerShowUpCents: null })
+  db.sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, clicks, fetched_at) VALUES ('campweb1', 'pools', ?, 12000, 48, ?)").run(day, now)
+  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: 12000, clicks: 48, leads: 3, booked: 2, showed: 1, costPerBookingCents: 6000, costPerShowUpCents: 12000 })
+  // Tenant isolation: the other business sees only its own spend and no leads.
+  const salon = (await call(overviewApi, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.ads
+  assert.deepEqual([salon.spendCents, salon.leads, salon.costPerBookingCents], [99900, 0, null])
 })

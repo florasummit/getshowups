@@ -11,6 +11,16 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   // Each project gets its own seeded business so the flow starts from scratch in both.
   await useSession(context, testInfo.project.name === 'mobile' ? fixtures.E2E_HOME_SESSION_TOKEN : fixtures.E2E_SESSION_TOKEN)
   await page.goto('/dashboard')
+  // Overview shows the Advertising row (Ads switched on); nothing is recorded yet, so money values are
+  // shown as unavailable ('—'), never as $0 or an estimate.
+  const adsRow = page.locator('[data-ads-results]')
+  await expect(adsRow.getByRole('heading', { name: 'Advertising' })).toBeVisible()
+  for (const label of ['Ad spend', 'Clicks', 'Leads from ads', 'Bookings', 'Show-ups', 'Cost per booking', 'Cost per show-up']) {
+    await expect(adsRow.getByText(label, { exact: true })).toBeVisible()
+  }
+  await expect(adsRow.locator('.stat', { hasText: 'Ad spend' }).locator('.stat-value')).toHaveText('—')
+  await expect(adsRow.locator('.stat', { hasText: 'Cost per show-up' }).locator('.stat-value')).toHaveText('—')
+  await expect(adsRow.getByText('no ad spend recorded')).toBeVisible()
   await page.getByRole('link', { name: 'Ads', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
 

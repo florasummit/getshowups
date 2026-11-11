@@ -214,6 +214,43 @@ function Stats({ stats, visit }) {
   )
 }
 
+// Whole dollars when exact, cents otherwise; '—' when unavailable (never an estimate).
+const money = (cents) => {
+  if (cents === null || cents === undefined) return '—'
+  const exact = cents % 100 === 0
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: exact ? 0 : 2, maximumFractionDigits: exact ? 0 : 2 })}`
+}
+
+// Advertising results (shown only while the Ads feature is on). '—' means not available yet: no ad
+// spend has been recorded, or there is nothing to divide by.
+function AdsResults({ ads }) {
+  const tiles = [
+    ['Ad spend', money(ads.spendCents)],
+    ['Clicks', ads.clicks ?? '—'],
+    ['Leads from ads', ads.leads],
+    ['Bookings', ads.booked],
+    ['Show-ups', ads.showed],
+    ['Cost per booking', money(ads.costPerBookingCents)],
+    ['Cost per show-up', money(ads.costPerShowUpCents)],
+  ]
+  return (
+    <section aria-label="Advertising, last 30 days" data-ads-results>
+      <h2 className="card-title">Advertising</h2>
+      <div className="stats">
+        {tiles.map(([label, value]) => (
+          <div key={label} className="stat">
+            <p className="stat-value">{value}</p>
+            <p className="stat-label">{label}</p>
+          </div>
+        ))}
+      </div>
+      <p className="fine stats-note">
+        Last 30 days · — means not available yet{ads.spendCents === null ? ' (no ad spend recorded)' : ''}.
+      </p>
+    </section>
+  )
+}
+
 function Overview({ me, data, reload, go, site }) {
   const tz = me.customer.timezone
   const visit = me.customer.appointmentMode === 'at_customer'
@@ -232,6 +269,7 @@ function Overview({ me, data, reload, go, site }) {
       {data && !data.failed && (
         <div className="enter">
           <Stats stats={data.stats} visit={visit} />
+          {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">
               <h2 className="card-title">{visit ? 'How did these visits go?' : 'Did they show up?'}</h2>

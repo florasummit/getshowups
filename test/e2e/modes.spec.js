@@ -56,8 +56,8 @@ test('owner records visit outcome separately from job completion, then reports j
   await expect(results.getByRole('button', { name: '$350' })).toBeVisible()
 
   await page.getByRole('link', { name: 'Overview' }).click()
-  await expect(page.locator('.stat', { hasText: 'Visits' }).locator('.stat-value')).toHaveText('1')
-  await expect(page.locator('.stat', { hasText: 'Show-up rate' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat', { hasText: 'Visits' }).locator('.stat-value')).toHaveText('1')
+  await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat', { hasText: 'Show-up rate' })).toHaveCount(0)
 })
 
 test('settings: mode choice shown and saved; hours label reflects visits', async ({ page, context }) => {
