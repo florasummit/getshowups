@@ -57,8 +57,9 @@ export async function onRequestPost({ request, env }) {
     accountId,
     accountName: about.name,
     currency: about.currency,
-    extra: loginCustomerId ? { loginCustomerId } : {},
+    // testAccount: Google's own flag (test accounts never serve ads or spend). Re-checked live before any change.
+    extra: { ...(loginCustomerId ? { loginCustomerId } : {}), testAccount: about.testAccount === true },
     status: 'connected',
   })
-  return json(200, { ok: true, accountId, status: 'connected' })
+  return json(200, { ok: true, accountId, status: 'connected', testAccount: about.testAccount === true })
 }

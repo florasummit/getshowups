@@ -623,9 +623,12 @@ test('ads: a click that lands on the website keeps its campaign through booking;
   assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads, null)
   env.ADS_ENABLED = 'true'
   // No spend recorded yet: spend, clicks and costs are unavailable (null), never zero or estimated.
-  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: null, clicks: null, leads: 3, booked: 2, showed: 1, costPerBookingCents: null, costPerShowUpCents: null })
+  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: null, clicks: null, leads: 3, booked: 2, showed: 1, costPerBookingCents: null, costPerShowUpCents: null, testAccount: false })
   db.sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, clicks, fetched_at) VALUES ('campweb1', 'pools', ?, 12000, 48, ?)").run(day, now)
-  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: 12000, clicks: 48, leads: 3, booked: 2, showed: 1, costPerBookingCents: 6000, costPerShowUpCents: 12000 })
+  assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: 12000, clicks: 48, leads: 3, booked: 2, showed: 1, costPerBookingCents: 6000, costPerShowUpCents: 12000, testAccount: false })
+  // Figures from a Google Ads TEST account are flagged so the dashboard labels them as test data.
+  db.sql.prepare("INSERT INTO ad_connections (customer, platform, account_id, extra, status, connected_at, updated_at) VALUES ('pools', 'google', '1234567890', '{\"testAccount\":true}', 'connected', 1, 1)").run()
+  assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads.testAccount, true)
   // Tenant isolation: the other business sees only its own spend and no leads.
   const salon = (await call(overviewApi, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.ads
   assert.deepEqual([salon.spendCents, salon.leads, salon.costPerBookingCents], [99900, 0, null])

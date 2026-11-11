@@ -166,8 +166,19 @@ createServer(async (req, res) => {
     const [kind, email] = String(p.get('code')).split(':')
     if (kind === 'login') return send(res, 200, { access_token: 'mock-login', id_token: idToken(email), scope: 'openid email' })
     if (kind === 'connect') return send(res, 200, { access_token: 'mock-access-token', refresh_token: `mock-refresh-${email}`, id_token: idToken(email), scope: SCOPE })
+    if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     return send(res, 400, { error: 'invalid_grant' })
   }
+
+  // Google Ads API stand-in (GOOGLE_ADS_API_MOCK_ORIGIN). MOCK DATA: one account that reports itself as a
+  // Google Ads TEST account, no campaigns and no metrics. Never shown as real results.
+  if (url.pathname === '/v26/customers:listAccessibleCustomers') return send(res, 200, { resourceNames: ['customers/1234567890'] })
+  if (/^\/v26\/customers\/\d{10}\/googleAds:search$/.test(url.pathname)) {
+    const q = JSON.parse(raw || '{}').query || ''
+    if (q.includes('FROM customer ')) return send(res, 200, { results: [{ customer: { id: '1234567890', descriptiveName: 'MOCK Google Ads test account', currencyCode: 'USD', testAccount: true } }] })
+    return send(res, 200, { results: [] })
+  }
+  if (/^\/v26\/customers\/\d{10}\/googleAds:searchStream$/.test(url.pathname)) return send(res, 200, [{ results: [] }])
 
   if (url.pathname === '/calendar/v3/freeBusy' && req.method === 'POST') {
     const owner = req.headers.authorization

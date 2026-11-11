@@ -3,7 +3,7 @@
 // Live launch stays disabled (ADS_LIVE_LAUNCH unset), so nothing can be created or spent.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
-import { useSession } from './helpers.js'
+import { returnFromGoogle, useSession } from './helpers.js'
 
 test.describe.configure({ mode: 'serial', timeout: 60_000 })
 
@@ -64,6 +64,25 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   // No horizontal overflow on phones.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test('connect Google Ads: a Google Ads TEST account is connected and clearly labelled (mock API)', async ({ page, context }) => {
+  // Google sign-in for Ads and the Google Ads API are local stand-ins (MOCK DATA: one test account, no
+  // campaigns, no metrics). Nothing here reaches Google, creates a campaign or spends money.
+  await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads:owner@e2e.example')
+  await page.goto('/dashboard/ads')
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Ad accounts' }) })
+  await accounts.getByRole('link', { name: 'Connect' }).first().click()
+  await page.waitForURL(/\/dashboard/)
+  await page.goto('/dashboard/ads')
+  await expect(accounts.getByText('Connected: MOCK Google Ads test account')).toBeVisible()
+  await expect(accounts.locator('[data-test-account]')).toHaveText('Google Ads test account: ads never run and nothing is charged. Results here are test data.')
+  // Reading the account works and is read-only; the Overview labels test-account figures.
+  const read = await (await page.request.get('/api/ads/google/campaigns')).json()
+  expect(read).toEqual({ testAccount: true, campaigns: [] })
+  await page.goto('/dashboard')
+  await expect(page.locator('[data-ads-results]')).toContainText('Google Ads test account: no real ads ran')
 })
 
 test('booking page passes ad attribution with the lead', async ({ page }) => {

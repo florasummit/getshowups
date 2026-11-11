@@ -81,7 +81,7 @@ export async function onRequestGet({ request, env }) {
   if (listed.accounts.length === 1) {
     const accountId = listed.accounts[0]
     const about = await describeAccountWithToken(env, tokens.access_token, accountId)
-    await upsertConnection(env, customerId, 'google', { accountId, accountName: about.name, currency: about.currency, status: 'connected' })
+    await upsertConnection(env, customerId, 'google', { accountId, accountName: about.name, currency: about.currency, extra: { testAccount: about.testAccount === true }, status: 'connected' })
   } else {
     await upsertConnection(env, customerId, 'google', { status: 'needs_account' })
   }

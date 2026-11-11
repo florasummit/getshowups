@@ -157,14 +157,78 @@ export async function listAccounts(env, customerId) {
   return r
 }
 
-// Name + currency of one account (best effort; null fields when unreadable).
+// Name, currency and test-account flag of one account (best effort; null fields when unreadable).
+// customer.test_account is Google's own flag: test accounts never serve ads and are never charged.
 export async function describeAccountWithToken(env, token, accountId, loginCustomerId) {
   const r = await call(env, token, 'POST', `/customers/${accountId}/googleAds:search`, {
-    body: { query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code FROM customer LIMIT 1' },
+    body: { query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.test_account FROM customer LIMIT 1' },
     loginCustomerId,
   })
   const c = r.ok ? r.data.results?.[0]?.customer : null
-  return { name: typeof c?.descriptiveName === 'string' ? c.descriptiveName.slice(0, 120) : null, currency: /^[A-Z]{3}$/.test(c?.currencyCode || '') ? c.currencyCode : null }
+  return {
+    name: typeof c?.descriptiveName === 'string' ? c.descriptiveName.slice(0, 120) : null,
+    currency: /^[A-Z]{3}$/.test(c?.currencyCode || '') ? c.currencyCode : null,
+    testAccount: typeof c?.testAccount === 'boolean' ? c.testAccount : null,
+  }
+}
+
+// ---------- test-account guard ----------
+// Without the operator switch ADS_LIVE_LAUNCH, every change that could make a campaign serve (create
+// for real, resume, budget change) is allowed ONLY on a Google Ads test account, verified fresh from
+// Google right before the change. Unknown → refused (fails closed). Pausing is never blocked.
+const liveSwitch = (env) => env.ADS_LIVE_LAUNCH === 'true'
+async function testAccountOk(env, token, conn) {
+  const about = await describeAccountWithToken(env, token, conn.account_id, login(conn))
+  return about.testAccount === true
+}
+async function guardServing(env, token, conn) {
+  if (liveSwitch(env)) return null
+  return (await testAccountOk(env, token, conn)) ? null : failure('test_account_required')
+}
+
+// True only when the business's connected account is a Google Ads test account (read from Google now).
+export async function isTestAccount(env, customerId) {
+  const r = await withAccount(env, customerId, async (token, conn) => ({ ok: true, test: await testAccountOk(env, token, conn) }))
+  return r.ok && r.test === true
+}
+
+// ---------- reading ----------
+
+const centsFromMicros = (m) => Math.round(Number(m || 0) / 10000)
+// Campaigns in the connected account with status, daily budget and last-30-day metrics, read live
+// from Google. Read-only. Our own campaigns are recognised by their [gsu:<id>] name tag.
+export async function readCampaigns(env, customerId) {
+  return withAccount(env, customerId, async (token, conn) => {
+    const query =
+      "SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING LAST_30_DAYS"
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const byId = new Map()
+    for (const batch of Array.isArray(r.data) ? r.data : [r.data]) {
+      for (const x of batch?.results || []) {
+        const id = String(x.campaign?.id || '')
+        if (!/^\d{1,20}$/.test(id)) continue
+        const m = x.metrics || {}
+        const c = byId.get(id) || {
+          id,
+          name: String(x.campaign?.name || '').slice(0, 250),
+          status: ['ENABLED', 'PAUSED'].includes(x.campaign?.status) ? x.campaign.status : 'OTHER',
+          dailyBudgetCents: x.campaignBudget?.amountMicros != null ? centsFromMicros(x.campaignBudget.amountMicros) : null,
+          spendMicros: 0,
+          clicks: 0,
+          impressions: 0,
+          conversions: 0,
+        }
+        c.spendMicros += Number(m.costMicros || 0)
+        c.clicks += Number(m.clicks || 0)
+        c.impressions += Number(m.impressions || 0)
+        c.conversions += Number(m.conversions || 0)
+        byId.set(id, c)
+      }
+    }
+    const campaigns = [...byId.values()].map(({ spendMicros, ...c }) => ({ ...c, spendCents: centsFromMicros(spendMicros), gsuId: c.name.match(/\[gsu:([A-Za-z0-9_-]{1,40})\]$/)?.[1] || null }))
+    return { ok: true, testAccount: await testAccountOk(env, token, conn), campaigns }
+  })
 }
 
 // True when accountId is a client under the manager loginCustomerId (for accounts reached via an MCC).
@@ -285,6 +349,10 @@ export async function launchCampaign(env, customerId, campaign, { validateOnly =
   return withAccount(env, customerId, async (token, conn) => {
     const accountId = conn.account_id
     const loginCustomerId = login(conn)
+    if (validateOnly === false) {
+      const blocked = await guardServing(env, token, conn)
+      if (blocked) return blocked
+    }
     const name = tagged(campaign)
     const found = await findExisting(env, token, accountId, loginCustomerId, name)
     if (!found.ok) return found
@@ -345,6 +413,10 @@ export async function setStatus(env, customerId, row, status) {
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
     if (!res) return failure('not_launched')
+    if (status === 'ENABLED') {
+      const blocked = await guardServing(env, token, conn)
+      if (blocked) return blocked
+    }
     const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaigns:mutate`, {
       body: { operations: [{ update: { resourceName: res.campaign, status }, updateMask: 'status' }] },
       loginCustomerId: login(conn),
@@ -359,6 +431,8 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
     if (!res?.budget) return failure('not_launched')
+    const blocked = await guardServing(env, token, conn)
+    if (blocked) return blocked
     const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaignBudgets:mutate`, {
       body: { operations: [{ update: { resourceName: res.budget, amountMicros: String(dailyCents * 10000) }, updateMask: 'amountMicros' }] },
       loginCustomerId: login(conn),

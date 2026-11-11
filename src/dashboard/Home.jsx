@@ -246,6 +246,7 @@ function AdsResults({ ads }) {
       </div>
       <p className="fine stats-note">
         Last 30 days · — means not available yet{ads.spendCents === null ? ' (no ad spend recorded)' : ''}.
+        {ads.testAccount && ' Google Ads test account: no real ads ran, so these are test figures, not business results.'}
       </p>
     </section>
   )

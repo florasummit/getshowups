@@ -54,7 +54,11 @@ function seed(id, owner) {
 const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const adsError = (status, code, errorCode) => reply(status, { error: { code: status, message: LEAK, status: code, details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v26.errors.GoogleAdsFailure', errors: [{ errorCode, message: LEAK }] }] } })
 
-// Default Google Ads mock: two accessible accounts, no existing campaign, ZIPs resolve, mutates succeed.
+// Default Google Ads mock (MOCK DATA, never real results): two accessible accounts, no existing campaign,
+// ZIPs resolve, mutates succeed. The mock account reports itself as a Google Ads TEST account unless a
+// test sets mockTestAccount (true / false / null = flag missing).
+let mockTestAccount = true
+let mockAccountLookup = true // false: the per-test `ads` mock answers the account lookup too (error tests)
 function defaultAds(path, body) {
   if (path === '/customers:listAccessibleCustomers') return reply(200, { resourceNames: [`customers/${ACCT}`, `customers/${MCC}`] })
   if (path === '/geoTargetConstants:suggest') {
@@ -64,7 +68,7 @@ function defaultAds(path, body) {
   }
   if (/googleAds:search$/.test(path)) {
     if (body.query.includes('FROM customer_client')) return reply(200, { results: body.query.endsWith(ACCT2) ? [{ customerClient: { id: ACCT2 } }] : [] })
-    if (body.query.includes('FROM customer ')) return reply(200, { results: [{ customer: { id: ACCT, descriptiveName: 'Pools Ads', currencyCode: 'USD' } }] })
+    if (body.query.includes('FROM customer ')) return reply(200, { results: [{ customer: { id: ACCT, descriptiveName: 'Pools Ads', currencyCode: 'USD', ...(mockTestAccount === null ? {} : { testAccount: mockTestAccount }) } }] })
     return reply(200, { results: [] })
   }
   if (/googleAds:mutate$/.test(path)) {
@@ -89,6 +93,8 @@ beforeEach(async () => {
   logs = []
   outputs = []
   refreshMode = 'ok'
+  mockTestAccount = true
+  mockAccountLookup = true
   ads = defaultAds
   tokenExchange = () => reply(200, { access_token: AT, refresh_token: RT, scope: G.ADS_SCOPE, expires_in: 3599, token_type: 'Bearer' })
   env = {
@@ -120,6 +126,9 @@ beforeEach(async () => {
       const body = init.body ? JSON.parse(init.body) : undefined
       calls.push({ url: u, path, method: init.method || 'GET', headers, body })
       assert.equal(headers.get('Authorization'), `Bearer ${AT}`)
+      // The account lookup (incl. Google's test-account flag) always answers from the labelled default
+      // mock, controlled by mockTestAccount, so per-test mocks for other calls don't hide the guard.
+      if (/googleAds:search$/.test(path) && body?.query?.includes('FROM customer ') && mockAccountLookup) return defaultAds(path, body, headers)
       return ads(path, body, headers)
     }
     throw new Error(`unexpected ${u}`)
@@ -304,6 +313,7 @@ test('callback: exchanges with PKCE, stores the refresh token encrypted, single 
   assert.equal(conn.account_id, ACCT)
   assert.equal(conn.account_name, 'Pools Ads')
   assert.equal(conn.currency, 'USD')
+  assert.deepEqual(conn.extra, { testAccount: true }, "Google's test-account flag is recorded on auto-select too")
   assert.ok(!JSON.stringify(conn).includes(RT))
 })
 
@@ -342,12 +352,12 @@ test('accounts: list and select only accessible accounts (direct or via a manage
   assert.equal((await post({ accountId: '1111111111', loginCustomerId: MCC })).json().error, 'account_not_accessible')
 
   const ok = await post({ accountId: '123-456-7890' })
-  assert.deepEqual(ok.json(), { ok: true, accountId: ACCT, status: 'connected' })
+  assert.deepEqual(ok.json(), { ok: true, accountId: ACCT, status: 'connected', testAccount: true })
   const viaMcc = await post({ accountId: ACCT2, loginCustomerId: MCC })
   assert.equal(viaMcc.status, 200)
   const conn = await getConnection(env, 'pools', 'google')
   assert.equal(conn.account_id, ACCT2)
-  assert.deepEqual(conn.extra, { loginCustomerId: MCC })
+  assert.deepEqual(conn.extra, { loginCustomerId: MCC, testAccount: true })
   assert.equal(adsCalls(/customer_client|googleAds:search/).at(-1).headers.get('login-customer-id'), MCC)
 
   // Another business has no connection: nothing of pools' is visible to it.
@@ -618,4 +628,107 @@ test('cross-customer isolation: tokens, accounts and campaigns never cross busin
   await G.listAccounts(env, 'salon')
   assert.equal((await getConnection(env, 'salon', 'google')).status, 'reconnect_required')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'connected')
+})
+
+// ---------- test-account sandbox (Google Ads test accounts only; MOCK DATA) ----------
+
+test('guard: without ADS_LIVE_LAUNCH, create/resume/budget work only on a verified Google Ads test account', async () => {
+  await connected()
+  // Real (non-test) account → every serving change refused before any mutate; pausing still works.
+  mockTestAccount = false
+  for (const r of [await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false }), await G.setStatus(env, 'pools', row(), 'ENABLED'), await G.setDailyBudget(env, 'pools', row(), 3000)]) {
+    assert.equal(r.error, 'test_account_required')
+  }
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'nothing sent to Google')
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'PAUSED'), { ok: true, status: 'PAUSED' }, 'pausing is never blocked')
+  // Validation (validateOnly) creates nothing, so it stays available on any account.
+  assert.equal((await G.launchCampaign(env, 'pools', campaign())).validateOnly, true)
+  // Flag missing or unreadable → refused (fails closed).
+  mockTestAccount = null
+  assert.equal((await G.setStatus(env, 'pools', row(), 'ENABLED')).error, 'test_account_required')
+  // Verified test account → allowed; the flag is re-read from Google right before the change.
+  mockTestAccount = true
+  calls = []
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'ENABLED'), { ok: true, status: 'ENABLED' })
+  assert.ok(adsCalls(/googleAds:search$/).some((c) => c.body.query.includes('customer.test_account')), 're-checked live')
+  assert.equal((await G.setDailyBudget(env, 'pools', row(), 2500)).dailyBudgetCents, 2500)
+  assert.equal((await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false })).platformCampaignId, '222')
+  // Operator live switch (needs separate approval) lifts the test-account requirement.
+  mockTestAccount = false
+  env.ADS_LIVE_LAUNCH = 'true'
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'ENABLED'), { ok: true, status: 'ENABLED' })
+})
+
+test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {
+  await connected()
+  ads = (path, body, h) => {
+    if (/googleAds:searchStream$/.test(path)) {
+      assert.match(body.query, /FROM campaign/)
+      assert.match(body.query, /DURING LAST_30_DAYS/)
+      // MOCK DATA: two daily rows for our campaign, one for a campaign GetShowUps did not create.
+      return reply(200, [
+        {
+          results: [
+            { campaign: { id: '222', name: 'Pool cleaning [gsu:cmp_abc123]', status: 'PAUSED' }, campaignBudget: { amountMicros: '25000000' }, metrics: { costMicros: '1230000', clicks: '3', impressions: '40', conversions: 1 } },
+            { campaign: { id: '222', name: 'Pool cleaning [gsu:cmp_abc123]', status: 'PAUSED' }, campaignBudget: { amountMicros: '25000000' }, metrics: { costMicros: '770000', clicks: '2', impressions: '10', conversions: 0 } },
+            { campaign: { id: '999', name: 'Owner campaign', status: 'ENABLED' }, campaignBudget: { amountMicros: '5000000' }, metrics: {} },
+          ],
+        },
+      ])
+    }
+    return defaultAds(path, body, h)
+  }
+  const r = await G.readCampaigns(env, 'pools')
+  assert.equal(r.ok, true)
+  assert.equal(r.testAccount, true)
+  assert.deepEqual(r.campaigns, [
+    { id: '222', name: 'Pool cleaning [gsu:cmp_abc123]', status: 'PAUSED', dailyBudgetCents: 2500, clicks: 5, impressions: 50, conversions: 1, spendCents: 200, gsuId: 'cmp_abc123' },
+    { id: '999', name: 'Owner campaign', status: 'ENABLED', dailyBudgetCents: 500, clicks: 0, impressions: 0, conversions: 0, spendCents: 0, gsuId: null },
+  ])
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'reading never mutates')
+  // Errors: permission and quota map to allowlisted codes; Google's message (may echo account data) never leaks.
+  ads = () => adsError(403, 'PERMISSION_DENIED', { authorizationError: 'USER_PERMISSION_DENIED' })
+  const denied = remember(await G.readCampaigns(env, 'pools'))
+  assert.equal(denied.ok, false)
+  assert.ok(!JSON.stringify(denied).includes('Jane Doe'))
+  // Not connected / no account chosen.
+  assert.equal((await G.readCampaigns(env, 'salon')).error, 'not_connected')
+})
+
+test('read route + campaign actions: owner-only, same-origin, tenant isolated, approved budget enforced', async () => {
+  const campaignsRoute = await import('../functions/api/ads/google/campaigns.js')
+  const campaignRoute = await import('../functions/api/dashboard/ads/campaign.js')
+  const { saveProfile } = await import('../server/ads/campaigns.js')
+  await connected()
+  ads = (path, body, h) => (/googleAds:searchStream$/.test(path) ? reply(200, [{ results: [] }]) : defaultAds(path, body, h))
+  const get = async (cookie) => campaignsRoute.onRequestGet({ request: new Request(`${ORIGIN}/api/ads/google/campaigns`, { headers: cookie ? { Cookie: cookie } : {} }), env })
+  const owner = await session('owner@pools.example')
+  assert.equal((await get()).status, 401)
+  const mine = await get(owner)
+  assert.deepEqual([mine.status, await mine.json()], [200, { testAccount: true, campaigns: [] }])
+  assert.equal((await get(await session('owner@salon.example'))).status, 404, 'another business sees nothing of pools')
+  env.ADS_ENABLED = 'false'
+  assert.equal((await get(owner)).status, 404, 'feature switch off → route hidden')
+  env.ADS_ENABLED = 'true'
+
+  // A launched campaign row (MOCK) + an approved $600/month budget → daily ceiling applies to budget changes.
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'paused', ?, 1000, '222', ?, ?, ?)").run(JSON.stringify(campaign().spec), row().platform_ids, now, now)
+  void saveProfile
+  const post = (cookie, body, origin = ORIGIN) => campaignRoute.onRequestPost({ request: new Request(`${ORIGIN}/api/dashboard/ads/campaign`, { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env })
+  assert.equal((await post(owner, { action: 'budget', id: 'cmp_abc123', dailyCents: 1500 })).status, 409, 'no approved budget yet')
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('appr1', 'pools', 60000, 'owner@pools.example', ?)").run(now)
+  assert.equal((await post(owner, { action: 'budget', id: 'cmp_abc123', dailyCents: 999999 })).status, 409, 'above the approved daily ceiling')
+  assert.equal((await post(owner, { action: 'budget', id: 'cmp_abc123', dailyCents: 1500 }, 'https://evil.example')).status, 403)
+  assert.equal((await post(await session('owner@salon.example'), { action: 'budget', id: 'cmp_abc123', dailyCents: 1500 })).status, 404, 'cannot touch another business’s campaign')
+  const ok = await post(owner, { action: 'budget', id: 'cmp_abc123', dailyCents: 1500 })
+  assert.deepEqual([ok.status, (await ok.json()).dailyBudgetCents], [200, 1500])
+  assert.equal(db.sql.prepare("SELECT daily_budget_cents d FROM ad_campaigns WHERE id = 'cmp_abc123'").get().d, 1500)
+  // Resume on the verified test account works without the live switch; on a real account it is refused.
+  const resumed = await post(owner, { action: 'resume', id: 'cmp_abc123' })
+  assert.equal(resumed.status, 200, await resumed.clone().text())
+  await post(owner, { action: 'pause', id: 'cmp_abc123' })
+  mockTestAccount = false
+  assert.deepEqual([(await post(owner, { action: 'resume', id: 'cmp_abc123' })).status], [409])
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status, 'paused')
 })

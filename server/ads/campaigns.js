@@ -165,6 +165,15 @@ export async function approveCampaign(env, customer, id, ownerEmail, now = Date.
 export const adsEnabled = (env) => env.ADS_ENABLED === 'true'
 export const liveLaunchEnabled = (env) => env.ADS_LIVE_LAUNCH === 'true'
 
+// Sandbox: without ADS_LIVE_LAUNCH, Google campaigns may still be created (paused), resumed and have
+// their budget changed when the connected account is a Google Ads TEST account (Google's own flag,
+// checked live; test accounts never serve ads or spend). The adapter enforces the same rule again
+// right before each change, so this cannot be bypassed from here.
+async function serveAllowed(env, platform, customerId, a) {
+  if (liveLaunchEnabled(env)) return true
+  return platform === 'google' && typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId))
+}
+
 // Access rule: once billing is configured, starting ads needs an active or trialing subscription.
 // Before billing exists (pilot) this is not enforced. Pausing is always allowed.
 export async function billingAllowsAds(env, customerId) {
@@ -187,7 +196,7 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'validate', status: r.ok ? 'applied' : 'failed', reason: r.ok ? 'Validation passed (nothing created, no spend)' : `Validation failed: ${r.error}` }, now)
     return r.ok ? { ok: true, validated: true, live: false } : { ok: false, error: r.error }
   }
-  if (!liveLaunchEnabled(env)) return { ok: false, error: 'live_launch_disabled' }
+  if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
   if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
   if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
   // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
@@ -216,8 +225,9 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
   if (!row) return { ok: false, error: 'not_found' }
   if (!['paused', 'active'].includes(target)) return { ok: false, error: 'invalid_status' }
   if (!row.platform_campaign_id && !JSON.parse(row.platform_ids || '{}').campaignId) return { ok: false, error: 'not_launched' }
+  const a = await adapter(row.platform)
   if (target === 'active') {
-    if (!liveLaunchEnabled(env)) return { ok: false, error: 'live_launch_disabled' }
+    if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
     if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
     if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
     const approval = await currentApproval(db, customer.id)
@@ -226,7 +236,6 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
     const month = await db.prepare('SELECT coalesce(sum(spend_cents),0) AS s FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2').bind(customer.id, new Date(now).toISOString().slice(0, 8) + '01').first()
     if ((month?.s ?? 0) >= approval.monthly_cents) return { ok: false, error: 'monthly_budget_reached' }
   }
-  const a = await adapter(row.platform)
   const r = await a.setStatus(env, customer.id, row, PLATFORM_STATUS[row.platform][target])
   if (!r.ok) {
     await logAction(db, { customer: customer.id, campaignId: id, actor, kind: target === 'active' ? 'resume' : 'pause', status: 'failed', reason: `Platform error: ${r.error}` }, now)
@@ -235,6 +244,29 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
   await db.prepare('UPDATE ad_campaigns SET status = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(id, customer.id, target, now).run()
   await logAction(db, { customer: customer.id, campaignId: id, actor, kind: target === 'active' ? 'resume' : 'pause', reason: target === 'active' ? 'Resumed' : 'Paused' }, now)
   return { ok: true, status: target }
+}
+
+// Owner changes the daily budget of a launched campaign. Never above the owner-approved ceiling; the
+// platform change is allowed only where serving is allowed (live switch, or a verified test account).
+export async function setCampaignBudget(env, customer, id, dailyCents, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customer.id, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  if (!Number.isInteger(dailyCents) || dailyCents <= 0) return { ok: false, error: 'invalid_budget' }
+  if (!row.platform_campaign_id) return { ok: false, error: 'not_launched' }
+  if (!['paused', 'active'].includes(row.status)) return { ok: false, error: 'invalid_status' }
+  if (!(await currentApproval(db, customer.id))) return { ok: false, error: 'budget_approval_required' }
+  if (dailyCents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
+  const a = await adapter(row.platform)
+  if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
+  const r = await a.setDailyBudget(env, customer.id, row, dailyCents)
+  if (!r.ok) {
+    await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'budget', status: 'failed', reason: `Platform error: ${r.error}` }, now)
+    return { ok: false, error: r.error }
+  }
+  await db.prepare('UPDATE ad_campaigns SET daily_budget_cents = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(id, customer.id, dailyCents, now).run()
+  await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'budget', reason: `Daily budget set to ${dailyCents} cents`, details: { dailyCents } }, now)
+  return { ok: true, dailyBudgetCents: dailyCents }
 }
 
 // Optimizer pause hook (cron).
@@ -345,6 +377,7 @@ export async function adSummary(db, customerId, now = Date.now()) {
     .first()
   const measured = (m?.n ?? 0) > 0
   const per = (n) => (measured && n > 0 ? Math.round(m.s / n) : null)
+  const conn = await db.prepare("SELECT extra FROM ad_connections WHERE customer = ?1 AND platform = 'google'").bind(customerId).first()
   const booked = f?.booked ?? 0
   const showed = f?.showed ?? 0
   return {
@@ -355,5 +388,7 @@ export async function adSummary(db, customerId, now = Date.now()) {
     showed,
     costPerBookingCents: per(booked),
     costPerShowUpCents: per(showed),
+    // Results come from a Google Ads TEST account: real API data, but no real ads ran (labelled in the UI).
+    testAccount: JSON.parse(conn?.extra || '{}').testAccount === true,
   }
 }

@@ -20,10 +20,10 @@ export async function onRequestGet({ request, env }) {
       currentApproval(db, id),
       remainingDailyCents(db, id),
       usageThisMonth(db, id),
-      db.prepare('SELECT platform, account_id, account_name, currency, status FROM ad_connections WHERE customer = ?1').bind(id).all(),
+      db.prepare('SELECT platform, account_id, account_name, currency, status, extra FROM ad_connections WHERE customer = ?1').bind(id).all(),
       db.prepare("SELECT id, kind, status, prompt, error, created_at FROM ad_creatives WHERE customer = ?1 AND status <> 'rejected' ORDER BY created_at DESC LIMIT 24").bind(id).all(),
     ])
-    const connections = Object.fromEntries(conns.results.map((c) => [c.platform, { accountId: c.account_id, accountName: c.account_name, currency: c.currency, status: c.status }]))
+    const connections = Object.fromEntries(conns.results.map((c) => [c.platform, { accountId: c.account_id, accountName: c.account_name, currency: c.currency, status: c.status, testAccount: JSON.parse(c.extra || '{}').testAccount === true }]))
     return json(200, {
       profile,
       campaigns,
@@ -39,6 +39,9 @@ export async function onRequestGet({ request, env }) {
         google: Boolean(env.GOOGLE_ADS_DEVELOPER_TOKEN || env.GOOGLE_ADS_API_MOCK_ORIGIN),
         meta: Boolean(env.META_APP_ID && env.META_APP_SECRET),
         liveLaunch: liveLaunchEnabled(env),
+        // Google Ads test account connected: campaigns can be created (paused), resumed and changed
+        // there without the live switch. Re-verified with Google before every change.
+        sandbox: !liveLaunchEnabled(env) && connections.google?.status === 'connected' && connections.google.testAccount === true,
       },
       bookingUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${id}`,
     })

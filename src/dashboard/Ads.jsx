@@ -12,6 +12,7 @@ const ERRORS = {
   profile_required: 'Save your business details first.',
   budget_approval_required: 'Approve a monthly budget first.',
   live_launch_disabled: 'Launching on Google or Meta is not switched on for your account yet. Use “Check (no spend)” for now.',
+  test_account_required: 'Only a Google Ads test account can be used right now, and Google did not confirm this one is a test account.',
   exceeds_approved_budget: 'This campaign’s daily budget is above what your approved budget allows.',
   monthly_budget_reached: 'This month’s approved budget has been used. Raise your budget to restart.',
   needs_account: 'Connect and choose an ad account first.',
@@ -188,6 +189,11 @@ function Connections({ connections, capabilities }) {
           <p className="fine">
             {!c ? 'Not connected' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : c.status === 'needs_account' ? 'Choose an ad account' : 'Reconnect needed'}
           </p>
+          {c?.status === 'connected' && c.testAccount && (
+            <p className="fine" data-test-account>
+              Google Ads test account: ads never run and nothing is charged. Results here are test data.
+            </p>
+          )}
         </div>
         {available ? (
           <a className="btn btn-quiet" href={`/api/ads/${platform}/start`}>
@@ -243,6 +249,10 @@ function CampaignEditor({ c, capabilities, onChange }) {
   const [spec, setSpec] = useState(c.spec)
   const [state, setState] = useState({})
   const editable = !c.launched && ['draft', 'approved', 'error'].includes(c.status)
+  // Google campaigns on a verified Google Ads test account can be created and started without the live
+  // switch (test accounts never serve or spend); the server re-checks with Google before every change.
+  const sandbox = c.platform === 'google' && Boolean(capabilities.sandbox)
+  const canServe = capabilities.liveLaunch || sandbox
   const g = spec.google || {}
   const m = spec.meta || {}
   const set = (patch) => setSpec((s) => ({ ...s, ...patch }))
@@ -337,13 +347,13 @@ function CampaignEditor({ c, capabilities, onChange }) {
           </button>
         )}
         {c.status === 'approved' && (
-          <button type="button" className="btn btn-quiet" disabled={!!state.busy || !capabilities.liveLaunch} onClick={() => act('launch', { confirm: true })} title={capabilities.liveLaunch ? '' : ERRORS.live_launch_disabled}>
-            Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused)
+          <button type="button" className="btn btn-quiet" disabled={!!state.busy || !canServe} onClick={() => act('launch', { confirm: true })} title={canServe ? '' : ERRORS.live_launch_disabled}>
+            Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ' · test account' : ''}
           </button>
         )}
         {c.launched && c.status === 'paused' && (
-          <button type="button" className="btn btn-primary" disabled={!!state.busy || !capabilities.liveLaunch} onClick={() => act('resume')}>
-            Start ads
+          <button type="button" className="btn btn-primary" disabled={!!state.busy || !canServe} onClick={() => act('resume')}>
+            {sandbox ? 'Start ads (test account, no spend)' : 'Start ads'}
           </button>
         )}
         {c.status === 'active' && (
