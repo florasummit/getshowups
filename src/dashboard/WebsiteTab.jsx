@@ -64,6 +64,7 @@ export default function WebsiteTab() {
   if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
   const w = data.website
   const live = data.domain?.status === 'connected' ? data.domain.url : data.url
+  const setUsage = (aiUsage) => setData((d) => ({ ...d, aiUsage }))
   const refresh = (d) => {
     setData(d)
     setStamp((n) => n + 1)
@@ -120,6 +121,8 @@ export default function WebsiteTab() {
         {w.generated || rewrite ? (
           <WebsiteGenerator
             hasDraft={!w.generated}
+            usage={data.aiUsage}
+            onUsage={setUsage}
             intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
             onApplied={(d) => {
               setRewrite(false)
@@ -131,6 +134,8 @@ export default function WebsiteTab() {
         ) : (
           <>
             <ReviseBox
+              usage={data.aiUsage}
+              onUsage={setUsage}
               onPreview={setPending}
               onApplied={(d) => {
                 refresh(d)

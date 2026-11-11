@@ -34,6 +34,16 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
 
 
+
+### AI website usage policy (2026-11-11): local, NOT deployed (needs migration 0011 first)
+- Was: rate rule websiteGenerate 10/day per business (UTC-midnight window) shared by generations AND revisions,
+  counting failed attempts; plus 40 AI results per rolling 30 days. Every 429 showed "several versions today".
+- Now (server/ai-usage.js, table website_ai_usage): per business per UTC day, only successful AI results count.
+  testing (platform-admin sign-in or AI_TESTING_BUSINESSES) 200 generations / 400 revisions; paying (hosting
+  active incl. pilots) 20 / 40; not yet paying 5 / 10. 30-day AI cost ceiling $10 / $2 / $0.50 (measured avg
+  $0.0005 per AI result). Burst guard websiteAi 30 attempts / 10 min. Manual edits unlimited. The dashboard
+  shows "N of M left today · resets at <local time>" and specific limit messages.
+
 ### Dashboard preview showed an unkept revision (2026-11-11)
 - Cause: Website tab kept a "Describe a change" revision pinned in the Preview after "Start over with three new
   designs" (the revision box unmounted without clearing it), so the preview showed a design that was not the

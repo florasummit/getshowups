@@ -506,6 +506,8 @@ function WebsiteStep({ onDone, back }) {
         {!keep ? (
           <>
             <WebsiteGenerator
+              usage={data.aiUsage}
+              onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
               intro="We’ll write a professional website from your answers. You pick the design, check everything, and nothing is public until you publish."
               onApplied={(d) => {
                 setData(d)
@@ -543,6 +545,8 @@ function WebsiteStep({ onDone, back }) {
       <p className="lede">Check it on a computer and a phone. Ask for any change in your own words, or edit the text yourself.</p>
       <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
       <ReviseBox
+        usage={data.aiUsage}
+        onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
         onPreview={setPending}
         onApplied={(d) => {
           setData(d)
@@ -558,6 +562,8 @@ function WebsiteStep({ onDone, back }) {
       <details className="more">
         <summary>Start over with three new designs</summary>
         <WebsiteGenerator
+          usage={data.aiUsage}
+          onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
           hasDraft
           onApplied={(d) => {
             setData(d)

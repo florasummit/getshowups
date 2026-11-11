@@ -63,10 +63,15 @@ test('owner edits, previews and publishes the website; visitors book through it 
   // "Start over" — the preview then shows the design that was applied (the saved draft).
   const caption = page.locator('.site-preview figcaption')
   const previewH1 = page.frameLocator('iframe[title="Website preview"]').getByRole('heading', { level: 1 })
+  // Today's AI allowance is shown and counts down; revisions have their own allowance.
+  await expect(page.locator('[data-allowance="revision"]')).toHaveText(/^\d+ of \d+ AI changes left today · resets at /)
   await page.getByRole('button', { name: 'Make it more modern' }).click()
   await expect(caption).toHaveText('New version · not saved yet')
   await expect(page.getByRole('button', { name: /^Publish/ })).toHaveCount(0)
   await page.getByRole('button', { name: 'Start over with three new designs' }).click()
+  const allowance = page.locator('[data-allowance="generation"]')
+  await expect(allowance).toHaveText(/^\d+ of \d+ new designs left today · resets at /)
+  const left = Number((await allowance.textContent()).split(' ')[0])
   await page.getByRole('button', { name: 'Design it again' }).click()
   await expect(page.locator('.design-card')).toHaveCount(3)
   const chosen = await page.locator('.design-card strong').first().textContent()
@@ -77,6 +82,7 @@ test('owner edits, previews and publishes the website; visitors book through it 
   const site = async () => (await page.request.get('/api/dashboard/website')).json()
   await expect.poll(async () => (await site()).website.draft.design.name).toBe(chosen)
   const draft = await site()
+  expect(draft.aiUsage.generation.remaining).toBe(left - 1)
   await expect(previewH1).toHaveText(draft.website.draft.headline)
   await expect(page.frameLocator('iframe[title="Website preview"]').locator('meta[name="theme-color"]')).toHaveAttribute('content', /^#/)
   await page.getByLabel('Headline').fill('Pool care in Charleston')

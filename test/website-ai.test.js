@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
-import { mergeGenerated, inventedNumbers, websiteFacts, generateWebsite, MONTHLY_GENERATIONS, WEBSITE_MODEL } from '../server/website-ai.js'
+import { mergeGenerated, inventedNumbers, websiteFacts, generateWebsite, WEBSITE_MODEL } from '../server/website-ai.js'
+import { aiUsage } from '../server/ai-usage.js'
 import * as website from '../functions/api/dashboard/website/index.js'
 import * as preview from '../functions/api/dashboard/website/preview.js'
 import * as publicSite from '../functions/p/[customer].js'
@@ -168,20 +169,71 @@ test('fallbacks: no AI binding, bad JSON or a model error give the template (lab
   assert.equal((await generateWebsite(env, customer)).generation.source, 'ai', 'string JSON responses are parsed')
 })
 
-test('limits: 10 generations per business per day (rate limit) and a monthly AI cap; edits never call the model', async () => {
+test('usage policy: paying businesses get 20 generations a day, revisions counted separately, reset at UTC midnight', async () => {
+  const c = await cookieFor('owner@pools.example') // pools: no self-serve signup → pilot, hosting active → paying tier
+  const usage0 = (await call(website, 'GET', { cookie: c })).json.aiUsage
+  assert.equal(usage0.tier, 'paying')
+  assert.deepEqual([usage0.generation, usage0.revision], [{ used: 0, limit: 20, remaining: 20 }, { used: 0, limit: 40, remaining: 40 }])
+  assert.equal(usage0.resetsAt, (Math.floor(Date.now() / 864e5) + 1) * 864e5, 'next 00:00 UTC')
+  for (let i = 0; i < 20; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
+  const over = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.equal(over.status, 429)
+  assert.deepEqual([over.json.error, over.json.kind, over.json.limit, over.json.resetsAt], ['daily_limit', 'generation', 20, usage0.resetsAt])
+  const callsAtLimit = calls
+  assert.equal(calls, callsAtLimit, 'no model call over the limit')
+  // Revisions have their own allowance.
+  const rev = await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'make it more modern' } })
+  assert.equal(rev.status, 200)
+  assert.deepEqual([rev.json.aiUsage.generation.remaining, rev.json.aiUsage.revision.used], [0, 1])
+  // Another business is unaffected; tomorrow the allowance is back.
+  assert.equal((await call(website, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'generate' } })).status, 200)
+  const tomorrow = await aiUsage(env, { id: 'pools' }, 'owner@pools.example', Date.now() + 864e5)
+  assert.equal(tomorrow.generation.remaining, 20)
+})
+
+test('usage policy: failed AI requests and template fallbacks are free; manual edits and previews are unlimited', async () => {
   const c = await cookieFor('owner@pools.example')
-  for (let i = 0; i < 10; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 429)
-  assert.equal((await call(website, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'generate' } })).status, 200, 'per business')
+  reply = new Error('capacity')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.generation.source, 'template')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'simpler' } })).status, 503)
+  const u = (await call(website, 'GET', { cookie: c })).json.aiUsage
+  assert.deepEqual([u.generation.used, u.revision.used], [0, 0])
   const before = calls
-  const now = Date.now()
-  for (let i = 0; i < MONTHLY_GENERATIONS; i++) db.sql.prepare("INSERT INTO website_generations (id, customer, content, source, created_at) VALUES (?, 'salon', '{}', 'ai', ?)").run(`old${i}`, now - 1000)
-  const capped = await generateWebsite(env, { id: 'salon', name: 'salon Co', serviceZips: [] })
-  assert.deepEqual([capped.generation.source, calls], ['template', before], 'over the monthly cap: template, no model call')
   const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
-  await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, headline: 'Edited by hand' } } })
+  for (let i = 0; i < 40; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, headline: `Edited by hand ${'x'.repeat(i % 3)}` } } })).status, 200)
   await call(preview, 'GET', { cookie: c })
   assert.equal(calls, before, 'saving and previewing never call the model')
+})
+
+test('usage policy tiers: testing (admin sign-in or listed business) is generous; not-yet-paying is small', async () => {
+  const pools = { id: 'pools' }
+  assert.equal((await aiUsage(env, pools, 'owner@pools.example')).tier, 'paying')
+  env.PLATFORM_ADMIN_EMAILS = 'admin@getshowups.example'
+  assert.equal((await aiUsage(env, pools, 'Admin@GetShowUps.example')).tier, 'testing')
+  env.AI_TESTING_BUSINESSES = 'other, pools'
+  const t = await aiUsage(env, pools, 'owner@pools.example')
+  assert.deepEqual([t.tier, t.generation.limit, t.revision.limit], ['testing', 200, 400])
+  assert.equal((await aiUsage(env, { id: 'salon' }, 'owner@salon.example')).tier, 'paying', 'listing is per business')
+  // Self-serve signup that has not paid yet.
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('salon', 'founding', 1)").run()
+  const s = await aiUsage(env, { id: 'salon' }, 'owner@salon.example')
+  assert.deepEqual([s.tier, s.generation.limit, s.revision.limit], ['starter', 5, 10])
+  // Testing tier near its limit (seeded count) is still enforced on the server.
+  db.sql.prepare("INSERT INTO website_ai_usage (customer, day, kind, count) VALUES ('pools', ?, 'generation', 200)").run(Math.floor(Date.now() / 864e5))
+  assert.equal((await call(website, 'POST', { cookie: await cookieFor('owner@pools.example'), body: { action: 'generate' } })).status, 429)
+})
+
+test('usage policy: the 30-day AI cost ceiling stops model calls; burst guard still limits rapid attempts', async () => {
+  const c = await cookieFor('owner@pools.example')
+  db.sql.prepare("INSERT INTO website_generations (id, customer, content, source, cost_micros, created_at) VALUES ('old', 'pools', '{}', 'ai', 2000000, ?)").run(Date.now() - 1000)
+  const before = calls
+  const g = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.deepEqual([g.status, g.json.generation.source, calls], [200, 'template', before], 'over the cost ceiling: standard layouts, no model call, not counted')
+  assert.equal(g.json.aiUsage.generation.used, 0)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'simpler' } })).json.error, 'monthly_limit')
+  let limited = 0
+  for (let i = 0; i < 40; i++) if ((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status === 429) limited++
+  assert.ok(limited >= 10, 'burst guard (30 attempts / 10 min per business)')
 })
 
 test('onboarding: "keep my current website" completes the website steps without creating a site', async () => {

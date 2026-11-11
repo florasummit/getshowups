@@ -68,6 +68,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   messages.js        Lead follow-ups, confirmation, reminders, no-show rebook: schedule rows, re-check at send time
   sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
+  ai-usage.js        AI website allowances per business/UTC day (tiers; AI_TESTING_BUSINESSES), 30-day cost ceiling
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)

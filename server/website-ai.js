@@ -14,7 +14,6 @@ import { FONTS, LAYOUTS, PALETTES, SECTIONS, SHAPES, directionFor, diversify, in
 export const WEBSITE_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct'
 // USD per million tokens (Workers AI list price for WEBSITE_MODEL).
 export const PRICE = { inputPerM: 0.351, outputPerM: 0.555 }
-export const MONTHLY_GENERATIONS = 40 // creations + revisions per business per 30 days
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d{2,5}$/
 
@@ -238,17 +237,14 @@ async function store(db, customer, { content, designs, source, usage, latencyMs,
   return id
 }
 
-const monthlyUsed = async (db, customerId, now) =>
-  (await db.prepare("SELECT count(*) AS n FROM website_generations WHERE customer = ?1 AND source = 'ai' AND created_at >= ?2").bind(customerId, now - 30 * 24 * 60 * 60 * 1000).first())?.n ?? 0
-
 // Images the model may place: the owner's own photos first, then licensed stock for the industry.
 const imageChoices = (assetIds, industry, photos = []) => [...[...new Set([...photos, ...assetIds])].map((id) => `asset:${id}`), ...stockFor(industry).map((s) => `stock:${s.id}`)]
 
 // Generates copy + three designs for a business and stores them (website_generations). Never touches the
 // draft or the live site. Returns { ok, generation: { id, content, designs, source } }.
-export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [] } = {}) {
+// `allowAi: false` (usage policy: monthly cost ceiling reached) uses the standard layouts without a model call.
+export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], allowAi = true } = {}) {
   const { db, base, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
-  const used = await monthlyUsed(db, customer.id, now)
   const facts = websiteFacts(customer, profile, base)
   const photos = draftPhotos.filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
@@ -259,7 +255,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
   let usage = null
   let latencyMs = null
   let rejected = []
-  if (aiConfigured(env) && used < MONTHLY_GENERATIONS) {
+  if (aiConfigured(env) && allowAi) {
     const t0 = Date.now()
     try {
       const r = await runModel(env, messages(facts, images), schemaFor(images))
@@ -279,7 +275,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
     }
   }
   const id = await store(db, customer, { content, designs, source, usage, latencyMs, rejected, now })
-  return { ok: true, generation: { id, content, designs, source, remaining: Math.max(0, MONTHLY_GENERATIONS - used - (source === 'ai' ? 1 : 0)) } }
+  return { ok: true, generation: { id, content, designs, source } }
 }
 
 // Natural-language revision of the current draft ("make it more modern", "use my photos"). Produces one
@@ -289,7 +285,6 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   if (!ask) return { ok: false, httpStatus: 400, error: 'instruction_required' }
   if (!aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
   const { db, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
-  if ((await monthlyUsed(db, customer.id, now)) >= MONTHLY_GENERATIONS) return { ok: false, httpStatus: 429, error: 'monthly_limit' }
   const photos = (draft.photos || []).filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
   const preset = draft.design || presetDesigns(industry, photos)[0]

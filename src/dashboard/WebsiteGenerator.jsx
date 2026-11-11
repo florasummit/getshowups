@@ -6,21 +6,40 @@ import { useState } from 'react'
 import { api } from '../lib/api.js'
 import { ScaledFrame } from './WebsiteEditor.jsx'
 
-const FAIL = {
-  429: 'You’ve made several versions today. Please try again tomorrow, or edit the text below.',
-  503: 'Our website designer is busy. Please try again in a minute.',
-}
+const FAIL = { 503: 'Our website designer is busy. Please try again in a minute.' }
 
-export default function WebsiteGenerator({ hasDraft, onApplied, intro }) {
+const resetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// Today's AI allowance for one kind ('generation' or 'revision'), e.g. "18 of 20 left today · resets at 7:00 PM".
+export function Allowance({ usage, kind, noun }) {
+  const u = usage?.[kind]
+  if (!u) return null
+  return (
+    <p className="fine" data-allowance={kind}>
+      {u.remaining} of {u.limit} {noun} left today · resets at {resetTime(usage.resetsAt)}
+    </p>
+  )
+}
+// Specific, honest messages for the server's limits (manual editing is never limited).
+const failText = (status, data, noun) =>
+  data?.error === 'daily_limit'
+    ? `You’ve used today’s ${data.limit} ${noun}. You can make more after ${resetTime(data.resetsAt)}, or edit the text below.`
+    : data?.error === 'monthly_limit'
+      ? 'You’ve reached this month’s AI limit. You can still edit the text and photos below.'
+      : data?.error === 'rate_limited'
+        ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
+        : FAIL[status]
+
+export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage }) {
   const [gen, setGen] = useState(null)
   const [state, setState] = useState({})
   const generate = async () => {
     setState({ busy: 'writing' })
     const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'generate' } })
+    if (data?.aiUsage) onUsage?.(data.aiUsage)
     if (status === 200) {
       setGen(data.generation)
       setState({})
-    } else setState({ error: FAIL[status] || 'We couldn’t create it just now. Please try again.' })
+    } else setState({ error: failText(status, data, 'new designs') || 'We couldn’t create it just now. Please try again.' })
   }
   const choose = async (option) => {
     setState({ busy: option })
@@ -40,7 +59,7 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro }) {
         <button type="button" className="btn btn-primary btn-lg" disabled={Boolean(state.busy)} onClick={generate}>
           {state.busy ? 'Designing your website…' : hasDraft ? 'Design it again' : 'Create my website'}
         </button>
-        {state.busy && <p className="fine" role="status">This takes about 15 seconds.</p>}
+        {state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}
@@ -81,20 +100,21 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro }) {
 const SUGGESTIONS = ['Make it more modern', 'Make it warmer and friendlier', 'Use my photos', 'Make it simpler', 'Try a dark look']
 
 // "Describe a change": one AI revision of the private draft, shown before anything is saved.
-export function ReviseBox({ onApplied, onPreview }) {
+export function ReviseBox({ onApplied, onPreview, usage, onUsage }) {
   const [text, setText] = useState('')
   const [rev, setRev] = useState(null)
   const [state, setState] = useState({})
   const send = async (instruction) => {
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'revise', instruction } })
+    if (data?.aiUsage) onUsage?.(data.aiUsage)
     if (status === 200) {
       setRev(data.generation)
       setState({})
       onPreview?.(data.generation)
       // Bring the new version into view.
       requestAnimationFrame(() => document.querySelector('.site-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-    } else setState({ error: FAIL[status] || 'We couldn’t make that change just now. Please try again.' })
+    } else setState({ error: failText(status, data, 'AI changes') || 'We couldn’t make that change just now. Please try again.' })
   }
   const keep = async () => {
     setState({ busy: true })
@@ -159,7 +179,7 @@ export function ReviseBox({ onApplied, onPreview }) {
           </button>
         ))}
       </div>
-      {state.busy && <p className="fine" role="status">Updating your website… about 10 seconds.</p>}
+      {state.busy ? <p className="fine" role="status">Updating your website… about 10 seconds.</p> : <Allowance usage={usage} kind="revision" noun="AI changes" />}
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
