@@ -35,7 +35,37 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
 
 
 
-### AI website usage policy (2026-11-11): local, NOT deployed (needs migration 0011 first)
+
+### Milestone B: Stripe sandbox journey COMPLETE (2026-11-11, production, Stripe TEST mode)
+- Real run on production with an isolated test business (gsu-stripe-test-pools, brandon@florasummit.com):
+  Get started → Google sign-in → business name → $499/month Stripe test Checkout (abandoned → same session
+  resumed; owner entered test cards) → signed webhooks (checkout.session.completed, customer.subscription.created,
+  invoice.paid; each once) → subscription active → details/services/calendar/hours/website → onboarding complete
+  → dashboard → portal cancellation (customer.subscription.updated → cancel at period end, access until Dec 11).
+- Verified: paid steps locked before payment; second checkout refused (409 use_portal); webhook idempotency;
+  tenant isolation from PoolThru; PoolThru billing exemption and data unchanged. STRIPE_LIVE_ENABLED off.
+- Email: 4 automated emails delivered to the test recipient's Inbox via Resend (MESSAGES_LIVE still off).
+- Cleanup: test website unpublished (was published during onboarding); test business calendar record deleted
+  (it had connected care@poolthru.com; the shared Google grant was NOT revoked; PoolThru's record unchanged).
+  The test business remains (active test subscription, ends Dec 11); reconnect only to a separate test calendar.
+- Fix LIVE (99be975, deployment 72b6fb33): public booking now requires an active plan (same rule as the public
+  website: pilots exempt, paid/past_due yes, canceled within the 14-day grace, unpaid never).
+- Remaining before live billing (owner): Stripe live activation; live $499/month Price; live webhook (6 events:
+  checkout.session.completed, customer.subscription.created/updated/deleted, invoice.paid, invoice.payment_failed)
+  + customer portal; live STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET set by the owner; then (approval)
+  STRIPE_LIVE_ENABLED=true + founding plan price update + one real payment and refund. Google OAuth consent
+  screen "In production" (status unconfirmed; console needs the owner's password). A declined test card was not
+  observable server-side (declines create no records by design).
+
+### Ads Overview (2026-11-11): built on feature/ads-overview, NOT deployed (needs approval)
+- Overview "Advertising" row when ADS_ENABLED: ad spend, clicks, leads from ads, bookings, show-ups, cost per
+  booking, cost per show-up (server/ads/campaigns.js adSummary). Real data only: spend/clicks from
+  ad_metrics_daily (null until recorded), leads from lead_attribution for the business's own campaigns, test
+  leads excluded; costs null without spend or a denominator ('—' in the UI).
+- Website → booking attribution: the website already carries utm_*/gclid onto booking links; now covered end to
+  end (ad click on /p/:id → booking link → lead credited to the campaign). No Google Ads API calls.
+
+### AI website usage policy (2026-11-11): LIVE (e3f4ebe, deployment 378c4c67; migration 0011 applied)
 - Was: rate rule websiteGenerate 10/day per business (UTC-midnight window) shared by generations AND revisions,
   counting failed attempts; plus 40 AI results per rolling 30 days. Every 429 showed "several versions today".
 - Now (server/ai-usage.js, table website_ai_usage): per business per UTC day, only successful AI results count.
@@ -44,7 +74,7 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   $0.0005 per AI result). Burst guard websiteAi 30 attempts / 10 min. Manual edits unlimited. The dashboard
   shows "N of M left today · resets at <local time>" and specific limit messages.
 
-### Dashboard preview showed an unkept revision (2026-11-11)
+### Dashboard preview showed an unkept revision (2026-11-11): LIVE (e94c0e8, deployment 0f8e2bac)
 - Cause: Website tab kept a "Describe a change" revision pinned in the Preview after "Start over with three new
   designs" (the revision box unmounted without clearing it), so the preview showed a design that was not the
   draft while Publish sent the draft. Not caching, stale data or a renderer difference: generation option,
