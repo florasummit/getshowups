@@ -1,9 +1,12 @@
 // Shared guard for the public booking API (/api/book/:customer). Only businesses that finished
-// setup (calendar connected + hours saved) are bookable; others look like they do not exist.
+// setup (calendar connected + hours saved) and whose plan includes hosting are bookable (the same rule as
+// the public website: pilots exempt, paid/past_due yes, canceled within the grace period, unpaid never);
+// others look like they do not exist.
 import { json, missingConfig } from './google-oauth.js'
 import { CUSTOMER_RE } from './invites.js'
 import { customerFromRow, isSameOrigin } from './auth.js'
 import { getCustomer } from './customers.js'
+import { hostingStatus, isHosted } from './website.js'
 
 export async function bookableCustomer(env, params, { write = false, request } = {}) {
   if (missingConfig(env).length) return { response: json(503, { error: 'not_configured' }) }
@@ -14,5 +17,6 @@ export async function bookableCustomer(env, params, { write = false, request } =
   if (!customer || customer.status !== 'active' || !customer.hoursConfirmed || !(await env.GOOGLE_TOKENS.get(`google:${id}`))) {
     return { response: json(404, { error: 'not_found' }) }
   }
+  if (!isHosted(await hostingStatus(env.ONBOARDING_DB, id))) return { response: json(404, { error: 'not_found' }) }
   return { customer }
 }

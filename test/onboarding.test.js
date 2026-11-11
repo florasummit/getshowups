@@ -15,6 +15,7 @@ import * as hours from '../functions/api/dashboard/hours.js'
 import * as website from '../functions/api/dashboard/website/index.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as webhook from '../functions/api/stripe/webhook.js'
+import { bookableCustomer } from '../server/public.js'
 
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -135,6 +136,35 @@ test('payment step is completed only by a verified Stripe webhook; past_due keep
   assert.equal((await stepsOf(cookie)).payment, true, 'after onboarding the owner keeps their dashboard; billing shows as a notice')
   const r = (await call(onboarding, 'GET', { cookie })).json.readiness
   assert.deepEqual([r.items[0].id, r.items[0].state, r.items[0].detail, r.next], ['subscription', 'action', 'canceled', 'subscription'])
+})
+
+test('paid features need payment: an unpaid signup that skips the payment step cannot take bookings or publish', async () => {
+  const { cookie, id } = await newSignup()
+  // Everything set up except payment (calendar connected, hours saved) by calling the API directly.
+  await connectCalendar(id)
+  db.sql.prepare('UPDATE customers SET hours_confirmed_at = 1 WHERE id = ?').run(id)
+  const bookable = async () => !(await bookableCustomer(env, { customer: id })).response
+  assert.equal(await bookable(), false, 'public booking API looks like the business does not exist')
+  const draft = (await call(website, 'GET', { cookie })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie, body: { action: 'publish', content: draft, confirm: true } })).status, 402)
+  assert.equal((await call(publicSite, 'GET', { params: { customer: id } })).status, 404)
+  // Paid (signed webhook) → bookable and publishable; past_due keeps it while Stripe retries.
+  await activate(id)
+  assert.equal(await bookable(), true)
+  assert.equal((await call(website, 'POST', { cookie, body: { action: 'publish', content: draft, confirm: true } })).status, 200)
+  await activate(id, 'past_due')
+  assert.equal(await bookable(), true)
+  // Canceled before finishing onboarding → not bookable.
+  await deliver({ id: 'evt_del_gate', type: 'customer.subscription.deleted', created: Math.floor(Date.now() / 1000) + 5, data: { object: { id: `sub_${id}`, customer: `cus_${id}`, status: 'canceled', metadata: { customer: id }, items: { data: [] } } } })
+  const sub = db.sql.prepare('SELECT status FROM subscriptions WHERE customer = ?').get(id)
+  assert.equal(sub.status, 'canceled')
+  // Pilots (no self-serve signup) are unaffected.
+  const pilot = await cookieFor('owner@pilot.example')
+  const pr = await call(business, 'POST', { cookie: pilot, body: { name: 'Pilot Co', timezone: 'America/New_York', serviceZips: '' } })
+  db.sql.prepare('DELETE FROM self_signups WHERE customer = ?').run(pr.json.id) // admin-created pilot: no self-serve signup
+  await connectCalendar(pr.json.id)
+  db.sql.prepare('UPDATE customers SET hours_confirmed_at = 1 WHERE id = ?').run(pr.json.id)
+  assert.equal(!(await bookableCustomer(env, { customer: pr.json.id })).response, true, 'pilot stays bookable without billing')
 })
 
 test('legacy businesses (no self-serve signup) are never asked to pay or do the new steps', async () => {
