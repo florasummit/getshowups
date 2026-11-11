@@ -541,7 +541,7 @@ function WebsiteStep({ onDone, back }) {
         Here’s your website
       </h1>
       <p className="lede">Check it on a computer and a phone. Ask for any change in your own words, or edit the text yourself.</p>
-      <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} />
+      <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
       <ReviseBox
         onPreview={setPending}
         onApplied={(d) => {

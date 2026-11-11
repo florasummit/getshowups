@@ -65,13 +65,16 @@ export function ScaledFrame({ src, title, width = 1280, height = 860 }) {
   )
 }
 
-export function WebsitePreview({ stamp, live = false, title = 'Website preview', query = '' }) {
+// `unsaved`: the preview shows a suggested version that is not the saved draft (labelled as such).
+export function WebsitePreview({ stamp, live = false, title = 'Website preview', query = '', unsaved = false }) {
   const [device, setDevice] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 700 ? 'phone' : 'desktop'))
   const src = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}${query}v=${stamp}`
   return (
     <figure className="site-preview">
       <div className="site-preview-bar">
-        <figcaption className="fine">{live ? 'Your live website' : 'Preview · only you can see this'}</figcaption>
+        <figcaption className="fine" data-preview={live ? 'live' : unsaved ? 'unsaved' : 'draft'}>
+          {live ? 'Your live website' : unsaved ? 'New version · not saved yet' : 'Draft preview · only you can see this'}
+        </figcaption>
         <div className="segmented" role="group" aria-label="Preview size">
           {['desktop', 'phone'].map((d) => (
             <button key={d} type="button" aria-pressed={device === d} onClick={() => setDevice(d)}>

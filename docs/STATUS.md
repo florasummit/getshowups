@@ -34,7 +34,15 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
 
 
-### Website images and headlines fix (2026-11-10): local, NOT deployed
+### Dashboard preview showed an unkept revision (2026-11-11)
+- Cause: Website tab kept a "Describe a change" revision pinned in the Preview after "Start over with three new
+  designs" (the revision box unmounted without clearing it), so the preview showed a design that was not the
+  draft while Publish sent the draft. Not caching, stale data or a renderer difference: generation option,
+  saved draft, preview and live site were verified byte-identical in production.
+- Fix: the pending revision is cleared on start-over and on apply; an unsaved revision is labelled
+  "New version · not saved yet" and publishing waits until it is kept or discarded. Regression: website.spec.js.
+
+### Website images and headlines fix (2026-11-10): LIVE (f1a2128, deployment 7ec4f896)
 - Cause: PoolThru has no business_profiles row in production → industry null → stockFor() fell back to generic
   home- photos (house, kitchen, living room); a ZIP-only area ("ZIP codes 29403") was given to the AI as the area.
 - Fix: industryKey() from industry → service names → description → name; each industry has only its own photos,

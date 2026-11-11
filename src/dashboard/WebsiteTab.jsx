@@ -92,7 +92,7 @@ export default function WebsiteTab() {
         )}
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
-          {!w.generated && (!w.published || w.changed) && (
+          {!w.generated && !pending && (!w.published || w.changed) && (
             <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
@@ -103,7 +103,8 @@ export default function WebsiteTab() {
             </a>
           )}
         </div>
-        {publishing && (
+        {pending && <p className="fine">Keep or discard the new version below before publishing.</p>}
+        {publishing && !pending && (
           <PublishBox
             data={data}
             label={w.published ? 'Publish changes' : 'Publish website'}
@@ -122,6 +123,7 @@ export default function WebsiteTab() {
             intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
             onApplied={(d) => {
               setRewrite(false)
+              setPending(null)
               refresh(d)
               setEditorKey((k) => k + 1)
             }}
@@ -135,7 +137,15 @@ export default function WebsiteTab() {
                 setEditorKey((k) => k + 1)
               }}
             />
-            <button type="button" className="link-btn" onClick={() => setRewrite(true)}>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                // An unkept revision must not stay in the preview once the owner moves on (it isn't the draft).
+                setPending(null)
+                setRewrite(true)
+              }}
+            >
               Start over with three new designs
             </button>
           </>
@@ -145,7 +155,7 @@ export default function WebsiteTab() {
       {!w.generated && (
         <>
           <section className="site-preview-wrap" aria-label="Preview">
-            <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} />
+            <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
           </section>
           <section className="card site-editor" aria-label="Edit website">
             <h2 className="card-title">Edit text and photos</h2>
