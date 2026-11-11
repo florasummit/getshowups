@@ -57,6 +57,16 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   screen "In production" (status unconfirmed; console needs the owner's password). A declined test card was not
   observable server-side (declines create no records by design).
 
+### Google Ads sandbox (2026-11-11): built on feature/ads-overview, NOT deployed (needs approval)
+- Test-account guard: without ADS_LIVE_LAUNCH, create (paused), resume and budget changes only on an account
+  Google reports as a test account (customer.test_account, re-read before each change; unknown → refused).
+  Pausing never blocked. Read-only GET /api/ads/google/campaigns (status, budget, 30-day metrics). Owner budget
+  changes within the approved ceiling. Test-account data labelled on the Ads screen and Overview.
+- Verified with mocks only (labelled). Real verification needs: developer token (test access is enough), a
+  Google Ads test manager + test client account, Google Ads API enabled and the adwords scope on the OAuth
+  consent screen (project 380394286094), GOOGLE_ADS_DEVELOPER_TOKEN set by the owner.
+- Recommended before any production trial: per-business Ads enablement (ADS_ENABLED is global).
+
 ### Ads Overview (2026-11-11): built on feature/ads-overview, NOT deployed (needs approval)
 - Overview "Advertising" row when ADS_ENABLED: ad spend, clicks, leads from ads, bookings, show-ups, cost per
   booking, cost per show-up (server/ads/campaigns.js adSummary). Real data only: spend/clicks from
