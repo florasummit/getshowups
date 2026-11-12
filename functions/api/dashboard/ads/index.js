@@ -36,7 +36,8 @@ export async function onRequestGet({ request, env }) {
         ai: Boolean(env.ANTHROPIC_API_KEY),
         images: imageConfigured(env),
         videos: videoConfigured(env),
-        google: Boolean(env.GOOGLE_ADS_DEVELOPER_TOKEN || env.GOOGLE_ADS_API_MOCK_ORIGIN),
+        // Google Ads access belongs to the Google Cloud project behind our OAuth client (no developer token).
+        google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
         meta: Boolean(env.META_APP_ID && env.META_APP_SECRET),
         liveLaunch: liveLaunchEnabled(env),
         // Google Ads test account connected: campaigns can be created (paused), resumed and changed

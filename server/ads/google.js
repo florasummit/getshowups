@@ -13,12 +13,14 @@
 //   - Campaign.status defaults to ENABLED when omitted → we always send PAUSED. Fields used:
 //     advertisingChannelType, campaignBudget, networkSettings, maximizeConversions,
 //     containsEuPoliticalAdvertising. CampaignCriterion { campaign, negative, location, keyword }.
-//   - Test-access developer projects reach test accounts only (CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION).
+//   - Developer tokens were sunset on 2026-09-09: access is granted per Google Cloud project (enabling the
+//     Google Ads API gives Test access = test accounts only, CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION
+//     otherwise). The header is ignored today and will be rejected in a future version, so we never send it
+//     (verified 2026-11-11, developers.google.com/google-ads/api/docs/api-policy/developer-token).
 // UNVERIFIED (conservative choices; verify against a Google Ads TEST account before any real use):
 //   - Exact GoogleAdsFailure JSON layout (error.details[].errors[].errorCode.{xxxError}); mapError
 //     also falls back to HTTP status so an unexpected layout still maps to a safe code.
 //   - FieldMask JSON path spelling for budgets ("amountMicros"); geo suggestion targetType 'Postal Code'.
-//   - Whether a developer-token header is still required: sent only when GOOGLE_ADS_DEVELOPER_TOKEN is set.
 // Tests use GOOGLE_ADS_API_MOCK_ORIGIN (loopback only) — never set in production.
 import { googleFetch, refreshAccessToken } from '../google-oauth.js'
 import { siteOrigin } from '../auth.js'
@@ -108,7 +110,6 @@ async function call(env, token, method, path, { body, loginCustomerId, retry = t
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
-  if (env.GOOGLE_ADS_DEVELOPER_TOKEN) headers['developer-token'] = env.GOOGLE_ADS_DEVELOPER_TOKEN
   for (let attempt = 0; ; attempt++) {
     let result
     try {

@@ -366,6 +366,16 @@ test('accounts: list and select only accessible accounts (direct or via a manage
   assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie: salon, body: { accountId: ACCT } })).json().error, 'not_connected')
 })
 
+test('no developer-token header: Google sunset developer tokens (2026-09-09); access is per Cloud project', async () => {
+  // Even if the old secret is still stored, it is never sent (Google will reject it in a future version).
+  env.GOOGLE_ADS_DEVELOPER_TOKEN = 'fake-legacy-token'
+  await connected()
+  assert.equal((await G.launchCampaign(env, 'pools', campaign())).ok, true)
+  const all = adsCalls(/./)
+  assert.ok(all.length > 0)
+  for (const c of all) assert.equal(c.headers.get('developer-token'), null)
+})
+
 // ---------- launch ----------
 
 test('launch: validateOnly by default; one atomic mutate with temp ids, PAUSED campaign, geo, keywords, negatives, RSA', async () => {

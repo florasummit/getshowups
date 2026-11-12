@@ -28,8 +28,8 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Evaluate GHL conversations before any custom messaging. SMS needs A2P registration. Rescheduling/cancel links and
   missed-call follow-up (telephony) are still missing.
 - **D. Google Ads**: OAuth, accounts, plan drafts, budget approval, paused-campaign creation, optimizer and
-  attribution exist behind ADS_ENABLED / ADS_LIVE_LAUNCH. Needs: Google Ads developer token (Basic access), OAuth
-  verification for the adwords scope, a real test account; then spend → leads → bookings → show-ups reporting.
+  attribution exist behind ADS_ENABLED / ADS_LIVE_LAUNCH. Needs: Explorer/Basic access on the Google Cloud project (developer
+  tokens were sunset 2026-09-09), OAuth verification for the adwords scope, a real test account; then spend → leads → bookings → show-ups reporting.
 - Onboarding target: sign up/pay → confirm details → keep or generate website → calendar → (optional) Google Ads →
   direct booking or qualification → review. Dashboard answers leads, booked, showed, spend, attention.
 
@@ -62,9 +62,12 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Google reports as a test account (customer.test_account, re-read before each change; unknown → refused).
   Pausing never blocked. Read-only GET /api/ads/google/campaigns (status, budget, 30-day metrics). Owner budget
   changes within the approved ceiling. Test-account data labelled on the Ads screen and Overview.
-- Verified with mocks only (labelled). Real verification needs: developer token (test access is enough), a
-  Google Ads test manager + test client account, Google Ads API enabled and the adwords scope on the OAuth
-  consent screen (project 380394286094), GOOGLE_ADS_DEVELOPER_TOKEN set by the owner.
+- Verified with mocks only (labelled). Real verification needs: Google Ads API enabled in Cloud project
+  380394286094 (that alone grants Test access = test accounts only), the adwords scope + test users on its OAuth
+  consent screen, and a Google Ads test client account (under a test manager account).
+- 2026-11-11: Google sunset developer tokens on 2026-09-09 (access is per Cloud project; the header is ignored
+  now and will be rejected in a future version). We no longer send it. The GOOGLE_ADS_DEVELOPER_TOKEN secret
+  stored in production on 2026-11-11 is unused and can be deleted later (with approval).
 - Recommended before any production trial: per-business Ads enablement (ADS_ENABLED is global).
 
 ### Ads Overview (2026-11-11): built on feature/ads-overview, NOT deployed (needs approval)
