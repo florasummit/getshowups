@@ -37,7 +37,7 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
 
 
 ### Milestone B: Stripe sandbox journey COMPLETE (2026-11-11, production, Stripe TEST mode)
-- Real run on production with an isolated test business (gsu-stripe-test-pools, brandon@florasummit.com):
+- Real run on production with an isolated test business (gsu-stripe-test-pools, owner@example.com (test owner)):
   Get started → Google sign-in → business name → $499/month Stripe test Checkout (abandoned → same session
   resumed; owner entered test cards) → signed webhooks (checkout.session.completed, customer.subscription.created,
   invoice.paid; each once) → subscription active → details/services/calendar/hours/website → onboarding complete
@@ -46,7 +46,7 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   tenant isolation from PoolThru; PoolThru billing exemption and data unchanged. STRIPE_LIVE_ENABLED off.
 - Email: 4 automated emails delivered to the test recipient's Inbox via Resend (MESSAGES_LIVE still off).
 - Cleanup: test website unpublished (was published during onboarding); test business calendar record deleted
-  (it had connected care@poolthru.com; the shared Google grant was NOT revoked; PoolThru's record unchanged).
+  (it had connected PoolThru's Google account (owner@poolthru.example); the shared Google grant was NOT revoked; PoolThru's record unchanged).
   The test business remains (active test subscription, ends Dec 11); reconnect only to a separate test calendar.
 - Fix LIVE (99be975, deployment 72b6fb33): public booking now requires an active plan (same rule as the public
   website: pilots exempt, paid/past_due yes, canceled within the 14-day grace, unpaid never).
