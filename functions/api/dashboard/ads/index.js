@@ -5,11 +5,13 @@ import { getProfile, listCampaigns, adResults, liveLaunchEnabled } from '../../.
 import { currentApproval, remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const db = env.ONBOARDING_DB
   const id = session.customer.id
   try {

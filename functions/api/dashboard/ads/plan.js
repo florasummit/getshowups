@@ -8,11 +8,13 @@ import { generatePlan, draftSpecs } from '../../../../server/ads/strategy.js'
 import { remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { websiteSummary } from '../../../../server/website.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestPost({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const customer = session.customer
   const rl = await hit(env, 'adsPlan', customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)

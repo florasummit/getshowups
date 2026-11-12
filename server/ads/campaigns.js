@@ -161,8 +161,6 @@ export async function approveCampaign(env, customer, id, ownerEmail, now = Date.
 // Live launch needs: ADS_LIVE_LAUNCH === 'true' (operator switch, requires human approval to set),
 // a connected account, and an approved campaign. Otherwise a non-spending check runs
 // (Google validateOnly / Meta dry run) and nothing is created.
-// Release switch for the whole Ads feature (dashboard tab + routes). Off unless exactly 'true'.
-export const adsEnabled = (env) => env.ADS_ENABLED === 'true'
 export const liveLaunchEnabled = (env) => env.ADS_LIVE_LAUNCH === 'true'
 
 // Sandbox: without ADS_LIVE_LAUNCH, Google campaigns may still be created (paused), resumed and have

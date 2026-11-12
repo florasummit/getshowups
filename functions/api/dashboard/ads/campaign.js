@@ -10,13 +10,15 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction } from '../../../../server/ads/campaigns.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 const STATUS = { test_account_required: 409, invalid_budget: 400, invalid_status: 409, not_found: 404, live_launch_disabled: 409, approval_required: 409, budget_approval_required: 409, exceeds_approved_budget: 409, monthly_budget_reached: 409, not_editable: 409, not_launched: 409, needs_account: 409, profile_required: 409, too_many_campaigns: 409, creative_not_approved: 409, subscription_required: 402 }
 
 export async function onRequestPost({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const customer = session.customer
   const rl = await hit(env, 'adsWrite', customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)

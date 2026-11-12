@@ -4,12 +4,14 @@ import { encrypt, json, randomToken } from '../../../../server/google-oauth.js'
 import { cookie, requireSession } from '../../../../server/auth.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { META_SCOPES, META_STATE_COOKIE, META_STATE_TTL_SECONDS, metaConfigured, metaDialogUrl, metaRedirectUri } from '../../../../server/ads/meta.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   if (!metaConfigured(env)) return json(503, { error: 'not_configured' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const rl = await hitByIp(env, 'adsConnect', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)
 

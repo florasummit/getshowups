@@ -6,11 +6,13 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { generateImage, startVideo, setCreativeDecision, getCreativeAsset } from '../../../../server/ads/creative.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const id = new URL(request.url).searchParams.get('id')
   const asset = id && /^[A-Za-z0-9_-]{8,40}$/.test(id) ? await getCreativeAsset(env, session.customer.id, id) : null
   if (!asset) return json(404, { error: 'not_found' })
@@ -18,9 +20,10 @@ export async function onRequestGet({ request, env }) {
 }
 
 export async function onRequestPost({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const id = session.customer.id
   const body = await request.json().catch(() => null)
   const generating = body?.action === 'image' || body?.action === 'video'

@@ -4,6 +4,7 @@ import { requireSession, siteOrigin } from '../../../server/auth.js'
 import { progress } from '../../../server/customers.js'
 import { signupPlan } from '../../../server/onboarding.js'
 import { listPlans } from '../../../server/stripe.js'
+import { adsEnabledFor } from '../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env, { needCustomer: false })
@@ -18,6 +19,6 @@ export async function onRequestGet({ request, env }) {
     customer,
     progress: await progress(env, customer),
     bookingUrl: customer ? `${siteOrigin(env)}/book/${customer.id}` : null,
-    features: { ads: env.ADS_ENABLED === 'true', ghl: env.GHL_ENABLED === 'true' },
+    features: { ads: customer ? adsEnabledFor(env, customer.id) : false, ghl: env.GHL_ENABLED === 'true' },
   })
 }

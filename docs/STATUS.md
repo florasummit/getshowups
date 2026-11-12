@@ -62,13 +62,25 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Google reports as a test account (customer.test_account, re-read before each change; unknown → refused).
   Pausing never blocked. Read-only GET /api/ads/google/campaigns (status, budget, 30-day metrics). Owner budget
   changes within the approved ceiling. Test-account data labelled on the Ads screen and Overview.
-- Verified with mocks only (labelled). Real verification needs: Google Ads API enabled in Cloud project
-  380394286094 (that alone grants Test access = test accounts only), the adwords scope + test users on its OAuth
-  consent screen, and a Google Ads test client account (under a test manager account).
+- **Verified against Google's real API (2026-11-12, local run, test accounts only)**: Cloud project 380394286094
+  (Test access; production OAuth client's project, confirmed from the public client id), separate local Desktop OAuth
+  client in that project, no developer token. Test manager 554-785-3090 and test client 642-666-3252 (under it):
+  customer.test_account = true for both; status CLOSED, which Google documents as normal for test accounts.
+  The app's real adapter (server/ads/google.js), 12/12 PASS: test-account guard, geoTargetConstants:suggest (ZIPs),
+  create PAUSED Search campaign in one atomic mutate, read back (direct GAQL + app searchStream), relaunch returns the
+  existing campaign (no duplicate), enable, pause, daily budget $10 → $15, final state PAUSED. Test campaign
+  24455347866 "GSU lifecycle TEST [gsu:lcmwe636hv]" left PAUSED in the test client (test accounts never serve/charge).
+  Not live-verified: daily metrics (test accounts have none), production OAuth client + deployed callback, real accounts.
 - 2026-11-11: Google sunset developer tokens on 2026-09-09 (access is per Cloud project; the header is ignored
   now and will be rejected in a future version). We no longer send it. The GOOGLE_ADS_DEVELOPER_TOKEN secret
   stored in production on 2026-11-11 is unused and can be deleted later (with approval).
-- Recommended before any production trial: per-business Ads enablement (ADS_ENABLED is global).
+- Per-business flag (2026-11-12): Ads needs ADS_ENABLED=true AND the business id in ADS_BUSINESSES (no wildcard;
+  unset = nobody). Applies to every Ads route, both OAuth callbacks, me.features.ads, Overview and onboarding
+  readiness. Cron metrics sync / optimizer still act on already-launched campaigns (read + pause only).
+- Single-business pilot still needs (each an approval): deploy PR #1 (migrations: none new); production OAuth client
+  gets the Ads redirect URI https://getshowups.com/api/ads/google/callback and the adwords scope on the consent screen;
+  ADS_ENABLED=true + ADS_BUSINESSES=<pilot id>; a test connection first. Real (non-test) accounts additionally need
+  Explorer/Basic access on the Cloud project and ADS_LIVE_LAUNCH=true + an owner budget approval before any spend.
 
 ### Ads Overview (2026-11-11): built on feature/ads-overview, NOT deployed (needs approval)
 - Overview "Advertising" row when ADS_ENABLED: ad spend, clicks, leads from ads, bookings, show-ups, cost per

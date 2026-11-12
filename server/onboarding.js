@@ -6,6 +6,7 @@ import { getSubscription, listPlans, stripeConfigured } from './stripe.js'
 import { websiteSummary } from './website.js'
 import { domainFor } from './domains.js'
 import { internalEmails, isTestLead } from './testdata.js'
+import { adsEnabledFor } from './ads/access.js'
 
 const PAID = ['active', 'trialing', 'past_due'] // past_due: paid before, in Stripe's retry window
 
@@ -165,7 +166,8 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
   items.push({ id: 'booking', state: (appts?.n ?? 0) > 0 ? 'ok' : 'pending', detail: (appts?.n ?? 0) > 0 ? 'has_bookings' : 'no_bookings_yet' })
   items.push({ id: 'email', state: env.MESSAGES_LIVE === 'true' ? 'ok' : 'pending', detail: env.MESSAGES_LIVE === 'true' ? 'live' : 'activating' })
   items.push({ id: 'sms', state: 'off', detail: 'not_available_yet' })
-  items.push({ id: 'ads', state: env.ADS_ENABLED === 'true' ? 'pending' : 'off', detail: env.ADS_ENABLED === 'true' ? 'connect_in_ads' : 'not_available_yet' })
+  const ads = adsEnabledFor(env, customer?.id)
+  items.push({ id: 'ads', state: ads ? 'pending' : 'off', detail: ads ? 'connect_in_ads' : 'not_available_yet' })
   const next = items.find((i) => i.state === 'action')?.id ?? (items.find((i) => i.id === 'booking').state !== 'ok' ? 'share' : null)
   return { items, next }
 }

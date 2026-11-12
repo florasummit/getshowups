@@ -72,7 +72,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)
-  ads/               spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
+  ads/               access (who gets Ads: ADS_ENABLED + ADS_BUSINESSES), spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
@@ -147,8 +147,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (idempotency key), refuses if Stripe already has a subscription, and resumes an open session.
 - STRIPE_API_MOCK_ORIGIN and STRIPE_LIVE_ENABLED: mock is loopback-only (e2e); live billing needs STRIPE_LIVE_ENABLED=true
   (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
-- Release switches (off unless exactly 'true'): ADS_ENABLED (Ads tab + /api/dashboard/ads/* + /api/ads/* connect),
-  ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
+- Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
+  /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
+  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
   in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).

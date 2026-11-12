@@ -622,6 +622,9 @@ test('ads: a click that lands on the website keeps its campaign through booking;
   // Switch off (production today): no advertising row at all.
   assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads, null)
   env.ADS_ENABLED = 'true'
+  // Master switch on but this business is not listed: still no advertising row.
+  assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads, null)
+  env.ADS_BUSINESSES = 'pools'
   // No spend recorded yet: spend, clicks and costs are unavailable (null), never zero or estimated.
   assert.deepEqual((await call(overviewApi, 'GET', { cookie: c })).json.ads, { spendCents: null, clicks: null, leads: 3, booked: 2, showed: 1, costPerBookingCents: null, costPerShowUpCents: null, testAccount: false })
   db.sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, clicks, fetched_at) VALUES ('campweb1', 'pools', ?, 12000, 48, ?)").run(day, now)
@@ -629,7 +632,11 @@ test('ads: a click that lands on the website keeps its campaign through booking;
   // Figures from a Google Ads TEST account are flagged so the dashboard labels them as test data.
   db.sql.prepare("INSERT INTO ad_connections (customer, platform, account_id, extra, status, connected_at, updated_at) VALUES ('pools', 'google', '1234567890', '{\"testAccount\":true}', 'connected', 1, 1)").run()
   assert.equal((await call(overviewApi, 'GET', { cookie: c })).json.ads.testAccount, true)
+  // Per-business flag: salon is not listed, so it has no advertising row even with the master switch on.
+  const salonCookie = await cookieFor('owner@salon.example')
+  assert.equal((await call(overviewApi, 'GET', { cookie: salonCookie })).json.ads, null)
+  env.ADS_BUSINESSES = 'pools,salon'
   // Tenant isolation: the other business sees only its own spend and no leads.
-  const salon = (await call(overviewApi, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.ads
+  const salon = (await call(overviewApi, 'GET', { cookie: salonCookie })).json.ads
   assert.deepEqual([salon.spendCents, salon.leads, salon.costPerBookingCents], [99900, 0, null])
 })

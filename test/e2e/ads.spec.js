@@ -85,6 +85,16 @@ test('connect Google Ads: a Google Ads TEST account is connected and clearly lab
   await expect(page.locator('[data-ads-results]')).toContainText('Google Ads test account: no real ads ran')
 })
 
+test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_OTHER_SESSION_TOKEN)
+  expect((await (await page.request.get('/api/dashboard/me')).json()).features.ads).toBe(false)
+  expect((await page.request.get('/api/dashboard/ads')).status()).toBe(404)
+  expect((await page.request.get('/api/ads/google/campaigns')).status()).toBe(404)
+  await page.goto('/dashboard')
+  await expect(page.getByRole('link', { name: 'Ads', exact: true })).toHaveCount(0)
+  await expect(page.locator('[data-ads-results]')).toHaveCount(0)
+})
+
 test('booking page passes ad attribution with the lead', async ({ page }) => {
   let sent
   page.on('request', (r) => {

@@ -5,6 +5,7 @@ import { GOOGLE_AUTH_URL, encrypt, json, pkceChallenge, randomToken } from '../.
 import { cookie, requireSession, siteOrigin } from '../../../../server/auth.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { ADS_SCOPE, ADS_STATE_COOKIE, ADS_STATE_TTL_SECONDS, adsRedirectUri } from '../../../../server/ads/google.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 // A top-level navigation from our own dashboard; anything sent from another site is refused.
 function crossSite(request, env) {
@@ -15,9 +16,10 @@ function crossSite(request, env) {
 }
 
 export async function onRequestGet({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   if (crossSite(request, env)) return json(403, { error: 'forbidden' })
   const rl = await hitByIp(env, 'adsConnect', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)

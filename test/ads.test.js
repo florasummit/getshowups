@@ -83,6 +83,7 @@ beforeEach(() => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ADS_ENABLED: 'true',
+    ADS_BUSINESSES: 'pools,salon', // per-business Ads flag (server/ads/access.js)
     ONBOARDING_DB: db,
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k) },
   }
@@ -423,6 +424,34 @@ test('billing access rule: with Stripe configured, launch needs an active or tri
   db.sql.prepare("INSERT INTO subscriptions (customer, status, updated_at) VALUES ('pools', 'past_due', 1)").run()
   assert.equal((await call(adsCampaign, 'POST', '/x', { cookie: c, body: { action: 'launch', id, confirm: true } })).json.error, 'subscription_required')
   assert.equal(db.sql.prepare('SELECT status FROM ad_campaigns WHERE id = ?').get(id).status, 'approved', 'still approved, nothing attempted')
+})
+
+test('per-business flag: with the master switch on, only businesses in ADS_BUSINESSES see Ads (default: nobody)', async () => {
+  const me = await import('../functions/api/dashboard/me.js')
+  const onboarding = await import('../functions/api/dashboard/onboarding.js')
+  const routes = [[adsIndex, 'GET'], [adsProfile, 'POST'], [adsPlan, 'POST'], [adsBudget, 'POST'], [adsCampaign, 'POST'], [adsCreative, 'POST'], [adsCreative, 'GET']]
+  const pools = await owner()
+  const salon = await cookieFor('owner@salon.example')
+  const adsItem = async (cookie) => (await call(onboarding, 'GET', '/api/dashboard/onboarding', { cookie })).json.readiness.items.find((i) => i.id === 'ads')
+  delete env.ADS_BUSINESSES // default
+  for (const [mod, method] of routes) assert.equal((await call(mod, method, '/x', { cookie: pools, body: method === 'POST' ? PROFILE : undefined })).status, 404)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, false)
+  assert.deepEqual(await adsItem(pools), { id: 'ads', state: 'off', detail: 'not_available_yet' })
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ad_profiles').get().n, 0, 'nothing written')
+
+  env.ADS_BUSINESSES = 'pools'
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: pools })).status, 200)
+  assert.equal((await call(adsProfile, 'POST', '/x', { cookie: pools, body: PROFILE })).status, 200)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, true)
+  assert.deepEqual(await adsItem(pools), { id: 'ads', state: 'pending', detail: 'connect_in_ads' })
+  // The unlisted business still sees nothing, and cannot write.
+  for (const [mod, method] of routes) assert.equal((await call(mod, method, '/x', { cookie: salon, body: method === 'POST' ? PROFILE : undefined })).status, 404)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: salon })).json.features.ads, false)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ad_profiles WHERE customer = 'salon'").get().n, 0)
+  // Master switch off overrides the list.
+  env.ADS_ENABLED = 'false'
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: pools })).status, 404)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, false)
 })
 
 test('release switch: without ADS_ENABLED every ads dashboard route is 404 and me reports ads off', async () => {

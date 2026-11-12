@@ -119,6 +119,7 @@ beforeEach(async () => {
   meta = fakeMeta()
   env = {
     ADS_ENABLED: 'true',
+    ADS_BUSINESSES: 'pools,salon', // per-business Ads flag (server/ads/access.js)
     GOOGLE_CLIENT_ID: 'cid',
     GOOGLE_CLIENT_SECRET: 'cs',
     GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`,

@@ -7,6 +7,7 @@ import { cookie, requireSession } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { saveToken, upsertConnection } from '../../../../server/ads/connections.js'
 import { META_STATE_COOKIE, META_STATE_TTL_SECONDS, exchangeCode, listAccountsWithToken, metaConfigured } from '../../../../server/ads/meta.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 function redirect(location) {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
@@ -16,11 +17,12 @@ function redirect(location) {
 const fail = (code) => redirect(`/dashboard?ads_error=${code}`)
 
 export async function onRequestGet({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return fail('not_configured')
+  if (!adsEnabled(env)) return fail('not_configured')
   if (!metaConfigured(env)) return json(503, { error: 'not_configured' })
   if ((await hitByIp(env, 'adsCallback', request)).limited) return fail('rate_limited')
   const { session, response } = await requireSession(request, env)
   if (response) return fail('signin_required')
+  if (!adsEnabledFor(env, session.customer?.id)) return fail('not_configured')
 
   const url = new URL(request.url)
   if (url.searchParams.get('error')) return fail('cancelled')

@@ -3,11 +3,13 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { validateProfile, saveProfile } from '../../../../server/ads/campaigns.js'
+import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestPost({ request, env }) {
-  if (env.ADS_ENABLED !== 'true') return json(404, { error: 'not_found' })
+  if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
+  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const rl = await hit(env, 'adsWrite', session.customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const { errors, profile } = validateProfile(await request.json().catch(() => null))
