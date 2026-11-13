@@ -99,18 +99,45 @@ test('connect Google Ads: a Google Ads TEST account is connected and clearly lab
   await expect(page.locator('[data-ads-results]')).toContainText('Google Ads test account: no real ads ran')
 })
 
-test('Google Ads sandbox: choose a test account, create paused, start, pause and change the budget (mock API)', async ({ page, context }) => {
+test('Google Ads sandbox: production sign-in refused, recover, choose a test account, create paused (no duplicate), start, pause, change the budget (mock API)', async ({ page, context, browser }) => {
   // MOCK DATA throughout: a local Google Ads stand-in with test accounts only. Nothing reaches Google or spends.
   await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
-  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads:owner@e2e-ads.example')
   await page.goto('/dashboard/ads')
+  await expect(page.locator('[data-testing-mode]')).toContainText('nothing is ever charged')
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  const pickerFor = () => accounts.getByRole('group', { name: 'Choose a Google Ads account' })
+
+  // 1) A Google sign-in that reaches only a REAL (production) Google Ads account: Google refuses our
+  // test-access project, the owner lands back on the Ads tab with a clear message, nothing is connected.
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-prod:owner@e2e-ads.example')
   await accounts.getByRole('link', { name: 'Connect' }).first().click()
-  await page.waitForURL(/\/dashboard/)
-  await page.goto('/dashboard/ads')
-  const picker = accounts.getByRole('group', { name: 'Choose a Google Ads account' })
-  await picker.getByRole('button', { name: 'Use MOCK Google Ads test account 123-456-7890' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(page.getByRole('alert').first()).toContainText('only lets GetShowUps use Google Ads test accounts')
+  expect(new URL(page.url()).search).toBe('')
+  await expect(accounts.getByText('Choose an ad account')).toBeVisible()
+  await expect(accounts.getByRole('button', { name: 'Try again' })).toBeVisible()
+  expect((await (await page.request.get('/api/dashboard/ads')).json()).connections.google.accountId ?? null).toBeNull()
+
+  // 2) Recovery: reconnect with the sandbox Google sign-in; the test accounts are found automatically.
+  await page.unroute('**/api/ads/google/start')
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads:owner@e2e-ads.example')
+  await accounts.getByRole('link', { name: 'Reconnect' }).first().click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(page.getByRole('status').filter({ hasText: 'Google Ads is connected.' })).toBeVisible()
+  await pickerFor().getByRole('button', { name: 'Use MOCK Google Ads test account 123-456-7890' }).click()
   await expect(accounts.locator('[data-test-account]')).toContainText('Google Ads test account 123-456-7890')
+
+  // Server-side: non-test, manager, production and unknown accounts are refused whatever the browser sends.
+  const choose = (accountId) =>
+    page.evaluate(async (id) => {
+      const r = await fetch('/api/ads/google/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: id, loginCustomerId: '5550000000' }) })
+      return [r.status, (await r.json()).error]
+    }, accountId)
+  expect(await choose('7770000000')).toEqual([409, 'test_account_required'])
+  expect(await choose('5550000000')).toEqual([400, 'account_not_accessible'])
+  expect(await choose('9220000000')).toEqual([400, 'account_not_accessible'])
+  expect(await choose('1111111111')).toEqual([400, 'account_not_accessible'])
+  expect((await (await page.request.get('/api/dashboard/ads')).json()).connections.google.accountId).toBe('1234567890')
 
   // A draft whose booking link is https (local e2e serves http, so the starter draft cannot be approved here).
   const saved = await page.evaluate(async () => {
@@ -129,6 +156,12 @@ test('Google Ads sandbox: choose a test account, create paused, start, pause and
   await expect(c.locator('.chip')).toHaveText('approved')
   await c.getByRole('button', { name: 'Create on Google (paused) · test account' }).click()
   await expect(c.locator('.chip')).toHaveText('Paused')
+  // Duplicate prevention: a second create request for the same campaign is refused; Google has one copy.
+  const campaignId = (await (await page.request.get('/api/dashboard/ads')).json()).campaigns.find((x) => x.launched).id
+  const again = await page.evaluate(async (id) => (await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'launch', id, confirm: true }) })).status, campaignId)
+  expect(again).toBeGreaterThanOrEqual(400)
+  const onGoogle = (await (await page.request.get('/api/ads/google/campaigns')).json()).campaigns.filter((x) => x.gsuId === campaignId)
+  expect(onGoogle).toHaveLength(1)
 
   await c.getByRole('button', { name: 'Start ads (test account, no spend)' }).click()
   await expect(c.locator('.chip')).toHaveText('Running')
@@ -144,6 +177,18 @@ test('Google Ads sandbox: choose a test account, create paused, start, pause and
   await c.getByRole('button', { name: 'Check on Google' }).click()
   await expect(c.locator('[data-google-live]')).toHaveText('Google reports: paused · $8/day · test account')
   await expect(page.getByText('Daily budget set to 800 cents')).toBeVisible()
+
+  // Phone width: the created-campaign controls and account row fit without horizontal scrolling.
+  await page.setViewportSize({ width: 360, height: 800 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+
+  // Tenant isolation: another Ads business sees none of this business's campaigns or connection.
+  const other = await browser.newContext()
+  await useSession(other, fixtures.E2E_SESSION_TOKEN)
+  const theirs = await (await other.request.get('/api/dashboard/ads')).json()
+  expect(theirs.campaigns.map((x) => x.id)).not.toContain(campaignId)
+  expect(JSON.stringify(theirs)).not.toContain('1234567890')
+  await other.close()
 })
 
 test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context }) => {

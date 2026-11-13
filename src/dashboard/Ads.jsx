@@ -19,7 +19,10 @@ const ERRORS = {
   needs_account: 'Connect and choose an ad account first.',
   not_connected: 'Connect the ad account first.',
   reconnect_required: 'Reconnect the ad account; access has expired.',
-  not_approved_for_production: 'GetShowUps is still waiting for Google to approve live access.',
+  not_approved_for_production: 'Google only lets GetShowUps use Google Ads test accounts for now, and this sign-in reached a real (production) account. Nothing was changed in it.',
+  permission_denied: 'This Google sign-in doesn’t have permission for that Google Ads account.',
+  transient: 'Google Ads didn’t respond. Please try again in a minute.',
+  quota_exhausted: 'Google Ads is busy. Please try again in a few minutes.',
   creative_not_approved: 'Approve the image this ad uses first.',
   image_required: 'Add an approved image for this Meta ad.',
   quota_images: 'You’ve used this month’s image allowance.',
@@ -29,13 +32,34 @@ const ERRORS = {
   ai_declined: 'The planner couldn’t write this plan. Try changing the services.',
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
-  account_not_accessible: 'That account isn’t reachable with this Google sign-in. If it sits under a manager account, choose the manager too.',
-  invalid_account: 'Enter a 10-digit Google Ads account ID (dashes are fine).',
+  account_not_accessible: 'That account isn’t available with this Google sign-in. Choose one from the list.',
+  invalid_account: 'Choose an account from the list.',
   invalid_budget: 'Enter a daily budget in dollars.',
   invalid_status: 'Only a created campaign (running or paused) can change its budget.',
   not_launched: 'Create the campaign on Google first.',
 }
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
+
+// What the owner sees after coming back from Google or Meta sign-in (?ads= / ?ads_error= on the URL).
+const RETURNS = {
+  google_connected: 'Google Ads is connected.',
+  meta_connected: 'Facebook & Instagram is connected.',
+  cancelled: 'Sign-in was cancelled. Nothing was connected.',
+  expired: 'That sign-in timed out or was started in another tab. Click Connect to try again.',
+  scope_denied: 'Google Ads access wasn’t granted. Click Connect again and allow access to Google Ads.',
+  no_refresh_token: 'Google didn’t grant lasting access. Click Connect again. If it repeats, remove GetShowUps under your Google Account’s third-party access, then connect.',
+  failed: 'Sign-in didn’t finish. Please try again.',
+  unauthenticated: 'Sign in to GetShowUps first, then connect.',
+}
+function readReturn() {
+  const q = new URLSearchParams(window.location.search)
+  const ok = q.get('ads')
+  const err = q.get('ads_error')
+  if (!ok && !err) return null
+  window.history.replaceState(null, '', window.location.pathname)
+  if (ok) return RETURNS[ok] ? { ok: RETURNS[ok] } : null
+  return { error: RETURNS[err] || errorText(err) }
+}
 
 function Results({ r }) {
   const tiles = [
@@ -192,9 +216,10 @@ function BudgetCard({ budget, profile, onSaved }) {
 function GoogleAccountPicker({ onSaved }) {
   const [list, setList] = useState(null)
   const [state, setState] = useState({})
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    api('/api/ads/google/accounts').then(({ status, data }) => setList(status === 200 ? data : { error: data.error }))
-  }, [])
+    api('/api/ads/google/accounts').then(({ status, data }) => setList(status === 200 ? data : { error: data?.error }))
+  }, [attempt])
   const choose = async (accountId) => {
     setState({ busy: accountId })
     const { status, data } = await api('/api/ads/google/accounts', { method: 'POST', body: { accountId } })
@@ -204,7 +229,22 @@ function GoogleAccountPicker({ onSaved }) {
     } else setState({ error: errorText(data.error) })
   }
   if (!list) return <p className="fine" aria-busy="true">Finding your Google Ads accounts…</p>
-  if (list.error) return <p className="form-error" role="alert">{errorText(list.error)}</p>
+  if (list.error)
+    return (
+      <p className="form-error" role="alert">
+        {errorText(list.error)}{' '}
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            setList(null)
+            setAttempt((n) => n + 1)
+          }}
+        >
+          Try again
+        </button>
+      </p>
+    )
   if (!list.accounts.length)
     return (
       <p className="fine" role="status">
@@ -245,7 +285,7 @@ function Connections({ connections, capabilities, onChange }) {
         <div>
           <strong>{label}</strong>
           <p className="fine">
-            {!c ? 'Not connected' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : c.status === 'needs_account' ? 'Choose an ad account' : 'Reconnect needed'}
+            {!c ? 'Not connected' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : c.status === 'needs_account' ? 'Choose an ad account' : 'Access expired. Click Reconnect; your campaigns stay as they are.'}
           </p>
           {c?.status === 'connected' && c.testAccount && (
             <p className="fine" data-test-account>
@@ -543,6 +583,7 @@ function Creatives({ creatives, quota, capabilities, concepts, onChange }) {
 }
 
 export default function Ads() {
+  const [returned] = useState(readReturn)
   const [d, setD] = useState(null)
   const [error, setError] = useState(false)
   const [plan, setPlan] = useState({})
@@ -581,6 +622,21 @@ export default function Ads() {
   return (
     <div className="enter">
       <h1 className="title">Ads</h1>
+      {returned?.ok && (
+        <p className="notice" role="status">
+          {returned.ok}
+        </p>
+      )}
+      {returned?.error && (
+        <p className="form-error" role="alert">
+          {returned.error}
+        </p>
+      )}
+      {!d.capabilities.liveLaunch && (
+        <p className="fine" data-testing-mode>
+          Testing mode: only Google Ads test accounts can be connected. Test campaigns never show to anyone and nothing is ever charged.
+        </p>
+      )}
       {anyLaunched && <Results r={d.results} />}
 
       <section className="card">

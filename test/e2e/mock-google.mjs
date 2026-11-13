@@ -120,7 +120,13 @@ const ADS_ACCOUNTS = {
 }
 const adsCampaigns = new Map() // account id → [{ id, name, status, budget, amountMicros }]
 let adsNextId = 900000001
-function adsRoute(path, raw) {
+// Our Cloud project has Google Ads TEST access only: Google lists a real account but refuses every
+// request to it (CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION), as the real API does.
+const PROD_REFUSAL = { error: { code: 403, status: 'PERMISSION_DENIED', message: 'mock', details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v26.errors.GoogleAdsFailure', errors: [{ errorCode: { authorizationError: 'CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION' }, message: 'mock' }] }] } }
+function adsRoute(path, raw, auth = '') {
+  if (String(auth).includes('mock-ads-prod-access') && path.startsWith('/v26/')) {
+    return path === '/v26/customers:listAccessibleCustomers' ? [200, { resourceNames: ['customers/9220000000'] }] : [403, PROD_REFUSAL]
+  }
   if (path === '/v26/customers:listAccessibleCustomers') return [200, { resourceNames: ['customers/1234567890', 'customers/5550000000'] }]
   if (path === '/v26/geoTargetConstants:suggest') {
     const names = JSON.parse(raw || '{}').locationNames?.names || []
@@ -221,10 +227,13 @@ createServer(async (req, res) => {
   if (url.pathname === '/token' && req.method === 'POST') {
     const p = new URLSearchParams(raw)
     // One calendar per connected Google account: the access token is derived from the refresh token.
+    // A Google sign-in that reaches only REAL (production) Google Ads accounts keeps a recognisable token.
+    if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     if (p.get('grant_type') === 'refresh_token') return send(res, 200, { access_token: `mock-access-${createHmac('sha256', 'cal').update(String(p.get('refresh_token'))).digest('hex').slice(0, 16)}`, expires_in: 3600, scope: SCOPE })
     const [kind, email] = String(p.get('code')).split(':')
     if (kind === 'login') return send(res, 200, { access_token: 'mock-login', id_token: idToken(email), scope: 'openid email' })
     if (kind === 'connect') return send(res, 200, { access_token: 'mock-access-token', refresh_token: `mock-refresh-${email}`, id_token: idToken(email), scope: SCOPE })
+    if (kind === 'ads-prod') return send(res, 200, { access_token: 'mock-ads-prod-access', refresh_token: `mock-ads-prod-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     return send(res, 400, { error: 'invalid_grant' })
   }
@@ -232,7 +241,7 @@ createServer(async (req, res) => {
   // Google Ads API stand-in (GOOGLE_ADS_API_MOCK_ORIGIN). MOCK DATA, never shown as real results: the
   // signed-in Google user reaches a MOCK test client (123-456-7890) directly and a MOCK test manager
   // (555-000-0000) with one client (666-000-0000). Campaigns live in memory per account; no metrics.
-  const ads = adsRoute(url.pathname, raw)
+  const ads = adsRoute(url.pathname, raw, req.headers.authorization)
   if (ads) return send(res, ads[0], ads[1])
 
   if (url.pathname === '/calendar/v3/freeBusy' && req.method === 'POST') {

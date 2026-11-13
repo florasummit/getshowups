@@ -14,7 +14,7 @@ function redirect(location) {
   headers.append('Set-Cookie', cookie(META_STATE_COOKIE, '', 0))
   return new Response(null, { status: 303, headers })
 }
-const fail = (code) => redirect(`/dashboard?ads_error=${code}`)
+const fail = (code) => redirect(`/dashboard/ads?ads_error=${code}`)
 
 export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return fail('not_configured')
@@ -60,5 +60,5 @@ export async function onRequestGet({ request, env }) {
   } else {
     await upsertConnection(env, customer, 'meta', { status: 'needs_account' })
   }
-  return redirect('/dashboard?ads=meta_connected')
+  return redirect('/dashboard/ads?ads=meta_connected')
 }

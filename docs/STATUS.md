@@ -86,6 +86,18 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   campaigns get a daily-budget control and "Check on Google" (live status + budget read-back). Images moved under
   "More options"; the Meta row is hidden until Meta is configured. Browser test covers connect → choose → approve →
   create paused → start → pause → budget → read-back against a stateful MOCK Google Ads stand-in.
+- Deployed 2026-11-13 (approved): main fast-forwarded 99be975 → 4355bb5 (Pages deployment a2a02e07). Backup
+  ~/getshowups-backups/prod-20261113T011808Z-pre-ads-sandbox.sql (restore-tested, 44 tables). ADS_ENABLED=true and
+  ADS_BUSINESSES=gsu-stripe-test-pools set before the push (verified the old deployment stayed 404). ADS_LIVE_LAUNCH,
+  STRIPE_LIVE_ENABLED, MESSAGES_LIVE unset. Smoke checks passed; PoolThru rows identical across 40 tables. No migrations.
+  Rollback: delete ADS_ENABLED + redeploy, or roll back to deployment 72b6fb33 (99be975).
+- Sandbox polish (branch feature/ads-sandbox-polish, NOT deployed): Google/Meta sign-in now returns to the Ads tab with a
+  visible result (connected, cancelled, timed out, access not granted, production account refused, …) instead of the
+  Overview with nothing shown; "Testing mode" note (test accounts only, nothing charged); account-list errors get Try
+  again; reconnect/error texts no longer mention typing account or manager IDs. Browser test now also covers a
+  production-only Google sign-in (refused, clear message, recover by reconnecting), server refusal of non-test /
+  manager / production / unknown account ids, duplicate create prevention, cross-business isolation, 360px width.
+  Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Production OAuth (2026-11-12, owner): Ads callback URI registered on the production Web client (verified by a
   no-sign-in authorize probe), adwords scope listed, consent screen In production / External, user cap 3/100.
 - Single-business pilot still needs (each an approval): deploy PR #1 (migrations: none new);

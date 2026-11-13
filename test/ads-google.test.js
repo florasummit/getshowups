@@ -288,16 +288,16 @@ test('callback: rejects bad/missing state, other business sessions, and denied c
   const sealed = stateCookie(s.res)
   const state = new URL(s.location).searchParams.get('state')
   const cb = (qs, c) => call(callback, 'GET', `/api/ads/google/callback?${qs}`, { cookie: c })
-  assert.equal((await cb(`code=x&state=${state}`, cookie)).location, '/dashboard?ads_error=expired') // no state cookie
-  assert.equal((await cb(`code=x&state=wrong`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=expired')
-  assert.equal((await cb(`code=x&state=${state}`, `${cookie}; __Host-gsu_ads_google=garbage`)).location, '/dashboard?ads_error=expired')
-  assert.equal((await cb(`error=access_denied&state=${state}`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=cancelled')
+  assert.equal((await cb(`code=x&state=${state}`, cookie)).location, '/dashboard/ads?ads_error=expired') // no state cookie
+  assert.equal((await cb(`code=x&state=wrong`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard/ads?ads_error=expired')
+  assert.equal((await cb(`code=x&state=${state}`, `${cookie}; __Host-gsu_ads_google=garbage`)).location, '/dashboard/ads?ads_error=expired')
+  assert.equal((await cb(`error=access_denied&state=${state}`, `${cookie}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard/ads?ads_error=cancelled')
   // A different business's owner cannot finish this business's flow (state names the business).
   const other = await session('owner@salon.example')
-  assert.equal((await cb(`code=x&state=${state}`, `${other}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard?ads_error=expired')
+  assert.equal((await cb(`code=x&state=${state}`, `${other}; __Host-gsu_ads_google=${sealed}`)).location, '/dashboard/ads?ads_error=expired')
   // Expired state.
   const old = await encrypt(env, JSON.stringify({ state: 's'.repeat(43), verifier: 'v', customer: 'pools', email: 'owner@pools.example', iat: Date.now() - 11 * 60_000 }))
-  assert.equal((await cb(`code=x&state=${'s'.repeat(43)}`, `${cookie}; __Host-gsu_ads_google=${old}`)).location, '/dashboard?ads_error=expired')
+  assert.equal((await cb(`code=x&state=${'s'.repeat(43)}`, `${cookie}; __Host-gsu_ads_google=${old}`)).location, '/dashboard/ads?ads_error=expired')
   assert.equal(calls.length, 0, 'no token exchange happened')
   assert.equal(kv.size, 0)
 })
@@ -306,7 +306,7 @@ test('callback: exchanges with PKCE, stores the refresh token encrypted, single 
   ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${ACCT}`] }) : defaultAds(path, body, h))
   const r = await connect()
   assert.equal(r.status, 303)
-  assert.equal(r.location, '/dashboard?ads=google_connected')
+  assert.equal(r.location, '/dashboard/ads?ads=google_connected')
   assert.match(r.res.headers.get('Set-Cookie'), /__Host-gsu_ads_google=; .*Max-Age=0/)
   const ex = calls.find((c) => c.form?.get('grant_type') === 'authorization_code').form
   assert.equal(ex.get('redirect_uri'), `${ORIGIN}/api/ads/google/callback`)
@@ -326,17 +326,44 @@ test('callback: exchanges with PKCE, stores the refresh token encrypted, single 
 test('callback: sign-in that only reaches a manager → its one test client is found and auto-selected', async () => {
   // Like the sandbox setup: the Google login can access the test MANAGER; the test client sits under it.
   ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${MCC}`] }) : defaultAds(path, body, h))
-  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  assert.equal((await connect()).location, '/dashboard/ads?ads=google_connected')
   const conn = await getConnection(env, 'pools', 'google')
   assert.deepEqual([conn.status, conn.account_id, conn.extra], ['connected', ACCT2, { loginCustomerId: MCC, testAccount: true }])
   assert.ok(adsCalls(/googleAds:search$/).every((c) => c.headers.get('login-customer-id') === MCC), 'every read goes through the manager')
+})
+
+test('discovery: production accounts Google refuses are skipped; only-production sign-in → allowlisted error', async () => {
+  const PROD = '9223132742'
+  const refuse = () => adsError(403, 'PERMISSION_DENIED', { authorizationError: 'CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION' })
+  // Like the real login: a production manager (refused under Test access) plus the test manager.
+  ads = (path, body, h) =>
+    path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${PROD}`, `customers/${MCC}`] }) : path.startsWith(`/customers/${PROD}/`) ? refuse() : defaultAds(path, body, h)
+  assert.equal((await connect()).location, '/dashboard/ads?ads=google_connected')
+  let conn = await getConnection(env, 'pools', 'google')
+  assert.deepEqual([conn.status, conn.account_id, conn.extra.loginCustomerId], ['connected', ACCT2, MCC], 'the one test client is found and used')
+  const cookie = await session('owner@pools.example')
+  const list = (await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json()
+  assert.deepEqual(list.accounts.map((a) => a.id), [ACCT2])
+  assert.ok(!JSON.stringify(list).includes(PROD))
+  assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body: { accountId: PROD } })).json().error, 'account_not_accessible')
+
+  // Only production accounts: nothing connected, allowlisted error, no provider text leaks.
+  ads = (path) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${PROD}`] }) : refuse())
+  const r = await connect('owner@salon.example')
+  assert.equal(r.location, '/dashboard/ads?ads_error=not_approved_for_production')
+  conn = await getConnection(env, 'salon', 'google')
+  assert.deepEqual([conn.status, conn.account_id], ['needs_account', null])
+  const salon = await session('owner@salon.example')
+  const g = await call(accounts, 'GET', '/api/ads/google/accounts', { cookie: salon })
+  assert.deepEqual([g.status, g.json()], [403, { error: 'not_approved_for_production' }])
+  assert.ok(!outputs.join(' ').includes('Jane Doe'))
 })
 
 test('sandbox: only Google Ads TEST accounts can be connected until live launch is switched on', async () => {
   // Callback with ONE accessible account that Google does not flag as a test account → not auto-selected.
   mockTestAccount = false
   ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${ACCT}`] }) : defaultAds(path, body, h))
-  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  assert.equal((await connect()).location, '/dashboard/ads?ads=google_connected')
   let conn = await getConnection(env, 'pools', 'google')
   assert.deepEqual([conn.status, conn.account_id], ['needs_account', null])
   // Choosing it explicitly is refused too, and nothing is stored.
@@ -368,20 +395,20 @@ test('sandbox: only Google Ads TEST accounts can be connected until live launch 
 })
 
 test('callback: several accounts → needs_account; missing scope or refresh token refused', async () => {
-  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  assert.equal((await connect()).location, '/dashboard/ads?ads=google_connected')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
   assert.equal((await getConnection(env, 'pools', 'google')).account_id, null)
 
   tokenExchange = () => reply(200, { access_token: AT, scope: 'openid email' , refresh_token: RT })
-  assert.equal((await connect('owner@salon.example')).location, '/dashboard?ads_error=scope_denied')
+  assert.equal((await connect('owner@salon.example')).location, '/dashboard/ads?ads_error=scope_denied')
   tokenExchange = () => reply(200, { access_token: AT, scope: G.ADS_SCOPE })
-  assert.equal((await connect('owner@salon.example')).location, '/dashboard?ads_error=no_refresh_token')
+  assert.equal((await connect('owner@salon.example')).location, '/dashboard/ads?ads_error=no_refresh_token')
   assert.equal(kv.has('ads:google:salon'), false)
 })
 
 test('callback: test-access project → connection kept as needs_account with an allowlisted error', async () => {
   ads = () => adsError(403, 'PERMISSION_DENIED', { authorizationError: 'CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION' })
-  assert.equal((await connect()).location, '/dashboard?ads_error=not_approved_for_production')
+  assert.equal((await connect()).location, '/dashboard/ads?ads_error=not_approved_for_production')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
 })
 
@@ -448,7 +475,7 @@ test('per-business flag: Google Ads connect + read routes only for businesses li
   const s = await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { 'Sec-Fetch-Site': 'same-origin' } })
   env.ADS_BUSINESSES = 'salon'
   const cb = await call(callback, 'GET', `/api/ads/google/callback?code=c0de&state=${new URL(s.location).searchParams.get('state')}`, { cookie: `${cookie}; __Host-gsu_ads_google=${stateCookie(s.res)}` })
-  assert.equal(cb.location, '/dashboard?ads_error=not_configured')
+  assert.equal(cb.location, '/dashboard/ads?ads_error=not_configured')
   assert.equal(kv.size, 0, 'no token stored')
   assert.equal(calls.filter((c) => c.form?.get('grant_type') === 'authorization_code').length, 0, 'no code exchange')
 })
