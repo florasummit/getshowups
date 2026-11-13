@@ -100,7 +100,11 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Website URL input (2026-11-13, branch feature/url-normalization, NOT deployed): server/url.js normalizeWebsiteUrl()
+- Google Ads account selection UX (2026-11-13, branch feature/ads-account-selection, NOT deployed): Google sign-in and
+  the chosen Ads account shown separately; selected account shown once with a checkmark; Change account only when
+  another eligible account exists; exactly one eligible + nothing chosen before → selected automatically (not after a
+  test-business unmark reset). Frontend + e2e mock scenarios only; server rules unchanged.
+- Website URL input: DEPLOYED 2026-11-13 (3f870cf, deployment e2122dce). server/url.js normalizeWebsiteUrl()
   for every business; Ads profile website accepts example.com / www / http / https (https default), refuses unsafe.
 - PoolThru Ads sandbox: DEPLOYED 2026-11-13 (c46662a, deployment 8b69546f; ADS_BUSINESSES = gsu-stripe-test-pools,
   poolthru-llc). Owner connect (step 6) pending.

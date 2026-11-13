@@ -1610,5 +1610,9 @@
 /* Ads: automatic account picker and the collapsed optional section */
 .account-pick .row { gap: 12px; flex-wrap: wrap; }
 .account-pick .chip { margin-left: 8px; }
+.account-selected { margin: 0; }
+.account-selected .chip { margin-left: 8px; }
+.account-selected > [aria-hidden], .account-current > [aria-hidden] { color: #166534; font-weight: 700; }
+.account-current { white-space: nowrap; }
 .more-options > summary { cursor: pointer; font-weight: 600; }
 .more-options[open] > summary { margin-bottom: 12px; }

@@ -1,7 +1,7 @@
 // Ads: results first, then a short guided setup (business details → plan → budget → accounts →
 // review and launch). Every campaign is an editable draft until the owner approves it; launching
 // creates it PAUSED and nothing spends until the owner presses Start.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 
 const money = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: c % 100 ? 2 : 0 })}`)
@@ -207,25 +207,67 @@ function BudgetCard({ budget, profile, onSaved }) {
   )
 }
 
-// Choose which Google Ads account to use. Accounts reachable only through a manager need the manager
-// chosen too. While live launch is off, the server only accepts accounts Google flags as test accounts.
-// Choose which Google Ads account to use. The server finds the accounts automatically (including ones
-// under a manager account) and works out how to reach them; while ads are in testing it offers only
-// accounts Google flags as test accounts.
-function GoogleAccountPicker({ onSaved }) {
+// Google Ads has two separate states (server/ads/connections.js):
+//   1. Google sign-in: the stored, encrypted authorization. status 'reconnect_required' = it expired or was revoked.
+//   2. The Google Ads account the business's ads run in: status 'connected' + accountId. 'needs_account' = signed
+//      in, no account chosen yet.
+// The server finds the choosable accounts (including ones under a manager); while ads are in testing it offers
+// only accounts Google flags as test accounts, and it re-checks every choice.
+function GoogleAdsAccount({ c, onChange }) {
   const [list, setList] = useState(null)
-  const [state, setState] = useState({})
   const [attempt, setAttempt] = useState(0)
+  const [changing, setChanging] = useState(false)
+  const [state, setState] = useState({})
+  const auto = useRef(false)
+  const changed = useRef(onChange)
   useEffect(() => {
-    api('/api/ads/google/accounts').then(({ status, data }) => setList(status === 200 ? data : { error: data?.error }))
-  }, [attempt])
-  const choose = async (accountId) => {
+    changed.current = onChange
+  }, [onChange])
+  const choose = useCallback(async (accountId) => {
     setState({ busy: accountId })
     const { status, data } = await api('/api/ads/google/accounts', { method: 'POST', body: { accountId } })
     if (status === 200) {
       setState({})
-      onSaved()
+      setChanging(false)
+      changed.current()
     } else setState({ error: errorText(data.error) })
+  }, [])
+  useEffect(() => {
+    api('/api/ads/google/accounts').then(({ status, data }) => {
+      const l = status === 200 ? data : { error: data?.error }
+      setList(l)
+      // Exactly one choosable account and none chosen before: nothing to decide, so use it. Not when an earlier
+      // choice was reset (e.g. a test business became real): that needs the owner's explicit choice.
+      if (c.status === 'needs_account' && !l.error && l.accounts.length === 1 && !l.selected && !auto.current) {
+        auto.current = true
+        choose(l.accounts[0].id)
+      }
+    })
+  }, [attempt, c.status, choose])
+
+  const name = (a) => a.name || 'Google Ads account'
+  const selected = c.status === 'connected' ? c.accountId : null
+  const others = list?.accounts ? list.accounts.filter((a) => a.id !== selected) : []
+
+  if (selected && !changing) {
+    return (
+      <div className="stack" data-ads-account>
+        <p className="account-selected">
+          <span aria-hidden="true">✓</span> Ad account: <strong>{c.accountName || 'Google Ads account'}</strong> <span className="fine">{acct(selected)}</span>
+          {c.testAccount && <span className="chip">Test account</span>}
+        </p>
+        {c.testAccount && (
+          <p className="fine" data-test-account>
+            Google Ads test account: ads never run and nothing is charged. Results here are test data.
+          </p>
+        )}
+        {others.length > 0 && (
+          <button type="button" className="link-btn" onClick={() => setChanging(true)}>
+            Change account
+          </button>
+        )}
+      </div>
+    )
   }
   if (!list) return <p className="fine" aria-busy="true">Finding your Google Ads accounts…</p>
   if (list.error)
@@ -244,6 +286,7 @@ function GoogleAccountPicker({ onSaved }) {
         </button>
       </p>
     )
+  if (state.busy && !changing && list.accounts.length === 1) return <p className="fine" aria-busy="true">Selecting {name(list.accounts[0])}…</p>
   if (!list.accounts.length)
     return (
       <p className="fine" role="status">
@@ -254,59 +297,57 @@ function GoogleAccountPicker({ onSaved }) {
     )
   return (
     <div className="stack" role="group" aria-label="Choose a Google Ads account">
-      <p className="fine">Choose the account your ads should run in:</p>
+      <p className="fine">{selected ? 'Choose a different account for your ads:' : 'Choose the account your ads should run in:'}</p>
       <ul className="rows account-pick">
         {list.accounts.map((a) => (
           <li key={a.id} className="row">
             <span>
-              <strong>{a.name || 'Google Ads account'}</strong> <span className="fine">{acct(a.id)}</span>
+              <strong>{name(a)}</strong> <span className="fine">{acct(a.id)}</span>
               {a.testAccount && <span className="chip">Test account</span>}
             </span>
-            <button type="button" className="btn btn-quiet" disabled={Boolean(state.busy)} onClick={() => choose(a.id)} aria-label={`Use ${a.name || 'account'} ${acct(a.id)}`}>
-              {state.busy === a.id ? 'Checking with Google…' : 'Use this account'}
-            </button>
+            {a.id === selected ? (
+              <span className="fine account-current">
+                <span aria-hidden="true">✓</span> Selected
+              </span>
+            ) : (
+              <button type="button" className="btn btn-quiet" disabled={Boolean(state.busy)} onClick={() => choose(a.id)} aria-label={`Use ${name(a)} ${acct(a.id)}`}>
+                {state.busy === a.id ? 'Checking with Google…' : 'Use this account'}
+              </button>
+            )}
           </li>
         ))}
       </ul>
       {list.sandbox && list.hidden > 0 && <p className="fine">Only test accounts are shown while ads are in testing.</p>}
-      {state.error && <p className="form-error" role="alert">{state.error}</p>}
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      {selected && (
+        <button type="button" className="link-btn" onClick={() => setChanging(false)}>
+          Keep {c.accountName || 'the current account'}
+        </button>
+      )}
     </div>
   )
 }
 
 function Connections({ connections, capabilities, onChange }) {
-  const [picking, setPicking] = useState(false)
   const row = (platform, label) => {
     const c = connections[platform]
     const available = capabilities[platform]
+    const expired = c?.status === 'reconnect_required'
     return (
       <li key={platform} className="row">
         <div>
           <strong>{label}</strong>
-          <p className="fine">
-            {!c ? 'Not connected' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : c.status === 'needs_account' ? 'Choose an ad account' : 'Access expired. Click Reconnect; your campaigns stay as they are.'}
+          <p className="fine" data-google-signin={platform === 'google' ? (c ? (expired ? 'expired' : 'ok') : 'none') : undefined}>
+            {!c ? 'Not connected' : expired ? 'Sign-in expired. Click Reconnect; your campaigns stay as they are.' : platform === 'google' ? 'Signed in with Google' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : 'Choose an ad account'}
           </p>
-          {c?.status === 'connected' && c.testAccount && (
-            <p className="fine" data-test-account>
-              Google Ads test account{c.accountId ? ` ${acct(c.accountId)}` : ''}: ads never run and nothing is charged. Results here are test data.
-            </p>
-          )}
-          {platform === 'google' && c && (c.status === 'needs_account' || picking) && (
-            <GoogleAccountPicker
-              onSaved={() => {
-                setPicking(false)
-                onChange()
-              }}
-            />
-          )}
-          {platform === 'google' && c?.status === 'connected' && !picking && (
-            <button type="button" className="link-btn" onClick={() => setPicking(true)}>
-              Use a different account
-            </button>
-          )}
+          {platform === 'google' && c && !expired && <GoogleAdsAccount c={c} onChange={onChange} />}
         </div>
         {available ? (
-          <a className="btn btn-quiet" href={`/api/ads/${platform}/start`}>
+          <a className={`btn ${!c || expired ? 'btn-primary' : 'btn-quiet'}`} href={`/api/ads/${platform}/start`}>
             {c ? 'Reconnect' : 'Connect'}
           </a>
         ) : (

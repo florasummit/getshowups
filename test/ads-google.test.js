@@ -825,6 +825,9 @@ test('test business: ADS_LIVE_LAUNCH never applies; real accounts refused; unmar
   const before = Date.now() - 1000
   await TB.setTestBusiness(env, 'pools', false, 'admin@getshowups.example')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account', 'sandbox connection is not carried into live use')
+  // The earlier choice is still reported, so the dashboard asks the owner again instead of auto-selecting.
+  const after = (await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json()
+  assert.deepEqual([after.status, after.selected], ['needs_account', ACCT])
   assert.equal((await G.setStatus(env, 'pools', row(), 'ENABLED')).error, 'needs_account')
   await connected() // the owner explicitly chooses an account again
   assert.equal((await G.setStatus(env, 'pools', row({ created_at: before }), 'ENABLED')).error, 'test_account_required', 'sandbox campaign stays sandboxed')

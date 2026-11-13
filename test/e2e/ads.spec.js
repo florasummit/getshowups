@@ -88,7 +88,8 @@ test('connect Google Ads: a Google Ads TEST account is connected and clearly lab
   await page.goto('/dashboard/ads')
   // Accounts are found automatically: one direct, one under a manager. Only TEST accounts are offered;
   // the manager itself and the non-test client are never listed, and no account ids need typing.
-  await expect(accounts.getByText('Choose an ad account')).toBeVisible()
+  // Two separate states: signed in with Google (authorization) vs which Google Ads account is used.
+  await expect(accounts.locator('[data-google-signin]')).toHaveText('Signed in with Google')
   const picker = accounts.getByRole('group', { name: 'Choose a Google Ads account' })
   await expect(picker.getByRole('button', { name: /^Use .* \d{3}-\d{3}-\d{4}$/ })).toHaveCount(2)
   await expect(picker).toContainText('MOCK Google Ads test account')
@@ -99,13 +100,60 @@ test('connect Google Ads: a Google Ads TEST account is connected and clearly lab
   await expect(picker.getByText('Only test accounts are shown while ads are in testing.')).toBeVisible()
   await expect(page.getByRole('textbox', { name: /account ID/i })).toHaveCount(0)
   await picker.getByRole('button', { name: 'Use MOCK test client 666-000-0000' }).click()
-  await expect(accounts.getByText('Connected: MOCK test client')).toBeVisible()
-  await expect(accounts.locator('[data-test-account]')).toHaveText('Google Ads test account 666-000-0000: ads never run and nothing is charged. Results here are test data.')
+  await expect(accounts.locator('[data-ads-account]')).toContainText('Ad account: MOCK test client 666-000-0000')
+  await expect(accounts.locator('[data-test-account]')).toHaveText('Google Ads test account: ads never run and nothing is charged. Results here are test data.')
+  await expect(picker).toHaveCount(0)
   // Reading the account works and is read-only; the Overview labels test-account figures.
   const read = await (await page.request.get('/api/ads/google/campaigns')).json()
   expect(read).toEqual({ testAccount: true, campaigns: [] })
   await page.goto('/dashboard')
   await expect(page.locator('[data-ads-results]')).toContainText('Google Ads test account: no real ads ran')
+})
+
+test('Google Ads account selection: selected account shown once with a checkmark; change only when another exists; one account selected automatically (mock API)', async ({ page, context }) => {
+  // MOCK DATA: local Google Ads stand-in, test accounts only. Continues from the previous test (MOCK test client selected).
+  await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  const picker = accounts.getByRole('group', { name: 'Choose a Google Ads account' })
+  const selected = accounts.locator('[data-ads-account]')
+  const state = async () => (await (await page.request.get('/api/dashboard/ads')).json())
+
+  // Already selected: shown as selected, never offered again; another eligible account exists → Change account.
+  await expect(selected).toContainText('✓ Ad account: MOCK test client 666-000-0000')
+  await expect(picker).toHaveCount(0)
+  await expect(accounts.getByRole('button', { name: 'Use this account' })).toHaveCount(0)
+  await accounts.getByRole('button', { name: 'Change account' }).click()
+  await expect(picker.getByRole('button', { name: /^Use / })).toHaveCount(1) // only the OTHER account has a button
+  await expect(picker.getByRole('listitem').filter({ hasText: 'MOCK test client' })).toContainText('Selected')
+  await accounts.getByRole('button', { name: 'Keep MOCK test client' }).click()
+  await expect(picker).toHaveCount(0)
+  await accounts.getByRole('button', { name: 'Change account' }).click()
+  await picker.getByRole('button', { name: 'Use MOCK Google Ads test account 123-456-7890' }).click()
+  await expect(selected).toContainText('Ad account: MOCK Google Ads test account 123-456-7890')
+  // The next step (create on the test account) is available as soon as an account is selected.
+  expect((await state()).capabilities.sandbox).toBe(true)
+
+  // Reconnect with a Google sign-in that reaches exactly ONE test account: chosen automatically, nothing to pick,
+  // no Change account (there is no other eligible account).
+  await page.unroute('**/api/ads/google/start').catch(() => {})
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-one:owner@e2e.example')
+  await accounts.getByRole('link', { name: 'Reconnect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(selected).toContainText('✓ Ad account: MOCK test client 666-000-0000')
+  await expect(accounts.getByRole('button', { name: 'Change account' })).toHaveCount(0)
+  await expect(picker).toHaveCount(0)
+
+  // Google briefly fails while connecting (no account could be chosen then). Once the page can list the accounts
+  // and exactly one is eligible, it is selected automatically; the server still verifies it is a test account.
+  await page.unroute('**/api/ads/google/start')
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-flaky:owner@e2e.example')
+  await accounts.getByRole('link', { name: 'Reconnect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(selected).toContainText('✓ Ad account: MOCK test client 666-000-0000')
+  await expect(accounts.getByRole('button', { name: 'Change account' })).toHaveCount(0)
+  const s = await state()
+  expect([s.connections.google.status, s.connections.google.accountId, s.capabilities.sandbox]).toEqual(['connected', '6660000000', true])
 })
 
 test('Google Ads sandbox: production sign-in refused, recover, choose a test account, create paused (no duplicate), start, pause, change the budget (mock API)', async ({ page, context, browser }) => {
@@ -123,7 +171,7 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await page.waitForURL('**/dashboard/ads')
   await expect(page.getByRole('alert').first()).toContainText('only lets GetShowUps use Google Ads test accounts')
   expect(new URL(page.url()).search).toBe('')
-  await expect(accounts.getByText('Choose an ad account')).toBeVisible()
+  await expect(accounts.locator('[data-google-signin]')).toHaveText('Signed in with Google')
   await expect(accounts.getByRole('button', { name: 'Try again' })).toBeVisible()
   expect((await (await page.request.get('/api/dashboard/ads')).json()).connections.google.accountId ?? null).toBeNull()
 
@@ -134,7 +182,8 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await page.waitForURL('**/dashboard/ads')
   await expect(page.getByRole('status').filter({ hasText: 'Google Ads is connected.' })).toBeVisible()
   await pickerFor().getByRole('button', { name: 'Use MOCK Google Ads test account 123-456-7890' }).click()
-  await expect(accounts.locator('[data-test-account]')).toContainText('Google Ads test account 123-456-7890')
+  await expect(accounts.locator('[data-ads-account]')).toContainText('123-456-7890')
+  await expect(accounts.locator('[data-test-account]')).toBeVisible()
 
   // Server-side: non-test, manager, production and unknown accounts are refused whatever the browser sends.
   const choose = (accountId) =>

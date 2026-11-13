@@ -118,6 +118,7 @@ const ADS_ACCOUNTS = {
   // A NON-test account under the manager: never offered while ads are in testing (sandbox).
   7770000000: { name: 'MOCK non-test account', manager: false, test: false },
 }
+let flakyListings = 0
 const adsCampaigns = new Map() // account id → [{ id, name, status, budget, amountMicros }]
 let adsNextId = 900000001
 // Our Cloud project has Google Ads TEST access only: Google lists a real account but refuses every
@@ -126,6 +127,12 @@ const PROD_REFUSAL = { error: { code: 403, status: 'PERMISSION_DENIED', message:
 function adsRoute(path, raw, auth = '') {
   if (String(auth).includes('mock-ads-prod-access') && path.startsWith('/v26/')) {
     return path === '/v26/customers:listAccessibleCustomers' ? [200, { resourceNames: ['customers/9220000000'] }] : [403, PROD_REFUSAL]
+  }
+  // ads-one: the Google sign-in reaches exactly ONE test account. ads-flaky: same, but Google's first listing
+  // fails (503, plus our one retry), as a brief outage during connect would.
+  if (path === '/v26/customers:listAccessibleCustomers' && /mock-ads-(one|flaky)-access/.test(String(auth))) {
+    if (String(auth).includes('mock-ads-flaky-access') && flakyListings++ < 2) return [503, { error: { code: 503, status: 'UNAVAILABLE', message: 'mock' } }]
+    return [200, { resourceNames: ['customers/6660000000'] }] // the MOCK test client, reached directly
   }
   if (path === '/v26/customers:listAccessibleCustomers') return [200, { resourceNames: ['customers/1234567890', 'customers/5550000000'] }]
   if (path === '/v26/geoTargetConstants:suggest') {
@@ -229,11 +236,14 @@ createServer(async (req, res) => {
     // One calendar per connected Google account: the access token is derived from the refresh token.
     // A Google sign-in that reaches only REAL (production) Google Ads accounts keeps a recognisable token.
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
+    const variant = String(p.get('refresh_token')).match(/^mock-ads-(one|flaky)-refresh-/)?.[1]
+    if (p.get('grant_type') === 'refresh_token' && variant) return send(res, 200, { access_token: `mock-ads-${variant}-access`, expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     if (p.get('grant_type') === 'refresh_token') return send(res, 200, { access_token: `mock-access-${createHmac('sha256', 'cal').update(String(p.get('refresh_token'))).digest('hex').slice(0, 16)}`, expires_in: 3600, scope: SCOPE })
     const [kind, email] = String(p.get('code')).split(':')
     if (kind === 'login') return send(res, 200, { access_token: 'mock-login', id_token: idToken(email), scope: 'openid email' })
     if (kind === 'connect') return send(res, 200, { access_token: 'mock-access-token', refresh_token: `mock-refresh-${email}`, id_token: idToken(email), scope: SCOPE })
     if (kind === 'ads-prod') return send(res, 200, { access_token: 'mock-ads-prod-access', refresh_token: `mock-ads-prod-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
+    if (kind === 'ads-one' || kind === 'ads-flaky') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     return send(res, 400, { error: 'invalid_grant' })
   }
