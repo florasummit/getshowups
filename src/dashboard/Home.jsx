@@ -424,7 +424,9 @@ const tabFromPath = () => {
 }
 
 export default function Home({ me, reload }) {
-  const [view, setView] = useState(tabFromPath)
+  const [requested, setView] = useState(tabFromPath)
+  // /dashboard/ads for a business without the Ads feature (e.g. back from a refused ad sign-in) → Overview.
+  const view = requested === 'ads' && !me.features?.ads ? 'overview' : requested
   const billing = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()

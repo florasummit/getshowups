@@ -191,7 +191,7 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await other.close()
 })
 
-test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context }) => {
+test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context, browser }) => {
   await useSession(context, fixtures.E2E_OTHER_SESSION_TOKEN)
   expect((await (await page.request.get('/api/dashboard/me')).json()).features.ads).toBe(false)
   expect((await page.request.get('/api/dashboard/ads')).status()).toBe(404)
@@ -199,6 +199,26 @@ test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab 
   await page.goto('/dashboard')
   await expect(page.getByRole('link', { name: 'Ads', exact: true })).toHaveCount(0)
   await expect(page.locator('[data-ads-results]')).toHaveCount(0)
+  // Back from a refused ad sign-in (/dashboard/ads?ads_error=…): their normal dashboard, never a broken Ads page.
+  await page.goto('/dashboard/ads?ads_error=not_configured')
+  await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toHaveCount(0)
+  await expect(page.getByText('Couldn’t load ads.')).toHaveCount(0)
+
+  // A set-up business whose Ads feature is off (me stubbed to features.ads=false) gets the Overview.
+  const ctx = await browser.newContext()
+  await useSession(ctx, fixtures.E2E_SESSION_TOKEN)
+  const p2 = await ctx.newPage()
+  await p2.route('**/api/dashboard/me', async (route) => {
+    const res = await route.fetch()
+    const body = await res.json()
+    await route.fulfill({ response: res, json: { ...body, features: { ...body.features, ads: false } } })
+  })
+  await p2.goto('/dashboard/ads?ads_error=not_configured')
+  await expect(p2.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
+  await expect(p2.getByRole('link', { name: 'Ads', exact: true })).toHaveCount(0)
+  await expect(p2.getByText('Couldn’t load ads.')).toHaveCount(0)
+  await ctx.close()
 })
 
 test('booking page passes ad attribution with the lead', async ({ page }) => {

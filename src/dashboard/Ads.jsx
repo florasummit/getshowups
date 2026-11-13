@@ -56,7 +56,6 @@ function readReturn() {
   const ok = q.get('ads')
   const err = q.get('ads_error')
   if (!ok && !err) return null
-  window.history.replaceState(null, '', window.location.pathname)
   if (ok) return RETURNS[ok] ? { ok: RETURNS[ok] } : null
   return { error: RETURNS[err] || errorText(err) }
 }
@@ -584,6 +583,10 @@ function Creatives({ creatives, quota, capabilities, concepts, onChange }) {
 
 export default function Ads() {
   const [returned] = useState(readReturn)
+  useEffect(() => {
+    // Drop ?ads= / ?ads_error= so a reload or bookmark doesn't repeat the message.
+    if (returned) window.history.replaceState(null, '', window.location.pathname)
+  }, [returned])
   const [d, setD] = useState(null)
   const [error, setError] = useState(false)
   const [plan, setPlan] = useState({})
