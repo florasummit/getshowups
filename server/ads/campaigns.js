@@ -176,13 +176,15 @@ export async function liveFor(env, customerId, createdAt = Date.now()) {
 // their budget changed when the connected account is a Google Ads TEST account (Google's own flag,
 // checked live; test accounts never serve ads or spend). The adapter enforces the same rule again
 // right before each change, so this cannot be bypassed from here.
-async function serveAllowed(env, platform, customerId, a, row) {
-  if (await liveFor(env, customerId, row.created_at)) return true
-  return platform === 'google' && typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId))
+// Returns 'live', 'sandbox' (verified Google Ads test account: never serves or spends) or null.
+async function serveMode(env, platform, customerId, a, row) {
+  if (await liveFor(env, customerId, row.created_at)) return 'live'
+  return platform === 'google' && typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId)) ? 'sandbox' : null
 }
 
-// Access rule: once billing is configured, starting ads needs an active or trialing subscription.
-// Before billing exists (pilot) this is not enforced. Pausing is always allowed.
+// Access rule: once billing is configured, starting LIVE ads needs an active or trialing subscription.
+// Before billing exists (pilot) this is not enforced. Pausing is always allowed. Sandbox (Google Ads
+// test account) launches/resumes skip it: they cannot spend, and pilots such as PoolThru are never billed.
 export async function billingAllowsAds(env, customerId) {
   if (!stripeConfigured(env)) return true
   const sub = await getSubscription(env.ONBOARDING_DB, customerId)
@@ -203,8 +205,9 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'validate', status: r.ok ? 'applied' : 'failed', reason: r.ok ? 'Validation passed (nothing created, no spend)' : `Validation failed: ${r.error}` }, now)
     return r.ok ? { ok: true, validated: true, live: false } : { ok: false, error: r.error }
   }
-  if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
-  if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
+  const mode = await serveMode(env, row.platform, customer.id, a, row)
+  if (!mode) return { ok: false, error: 'live_launch_disabled' }
+  if (mode === 'live' && !(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
   if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
   // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
   if (row.daily_budget_cents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
@@ -234,9 +237,10 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
   if (!row.platform_campaign_id && !JSON.parse(row.platform_ids || '{}').campaignId) return { ok: false, error: 'not_launched' }
   const a = await adapter(row.platform)
   if (target === 'active') {
-    if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
+    const mode = await serveMode(env, row.platform, customer.id, a, row)
+    if (!mode) return { ok: false, error: 'live_launch_disabled' }
     if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
-    if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
+    if (mode === 'live' && !(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
     const approval = await currentApproval(db, customer.id)
     if (!approval) return { ok: false, error: 'budget_approval_required' }
     if (row.daily_budget_cents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
@@ -265,7 +269,7 @@ export async function setCampaignBudget(env, customer, id, dailyCents, actor, no
   if (!(await currentApproval(db, customer.id))) return { ok: false, error: 'budget_approval_required' }
   if (dailyCents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
   const a = await adapter(row.platform)
-  if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
+  if (!(await serveMode(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
   const r = await a.setDailyBudget(env, customer.id, row, dailyCents)
   if (!r.ok) {
     await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'budget', status: 'failed', reason: `Platform error: ${r.error}` }, now)

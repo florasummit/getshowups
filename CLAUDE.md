@@ -139,7 +139,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
-  budget approval, and room under it. Automation may pause or recommend, never raise budgets or resume. Every spec goes
+  budget approval, and room under it. With Stripe configured, LIVE launch/resume also needs an active subscription;
+  sandbox (verified Google Ads test account) does not, so never-billed pilots (PoolThru) can test. Automation may pause or recommend, never raise budgets or resume. Every spec goes
   through validateSpec(); AI output never reaches a platform unvalidated. Ad mock origins are loopback-only test vars.
 - Self-serve billing: when Stripe is configured and a plan is active, every new self-serve business gets a self_signups
   row (same batch as the business) and must pay before onboarding; access follows the verified webhook. Businesses

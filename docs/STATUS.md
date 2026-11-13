@@ -100,6 +100,11 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
+- PoolThru Ads sandbox prep (2026-11-13, branch feature/ads-sandbox-pilot, NOT deployed): sandbox launch/resume on a
+  verified Google Ads test account no longer requires a GetShowUps subscription (pilots are never billed); live keeps
+  the rule. Enabling PoolThru = add poolthru-llc to ADS_BUSINESSES (secret) + redeploy (approval). PoolThru stays a
+  REAL business (never marked test); ADS_LIVE_LAUNCH off keeps it on test accounts only.
+- Admin console layout: DEPLOYED 2026-11-13 with PR #5 (0f6e2dd, deployment 7205a098).
 - Admin console layout (2026-11-13, branch feature/admin-test-businesses-section, NOT deployed): the Customers list
   shows real businesses only; marked businesses appear only under a separate "Test businesses" section (frontend only,
   same API/metrics). Admin e2e MRR check made race-safe (selfserve.spec can add a real $0 subscription in parallel).

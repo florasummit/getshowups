@@ -815,6 +815,46 @@ test('test business: ADS_LIVE_LAUNCH never applies; real accounts refused; unmar
   delete env.ADS_LIVE_LAUNCH
 })
 
+test('pilot (never billed, NOT a test business): sandbox launch/resume on a Google Ads test account needs no subscription; real accounts refused; live keeps the billing rule', async () => {
+  const C = await import('../server/ads/campaigns.js')
+  const TB = await import('../server/testbusiness.js')
+  Object.assign(env, { STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_WEBHOOK_SECRET: 'whsec_fake' }) // billing configured (test mode)
+  // PoolThru-like pilot: an abandoned 'incomplete' placeholder without a Stripe subscription, no self-serve signup.
+  db.sql.prepare("INSERT INTO subscriptions (customer, status, updated_at) VALUES ('pools', 'incomplete', 1)").run()
+  assert.equal((await TB.testStatus(env, 'pools')).test, false, 'not marked as a test business')
+  await connected()
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('b1', 'pools', 300000, 'owner@pools.example', ?)").run(now)
+  const insert = (id) =>
+    db.sql
+      .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES (?, 'pools', 'google', 'approved', ?, 2500, 'owner@pools.example', ?, ?, ?)")
+      .run(id, JSON.stringify(campaign().spec), now, now, now)
+  const pools = { id: 'pools' }
+  const status = (id) => db.sql.prepare('SELECT status FROM ad_campaigns WHERE id = ?').get(id).status
+  insert('cmp_sandbox')
+
+  // Live switch off (production today) + a REAL account → refused before billing or any Google change.
+  mockTestAccount = false
+  assert.equal((await C.launch(env, pools, 'cmp_sandbox', 'owner@pools.example', { live: true })).error, 'live_launch_disabled')
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'nothing created on a real account')
+  assert.equal(status('cmp_sandbox'), 'approved')
+
+  // Verified Google Ads TEST account → created PAUSED in the sandbox and resumable, no subscription needed.
+  mockTestAccount = true
+  assert.deepEqual(await C.launch(env, pools, 'cmp_sandbox', 'owner@pools.example', { live: true }), { ok: true, live: true, status: 'paused' })
+  assert.deepEqual(await C.setCampaignStatus(env, pools, 'cmp_sandbox', 'active', 'owner:owner@pools.example'), { ok: true, status: 'active' })
+  // The account flips to real between checks → the adapter's own re-check refuses (fails closed).
+  mockTestAccount = false
+  assert.equal((await C.setCampaignBudget(env, pools, 'cmp_sandbox', 2000, 'owner:owner@pools.example')).error, 'live_launch_disabled')
+
+  // Future live switch (approval) + real account → the LIVE path, where the subscription rule still applies.
+  env.ADS_LIVE_LAUNCH = 'true'
+  insert('cmp_live')
+  assert.equal((await C.launch(env, pools, 'cmp_live', 'owner@pools.example', { live: true })).error, 'subscription_required')
+  assert.equal(status('cmp_live'), 'approved', 'nothing attempted')
+  delete env.ADS_LIVE_LAUNCH
+})
+
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {
   await connected()
   ads = (path, body, h) => {
