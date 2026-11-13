@@ -59,6 +59,7 @@ const adsError = (status, code, errorCode) => reply(status, { error: { code: sta
 // ZIPs resolve, mutates succeed. The mock account reports itself as a Google Ads TEST account unless a
 // test sets mockTestAccount (true / false / null = flag missing).
 let mockTestAccount = true
+let dm = () => reply(200, { requestId: 'req-1' }) // Data Manager events:ingest (MOCK)
 let mockAccountLookup = true // false: the per-test `ads` mock answers the account lookup too (error tests)
 function defaultAds(path, body) {
   if (path === '/customers:listAccessibleCustomers') return reply(200, { resourceNames: [`customers/${ACCT}`, `customers/${MCC}`] })
@@ -102,6 +103,7 @@ beforeEach(async () => {
   mockTestAccount = true
   mockAccountLookup = true
   ads = defaultAds
+  dm = () => reply(200, { requestId: 'req-1' })
   tokenExchange = () => reply(200, { access_token: AT, refresh_token: RT, scope: G.ADS_SCOPE, expires_in: 3599, token_type: 'Bearer' })
   env = {
     ADS_ENABLED: 'true',
@@ -137,6 +139,12 @@ beforeEach(async () => {
       // mock, controlled by mockTestAccount, so per-test mocks for other calls don't hide the guard.
       if (/googleAds:search$/.test(path) && body?.query?.includes('FROM customer ') && mockAccountLookup) return defaultAds(path, body, headers)
       return ads(path, body, headers)
+    }
+    if (u === 'https://datamanager.googleapis.com/v1/events:ingest') {
+      const body = JSON.parse(init.body)
+      calls.push({ url: u, path: 'dm:ingest', body, headers })
+      assert.equal(headers.get('Authorization'), `Bearer ${AT}`)
+      return dm(body)
     }
     throw new Error(`unexpected ${u}`)
   }
@@ -1081,6 +1089,94 @@ test('accounts: payment status of the chosen account (Google bills directly); te
     assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json().billing, want)
   }
   delete env.ADS_LIVE_LAUNCH
+})
+
+// ---------- conversion feedback (Data Manager) ----------
+
+const DM = 'https://www.googleapis.com/auth/datamanager'
+async function seedAdLead(customer, id, { gclid = 'Cj0KCQiAgclidMOCK123456', email = `${id}@example.net`, at = Date.now() } = {}) {
+  const { sealClickId } = await import('../server/ads/conversions.js')
+  db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES (?, ?, 'Pat', ?, '555-010-0100', 'Pool', 'booked', 'x', ?, ?)").run(id, customer, email, at, at)
+  const gclidEnc = await sealClickId(env, gclid)
+  db.sql.prepare("INSERT INTO lead_attribution (lead_id, customer, source, campaign_id, details, created_at) VALUES (?, ?, 'google_ads', 'cmp_abc123', ?, ?)").run(id, customer, JSON.stringify({ gclid: 'present', ...(gclidEnc ? { gclidEnc } : {}) }), at)
+}
+
+test('conversion actions: found by name or created (upload clicks; only the booking counts for bidding); idempotent', async () => {
+  await connected()
+  ads = (path, body, h) => {
+    if (/googleAds:search$/.test(path) && /FROM conversion_action/.test(body.query)) return reply(200, { results: [{ conversionAction: { id: '71', name: 'GetShowUps: booking request', type: 'UPLOAD_CLICKS', status: 'ENABLED' } }] })
+    if (/conversionActions:mutate$/.test(path)) return reply(200, { results: body.operations.map((_, i) => ({ resourceName: `customers/${ACCT}/conversionActions/8${i}` })) })
+    return defaultAds(path, body, h)
+  }
+  const r = await G.ensureConversionActions(env, 'pools')
+  assert.deepEqual(r, { ok: true, actions: { lead: '71', booked: '80', completed: '81' } })
+  const ops = adsCalls(/conversionActions:mutate$/)[0].body.operations.map((o) => o.create)
+  assert.deepEqual(ops.map((o) => [o.name, o.type, o.category, o.primaryForGoal]), [
+    ['GetShowUps: booked appointment', 'UPLOAD_CLICKS', 'BOOK_APPOINTMENT', true],
+    ['GetShowUps: completed job', 'UPLOAD_CLICKS', 'CONVERTED_LEAD', false],
+  ])
+})
+
+test('Data Manager ingest: only with the granted scope; destination = the business account; errors classified', async () => {
+  await connected()
+  const ev = [{ transactionId: 'booked:a1', eventTimestamp: '2026-11-13T15:00:00Z', eventSource: 'WEB', adIdentifiers: { gclid: 'Cj0KCQiAgclidMOCK123456' } }]
+  // Sign-in without the Data Manager scope → nothing is sent.
+  assert.equal((await G.ingestConversions(env, 'pools', '80', ev)).error, 'scope_missing')
+  assert.equal(calls.filter((c) => c.path === 'dm:ingest').length, 0)
+  await saveToken(env, 'google', 'pools', { refreshToken: RT, clientId: 'cid', scope: `${G.ADS_SCOPE} ${DM}` })
+  assert.deepEqual(await G.ingestConversions(env, 'pools', '80', ev, { validateOnly: true }), { ok: true, requestId: 'req-1' })
+  const sent = calls.find((c) => c.path === 'dm:ingest').body
+  assert.deepEqual(sent.destinations, [{ operatingAccount: { accountType: 'GOOGLE_ADS', accountId: ACCT }, loginAccount: { accountType: 'GOOGLE_ADS', accountId: ACCT }, productDestinationId: '80' }])
+  assert.deepEqual([sent.validateOnly, sent.events, sent.consent], [true, ev, undefined], 'no consent is claimed')
+  dm = () => reply(429, { error: { code: 429 } })
+  assert.deepEqual([(await G.ingestConversions(env, 'pools', '80', ev)).error, (await G.ingestConversions(env, 'pools', '80', ev)).retryable], ['quota_exhausted', true])
+  dm = () => reply(400, { error: { code: 400, message: LEAK } })
+  assert.deepEqual([(await G.ingestConversions(env, 'pools', '80', ev)).error, (await G.ingestConversions(env, 'pools', '80', ev)).retryable], ['invalid_request', false])
+  assert.equal((await G.ingestConversions(env, 'pools', 'x', ev)).error, 'invalid_request')
+})
+
+test('conversions: off by default (no click ids kept, nothing sent); when on, leads/bookings/completed jobs are reported once', async () => {
+  const CV = await import('../server/ads/conversions.js')
+  const { recordAttribution } = await import('../server/ads/attribution.js')
+  await connected()
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'paused', '{}', 2500, '222', ?, ?)").run(now, now)
+  // OFF (production today): only "present" is kept; the cron sends nothing.
+  db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES ('leadoff1', 'pools', 'P', 'p@example.net', '1', 'x', 'new', 'x', ?, ?)").run(now, now)
+  await recordAttribution(env, 'pools', 'leadoff1', { utm_source: 'google', utm_campaign: 'cmp_abc123', gclid: 'Cj0KCQiAgclidMOCK123456' })
+  assert.deepEqual(JSON.parse(db.sql.prepare("SELECT details FROM lead_attribution WHERE lead_id = 'leadoff1'").get().details), { medium: null, gclid: 'present' })
+  assert.deepEqual(await CV.uploadConversions(env, G), { enabled: 0 })
+
+  // ON: click id sealed (never stored in plain text), events reported per conversion action, deduplicated.
+  env.ADS_CONVERSIONS_ENABLED = 'true'
+  await saveToken(env, 'google', 'pools', { refreshToken: RT, clientId: 'cid', scope: `${G.ADS_SCOPE} ${DM}` })
+  await upsertConnection(env, 'pools', 'google', { accountId: ACCT, currency: 'USD', status: 'connected', extra: { testAccount: true, conversionActions: { booked: '80', lead: '71', completed: '81' } } })
+  await seedAdLead('pools', 'lead0001')
+  assert.ok(!db.sql.prepare("SELECT details FROM lead_attribution WHERE lead_id = 'lead0001'").get().details.includes('Cj0KCQiAgclidMOCK123456'), 'encrypted at rest')
+  db.sql.prepare("INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, created_at, updated_at) VALUES ('appt0001', 'pools', 'lead0001', ?, ?, 'showed', ?, ?)").run(now + 86400000, now + 90000000, now + 1000, now + 1000)
+  db.sql.prepare("INSERT INTO appointment_outcomes (appointment_id, customer, work, value_cents, reported_at) VALUES ('appt0001', 'pools', 'completed', 17500, ?)").run(now + 2000)
+  // A test record (owner's own email) and another business are never reported.
+  await seedAdLead('pools', 'leadtest1', { email: 'owner@pools.example' })
+  await seedAdLead('salon', 'leadsalon')
+  const r = await CV.uploadConversions(env, G, { now: now + 5000 })
+  assert.deepEqual(r, { sent: 3, failed: 0, skipped: 0, businesses: 1 })
+  const sent = calls.filter((c) => c.path === 'dm:ingest').map((c) => [c.body.destinations[0].productDestinationId, c.body.events.map((e) => e.transactionId), c.body.events[0].conversionValue ?? null])
+  assert.deepEqual(sent, [['80', ['booked:appt0001'], null], ['71', ['lead:lead0001'], null], ['81', ['completed:appt0001'], 175]])
+  assert.equal(calls.filter((c) => c.path === 'dm:ingest')[2].body.events[0].currency, 'USD')
+  assert.equal(calls.filter((c) => c.path === 'dm:ingest')[0].body.events[0].adIdentifiers.gclid, 'Cj0KCQiAgclidMOCK123456')
+  // Second run: nothing new to send.
+  calls = []
+  assert.deepEqual(await CV.uploadConversions(env, G, { now: now + 6000 }), { sent: 0, failed: 0, skipped: 0, businesses: 0 })
+  // Temporary failures are retried at most 5 times, then left alone.
+  await seedAdLead('pools', 'lead0002')
+  dm = () => reply(503, { error: { code: 503 } })
+  for (let i = 0; i < 6; i++) await CV.uploadConversions(env, G, { now: now + 7000 + i })
+  assert.equal(calls.filter((c) => c.path === 'dm:ingest' && c.body.events[0].transactionId === 'lead:lead0002').length, 5)
+  assert.equal(JSON.parse(db.sql.prepare("SELECT details FROM ad_actions WHERE id = 'conv:lead:lead0002'").get().details).attempts, 5)
+  // Click ids are deleted after 90 days.
+  assert.deepEqual(await CV.purgeClickIds(env, now + 91 * 86400000), { purged: 4 })
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM lead_attribution WHERE json_extract(details, '$.gclidEnc') IS NOT NULL").get().n, 0)
+  delete env.ADS_CONVERSIONS_ENABLED
 })
 
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {

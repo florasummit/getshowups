@@ -52,8 +52,10 @@ export default function Privacy() {
         <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
           contact details, the campaign source of a first visit (for example a utm_source link), the ad campaign tags of a
-          booking request that came from an ad (and whether a Google click identifier was present, not its value) so the
-          business can see which ads lead to bookings, one-way hashed IP
+          booking request that came from an ad (and whether a Google click identifier was present) so the business can see
+          which ads lead to bookings; if a business turns on conversion reporting, the Google click identifier itself is
+          kept encrypted for up to 90 days so that request, its booking and a completed job can be reported to that
+          business’s own Google Ads account (no names or contact details are sent), one-way hashed IP
           addresses kept briefly to limit abuse, and standard request logs processed by our hosting provider.
         </li>
       </ul>

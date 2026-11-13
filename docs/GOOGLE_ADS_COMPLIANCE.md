@@ -66,5 +66,10 @@ Reviewed 2026-11-13 from official Google pages (links below). **Verified** = sta
 - **Disassociation:** the owner can disconnect in the dashboard. That deletes our stored access and keeps campaigns in
   Google Ads under the owner's control. On request we do it within 3 business days (privacy policy).
 - **Disclosure:** the data-use line is in the app (Connect card), and the privacy policy describes Google Ads data use.
+- **Conversions:** built for the Data Manager API, but off until approved (`ADS_CONVERSIONS_ENABLED`, plus the
+  `datamanager` scope and OAuth verification). Click IDs are stored only while it's on, encrypted, for at most 90 days.
+  No consent is claimed, because the booking page doesn't collect ad-data consent. If Google requires it for some
+  users, add a consent step first. Upload status lookups (`requestStatus.retrieve`) aren't built yet: the API
+  rejects a whole request on error, and row-level diagnostics are the next step.
 - **Charging wording:** the daily budget is described as an average. Google may spend up to 2× on a day, but at most
   about 30.4× the average in a month.

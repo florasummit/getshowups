@@ -1,6 +1,7 @@
 // POST /api/cron/run — called every 5 minutes by the scheduler Worker (workers/scheduler).
 // Auth: Authorization: Bearer <CRON_SECRET> (32+ chars). Sends due lead messages, queues onboarding
 // follow-ups, flushes the account email outbox, and checks customer domains. Returns counts only.
+import { purgeClickIds, uploadConversions } from '../../../server/ads/conversions.js'
 import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server/google-oauth.js'
 import { processDueMessages } from '../../../server/messages.js'
 import { queueFollowUps } from '../../../server/accounts.js'
@@ -35,6 +36,8 @@ export async function onRequestPost({ request, env }) {
     const ads = {
       metrics: await adsStep('metrics', () => syncMetrics(env)),
       verify: await adsStep('verify', () => verifyLaunched(env)),
+      clickIds: await adsStep('click ids', () => purgeClickIds(env)),
+      conversions: await adsStep('conversions', async () => uploadConversions(env, await import('../../../server/ads/google.js'))),
       // Google Ads Developer Policies restrict unattended ("headless") changes: unless ADS_AUTOMATION_ENABLED is
       // exactly 'true' (approval), the optimizer only recommends; owners make every change themselves.
       optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: env.ADS_AUTOMATION_ENABLED === 'true' ? pauseForOptimizer : null })),

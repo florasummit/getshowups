@@ -2,6 +2,7 @@
 // that the same business is still signed in, exchanges the code server-side, requires the adwords
 // scope and a refresh token, stores the token encrypted, then picks the account when exactly one is
 // accessible. Every outcome redirects to /dashboard with at most an allowlisted code.
+import { DATA_MANAGER_SCOPE } from '../../../../server/ads/conversions.js'
 import { decrypt, googleApi, googleFetch, missingConfig, readCookie, timingSafeEqual } from '../../../../server/google-oauth.js'
 import { cookie, getSession } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
@@ -74,7 +75,9 @@ export async function onRequestGet({ request, env }) {
   if (!String(tokens.scope || '').split(' ').includes(ADS_SCOPE)) return fail('scope_denied')
   if (!tokens.refresh_token || !tokens.access_token) return fail('no_refresh_token')
 
-  await saveToken(env, 'google', customerId, { refreshToken: tokens.refresh_token, clientId: env.GOOGLE_CLIENT_ID, scope: ADS_SCOPE })
+  // Keep the scopes Google actually granted (conversion reporting needs the Data Manager scope too).
+  const granted = String(tokens.scope || '').split(' ').filter((x) => x === ADS_SCOPE || x === DATA_MANAGER_SCOPE).join(' ')
+  await saveToken(env, 'google', customerId, { refreshToken: tokens.refresh_token, clientId: env.GOOGLE_CLIENT_ID, scope: granted })
 
   // Find every usable account (direct + under managers). Exactly one choosable account → use it;
   // otherwise the owner picks in the dashboard. Sandbox: only Google Ads TEST accounts are choosable.

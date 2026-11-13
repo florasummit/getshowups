@@ -26,6 +26,7 @@ import { googleFetch, refreshAccessToken } from '../google-oauth.js'
 import { siteOrigin } from '../auth.js'
 import { failure, getConnection, loadToken, markReconnect } from './connections.js'
 import { LIMITS } from './spec.js'
+import { ACTIONS, DATA_MANAGER_SCOPE } from './conversions.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 
 export const GOOGLE_ADS_API_VERSION = 'v26'
@@ -39,6 +40,12 @@ export function googleAdsBase(env) {
   const o = env?.GOOGLE_ADS_API_MOCK_ORIGIN
   const mock = typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? o : null
   return `${mock || 'https://googleads.googleapis.com'}/${GOOGLE_ADS_API_VERSION}`
+}
+// Data Manager API (offline conversions since June 2026). The mock origin is a loopback-only test variable.
+export function dataManagerBase(env) {
+  const o = env?.DATA_MANAGER_API_MOCK_ORIGIN
+  const mock = typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? o : null
+  return `${mock || 'https://datamanager.googleapis.com'}/v1`
 }
 // Accepts 123-456-7890 or 1234567890; returns the 10-digit form or null.
 export const normalizeAccountId = (v) => {
@@ -490,6 +497,73 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
       loginCustomerId: login(conn),
     })
     return r.ok ? { ok: true, dailyBudgetCents: dailyCents } : r
+  })
+}
+
+// ---------- conversion tracking ----------
+
+// Makes sure the account has GetShowUps' upload-click conversion actions (found by name; only missing ones are
+// created). Returns { ok, actions: { booked, lead, completed } } with numeric ids. Google Ads API.
+export async function ensureConversionActions(env, customerId) {
+  return withAccount(env, customerId, async (token, conn) => {
+    const names = Object.values(ACTIONS).map((a) => gaqlString(a.name)).join(', ')
+    const found = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:search`, {
+      body: { query: `SELECT conversion_action.id, conversion_action.name, conversion_action.type, conversion_action.status FROM conversion_action WHERE conversion_action.name IN (${names})` },
+      loginCustomerId: login(conn),
+    })
+    if (!found.ok) return found
+    const ids = {}
+    for (const x of found.data.results || []) {
+      const kind = Object.keys(ACTIONS).find((k) => ACTIONS[k].name === x.conversionAction?.name)
+      if (kind && x.conversionAction?.type === 'UPLOAD_CLICKS' && x.conversionAction.status !== 'REMOVED') ids[kind] = String(x.conversionAction.id)
+    }
+    const missing = Object.keys(ACTIONS).filter((k) => !ids[k])
+    if (missing.length) {
+      const r = await call(env, token, 'POST', `/customers/${conn.account_id}/conversionActions:mutate`, {
+        body: {
+          operations: missing.map((k) => ({
+            create: { name: ACTIONS[k].name, type: 'UPLOAD_CLICKS', category: ACTIONS[k].category, status: 'ENABLED', primaryForGoal: ACTIONS[k].primary, countingType: 'ONE_PER_CLICK', valueSettings: { defaultValue: 0, alwaysUseDefaultValue: false } },
+          })),
+        },
+        loginCustomerId: login(conn),
+        retry: false,
+      })
+      if (!r.ok) return r
+      ;(r.data.results || []).forEach((x, i) => (ids[missing[i]] = lastId(x.resourceName)))
+    }
+    return { ok: true, actions: ids }
+  })
+}
+
+// Sends conversion events for one conversion action through the Data Manager API (events:ingest). Needs the
+// business's Google sign-in to include the Data Manager scope; otherwise nothing is sent ('scope_missing').
+// Fast-fail: all events are imported or none. Returns { ok, requestId } or a failure().
+export async function ingestConversions(env, customerId, actionId, events, { validateOnly = false } = {}) {
+  if (!/^\d{1,20}$/.test(String(actionId)) || !Array.isArray(events) || !events.length || events.length > 2000) return failure('invalid_request')
+  const stored = await loadToken(env, 'google', customerId)
+  if (!String(stored?.scope || '').split(' ').includes(DATA_MANAGER_SCOPE)) return failure('scope_missing')
+  return withAccount(env, customerId, async (token, conn) => {
+    const destination = {
+      operatingAccount: { accountType: 'GOOGLE_ADS', accountId: conn.account_id },
+      loginAccount: { accountType: 'GOOGLE_ADS', accountId: login(conn) || conn.account_id },
+      productDestinationId: String(actionId),
+    }
+    let res
+    try {
+      res = await googleFetch(env, `${dataManagerBase(env)}/events:ingest`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ destinations: [destination], events, validateOnly }),
+      })
+    } catch {
+      return failure('transient', { retryable: true })
+    }
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) return { ok: true, requestId: typeof data.requestId === 'string' ? data.requestId.slice(0, 120) : null }
+    if (res.status === 429 || res.status >= 500) return failure(res.status === 429 ? 'quota_exhausted' : 'transient', { retryable: true, httpStatus: res.status })
+    if (res.status === 401) return failure('reconnect_required', { reconnect: true, httpStatus: 401 })
+    if (res.status === 403) return failure('permission_denied', { httpStatus: 403 })
+    return failure('invalid_request', { httpStatus: res.status })
   })
 }
 

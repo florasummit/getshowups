@@ -1,6 +1,7 @@
 // GET /api/ads/google/start — owner connects their business's Google Ads account (scope: adwords only,
 // a consent separate from sign-in and Calendar). State, PKCE verifier and the business id travel in an
 // encrypted, HttpOnly cookie; the callback re-checks the signed-in session against it.
+import { conversionsEnabled, DATA_MANAGER_SCOPE } from '../../../../server/ads/conversions.js'
 import { GOOGLE_AUTH_URL, encrypt, json, pkceChallenge, randomToken } from '../../../../server/google-oauth.js'
 import { cookie, requireSession, siteOrigin } from '../../../../server/auth.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
@@ -32,7 +33,8 @@ export async function onRequestGet({ request, env }) {
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: adsRedirectUri(env),
     response_type: 'code',
-    scope: ADS_SCOPE,
+    // + Data Manager (conversion reporting) only when that feature is approved and on.
+    scope: conversionsEnabled(env) ? `${ADS_SCOPE} ${DATA_MANAGER_SCOPE}` : ADS_SCOPE,
     access_type: 'offline',
     prompt: 'consent', // a refresh token is required for later, unattended reporting
     state,

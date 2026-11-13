@@ -7,6 +7,7 @@ import * as meta from './meta.js'
 import { stripeConfigured, getSubscription } from '../stripe.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 import { normalizeWebsiteUrl } from '../url.js'
+import { conversionsEnabled } from './conversions.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -263,6 +264,16 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     const fresh = await getRow(db, customer.id, id)
     const v = await verifyAndRecord(env, fresh, now).catch(() => ({ ok: false, error: 'storage_error' }))
     verification = v.ok ? { ok: v.failed.length === 0, failed: v.failed } : { ok: false, error: v.error }
+    // Conversion reporting (approved feature only): make sure the account has our conversion actions.
+    if (conversionsEnabled(env) && a.ensureConversionActions) {
+      const c = await a.ensureConversionActions(env, customer.id).catch(() => ({ ok: false, error: 'transient' }))
+      if (c.ok) {
+        const conn = await db.prepare("SELECT extra FROM ad_connections WHERE customer = ?1 AND platform = 'google'").bind(customer.id).first()
+        const extra = { ...JSON.parse(conn?.extra || '{}'), conversionActions: c.actions }
+        await db.prepare("UPDATE ad_connections SET extra = ?2 WHERE customer = ?1 AND platform = 'google'").bind(customer.id, JSON.stringify(extra)).run()
+      }
+      await logAction(db, { customer: customer.id, campaignId: id, actor: 'system', kind: 'tracking', status: c.ok ? 'applied' : 'failed', reason: c.ok ? 'Conversion tracking set up in Google Ads' : `Conversion tracking not set up yet (${c.error})` }, now)
+    }
   }
   return { ok: true, live: true, status: 'paused', verification }
 }

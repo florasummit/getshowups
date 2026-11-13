@@ -1,3 +1,4 @@
+import { sealClickId } from './conversions.js'
 // Lead attribution for booking-page leads. Ad clicks land on /book/:id?utm_source=google|meta&utm_campaign=<our id>.
 // A lead is attributed to a campaign only when that campaign belongs to the same business; otherwise
 // it is recorded as a plain booking-page lead. Stores only non-personal parameters.
@@ -21,8 +22,11 @@ export async function recordAttribution(env, customerId, leadId, rawUtm, now = D
     }
   }
   // Meta website clicks are 'meta_ad_click'; Meta instant-form leads ('meta_lead_form') come from the webhook.
+  // The click id itself is kept (encrypted, 90 days) only for a GetShowUps Google campaign and only when conversion
+  // reporting is on (ADS_CONVERSIONS_ENABLED); otherwise just whether one was present.
+  const gclidEnc = source === 'google_ads' ? await sealClickId(env, rawUtm?.gclid) : null
   await env.ONBOARDING_DB.prepare('INSERT OR IGNORE INTO lead_attribution (lead_id, customer, source, campaign_id, details, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-    .bind(leadId, customerId, source, campaignId, JSON.stringify({ medium: utm.medium, gclid: utm.gclid }), now)
+    .bind(leadId, customerId, source, campaignId, JSON.stringify({ medium: utm.medium, gclid: utm.gclid, ...(gclidEnc ? { gclidEnc } : {}) }), now)
     .run()
   return { source, campaignId }
 }

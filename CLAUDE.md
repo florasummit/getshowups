@@ -72,7 +72,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)
-  ads/               access (who gets Ads: ADS_ENABLED + ADS_BUSINESSES), spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
+  ads/               access (who gets Ads: ADS_ENABLED + ADS_BUSINESSES), conversions (Data Manager feedback, flag), spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
@@ -155,6 +155,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).
+- Conversion feedback (server/ads/conversions.js) is OFF unless ADS_CONVERSIONS_ENABLED is exactly 'true' (approval: it
+  adds the sensitive Data Manager scope to the Ads sign-in). When on: click ids of GetShowUps Google campaign leads are
+  kept encrypted ≤90 days (purged by cron); lead/booking/completed-job events go to the Data Manager API
+  (events:ingest) per conversion action (created by ensureConversionActions at campaign creation; only the booking is
+  primary), transactionId-deduplicated, test records excluded, ≤5 attempts, no consent claimed, no personal data.
+  DATA_MANAGER_API_MOCK_ORIGIN is a loopback-only test var.
 - Google Ads policy (docs/GOOGLE_ADS_COMPLIANCE.md): no unattended changes. The optimizer only recommends unless
   ADS_AUTOMATION_ENABLED is exactly 'true' (approval). Offline conversions need the Data Manager API (new sensitive
   scope = approval). Our Cloud project is Test-level: real accounts need Explorer access (external, approval).
