@@ -66,22 +66,24 @@ function readReturn() {
 }
 
 function Results({ r }) {
+  // Every number says where it comes from; "—" = not available yet.
   const tiles = [
-    ['Ad spend', money(r.spendCents)],
-    ['Qualified leads', r.qualifiedLeads],
-    ['Booked', r.booked],
-    ['Jobs completed', r.completedJobs],
-    ['Reported job value', money(r.reportedRevenueCents)],
-    ['Cost per booking', money(r.costPerBookingCents)],
-    ['Cost per completed job', money(r.costPerCompletedJobCents)],
+    ['Ad spend', money(r.spendCents), r.spendCents == null ? 'not available yet' : 'from Google'],
+    ['Qualified leads', r.qualifiedLeads, 'your bookings'],
+    ['Booked', r.booked, 'your bookings'],
+    ['Jobs completed', r.completedJobs, 'you marked'],
+    ['Reported job value', money(r.reportedRevenueCents), r.reportedRevenueCents == null ? 'not reported' : 'you reported'],
+    ['Cost per booking', money(r.costPerBookingCents), r.costPerBookingCents == null ? 'not enough data' : 'calculated'],
+    ['Cost per completed job', money(r.costPerCompletedJobCents), r.costPerCompletedJobCents == null ? 'not enough data' : 'calculated'],
   ]
   return (
     <>
       <section aria-label="Ad results, last 30 days" className="stats">
-        {tiles.map(([label, value]) => (
-          <div key={label} className="stat">
+        {tiles.map(([label, value, source]) => (
+          <div key={label} className="stat" data-source={source}>
             <p className="stat-value stat-value--sm">{value}</p>
             <p className="stat-label">{label}</p>
+            <p className="stat-source">{source}</p>
           </div>
         ))}
       </section>
@@ -741,6 +743,25 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
       onChange()
     } else setState({ error: errorText(data.error), problems: data.errors })
   }
+  // Approve, then create (paused) in one owner action. If creating fails, the ad stays approved and says why.
+  const approveAndCreate = async () => {
+    if (inflight.current) return
+    inflight.current = true
+    setState({ busy: 'approve' })
+    setConfirm(null)
+    const a = await api('/api/dashboard/ads/campaign', { method: 'POST', body: { action: 'approve', id: c.id } })
+    if (a.status !== 200) {
+      inflight.current = false
+      setState({ error: errorText(a.data.error), problems: a.data.errors })
+      return
+    }
+    setState({ busy: 'launch' })
+    const l = await api('/api/dashboard/ads/campaign', { method: 'POST', body: { action: 'launch', id: c.id, confirm: true } })
+    inflight.current = false
+    if (l.status === 200) setState({ note: l.data.verification && !l.data.verification.ok && !l.data.verification.error ? NOTES.launch_differs : NOTES.launch })
+    else setState({ error: `Approved, but not created yet: ${errorText(l.data.error)}` })
+    onChange()
+  }
   const general = (state.problems || []).filter((p) => !/^google\.(headlines|descriptions)(\[\d+\])?:/.test(p))
 
   return (
@@ -751,6 +772,12 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
       </header>
 
       {c.platform === 'google' ? <GooglePreview spec={spec} /> : <MetaPreview spec={spec} />}
+      {c.platform === 'google' && (spec.geo?.zips || []).length > 0 && (
+        <p className="fine" data-where>
+          <strong>Where:</strong> people in {spec.geo.zips.length === 1 ? `ZIP code ${spec.geo.zips[0]}` : `${spec.geo.zips.length} ZIP codes (${spec.geo.zips.slice(0, 6).join(', ')}${spec.geo.zips.length > 6 ? ', …' : ''})`}, searching on Google.
+          {editable && ' Change your area in step 1, then draft again.'}
+        </p>
+      )}
       <BudgetSummary dailyCents={spec.dailyBudgetCents} budget={budget} />
       <p className="fine">{CHARGING}</p>
       {c.launched && <Verification v={c.verification} />}
@@ -863,15 +890,16 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
         </div>
       )}
 
-      {confirm === 'launch' ? (
+      {confirm === 'launch' || confirm === 'approve_create' ? (
         <div className="confirm" role="group" aria-label="Confirm create">
           <p>
-            Create this campaign on Google? It starts <strong>paused</strong>; nothing runs until you press Start.
+            {confirm === 'approve_create' ? 'Approve this ad and create it on Google? ' : 'Create this campaign on Google? '}
+            It starts <strong>paused</strong>; nothing runs until you press Start.
             {sandbox && ' Test account: it never shows and nothing is charged.'}
           </p>
           <div className="card-actions">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act('launch', { confirm: true })}>
-              Confirm: create on Google (paused)
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => (confirm === 'approve_create' ? approveAndCreate() : act('launch', { confirm: true }))}>
+              {confirm === 'approve_create' ? 'Confirm: approve and create (paused)' : 'Confirm: create on Google (paused)'}
             </button>
             <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
               Cancel
@@ -899,8 +927,9 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
               </button>
             )}
             {['draft', 'error'].includes(c.status) && !c.launched && (
-              <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => act('approve')}>
-                {state.busy === 'approve' ? 'Approving…' : 'Approve'}
+              // One step when creating is possible (connected account); otherwise approve now, create later.
+              <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => (canServe ? setConfirm('approve_create') : act('approve'))}>
+                {state.busy === 'approve' ? 'Approving…' : canServe ? `Approve and create (paused)${sandbox ? ' · test account' : ''}` : 'Approve'}
               </button>
             )}
             {c.status === 'approved' && !c.launched && (
@@ -928,7 +957,13 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
             {dirty && editable && <li>Save your changes first.</li>}
             {!c.launched && <li>Check: Google reviews the ad. Nothing is created or charged.</li>}
             {['draft', 'error'].includes(c.status) && !c.launched && (
-              <li>{budget ? 'Approve: locks in this version. Editing it later returns it to draft.' : 'Approve your monthly ad budget (step 4) to approve this campaign.'}</li>
+              <li>
+                {!budget
+                  ? 'Approve your monthly ad budget (step 4) to approve this campaign.'
+                  : canServe
+                    ? 'Approve and create: puts this exact ad on Google, paused. Nothing runs until you press Start.'
+                    : 'Approve: locks in this version. Connect your ad account to create it on Google.'}
+              </li>
             )}
             {c.status === 'approved' && !c.launched && (
               <li>{canServe ? 'Create: puts it on Google, paused. Nothing runs until you press Start.' : ERRORS.live_launch_disabled}</li>

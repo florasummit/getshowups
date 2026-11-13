@@ -1042,6 +1042,7 @@
 .action-help li + li {
   margin-top: 4px;
 }
+.stat-source { margin: 2px 0 0; font-size: 0.75rem; color: var(--text-muted); }
 .budget-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));

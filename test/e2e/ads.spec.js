@@ -289,14 +289,17 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await expect(page.locator('.campaign')).toHaveCount(1)
   await expect(page.locator('[data-duplicate-drafts]')).toHaveCount(0)
   const c = page.locator('.campaign').first()
-  await c.getByRole('button', { name: 'Approve' }).click()
-  await expect(c.locator('.chip')).toHaveText('Approved')
-  // Create asks for confirmation first (it starts paused; test account: never shows, nothing charged).
-  await c.getByRole('button', { name: 'Create on Google (paused) · test account' }).click()
+  // Where the ad shows, in plain words.
+  await expect(c.locator('[data-where]')).toContainText('people in ZIP code 29403, searching on Google')
+  // One owner step: approve this exact ad and create it (paused), after a confirmation. Starting stays separate.
+  await c.getByRole('button', { name: 'Approve and create (paused) · test account' }).click()
   await expect(c.getByRole('group', { name: 'Confirm create' })).toContainText('nothing is charged')
-  await c.getByRole('button', { name: 'Confirm: create on Google (paused)' }).click()
+  await c.getByRole('button', { name: 'Confirm: approve and create (paused)' }).click()
   // Read straight back from Google (MOCK API): budget, area, keywords, ad and landing page all match.
   await expect(c.locator('[data-verification="ok"]')).toHaveText('✓Checked on Google: budget, area, keywords and ad match')
+  // Results say where each number comes from; no spend data yet is shown as such, not as $0.
+  await expect(page.locator('.stat', { hasText: 'Ad spend' })).toContainText('not available yet')
+  await expect(page.locator('.stat', { hasText: 'Booked' }).first()).toContainText('your bookings')
   await expect(c.getByText('Google may spend up to twice the average on a busy day')).toBeVisible()
   await expect(c.locator('.chip')).toHaveText('Paused')
   // Duplicate prevention: a second create request for the same campaign is refused; Google has one copy.

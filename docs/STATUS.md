@@ -100,7 +100,9 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Google Ads conversion feedback (2026-11-13, branch feature/ads-conversions, OFF by flag): conversion actions via the
+- Ads review UX (2026-11-13, branch feature/ads-review-ux): one owner step "Approve and create (paused)" when the account
+  is connected (Start stays separate); "Where: people in ZIP …"; every result tile says where its number comes from.
+- Google Ads conversion feedback: DEPLOYED OFF 2026-11-13 (9565e99, deployment 6281da42): conversion actions via the
   Google Ads API at campaign creation; Data Manager events:ingest uploader (lead/booked/completed, deduped, retries);
   encrypted 90-day click ids; privacy text. Turning it on needs approval (new sensitive scope + OAuth verification).
 - Google Ads connection management: DEPLOYED 2026-11-13 (207af88, deployment 0b341010): Disconnect (pause-first or
