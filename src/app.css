@@ -927,6 +927,139 @@
 .plan-notes > * + * {
   margin-top: 8px;
 }
+.campaign > * + * {
+  margin-top: 16px;
+}
+.campaign-groups > * + * {
+  margin-top: 20px;
+}
+.text-list {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.text-list legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding: 0;
+}
+.text-row + .text-row {
+  margin-top: 8px;
+}
+.text-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.text-input input,
+.text-input textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--white);
+  font: inherit;
+  color: var(--text);
+  resize: vertical;
+}
+.text-input textarea {
+  min-height: 92px;
+}
+@media (min-width: 640px) {
+  .text-input textarea {
+    min-height: 68px;
+  }
+}
+.campaign-edit > summary::before {
+  content: '▸';
+  margin-right: 8px;
+  color: var(--text-muted);
+}
+.campaign-edit[open] > summary::before {
+  content: '▾';
+}
+.text-input input:focus,
+.text-input textarea:focus {
+  outline: none;
+  border-color: var(--orange-500);
+  box-shadow: 0 0 0 3px rgb(255 106 26 / 0.18);
+}
+.text-input .link-btn {
+  color: var(--text-muted);
+}
+.text-input .link-btn {
+  min-width: 32px;
+  min-height: 40px;
+}
+.counter {
+  flex: none;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+  text-align: right;
+}
+.counter--over,
+.field-error {
+  color: #991b1b;
+}
+.field-error {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}
+.text-input [aria-invalid] {
+  border-color: #b91c1c;
+}
+.text-list > .link-btn {
+  margin-top: 8px;
+  min-height: 40px;
+}
+.save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--ink-100);
+}
+.confirm {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.confirm > * + * {
+  margin-top: 12px;
+}
+.action-help {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.action-help li + li {
+  margin-top: 4px;
+}
+.budget-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.budget-summary div {
+  display: block;
+}
+.budget-summary dt {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.budget-summary dd {
+  margin: 2px 0 0;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 .creatives {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

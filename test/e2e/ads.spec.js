@@ -28,7 +28,8 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
 
   await page.getByLabel('What kind of business?').fill('Pool service')
-  await page.getByLabel(/Services you want customers for/).fill('Weekly pool cleaning\nPool repair')
+  // Comma-separated services become separate services (one per line works too).
+  await page.getByLabel(/Services you want customers for/).fill('Weekly pool cleaning, Pool repair')
   await page.getByLabel('ZIP codes you serve').fill('29403, 29407')
   await page.getByLabel('Typical first job ($)').fill('300')
   await page.getByLabel('Monthly ad budget ($)').fill('600')
@@ -41,10 +42,34 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await expect(page.getByText('Saved.')).toBeVisible()
   expect((await (await page.request.get('/api/dashboard/ads')).json()).profile.website).toBe('https://www.e2e-pools.example/book?ref=ads')
 
+  expect((await (await page.request.get('/api/dashboard/ads')).json()).profile.services).toEqual(['Weekly pool cleaning', 'Pool repair'])
+
   await page.getByRole('button', { name: 'Draft my plan' }).click()
   await expect(page.getByText('Starter draft (AI planning is not switched on).')).toBeVisible()
   const campaign = page.locator('.campaign').first()
-  await expect(campaign.getByLabel('Ad preview')).toContainText('Book Online in Minutes')
+  // Whole headlines from the business name and each service; no word is cut in half.
+  await expect(campaign.getByLabel('Ad preview')).toContainText('Weekly pool cleaning | Pool repair')
+  const headlines = await campaign.getByRole('group', { name: /Headlines/ }).getByRole('textbox').evaluateAll((els) => els.map((e) => e.value))
+  expect(headlines).toEqual(expect.arrayContaining(['Weekly pool cleaning', 'Pool repair', 'Book Online in Minutes']))
+  for (const h of headlines) expect(h.length).toBeLessThanOrEqual(30)
+  await expect(campaign.getByRole('group', { name: /Headlines/ }).locator('.counter').first()).toHaveText(/^\d+\/30$/)
+  // One plan at a time: the Draft button is gone, and a repeated request is refused without a second draft.
+  await expect(page.getByRole('button', { name: 'Draft my plan' })).toHaveCount(0)
+  const again = await page.evaluate(async () => {
+    const r = await fetch('/api/dashboard/ads/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    return [r.status, (await r.json()).error]
+  })
+  expect(again).toEqual([409, 'draft_exists'])
+  await expect(page.locator('.campaign')).toHaveCount(1)
+  // Inline validation: too long → counter and message; Check/Approve wait for a save; Discard restores.
+  const h2 = campaign.getByLabel('Headline 2', { exact: true })
+  await h2.fill('Weekly pool cleaning and full repairs')
+  await expect(campaign.getByText('7 too long')).toBeVisible()
+  await expect(campaign.getByRole('button', { name: 'Check (no spend)' })).toBeDisabled()
+  await expect(campaign.getByText('Save your changes first.')).toBeVisible()
+  await campaign.getByRole('button', { name: 'Discard' }).click()
+  await expect(h2).toHaveValue('Weekly pool cleaning')
+  await expect(campaign.getByRole('group', { name: 'Unsaved changes' })).toHaveCount(0)
 
   // Approval is blocked until a budget is approved (button disabled with a hint; the server refuses too,
   // see test/ads.test.js); the checkbox is required.
@@ -61,7 +86,6 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   const c = page.locator('.campaign').first()
   await c.getByRole('button', { name: 'Approve' }).click()
   await expect(c.getByText('dailyBudgetCents: exceeds the approved budget')).toBeVisible()
-  await c.getByText('Edit ad').click()
   await c.getByLabel('Daily budget ($)').fill('9')
   await c.getByRole('button', { name: 'Save changes' }).click()
   // Local e2e runs on http://127.0.0.1, so the booking-page ad URL is not https and approval stays
@@ -69,7 +93,7 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await expect(c.locator('.problems')).toHaveText('finalUrl: https URL required')
   await c.getByRole('button', { name: 'Approve' }).click()
   await expect(c.locator('.problems')).not.toContainText('exceeds the approved budget')
-  await expect(c.locator('.chip')).toHaveText('draft')
+  await expect(c.locator('.chip')).toHaveText('Draft')
   await expect(page.getByText('Owner approved a monthly ad budget')).toBeVisible()
   // No horizontal overflow on phones.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -198,7 +222,7 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   expect((await (await page.request.get('/api/dashboard/ads')).json()).connections.google.accountId).toBe('1234567890')
 
   // A draft whose booking link is https (local e2e serves http, so the starter draft cannot be approved here).
-  const saved = await page.evaluate(async () => {
+  const saveDraft = () => page.evaluate(async () => {
     const spec = {
       platform: 'google', name: 'E2E Pool Search', dailyBudgetCents: 900, finalUrl: 'https://e2e-ads.example/book', geo: { zips: ['29403'] },
       google: { keywords: [{ text: 'pool cleaning', match: 'PHRASE' }], negativeKeywords: ['jobs'], headlines: ['Pool Cleaning Service', 'Book Online in Minutes', 'Local Pool Care'],
@@ -207,12 +231,28 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
     const r = await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', spec }) })
     return r.status
   })
-  expect(saved).toBeLessThan(300)
+  expect(await saveDraft()).toBeLessThan(300)
+  // A duplicate draft (as made before one-plan-at-a-time): shown with a notice, never removed silently.
+  expect(await saveDraft()).toBeLessThan(300)
   await page.reload()
+  await expect(page.locator('[data-duplicate-drafts]')).toContainText('You have 2 Google Search drafts')
+  await expect(page.locator('.campaign')).toHaveCount(2)
+  const dup = page.locator('.campaign').first()
+  await dup.getByRole('button', { name: 'Remove draft' }).click()
+  await dup.getByRole('button', { name: 'Cancel' }).click() // nothing happens without confirming
+  await expect(page.locator('.campaign')).toHaveCount(2)
+  await dup.getByRole('button', { name: 'Remove draft' }).click()
+  await expect(dup.getByRole('group', { name: 'Confirm remove' })).toContainText('Nothing on Google changes')
+  await dup.getByRole('button', { name: 'Confirm: remove draft' }).click()
+  await expect(page.locator('.campaign')).toHaveCount(1)
+  await expect(page.locator('[data-duplicate-drafts]')).toHaveCount(0)
   const c = page.locator('.campaign').first()
   await c.getByRole('button', { name: 'Approve' }).click()
-  await expect(c.locator('.chip')).toHaveText('approved')
+  await expect(c.locator('.chip')).toHaveText('Approved')
+  // Create asks for confirmation first (it starts paused; test account: never shows, nothing charged).
   await c.getByRole('button', { name: 'Create on Google (paused) · test account' }).click()
+  await expect(c.getByRole('group', { name: 'Confirm create' })).toContainText('nothing is charged')
+  await c.getByRole('button', { name: 'Confirm: create on Google (paused)' }).click()
   await expect(c.locator('.chip')).toHaveText('Paused')
   // Duplicate prevention: a second create request for the same campaign is refused; Google has one copy.
   const campaignId = (await (await page.request.get('/api/dashboard/ads')).json()).campaigns.find((x) => x.launched).id

@@ -100,7 +100,14 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Google Ads account selection UX (2026-11-13, branch feature/ads-account-selection, NOT deployed): Google sign-in and
+- Campaign review (2026-11-13, branch feature/campaign-review, NOT deployed). Root causes found in PoolThru's data:
+  services saved as one comma-joined item → template headline cut to "Weekly pool cleaning, Pool mai"; two identical
+  drafts 12.5 s apart = "Draft my plan" clicked twice (no guard). Launch was already duplicate-safe (atomic claim +
+  tagged-name lookup on Google). Fix: services split on commas/newlines; whole-word headlines; one open draft per
+  platform (atomic, before any AI cost); review UI with preview, budget summary, per-field counters/inline errors,
+  explained Check/Approve/Create, confirm steps for Create and Remove. PoolThru's existing 2 drafts are kept (notice).
+- Google Ads account selection UX: DEPLOYED 2026-11-13 (d466e3c, deployment 7c7c96e6).
+- Google Ads account selection UX (details): Google sign-in and
   the chosen Ads account shown separately; selected account shown once with a checkmark; Change account only when
   another eligible account exists; exactly one eligible + nothing chosen before → selected automatically (not after a
   test-business unmark reset). Frontend + e2e mock scenarios only; server rules unchanged.

@@ -8,6 +8,7 @@ const money = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', 
 const toCents = (v) => (v === '' || v == null ? null : Math.round(Number(v) * 100))
 const acct = (id) => String(id || '').replace(/^(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3')
 const lines = (t) => String(t || '').split('\n').map((s) => s.trim()).filter(Boolean)
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 const ERRORS = {
   profile_required: 'Save your business details first.',
@@ -32,6 +33,7 @@ const ERRORS = {
   ai_declined: 'The planner couldn’t write this plan. Try changing the services.',
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
+  draft_exists: 'You already have a draft. Edit it below, or remove it to start over.',
   account_not_accessible: 'That account isn’t available with this Google sign-in. Choose one from the list.',
   invalid_account: 'Choose an account from the list.',
   invalid_budget: 'Enter a daily budget in dollars.',
@@ -119,7 +121,7 @@ function ProfileForm({ profile, onSaved }) {
         <input name="industry" defaultValue={p.industry} placeholder="Pool service" required maxLength={80} />
       </label>
       <label className="field">
-        <span>Services you want customers for <em>(one per line)</em></span>
+        <span>Services you want customers for <em>(one per line or separated by commas)</em></span>
         <textarea name="services" rows={3} defaultValue={p.services.join('\n')} required />
       </label>
       <label className="field">
@@ -396,10 +398,106 @@ function MetaPreview({ spec }) {
   )
 }
 
-function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
+const STATUS_LABEL = { draft: 'Draft', approved: 'Approved', error: 'Needs changes', launching: 'Creating…', paused: 'Paused', active: 'Running', removed: 'Removed' }
+const G = { headline: 30, headlinesMin: 3, headlinesMax: 15, description: 90, descriptionsMin: 2, descriptionsMax: 4 } // mirrors server/ads/spec.js (the server decides)
+
+// Server validation messages ("google.headlines[1]: longer than 30 characters") → per-field inline text.
+function byField(problems) {
+  const out = {}
+  for (const p of problems || []) {
+    const m = String(p).match(/^([\w.]+(?:\[\d+\])?): (.+)$/)
+    if (m) out[m[1]] = out[m[1]] ? `${out[m[1]]}; ${m[2]}` : m[2]
+  }
+  return out
+}
+
+// Browser-side hints only (instant feedback); the server re-validates on save, approve and launch.
+function textProblems(list, max) {
+  const seen = new Map()
+  return list.map((t) => {
+    const v = t.replace(/\s+/g, ' ').trim()
+    if (!v) return null // a just-added empty row isn't an error yet; the server reports empties on save
+    if (v.length > max) return `${v.length - max} too long`
+    const k = v.toLowerCase()
+    if (seen.has(k)) return 'Same as another'
+    seen.set(k, true)
+    return null
+  })
+}
+
+function TextList({ legend, noun, items, max, min, maxItems, field, server, disabled, multiline = false, onChange }) {
+  const Input = multiline ? 'textarea' : 'input'
+  const local = textProblems(items, max)
+  const countError = server[field] || (items.length < min ? `Add at least ${min}` : null)
+  return (
+    <fieldset className="text-list" disabled={disabled}>
+      <legend>
+        {legend} <span className="fine">({items.length} of up to {maxItems}, at least {min})</span>
+      </legend>
+      {items.map((t, i) => {
+        const problem = local[i] || server[`${field}[${i}]`]
+        const id = `${field}-${i}`
+        return (
+          <div key={i} className="text-row">
+            <div className="text-input">
+              <Input
+                id={id}
+                rows={multiline ? 3 : undefined}
+                value={t}
+                aria-label={`${noun} ${i + 1}`}
+                aria-invalid={problem ? true : undefined}
+                aria-describedby={`${id}-count`}
+                onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))}
+              />
+              <span id={`${id}-count`} className={`counter${t.trim().length > max ? ' counter--over' : ''}`}>
+                {t.trim().length}/{max}
+              </span>
+              {items.length > min && (
+                <button type="button" className="link-btn" aria-label={`Remove ${noun.toLowerCase()} ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
+                  ✕
+                </button>
+              )}
+            </div>
+            {problem && <p className="field-error">{problem}</p>}
+          </div>
+        )
+      })}
+      {countError && <p className="field-error">{countError}</p>}
+      {items.length < maxItems && (
+        <button type="button" className="link-btn" onClick={() => onChange([...items, ''])}>
+          + Add {noun.toLowerCase()}
+        </button>
+      )}
+    </fieldset>
+  )
+}
+
+function BudgetSummary({ dailyCents, budget }) {
+  return (
+    <dl className="budget-summary" aria-label="Budget">
+      <div>
+        <dt>Per day</dt>
+        <dd>{money(dailyCents)}</dd>
+      </div>
+      <div>
+        <dt>Per month</dt>
+        <dd>about {money(Math.round(((dailyCents || 0) * 30.4) / 100) * 100)}</dd>
+      </div>
+      <div>
+        <dt>Approved limit</dt>
+        <dd>{budget ? `${money(budget.monthlyCents)}/month` : 'Not yet (step 4)'}</dd>
+      </div>
+    </dl>
+  )
+}
+
+function CampaignEditor({ c, capabilities, budget, onChange }) {
+  const [saved, setSaved] = useState(c.spec)
   const [spec, setSpec] = useState(c.spec)
   const [state, setState] = useState({})
+  const [confirm, setConfirm] = useState(null) // 'launch' | 'remove'
   const editable = !c.launched && ['draft', 'approved', 'error'].includes(c.status)
+  const dirty = JSON.stringify(spec) !== JSON.stringify(saved)
   // Google campaigns on a verified Google Ads test account can be created and started without the live
   // switch (test accounts never serve or spend); the server re-checks with Google before every change.
   const sandbox = c.platform === 'google' && Boolean(capabilities.sandbox)
@@ -409,6 +507,9 @@ function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
   const set = (patch) => setSpec((s) => ({ ...s, ...patch }))
   const setG = (patch) => set({ google: { ...g, ...patch } })
   const setM = (patch) => set({ meta: { ...m, ...patch } })
+  const server = byField(state.problems)
+  const busy = Boolean(state.busy)
+  const inflight = useRef(false) // set synchronously: a double click never sends twice (the server is atomic too)
 
   const [daily, setDaily] = useState(c.dailyBudgetCents / 100)
   const [live, setLive] = useState(null)
@@ -416,85 +517,113 @@ function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
     setLive({ busy: true })
     const { status, data } = await api('/api/ads/google/campaigns')
     if (status !== 200) return setLive({ error: errorText(data.error) })
-    const g = data.campaigns.find((x) => x.gsuId === c.id)
-    setLive(g ? { ...g, testAccount: data.testAccount } : { missing: true })
+    const found = data.campaigns.find((x) => x.gsuId === c.id)
+    setLive(found ? { ...found, testAccount: data.testAccount } : { missing: true })
+  }
+  const NOTES = {
+    validate: 'Check passed. Nothing was created and nothing was spent.',
+    approve: 'Approved. Next: create it on Google (it starts paused).',
+    launch: sandbox ? 'Created on Google, paused. It’s a test account, so it never shows and nothing is charged.' : 'Created on Google, paused. Nothing runs until you press Start.',
+    resume: sandbox ? 'Started on the test account. It never shows and nothing is charged.' : 'Started.',
+    pause: 'Paused.',
+    budget: 'Daily budget changed.',
+    save: 'Saved.',
+    remove: 'Removed.',
   }
   const act = async (action, extra = {}) => {
+    if (inflight.current) return
+    inflight.current = true
     setState({ busy: action })
+    setConfirm(null)
     const { status, data } = await api('/api/dashboard/ads/campaign', { method: 'POST', body: { action, id: c.id, ...extra } })
+    inflight.current = false
     if (status === 200) {
-      const note = action === 'validate' ? 'Check passed. Nothing was created and nothing was spent.' : action === 'save' && data.errors?.length ? null : 'Done.'
-      setState({ note, problems: data.errors?.length ? data.errors : null })
+      if (action === 'save') setSaved(extra.spec)
+      const problems = data.errors?.length ? data.errors : null
+      setState({ note: action === 'save' && problems ? 'Saved. Fix the marked fields before approving.' : NOTES[action], problems })
       onChange()
     } else setState({ error: errorText(data.error), problems: data.errors })
   }
+  const general = (state.problems || []).filter((p) => !/^google\.(headlines|descriptions)(\[\d+\])?:/.test(p))
 
   return (
-    <article className="card campaign">
+    <article className="card campaign" aria-label={`${c.platform === 'google' ? 'Google Search' : 'Facebook & Instagram'} campaign`}>
       <header className="campaign-head">
         <h3 className="card-title">{c.platform === 'google' ? 'Google Search' : 'Facebook & Instagram'}</h3>
-        <span className={`chip chip--${c.status}`}>{c.status === 'active' ? 'Running' : c.status === 'paused' && c.launched ? 'Paused' : c.status}</span>
+        <span className={`chip chip--${c.status}`}>{STATUS_LABEL[c.status] || c.status}</span>
       </header>
-      {c.platform === 'google' ? <GooglePreview spec={spec} /> : <MetaPreview spec={spec} />}
 
-      {editable && (
+      {c.platform === 'google' ? <GooglePreview spec={spec} /> : <MetaPreview spec={spec} />}
+      <BudgetSummary dailyCents={spec.dailyBudgetCents} budget={budget} />
+
+      {editable && c.platform === 'google' && (
+        <div className="campaign-groups">
+          <TextList legend="Headlines" noun="Headline" items={g.headlines || []} max={G.headline} min={G.headlinesMin} maxItems={G.headlinesMax} field="google.headlines" server={server} disabled={busy} onChange={(headlines) => setG({ headlines })} />
+          <TextList legend="Descriptions" noun="Description" items={g.descriptions || []} max={G.description} min={G.descriptionsMin} maxItems={G.descriptionsMax} field="google.descriptions" server={server} disabled={busy} multiline onChange={(descriptions) => setG({ descriptions })} />
+          <label className="field">
+            <span>Daily budget ($)</span>
+            <input type="number" min="5" step="1" value={spec.dailyBudgetCents / 100} onChange={(e) => set({ dailyBudgetCents: toCents(e.target.value) })} />
+            {budget && <span className="fine">Up to {money(budget.dailyCeilingCents)}/day under your approved budget.</span>}
+          </label>
+          <details className="campaign-edit">
+            <summary>Search terms and areas</summary>
+            <label className="field">
+              <span>
+                Search terms <em>(one per line; [brackets] = exact match)</em>
+              </span>
+              <textarea
+                rows={5}
+                value={(g.keywords || []).map((k) => (k.match === 'EXACT' ? `[${k.text}]` : k.text)).join('\n')}
+                onChange={(e) => setG({ keywords: lines(e.target.value).map((t) => (/^\[.*\]$/.test(t) ? { text: t.slice(1, -1), match: 'EXACT' } : { text: t, match: 'PHRASE' })) })}
+              />
+            </label>
+            <label className="field">
+              <span>Never show for</span>
+              <textarea rows={3} value={(g.negativeKeywords || []).join('\n')} onChange={(e) => setG({ negativeKeywords: lines(e.target.value) })} />
+            </label>
+            <p className="fine">Shown in {plural(spec.geo?.zips?.length || 0, 'ZIP code')} from your business details.</p>
+          </details>
+        </div>
+      )}
+      {editable && c.platform === 'meta' && (
         <details className="campaign-edit">
           <summary>Edit ad</summary>
+          <label className="field">
+            <span>Main text</span>
+            <textarea rows={3} value={(m.primaryTexts || []).join('\n')} onChange={(e) => setM({ primaryTexts: lines(e.target.value) })} />
+          </label>
+          <label className="field">
+            <span>Headline <em>(up to 40 characters)</em></span>
+            <input value={(m.headlines || [])[0] || ''} onChange={(e) => setM({ headlines: [e.target.value] })} />
+          </label>
           <label className="field">
             <span>Daily budget ($)</span>
             <input type="number" min="5" step="1" value={spec.dailyBudgetCents / 100} onChange={(e) => set({ dailyBudgetCents: toCents(e.target.value) })} />
           </label>
-          {c.platform === 'google' ? (
-            <>
-              <label className="field">
-                <span>Headlines <em>(3–15, up to 30 characters, one per line)</em></span>
-                <textarea rows={6} value={(g.headlines || []).join('\n')} onChange={(e) => setG({ headlines: lines(e.target.value) })} />
-              </label>
-              <label className="field">
-                <span>Descriptions <em>(2–4, up to 90 characters)</em></span>
-                <textarea rows={3} value={(g.descriptions || []).join('\n')} onChange={(e) => setG({ descriptions: lines(e.target.value) })} />
-              </label>
-              <label className="field">
-                <span>Search terms <em>(one per line; wrap in [brackets] for exact match)</em></span>
-                <textarea
-                  rows={5}
-                  value={(g.keywords || []).map((k) => (k.match === 'EXACT' ? `[${k.text}]` : k.text)).join('\n')}
-                  onChange={(e) => setG({ keywords: lines(e.target.value).map((t) => (/^\[.*\]$/.test(t) ? { text: t.slice(1, -1), match: 'EXACT' } : { text: t, match: 'PHRASE' })) })}
-                />
-              </label>
-              <label className="field">
-                <span>Never show for <em>(negative terms)</em></span>
-                <textarea rows={3} value={(g.negativeKeywords || []).join('\n')} onChange={(e) => setG({ negativeKeywords: lines(e.target.value) })} />
-              </label>
-            </>
-          ) : (
-            <>
-              <label className="field">
-                <span>Main text</span>
-                <textarea rows={3} value={(m.primaryTexts || []).join('\n')} onChange={(e) => setM({ primaryTexts: lines(e.target.value) })} />
-              </label>
-              <label className="field">
-                <span>Headline <em>(up to 40 characters)</em></span>
-                <input value={(m.headlines || [])[0] || ''} onChange={(e) => setM({ headlines: [e.target.value] })} />
-              </label>
-            </>
-          )}
-          <button type="button" className="btn btn-quiet" disabled={!!state.busy} onClick={() => act('save', { spec })}>
-            Save changes
-          </button>
         </details>
       )}
 
-      {state.problems?.length > 0 && (
+      {editable && dirty && (
+        <div className="save-bar" role="group" aria-label="Unsaved changes">
+          <span className="fine">Unsaved changes</span>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act('save', { spec })}>
+            {state.busy === 'save' ? 'Saving…' : 'Save changes'}
+          </button>
+          <button type="button" className="link-btn" disabled={busy} onClick={() => setSpec(saved)}>
+            Discard
+          </button>
+        </div>
+      )}
+
+      {general.length > 0 && (
         <ul className="problems" role="alert">
-          {state.problems.slice(0, 8).map((p) => (
+          {general.slice(0, 8).map((p) => (
             <li key={p}>{p}</li>
           ))}
         </ul>
       )}
       {state.error && <p className="form-error" role="alert">{state.error}</p>}
       {state.note && <p className="fine" role="status">{state.note}</p>}
-      {['draft', 'error'].includes(c.status) && !c.launched && !budgetApproved && <p className="fine">Approve your monthly ad budget (step 4) to approve this campaign.</p>}
 
       {c.launched && ['paused', 'active'].includes(c.status) && (
         <form
@@ -509,7 +638,7 @@ function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
             <span>Daily budget ($) <em>(now {money(c.dailyBudgetCents)}/day)</em></span>
             <input type="number" min="1" step="1" value={daily} onChange={(e) => setDaily(e.target.value)} />
           </label>
-          <button type="submit" className="btn btn-quiet" disabled={!!state.busy || !canServe || toCents(daily) === c.dailyBudgetCents}>
+          <button type="submit" className="btn btn-quiet" disabled={busy || !canServe || toCents(daily) === c.dailyBudgetCents}>
             Change daily budget{sandbox ? ' (test account)' : ''}
           </button>
         </form>
@@ -530,38 +659,80 @@ function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
         </div>
       )}
 
-      <div className="card-actions">
-        {['draft', 'error'].includes(c.status) && !c.launched && (
-          <button type="button" className="btn btn-primary" disabled={!!state.busy || !budgetApproved} onClick={() => act('approve')} title={budgetApproved ? '' : 'Approve your monthly ad budget first'}>
-            Approve
-          </button>
-        )}
-        {!c.launched && (
-          <button type="button" className="btn btn-quiet" disabled={!!state.busy} onClick={() => act('validate')}>
-            Check (no spend)
-          </button>
-        )}
-        {c.status === 'approved' && (
-          <button type="button" className="btn btn-quiet" disabled={!!state.busy || !canServe} onClick={() => act('launch', { confirm: true })} title={canServe ? '' : ERRORS.live_launch_disabled}>
-            Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ' · test account' : ''}
-          </button>
-        )}
-        {c.launched && c.status === 'paused' && (
-          <button type="button" className="btn btn-primary" disabled={!!state.busy || !canServe} onClick={() => act('resume')}>
-            {sandbox ? 'Start ads (test account, no spend)' : 'Start ads'}
-          </button>
-        )}
-        {c.status === 'active' && (
-          <button type="button" className="btn btn-danger" disabled={!!state.busy} onClick={() => act('pause')}>
-            Pause
-          </button>
-        )}
-        {!c.launched && ['draft', 'approved', 'error'].includes(c.status) && (
-          <button type="button" className="link-btn" disabled={!!state.busy} onClick={() => act('remove')}>
-            Remove
-          </button>
-        )}
-      </div>
+      {confirm === 'launch' ? (
+        <div className="confirm" role="group" aria-label="Confirm create">
+          <p>
+            Create this campaign on Google? It starts <strong>paused</strong>; nothing runs until you press Start.
+            {sandbox && ' Test account: it never shows and nothing is charged.'}
+          </p>
+          <div className="card-actions">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act('launch', { confirm: true })}>
+              Confirm: create on Google (paused)
+            </button>
+            <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : confirm === 'remove' ? (
+        <div className="confirm" role="group" aria-label="Confirm remove">
+          <p>Remove this draft? It disappears from this list. Nothing on Google changes.</p>
+          <div className="card-actions">
+            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => act('remove')}>
+              Confirm: remove draft
+            </button>
+            <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="card-actions">
+            {!c.launched && (
+              <button type="button" className="btn btn-quiet" disabled={busy || dirty} onClick={() => act('validate')}>
+                {state.busy === 'validate' ? 'Checking…' : 'Check (no spend)'}
+              </button>
+            )}
+            {['draft', 'error'].includes(c.status) && !c.launched && (
+              <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => act('approve')}>
+                {state.busy === 'approve' ? 'Approving…' : 'Approve'}
+              </button>
+            )}
+            {c.status === 'approved' && !c.launched && (
+              <button type="button" className="btn btn-primary" disabled={busy || dirty || !canServe} onClick={() => setConfirm('launch')}>
+                Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ' · test account' : ''}
+              </button>
+            )}
+            {c.launched && c.status === 'paused' && (
+              <button type="button" className="btn btn-primary" disabled={busy || !canServe} onClick={() => act('resume')}>
+                {sandbox ? 'Start ads (test account, no spend)' : 'Start ads'}
+              </button>
+            )}
+            {c.status === 'active' && (
+              <button type="button" className="btn btn-danger" disabled={busy} onClick={() => act('pause')}>
+                Pause
+              </button>
+            )}
+            {editable && (
+              <button type="button" className="link-btn" disabled={busy} onClick={() => setConfirm('remove')}>
+                Remove draft
+              </button>
+            )}
+          </div>
+          <ul className="action-help fine">
+            {dirty && editable && <li>Save your changes first.</li>}
+            {!c.launched && <li>Check: Google reviews the ad. Nothing is created or charged.</li>}
+            {['draft', 'error'].includes(c.status) && !c.launched && (
+              <li>{budget ? 'Approve: locks in this version. Editing it later returns it to draft.' : 'Approve your monthly ad budget (step 4) to approve this campaign.'}</li>
+            )}
+            {c.status === 'approved' && !c.launched && (
+              <li>{canServe ? 'Create: puts it on Google, paused. Nothing runs until you press Start.' : ERRORS.live_launch_disabled}</li>
+            )}
+            {c.launched && c.status === 'paused' && <li>{sandbox ? 'Start: runs on the test account. It never shows and nothing is charged.' : 'Start: the ad can show and spend, within your approved budget.'}</li>}
+          </ul>
+        </>
+      )}
     </article>
   )
 }
@@ -645,9 +816,13 @@ export default function Ads() {
     load()
   }, [load])
 
+  const planning = useRef(false)
   const makePlan = async () => {
+    if (planning.current) return // one plan request at a time (the server also allows one open draft)
+    planning.current = true
     setPlan({ busy: true })
     const { status, data } = await api('/api/dashboard/ads/plan', { method: 'POST', body: {} })
+    planning.current = false
     setPlan(status === 201 ? { result: data } : { error: errorText(data.error) })
     load()
   }
@@ -663,6 +838,8 @@ export default function Ads() {
     )
   if (!d) return <div aria-busy="true" />
   const anyLaunched = d.campaigns.some((c) => c.launched)
+  // Open = never launched and still a draft/approved: one per platform (the server enforces it for new plans).
+  const openGoogle = d.campaigns.filter((c) => c.platform === 'google' && !c.launched && ['draft', 'approved', 'error', 'launching'].includes(c.status))
   return (
     <div className="enter">
       <h1 className="title">Ads</h1>
@@ -691,33 +868,38 @@ export default function Ads() {
       {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} onChange={load} />}
 
       {d.profile && (
-        <section className="card">
-          <h2 className="card-title">3. Review your campaign</h2>
-          <p className="fine">
-            {d.capabilities.ai ? 'GetShowUps drafts a plan from your details.' : 'GetShowUps creates a starter draft from your details.'} Drafts are only suggestions; nothing runs
-            until you approve it.
-          </p>
-          <button type="button" className="btn btn-primary" disabled={plan.busy} onClick={makePlan}>
-            {plan.busy ? 'Planning…' : d.campaigns.length ? 'Draft another plan' : 'Draft my plan'}
-          </button>
+        <section className="card" aria-labelledby="review-title">
+          <h2 className="card-title" id="review-title">
+            3. Review your campaign
+          </h2>
+          {openGoogle.length === 0 ? (
+            <>
+              <p className="fine">
+                {d.capabilities.ai ? 'GetShowUps drafts a plan from your details.' : 'GetShowUps creates a starter draft from your details.'} Nothing runs until you approve it.
+              </p>
+              <button type="button" className="btn btn-primary" disabled={plan.busy} onClick={makePlan}>
+                {plan.busy ? 'Drafting…' : 'Draft my plan'}
+              </button>
+            </>
+          ) : openGoogle.length > 1 ? (
+            <p className="notice" role="status" data-duplicate-drafts>
+              You have {openGoogle.length} Google Search drafts. Keep the one you want and remove the others.
+            </p>
+          ) : null}
           {plan.error && <p className="form-error" role="alert">{plan.error}</p>}
           {plan.result && (
             <div className="plan-notes" role="status">
               {plan.result.source === 'template' && <p className="fine">Starter draft (AI planning is not switched on).</p>}
               <p>{plan.result.rationale}</p>
-              {plan.result.landing && <p className="fine">Where clicks go: {plan.result.landing}</p>}
-              {plan.result.tracking?.length > 0 && <p className="fine">Tracking: {plan.result.tracking.join(' · ')}</p>}
             </div>
           )}
         </section>
       )}
 
-
       {d.campaigns.length > 0 && (
         <section aria-label="Campaigns" className="stack">
-          <h2 className="card-title">Campaigns</h2>
           {d.campaigns.map((c) => (
-            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budgetApproved={Boolean(d.budget)} onChange={load} />
+            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budget={d.budget} onChange={load} />
           ))}
         </section>
       )}

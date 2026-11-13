@@ -21,6 +21,8 @@ const PLATFORM_STATUS = { google: { paused: 'PAUSED', active: 'ENABLED' }, meta:
 
 // ---------- profile ----------
 const list = (v, max, len) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean))].filter((x) => x.length <= len).slice(0, max) : [])
+// Services may be typed one per line or comma-separated ("Weekly cleaning, Repairs"): each becomes its own service.
+export const splitServices = (v) => (Array.isArray(v) ? v : [v]).flatMap((x) => String(x ?? '').split(/[,\n;]+/))
 
 export function validateProfile(body) {
   const b = body && typeof body === 'object' ? body : {}
@@ -34,7 +36,7 @@ export function validateProfile(body) {
   }
   const industry = String(b.industry ?? '').trim().slice(0, 80)
   if (!industry) errors.push('industry')
-  const services = list(b.services, 12, 80)
+  const services = list(splitServices(b.services), 12, 80)
   if (!services.length) errors.push('services')
   const zips = [...new Set((b.serviceArea?.zips || []).map((z) => String(z).trim()))]
   if (!zips.length || zips.length > 200 || zips.some((z) => !ZIP_RE.test(z))) errors.push('zips')
@@ -107,8 +109,20 @@ async function logAction(db, { customer, campaignId, actor, kind, status = 'appl
     .run()
 }
 
+// An open draft: never launched, not removed, still editable or about to launch (same business + platform).
+const OPEN_DRAFT_SQL = "SELECT 1 FROM ad_campaigns WHERE customer = ?2 AND platform = ?3 AND platform_campaign_id IS NULL AND status IN ('draft', 'approved', 'error', 'launching')"
+export async function openDraftIds(db, customerId, platform) {
+  const { results } = await db
+    .prepare("SELECT id FROM ad_campaigns WHERE customer = ?1 AND platform = ?2 AND platform_campaign_id IS NULL AND status IN ('draft', 'approved', 'error', 'launching')")
+    .bind(customerId, platform)
+    .all()
+  return results.map((r) => r.id)
+}
+
 // Saves (creates or edits) a draft. Drafts may be incomplete; errors are returned for the editor.
-export async function saveDraft(env, customer, { id, spec }, now = Date.now()) {
+// onlyIfNone: create only when this business has no open (unlaunched, not removed) draft for the platform. The
+// check and the insert are one statement, so a double click or two tabs cannot create two drafts.
+export async function saveDraft(env, customer, { id, spec, onlyIfNone = false }, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const profile = await getProfile(db, customer.id)
   if (!profile) return { ok: false, error: 'profile_required' }
@@ -128,10 +142,16 @@ export async function saveDraft(env, customer, { id, spec }, now = Date.now()) {
   const count = await db.prepare("SELECT count(*) AS n FROM ad_campaigns WHERE customer = ?1 AND status <> 'removed'").bind(customer.id).first()
   if ((count?.n ?? 0) >= 10) return { ok: false, error: 'too_many_campaigns' }
   const newId = randomToken(12)
-  await db
-    .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES (?1, ?2, ?3, 'draft', ?4, ?5, ?6, ?6)")
-    .bind(newId, customer.id, spec.platform, body, daily, now)
-    .run()
+  const inserted = await db
+    .prepare(
+      `INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at)
+       SELECT ?1, ?2, ?3, 'draft', ?4, ?5, ?6, ?6
+       WHERE ?7 = 0 OR NOT EXISTS (${OPEN_DRAFT_SQL})
+       RETURNING id`,
+    )
+    .bind(newId, customer.id, spec.platform, body, daily, now, onlyIfNone ? 1 : 0)
+    .first()
+  if (!inserted) return { ok: false, error: 'draft_exists' }
   return { ok: true, id: newId, errors }
 }
 

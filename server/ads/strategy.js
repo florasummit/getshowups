@@ -116,9 +116,47 @@ export function sanitizePlan(raw, profile) {
   return plan
 }
 
+// Services as separate items. Profiles saved before comma-splitting may hold "A, B, C" as one service; that is
+// split here (the stored profile is not rewritten).
+export const serviceList = (profile) =>
+  [...new Set((profile?.services || []).flatMap((x) => String(x ?? '').split(/[,\n;]+/)).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean))]
+
+// Fits ad text into `max` characters without cutting a word in half: too-long text is shortened at a word
+// boundary and loses a dangling connector or punctuation ("Pool repair and" → "Pool repair"). Returns null
+// when nothing meaningful is left (e.g. one very long word).
+const DANGLING = /(?:[\s,;:.\-–—/&+|]+|\s+(?:and|or|of|for|the|a|an|to|in|with|at|by|from|our|your))$/i
+export function fitText(text, max) {
+  let t = String(text ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  if (t.length <= max) return t
+  t = t.slice(0, max + 1)
+  // A list ("A, B, C") is cut after the last whole item; other text at the last whole word.
+  const comma = t.lastIndexOf(',')
+  t = comma >= 3 ? t.slice(0, comma) : t.includes(' ') ? t.slice(0, t.lastIndexOf(' ')) : ''
+  for (let before = null; before !== t; ) {
+    before = t
+    t = t.replace(DANGLING, '').trim()
+  }
+  return t.length >= 3 ? t : null
+}
+const capitalize = (t) => t.charAt(0).toUpperCase() + t.slice(1)
+const uniqueFit = (list, max, limit) => {
+  const seen = new Set()
+  const out = []
+  for (const raw of list) {
+    const t = fitText(raw, max)
+    if (t && !seen.has(t.toLowerCase())) {
+      seen.add(t.toLowerCase())
+      out.push(t)
+    }
+  }
+  return out.slice(0, limit)
+}
+
 // Deterministic starter plan (no AI): honest, generic, and editable.
 export function templatePlan(customer, profile) {
-  const service = (profile.services[0] || profile.industry || 'service').toLowerCase()
+  const services = serviceList(profile)
+  const service = (services[0] || profile.industry || 'service').toLowerCase()
   const city = profile.serviceArea.cities?.[0] || ''
   const local = city ? ` ${city.toLowerCase()}` : ' near me'
   return sanitizePlan(
@@ -130,11 +168,21 @@ export function templatePlan(customer, profile) {
         keywords: [
           { text: `${service}${local}`, match: 'PHRASE' },
           { text: `${service} company`, match: 'PHRASE' },
-          ...profile.services.slice(1, 6).map((s) => ({ text: `${s.toLowerCase()}${local}`, match: 'PHRASE' })),
+          ...services.slice(1, 6).map((s) => ({ text: `${s.toLowerCase()}${local}`, match: 'PHRASE' })),
         ],
         negativeKeywords: ['jobs', 'job', 'hiring', 'salary', 'diy', 'how to', 'free', 'cheap'],
-        headlines: [customer.name.slice(0, 30), `${profile.services[0] || 'Local service'}`.slice(0, 30), 'Book Online in Minutes', 'Pick a Time That Works', 'Local, Friendly Service'],
-        descriptions: [`${customer.name} serves your area. Pick a time online and get booked.`, 'Tell us what you need and choose an appointment that fits your schedule.'],
+        // Whole words only: the business name, up to three services, then generic booking lines.
+        headlines: uniqueFit(
+          [customer.name, ...services.slice(0, 3).map(capitalize), ...(city ? [`Serving ${city}`] : []), 'Book Online in Minutes', 'Pick a Time That Works', 'Local, Friendly Service'],
+          LIMITS.google.headline,
+          LIMITS.google.headlinesMax,
+        ),
+        descriptions: [
+          `${customer.name} serves your area. Pick a time online and get booked.`.length <= LIMITS.google.description
+            ? `${customer.name} serves your area. Pick a time online and get booked.`
+            : 'We serve your area. Pick a time online and get booked.',
+          'Tell us what you need and choose an appointment that fits your schedule.',
+        ],
       },
       meta: {
         primaryTexts: [`Need ${service}? ${customer.name} serves your area. Request a time in under a minute.`],

@@ -876,6 +876,21 @@ test('pilot (never billed, NOT a test business): sandbox launch/resume on a Goog
   delete env.ADS_LIVE_LAUNCH
 })
 
+test('launch: two simultaneous Launch clicks create exactly one Google campaign (test account)', async () => {
+  const C = await import('../server/ads/campaigns.js')
+  await connected()
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('b1', 'pools', 300000, 'owner@pools.example', ?)").run(now)
+  db.sql
+    .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('cmp_twice01', 'pools', 'google', 'approved', ?, 2500, 'owner@pools.example', ?, ?, ?)")
+    .run(JSON.stringify(campaign().spec), now, now, now)
+  const results = await Promise.all([1, 2].map(() => C.launch(env, { id: 'pools' }, 'cmp_twice01', 'owner@pools.example', { live: true })))
+  assert.deepEqual(results.map((r) => (r.ok ? 'created' : r.error)).sort(), ['approval_required', 'created'])
+  assert.equal(adsCalls(/googleAds:mutate$/).filter((c) => c.body.validateOnly === false).length, 1, 'one create sent to Google')
+  // A third click later is refused too (already created, paused).
+  assert.equal((await C.launch(env, { id: 'pools' }, 'cmp_twice01', 'owner@pools.example', { live: true })).error, 'approval_required')
+})
+
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {
   await connected()
   ads = (path, body, h) => {

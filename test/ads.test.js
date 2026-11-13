@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { sha256Hex, encrypt } from '../server/google-oauth.js'
 import { validateSpec, unapprovedClaims, dailyCeilingCents } from '../server/ads/spec.js'
-import { generatePlan, templatePlan, sanitizePlan, draftSpecs } from '../server/ads/strategy.js'
+import { generatePlan, templatePlan, sanitizePlan, draftSpecs, fitText, serviceList } from '../server/ads/strategy.js'
 import { evaluate, runOptimizer } from '../server/ads/optimizer.js'
 import { validateProfile, saveProfile, adResults, syncMetrics } from '../server/ads/campaigns.js'
 import { recordAttribution } from '../server/ads/attribution.js'
@@ -259,6 +259,78 @@ test('profile website: every business can type example.com / www / http / https;
   // A value saved before this change (https) is returned exactly as stored.
   await saveProfile(db, 'pools', validateProfile({ ...PROFILE, website: 'https://poolthru.example' }).profile)
   assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.profile.website, 'https://poolthru.example')
+})
+
+test('services: comma- or newline-separated, saved as separate services', async () => {
+  assert.deepEqual(validateProfile({ ...PROFILE, services: ['Weekly pool cleaning, Pool maintenance', 'Green pool cleanup\nFilter repair', ' , '] }).profile.services, [
+    'Weekly pool cleaning',
+    'Pool maintenance',
+    'Green pool cleanup',
+    'Filter repair',
+  ])
+  assert.deepEqual(validateProfile({ ...PROFILE, services: 'Repairs; Openings' }).profile.services, ['Repairs', 'Openings'])
+  assert.deepEqual(validateProfile({ ...PROFILE, services: [' , '] }).errors, ['services'])
+})
+
+test('headlines: whole words only, never cut mid-word; old comma-joined profiles still produce clean headlines', () => {
+  const cases = {
+    'Weekly pool cleaning, Pool maintenance, Green pool cleanup': 'Weekly pool cleaning',
+    'Professional swimming pool maintenance and repair': 'Professional swimming pool',
+    'Pool cleaning & repair for homes': 'Pool cleaning & repair',
+    'Poolthru LLC': 'Poolthru LLC',
+    'Supercalifragilisticexpialidociouspools': null,
+    '   ': null,
+  }
+  for (const [input, want] of Object.entries(cases)) assert.equal(fitText(input, 30), want, input)
+  // A profile saved before comma-splitting (PoolThru's shape): split at use time, the stored profile untouched.
+  const legacy = { ...PROFILE, services: ['Weekly pool cleaning, Pool maintenance, Green pool cleanup'], serviceArea: { zips: ['29403'], cities: [] } }
+  assert.deepEqual(serviceList(legacy), ['Weekly pool cleaning', 'Pool maintenance', 'Green pool cleanup'])
+  for (const name of ['Poolthru LLC', 'A Very Long Pool Company Name That Keeps Going LLC']) {
+    const plan = templatePlan({ name }, legacy)
+    const hs = plan.google.headlines
+    assert.ok(hs.length >= 3 && hs.length <= 15)
+    assert.ok(hs.includes('Weekly pool cleaning') && hs.includes('Pool maintenance') && hs.includes('Green pool cleanup'), JSON.stringify(hs))
+    for (const h of hs) {
+      assert.ok(h.length <= 30, h)
+      assert.ok(!/(,|\b(and|or|of|for|the))$/i.test(h), `dangling: ${h}`)
+    }
+    assert.ok(!hs.some((h) => /Pool mai$|, Pool/.test(h)), 'no half words or joined lists')
+    assert.equal(new Set(hs.map((h) => h.toLowerCase())).size, hs.length, 'no duplicates')
+    for (const d of plan.google.descriptions) assert.ok(d.length <= 90, d)
+    assert.deepEqual(validateSpec({ platform: 'google', name: 'x', dailyBudgetCents: 900, finalUrl: 'https://x.example', geo: { zips: ['29403'] }, google: plan.google })[0], [], 'the starter draft is valid as-is')
+  }
+  assert.deepEqual(plan0Keywords(), ['weekly pool cleaning near me', 'weekly pool cleaning company', 'pool maintenance near me', 'green pool cleanup near me'])
+  function plan0Keywords() {
+    return templatePlan({ name: 'Poolthru LLC' }, legacy).google.keywords.map((k) => k.text)
+  }
+})
+
+test('plan: one open draft per platform; repeats and simultaneous clicks never duplicate; existing drafts are kept', async () => {
+  const c = await owner()
+  await call(adsProfile, 'POST', '/x', { cookie: c, body: PROFILE })
+  const count = () => db.sql.prepare("SELECT count(*) n FROM ad_campaigns WHERE customer = 'pools' AND status <> 'removed'").get().n
+  const first = await call(adsPlan, 'POST', '/x', { cookie: c, body: {} })
+  assert.equal(first.status, 201)
+  const again = await call(adsPlan, 'POST', '/x', { cookie: c, body: {} })
+  assert.deepEqual([again.status, again.json.error, again.json.campaignIds], [409, 'draft_exists', first.json.campaignIds])
+  assert.equal(count(), 1)
+  // Removing the draft (explicit, kept as 'removed', never deleted) allows a new plan.
+  assert.equal((await call(adsCampaign, 'POST', '/x', { cookie: c, body: { action: 'remove', id: first.json.campaignIds[0] } })).status, 200)
+  assert.equal(db.sql.prepare('SELECT status FROM ad_campaigns WHERE id = ?').get(first.json.campaignIds[0]).status, 'removed')
+  // Two simultaneous requests (double click / two tabs) → exactly one new draft.
+  const both = await Promise.all([call(adsPlan, 'POST', '/x', { cookie: c, body: {} }), call(adsPlan, 'POST', '/x', { cookie: c, body: {} })])
+  assert.deepEqual(both.map((r) => r.status).sort(), [201, 409])
+  assert.equal(count(), 1)
+  // An approved draft also counts as open; another business is unaffected.
+  const salon = await cookieFor('owner@salon.example')
+  await call(adsProfile, 'POST', '/x', { cookie: salon, body: PROFILE })
+  assert.equal((await call(adsPlan, 'POST', '/x', { cookie: salon, body: {} })).status, 201)
+  // Duplicates created before this rule are left alone (shown to the owner, never removed automatically).
+  const id = db.sql.prepare("SELECT id FROM ad_campaigns WHERE customer = 'pools' AND status = 'draft'").get().id
+  const row = db.sql.prepare('SELECT * FROM ad_campaigns WHERE id = ?').get(id)
+  db.sql.prepare('INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('dupDraft0001', 'pools', 'google', 'draft', row.spec, row.daily_budget_cents, 1, 1)
+  assert.equal((await call(adsPlan, 'POST', '/x', { cookie: c, body: {} })).status, 409)
+  assert.equal(count(), 2, 'both drafts kept')
 })
 
 test('budget: owner must confirm; campaigns cannot be approved above the ceiling; launch is off by default', async () => {

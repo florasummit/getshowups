@@ -1,9 +1,10 @@
 // POST /api/dashboard/ads/plan — generate a campaign plan (AI when configured, else a labelled template)
-// and save it as editable drafts. Drafts never launch and never spend.
+// and save it as editable drafts. Drafts never launch and never spend. One open draft per platform: while one
+// exists the owner edits it (or removes it to start over), so a second click never creates a duplicate.
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
-import { getProfile, saveDraft } from '../../../../server/ads/campaigns.js'
+import { getProfile, openDraftIds, saveDraft } from '../../../../server/ads/campaigns.js'
 import { generatePlan, draftSpecs } from '../../../../server/ads/strategy.js'
 import { remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
@@ -21,6 +22,9 @@ export async function onRequestPost({ request, env }) {
   const db = env.ONBOARDING_DB
   const profile = await getProfile(db, customer.id)
   if (!profile) return json(409, { error: 'profile_required' })
+  // Checked before planning, so a repeated click costs nothing (no AI call).
+  const existing = await openDraftIds(db, customer.id, 'google')
+  if (existing.length) return json(409, { error: 'draft_exists', campaignIds: existing })
   const result = await generatePlan(env, customer, profile)
   if (!result.ok) return json(result.retryable ? 503 : 422, { error: result.error })
   // Size drafts to what is still approvable; with no approval yet, to the owner's requested budget.
@@ -31,8 +35,9 @@ export async function onRequestPost({ request, env }) {
   const bookingUrl = (await websiteSummary(db, customer.id)).published ? `${origin}/p/${customer.id}` : `${origin}/book/${customer.id}`
   const ids = []
   for (const d of draftSpecs(customer, profile, result.plan, { dailyCeilingCents: ceiling, bookingUrl })) {
-    const saved = await saveDraft(env, customer, { spec: d.spec })
-    if (!saved.ok) return json(409, { error: saved.error })
+    // onlyIfNone: atomic, so two simultaneous requests still create one draft per platform.
+    const saved = await saveDraft(env, customer, { spec: d.spec, onlyIfNone: true })
+    if (!saved.ok) return json(409, { error: saved.error, ...(saved.error === 'draft_exists' ? { campaignIds: await openDraftIds(db, customer.id, d.platform) } : {}) })
     // The final URL carries our campaign id for attribution, so it is set once the id exists.
     if (d.platform === 'google') await saveDraft(env, customer, { id: saved.id, spec: { ...d.spec, finalUrl: d.url(saved.id) } })
     ids.push(saved.id)
