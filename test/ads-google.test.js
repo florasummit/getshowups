@@ -783,6 +783,38 @@ test('guard: without ADS_LIVE_LAUNCH, create/resume/budget work only on a verifi
   assert.deepEqual(await G.setStatus(env, 'pools', row(), 'ENABLED'), { ok: true, status: 'ENABLED' })
 })
 
+test('test business: ADS_LIVE_LAUNCH never applies; real accounts refused; unmarking keeps sandbox campaigns sandboxed', async () => {
+  const TB = await import('../server/testbusiness.js')
+  await connected()
+  await connected('salon')
+  env.ADS_LIVE_LAUNCH = 'true' // future operator switch: must not reach a test business
+  await TB.setTestBusiness(env, 'pools', true, 'admin@getshowups.example')
+  mockTestAccount = false // the connected account is a REAL Google Ads account
+  for (const r of [await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false }), await G.setStatus(env, 'pools', row(), 'ENABLED'), await G.setDailyBudget(env, 'pools', row(), 3000)]) {
+    assert.equal(r.error, 'test_account_required')
+  }
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'nothing sent to Google for the test business')
+  assert.deepEqual(await G.setStatus(env, 'pools', row(), 'PAUSED'), { ok: true, status: 'PAUSED' }, 'pausing is never blocked')
+  // Account choice: only test accounts are offered and accepted, live switch or not.
+  const cookie = await session('owner@pools.example')
+  const list = (await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json()
+  assert.deepEqual([list.sandbox, list.accounts.map((a) => a.id), list.hidden], [true, [ACCT2], 1])
+  assert.deepEqual((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body: { accountId: ACCT } })).json(), { error: 'test_account_required' })
+  // A real business (not marked) is unaffected: the operator switch applies to it as before.
+  assert.deepEqual(await G.setStatus(env, 'salon', row({ customer: 'salon' }), 'ENABLED'), { ok: true, status: 'ENABLED' })
+
+  // Unmark: the Ads connection must be chosen again, and campaigns created while marked stay sandboxed.
+  const before = Date.now() - 1000
+  await TB.setTestBusiness(env, 'pools', false, 'admin@getshowups.example')
+  assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account', 'sandbox connection is not carried into live use')
+  assert.equal((await G.setStatus(env, 'pools', row(), 'ENABLED')).error, 'needs_account')
+  await connected() // the owner explicitly chooses an account again
+  assert.equal((await G.setStatus(env, 'pools', row({ created_at: before }), 'ENABLED')).error, 'test_account_required', 'sandbox campaign stays sandboxed')
+  assert.equal((await G.setDailyBudget(env, 'pools', row({ created_at: before }), 3000)).error, 'test_account_required')
+  assert.deepEqual(await G.setStatus(env, 'pools', row({ created_at: Date.now() + 1000 }), 'ENABLED'), { ok: true, status: 'ENABLED' }, 'new campaigns follow the live switch')
+  delete env.ADS_LIVE_LAUNCH
+})
+
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {
   await connected()
   ads = (path, body, h) => {

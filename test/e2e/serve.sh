@@ -76,7 +76,8 @@ d1 "
     ('$E2E_ADS_CUSTOMER', 'cus_E2EADS', 'sub_E2EADS', 'founding', 'active', 49900, 'usd', $FAR, $NOW);
   INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
     ('$E2E_ADS_CUSTOMER', 'Pool service', '[\"Weekly pool cleaning\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
-  INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-ads-budget', '$E2E_ADS_CUSTOMER', 30000, 'owner@e2e-ads.example', $NOW);"
+  INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-ads-budget', '$E2E_ADS_CUSTOMER', 30000, 'owner@e2e-ads.example', $NOW);
+  INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_ADS_CUSTOMER', 1, 'admin@e2e.example', $NOW);"
 
 # One seeded Google connection per business (its own refresh token → its own mock calendar), like real
 # businesses that each connect their own Google account.

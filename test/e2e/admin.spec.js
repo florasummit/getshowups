@@ -4,7 +4,9 @@ import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle, useSession } from './helpers.js'
 
-test.describe.configure({ mode: 'serial', timeout: 60_000 })
+// No retries: one stateful sequence on a database seeded once per run; a retry would re-run it against
+// already-changed records and only hide the real failure (same as ads.spec.js).
+test.describe.configure({ mode: 'serial', timeout: 60_000, retries: 0 })
 
 test('customers without platform access are refused', async ({ page, context }) => {
   await page.goto('/admin')
@@ -21,9 +23,10 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await page.goto('/admin')
   await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
-  // The seeded Ads sandbox business has an active (fake) subscription, so MRR comes from that record.
-  // "No billing yet" (no subscriptions at all) is covered in test/operations.test.js.
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^\$[\d,]+\.\d{2}$/)
+  // The only subscription belongs to the seeded Ads sandbox business, which is marked as a TEST
+  // business, so it is left out: no real billing yet.
+  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText('No billing yet')
+  await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()
 
@@ -35,6 +38,46 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   const detail = await (await page.request.get(`/api/platform/customer?id=${fixtures.E2E_CUSTOMER}`)).text()
   expect(detail).not.toContain('pat@example.net')
   expect(detail).not.toContain('555-010-0100')
+})
+
+test('admin marks and unmarks a test business (confirmed, audited); counts follow; PoolThru-like businesses unaffected', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto('/admin')
+  // Other spec files create businesses in parallel, so compare within one snapshot: the Customers
+  // count equals the listed businesses minus the ones tagged Test.
+  const counted = async () => {
+    const o = await (await page.request.get('/api/platform/overview')).json()
+    return [o.metrics.customers.total, o.customers.filter((c) => !c.testBusiness).length, o.customers.find((c) => c.name === 'E2E Spare Co').testBusiness]
+  }
+  const [t0, real0, spare0] = await counted()
+  expect([t0, spare0]).toEqual([real0, false])
+  await page.locator('.row--link', { hasText: 'E2E Spare Co' }).first().click()
+  const card = page.getByRole('region', { name: 'Test business' })
+  await expect(card).toContainText('A real business.')
+  await card.getByRole('button', { name: 'Mark as test business' }).click()
+  await card.getByRole('button', { name: 'Confirm: mark as test business' }).click()
+  await expect(card).toContainText('Marked as a test business')
+  await expect(page.locator('.card', { hasText: 'Audit trail' }).getByText('customer.test_mark')).toBeVisible()
+  const [t1, real1, spare1] = await counted()
+  expect([t1, spare1]).toEqual([real1, true])
+  await page.goto('/admin')
+  await expect(page.locator('.row--link', { hasText: 'E2E Spare Co' }).first().locator('[data-test-business]')).toBeVisible()
+  // The primary (PoolThru-like) business is never tagged.
+  await expect(page.locator('.row--link', { hasText: fixtures.E2E_CUSTOMER_NAME }).first().locator('[data-test-business]')).toHaveCount(0)
+
+  await page.locator('.row--link', { hasText: 'E2E Spare Co' }).first().click()
+  await card.getByRole('button', { name: 'Remove test mark' }).click()
+  await card.getByRole('button', { name: /Confirm: treat as a real business/ }).click()
+  await expect(card).toContainText('A real business.')
+  await expect(page.locator('.card', { hasText: 'Audit trail' }).getByText('customer.test_unmark')).toBeVisible()
+  const [t2, real2, spare2] = await counted()
+  expect([t2, spare2]).toEqual([real2, false])
+  // Owners can't mark anything.
+  const owner = await context.browser().newContext()
+  await useSession(owner, fixtures.E2E_SESSION_TOKEN)
+  const r = await owner.request.post('/api/platform/test-business', { data: { customer: fixtures.E2E_CUSTOMER, test: true, confirm: true }, headers: { Origin: new URL(page.url()).origin } })
+  expect(r.status()).toBe(403)
+  await owner.close()
 })
 
 test('admin suspends and reactivates an account (audited); booking page pauses meanwhile', async ({ page, context }) => {

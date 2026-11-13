@@ -7,7 +7,7 @@ import { requireSession } from '../../../../server/auth.js'
 import { getConnection, markReconnect, upsertConnection } from '../../../../server/ads/connections.js'
 import { accessToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
-import { liveLaunchEnabled } from '../../../../server/ads/campaigns.js'
+import { liveFor } from '../../../../server/ads/campaigns.js'
 
 const STATUS = { reconnect_required: 409, not_approved_for_production: 403, permission_denied: 403, quota_exhausted: 503, transient: 503 }
 const failed = (r) => json(STATUS[r.error] || 502, { error: r.error })
@@ -21,9 +21,10 @@ async function selectable(env, customerId) {
     if (r.reconnect) await markReconnect(env, customerId, 'google')
     return r
   }
-  const live = liveLaunchEnabled(env)
+  // Test businesses only ever see Google Ads test accounts, whatever ADS_LIVE_LAUNCH says.
+  const live = await liveFor(env, customerId)
   const offered = live ? r.accounts : r.accounts.filter((a) => a.testAccount === true)
-  return { ok: true, token: t.token, offered, hidden: r.accounts.length - offered.length, all: r.accounts }
+  return { ok: true, token: t.token, offered, hidden: r.accounts.length - offered.length, all: r.accounts, live }
 }
 
 export async function onRequestGet({ request, env }) {
@@ -39,7 +40,7 @@ export async function onRequestGet({ request, env }) {
   return json(200, {
     status: conn.status,
     selected: conn.account_id || null,
-    sandbox: !liveLaunchEnabled(env),
+    sandbox: !r.live,
     accounts: r.offered.map(({ id, name, testAccount }) => ({ id, name, testAccount: testAccount === true })),
     hidden: r.hidden,
   })
@@ -68,7 +69,7 @@ export async function onRequestPost({ request, env }) {
   // Re-read the account itself through the same path (Google's flag again, plus name/currency).
   const about = await describeAccountWithToken(env, r.token, accountId, pick.via || undefined)
   // Sandbox: until live launch is switched on, only accounts Google flags as TEST accounts can be connected.
-  if (!liveLaunchEnabled(env) && about.testAccount !== true) return json(409, { error: 'test_account_required' })
+  if (!r.live && about.testAccount !== true) return json(409, { error: 'test_account_required' })
   await upsertConnection(env, customerId, 'google', {
     accountId,
     accountName: about.name || pick.name,

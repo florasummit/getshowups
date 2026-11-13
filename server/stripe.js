@@ -4,11 +4,16 @@
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
+import { testStatus } from './testbusiness.js'
 
 // Live billing is a separate, explicit decision: unless STRIPE_LIVE_ENABLED is exactly 'true', only
 // test-mode keys (sk_test_/rk_test_) count as configured, and live-mode events are refused.
 export const stripeLiveEnabled = (env) => env.STRIPE_LIVE_ENABLED === 'true'
 const testKey = (k) => /^(sk|rk)_test_/.test(String(k || ''))
+// A live (non-test) secret key is in use. Test businesses (server/testbusiness.js) never reach live
+// Stripe: checkout and the billing portal are refused for them, so no live charge can be created.
+export const stripeLiveKey = (env) => Boolean(env.STRIPE_SECRET_KEY) && !testKey(env.STRIPE_SECRET_KEY)
+const liveBlocked = async (env, customerId) => stripeLiveKey(env) && (await testStatus(env, customerId)).test
 export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && (testKey(env.STRIPE_SECRET_KEY) || stripeLiveEnabled(env)))
 // STRIPE_API_MOCK_ORIGIN is a loopback-only test override (e2e); never set in production.
 const apiBase = (env) => {
@@ -68,6 +73,7 @@ export async function getSubscription(db, customerId) {
 // (covers a payment whose webhook has not arrived yet) and reuse a still-open session if there is one.
 const LIVE_SUB = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']
 export async function createCheckout(env, { customer, email, planId, origin }) {
+  if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
   const db = env.ONBOARDING_DB
   const plan = await db.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()
   if (!plan) return { ok: false, httpStatus: 404, error: 'plan_not_found' }
@@ -110,6 +116,7 @@ export async function createCheckout(env, { customer, email, planId, origin }) {
 }
 
 export async function createPortal(env, { customer, origin }) {
+  if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
   const existing = await getSubscription(env.ONBOARDING_DB, customer.id)
   if (!existing?.stripeCustomerId) return { ok: false, httpStatus: 409, error: 'no_billing_account' }
   const r = await stripePost(env, '/billing_portal/sessions', { customer: existing.stripeCustomerId, return_url: `${origin}/dashboard` })

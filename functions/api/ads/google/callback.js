@@ -8,7 +8,7 @@ import { hitByIp } from '../../../../server/ratelimit.js'
 import { saveToken, upsertConnection } from '../../../../server/ads/connections.js'
 import { ADS_SCOPE, ADS_STATE_COOKIE, ADS_STATE_TTL_SECONDS, adsRedirectUri, describeAccountWithToken, listSelectableAccountsWithToken } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
-import { liveLaunchEnabled } from '../../../../server/ads/campaigns.js'
+import { liveFor } from '../../../../server/ads/campaigns.js'
 
 function redirect(location) {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
@@ -83,10 +83,11 @@ export async function onRequestGet({ request, env }) {
     await upsertConnection(env, customerId, 'google', { status: 'needs_account' })
     return fail(listed.error)
   }
-  const choosable = liveLaunchEnabled(env) ? listed.accounts : listed.accounts.filter((a) => a.testAccount === true)
+  const live = await liveFor(env, customerId) // never for a test business
+  const choosable = live ? listed.accounts : listed.accounts.filter((a) => a.testAccount === true)
   const only = choosable.length === 1 ? choosable[0] : null
   const about = only ? await describeAccountWithToken(env, tokens.access_token, only.id, only.via || undefined) : null
-  if (only && (liveLaunchEnabled(env) || about.testAccount === true)) {
+  if (only && (live || about.testAccount === true)) {
     await upsertConnection(env, customerId, 'google', {
       accountId: only.id,
       accountName: about.name || only.name,

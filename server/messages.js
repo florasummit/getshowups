@@ -10,6 +10,7 @@
 // provider a due message is marked skipped/no_provider (never sent later in a burst); before launch
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
+import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
 import { sendSms, smsConfigured } from './sms.js'
 import { smsHandledByGhl } from './ghl.js'
 import { confirmUrl, resumeUrl } from './links.js'
@@ -249,12 +250,15 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     if (!ghlSms.has(customer)) ghlSms.set(customer, await smsHandledByGhl(env, customer).catch(() => false))
     return ghlSms.get(customer)
   }
+  const tests = results.length ? await testStatuses(env) : new Map()
   for (const m of results) {
+    // A test business (or a message scheduled while it was one) only ever reaches test recipients.
+    const testOnly = sandboxed(statusIn(tests, m.customer), m.created_at)
     const reason =
       skipReason(m, now) ??
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
-      (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone) ? null : 'test_mode')
+      (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode')
     if (reason) {
       await db.prepare("UPDATE messages SET status = 'skipped', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, reason, now).run()
       out.skipped++
@@ -271,8 +275,8 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       const content = await render(env, m)
       result =
         m.channel === 'email'
-          ? await sendEmail(env, { id: `msg:${m.id}`, to: m.lead_email, subject: content.subject, text: content.text, fromName: `${m.biz} via GetShowUps`, replyTo: m.owner })
-          : await sendSms(env, { to: m.lead_phone, text: content.sms })
+          ? await sendEmail(env, { id: `msg:${m.id}`, to: m.lead_email, subject: content.subject, text: content.text, fromName: `${m.biz} via GetShowUps`, replyTo: m.owner, testOnly })
+          : await sendSms(env, { to: m.lead_phone, text: content.sms, testOnly })
     } catch (err) {
       console.error('messages: render/send error:', m.kind, err?.name)
       result = { ok: false, error: 'internal_error' }

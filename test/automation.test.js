@@ -470,6 +470,39 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
   assert.equal(ov.automation.testMode, true)
 })
 
+test('test business: even with MESSAGES_LIVE, only test recipients; unmarking never releases messages scheduled while marked', async () => {
+  const { setTestBusiness } = await import('../server/testbusiness.js')
+  await seed('alpha') // marked as a test business below
+  await seed('beta') // real business (like PoolThru): unaffected
+  withEmail() // MESSAGES_LIVE = 'true'
+  env.MESSAGE_TEST_RECIPIENTS = 'tester@example.org'
+  await setTestBusiness(env, 'alpha', true, 'ops@getshowups.com')
+  const t0 = Date.now()
+  await lead('alpha') // jamie@example.net: a real address
+  await lead('alpha', { email: 'Tester@Example.org' })
+  await lead('beta')
+  await processDueMessages(env, t0 + 20 * MIN)
+  const to = sentEmails().map((e) => e.to[0]).sort()
+  assert.deepEqual(to, ['jamie@example.net', 'tester@example.org'], 'test business reached only the test recipient; the real business sent normally')
+  const alphaReal = db.sql.prepare("SELECT m.status, m.error FROM messages m JOIN leads l ON l.id = m.lead_id WHERE m.customer = 'alpha' AND l.email = 'jamie@example.net' AND m.send_at <= ?").all(t0 + 20 * MIN)
+  assert.deepEqual(alphaReal.map((r) => ({ ...r })), [{ status: 'skipped', error: 'test_mode' }], 'held as test_mode, never sent')
+  // Provider-level defense: SMS and email refuse a real recipient for a test sender.
+  assert.equal((await sendEmail(env, { id: 'y', to: 'someone@example.net', subject: 's', text: 't', testOnly: true })).error, 'test_mode')
+  assert.equal((await sendSms({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+1' }, { to: '8435550142', text: 't', testOnly: true })).error, 'test_mode')
+
+  // Messages scheduled while marked stay test-only after the mark is removed; new ones follow MESSAGES_LIVE.
+  await lead('alpha', { email: 'later@example.net' }) // scheduled while still marked
+  await setTestBusiness(env, 'alpha', false, 'ops@getshowups.com')
+  const before = sentEmails().length
+  await processDueMessages(env, Date.now() + 20 * MIN)
+  assert.equal(sentEmails().slice(before).filter((e) => e.to[0] === 'later@example.net').length, 0, 'sandbox message not released by unmarking')
+  // Account outbox: mail queued for a test business is held for real recipients.
+  await setTestBusiness(env, 'alpha', true, 'ops@getshowups.com')
+  await enqueue(env, { id: 'tb-held', to: 'owner@alpha.example', customer: 'alpha', template: 't', subject: 's', body: 'b' })
+  await flushOutbox(env)
+  assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'tb-held'").get().status, 'pending')
+})
+
 test('repeated and overlapping scheduler runs never send a message twice', async () => {
   await seed('alpha')
   withEmail()

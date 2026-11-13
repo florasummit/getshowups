@@ -38,7 +38,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/     Session routes: me, calendar, overview (GET); business, hours, connect-link, outcome (POST)
   api/book/[customer]/  Public: index (GET slots), lead (POST), appointment (POST books on Google Calendar)
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
-                     invite-action, status, plans. Every write is same-origin and audited.
+                     invite-action, status, plans, test-business. Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
@@ -88,6 +88,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
+  testbusiness.js    Admin-marked test businesses (test_businesses): out of metrics; never live Ads/messaging/Stripe
   domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
   onboarding.js      Self-serve signup plan, ordered onboarding steps (derived from data), business profile, readiness
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
@@ -184,6 +185,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   The production `AI` binding on the Pages project needs approval. AI_API_MOCK_ORIGIN is a loopback-only test var.
 - Pilot / invited / admin-created businesses are never billed: no plan card, checkout refused (no placeholder rows).
 - Test records (testdata.js) are listed with a tag and excluded from every count; never deleted.
+- Test businesses (server/testbusiness.js, table test_businesses): marked/unmarked only by a platform admin via
+  POST /api/platform/test-business (same-origin, confirm, audited). A marked business is listed with a Test tag but
+  left out of every platform metric/count/MRR, and NEVER uses live operations whatever the global switches say:
+  Google Ads test accounts only (liveFor() ignores ADS_LIVE_LAUNCH), messages only to MESSAGE_TEST_RECIPIENTS
+  (recipientAllowed(..., { testOnly })), no Stripe checkout/portal with a live key. Unmarking never promotes sandbox
+  data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
+  (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
 
 ## Requires explicit human approval

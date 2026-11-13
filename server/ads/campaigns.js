@@ -5,6 +5,7 @@ import { validateSpec, dailyCeilingCents } from './spec.js'
 import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
 import { stripeConfigured, getSubscription } from '../stripe.js'
+import { sandboxed, testStatus } from '../testbusiness.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -163,12 +164,20 @@ export async function approveCampaign(env, customer, id, ownerEmail, now = Date.
 // (Google validateOnly / Meta dry run) and nothing is created.
 export const liveLaunchEnabled = (env) => env.ADS_LIVE_LAUNCH === 'true'
 
+// Live operation for one business (and one campaign, by its created_at): the operator switch is on AND
+// the business is not a test business AND the campaign was not created while it was one
+// (server/testbusiness.js). A test business therefore stays on Google Ads test accounts forever.
+export async function liveFor(env, customerId, createdAt = Date.now()) {
+  if (!liveLaunchEnabled(env)) return false
+  return !sandboxed(await testStatus(env, customerId), createdAt)
+}
+
 // Sandbox: without ADS_LIVE_LAUNCH, Google campaigns may still be created (paused), resumed and have
 // their budget changed when the connected account is a Google Ads TEST account (Google's own flag,
 // checked live; test accounts never serve ads or spend). The adapter enforces the same rule again
 // right before each change, so this cannot be bypassed from here.
-async function serveAllowed(env, platform, customerId, a) {
-  if (liveLaunchEnabled(env)) return true
+async function serveAllowed(env, platform, customerId, a, row) {
+  if (await liveFor(env, customerId, row.created_at)) return true
   return platform === 'google' && typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId))
 }
 
@@ -187,14 +196,14 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
   const spec = JSON.parse(row.spec)
   const a = await adapter(row.platform)
   if (!a) return { ok: false, error: 'platform_unavailable' }
-  const campaign = { id: row.id, spec, platformIds: JSON.parse(row.platform_ids || '{}'), platform_ids: row.platform_ids }
+  const campaign = { id: row.id, spec, createdAt: row.created_at, platformIds: JSON.parse(row.platform_ids || '{}'), platform_ids: row.platform_ids }
   if (!live) {
     // Validation path: never spends, never creates objects.
     const r = row.platform === 'google' ? await a.launchCampaign(env, customer.id, campaign, { validateOnly: true }) : await a.launchCampaign(env, customer.id, campaign, { dryRun: true })
     await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'validate', status: r.ok ? 'applied' : 'failed', reason: r.ok ? 'Validation passed (nothing created, no spend)' : `Validation failed: ${r.error}` }, now)
     return r.ok ? { ok: true, validated: true, live: false } : { ok: false, error: r.error }
   }
-  if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
+  if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
   if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
   if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
   // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
@@ -225,7 +234,7 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
   if (!row.platform_campaign_id && !JSON.parse(row.platform_ids || '{}').campaignId) return { ok: false, error: 'not_launched' }
   const a = await adapter(row.platform)
   if (target === 'active') {
-    if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
+    if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
     if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
     if (!(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
     const approval = await currentApproval(db, customer.id)
@@ -256,7 +265,7 @@ export async function setCampaignBudget(env, customer, id, dailyCents, actor, no
   if (!(await currentApproval(db, customer.id))) return { ok: false, error: 'budget_approval_required' }
   if (dailyCents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
   const a = await adapter(row.platform)
-  if (!(await serveAllowed(env, row.platform, customer.id, a))) return { ok: false, error: 'live_launch_disabled' }
+  if (!(await serveAllowed(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
   const r = await a.setDailyBudget(env, customer.id, row, dailyCents)
   if (!r.ok) {
     await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'budget', status: 'failed', reason: `Platform error: ${r.error}` }, now)

@@ -1,6 +1,10 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
 // Test records (server/testdata.js) are excluded from every count.
 import { internalEmails, isTestLead } from './testdata.js'
+import { isTestBusinessSql } from './testbusiness.js'
+
+// Real businesses only: test businesses are listed (tagged) but never counted.
+const REAL = (col) => `NOT ${isTestBusinessSql(col)}`
 import { providerConfigured } from './domains.js'
 const DAY = 24 * 60 * 60 * 1000
 
@@ -22,7 +26,8 @@ export async function customerRows(env, now = Date.now()) {
               (SELECT min(i.created_at) FROM account_invites i WHERE i.customer = c.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2) AS oldest_invite,
               (SELECT count(*) FROM events e WHERE e.customer = c.id AND e.type = 'booking_failed' AND e.at >= ?3) AS failures7,
               s.status AS sub_status, s.plan_id, s.mrr_cents, s.cancel_at_period_end, coalesce(ss.appointment_mode, 'at_business') AS appointment_mode,
-              (SELECT 1 FROM self_signups x WHERE x.customer = c.id) AS self_serve
+              (SELECT 1 FROM self_signups x WHERE x.customer = c.id) AS self_serve,
+              ${isTestBusinessSql('c.id')} AS is_test
          FROM customers c LEFT JOIN subscriptions s ON s.customer = c.id LEFT JOIN service_settings ss ON ss.customer = c.id
         ORDER BY c.created_at DESC`,
     )
@@ -67,6 +72,7 @@ export async function customerRows(env, now = Date.now()) {
       lastBooking: r.last_booking,
       pendingInvites: r.pending_invites,
       testLeads: r.test_leads,
+      testBusiness: Boolean(r.is_test),
       website: { live: Boolean(r.site_live), domain: r.domain_status || null },
       subscription: r.sub_status ? { status: r.sub_status, planId: r.plan_id, mrrCents: r.mrr_cents } : null,
       attention,
@@ -85,13 +91,14 @@ export async function growth(env, rows, now = Date.now()) {
   const since30 = now - 30 * DAY
   const prior30 = now - 60 * DAY
 
-  const customers = await one("SELECT count(*) AS total, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active FROM customers")
-  const activated = { n: rows.filter((r) => r.calendarConnected && r.onboarding !== 'invited' && r.onboarding !== 'calendar' && r.onboarding !== 'hours').length }
-  const firstBooked = { n: rows.filter((r) => r.lastBooking && r.calendarConnected).length }
+  const customers = await one(`SELECT count(*) AS total, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active FROM customers c WHERE ${REAL('c.id')}`)
+  const real = rows.filter((r) => !r.testBusiness)
+  const activated = { n: real.filter((r) => r.calendarConnected && r.onboarding !== 'invited' && r.onboarding !== 'calendar' && r.onboarding !== 'hours').length }
+  const firstBooked = { n: real.filter((r) => r.lastBooking && r.calendarConnected).length }
   const internal = internalEmails(env)
   const leads = await one(
     `SELECT sum(CASE WHEN status <> 'unqualified' THEN 1 ELSE 0 END) AS qualified, sum(CASE WHEN status = 'booked' THEN 1 ELSE 0 END) AS booked, count(*) AS total
-       FROM leads l WHERE created_at >= ?1 AND NOT ${isTestLead('l', '?2')}`,
+       FROM leads l WHERE created_at >= ?1 AND NOT ${isTestLead('l', '?2')} AND ${REAL('l.customer')}`,
     since30,
     internal,
   )
@@ -111,27 +118,27 @@ export async function growth(env, rows, now = Date.now()) {
      JOIN (SELECT c.id, coalesce(ss.appointment_mode, 'at_business') AS mode FROM customers c LEFT JOIN service_settings ss ON ss.customer = c.id) m ON m.id = a.customer
      JOIN leads l ON l.id = a.lead_id
      LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer
-     WHERE a.start_at >= ?1 AND NOT ${isTestLead('l', '?2')}`,
+     WHERE a.start_at >= ?1 AND NOT ${isTestLead('l', '?2')} AND ${REAL('a.customer')}`,
     since30,
     internal,
   )
   const retained = await one(
     `SELECT count(*) AS cohort, sum(CASE WHEN EXISTS (SELECT 1 FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = c.id AND a.created_at >= ?2 AND a.status IN ('booked','showed','no_show') AND NOT ${isTestLead('l', '?3')}) THEN 1 ELSE 0 END) AS active
-       FROM customers c WHERE c.hours_confirmed_at IS NOT NULL AND c.hours_confirmed_at < ?1`,
+       FROM customers c WHERE c.hours_confirmed_at IS NOT NULL AND c.hours_confirmed_at < ?1 AND ${REAL('c.id')}`,
     since30,
     since30,
     internal,
   )
   const subs = await one(
-    "SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions",
+    `SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions s WHERE ${REAL('s.customer')}`,
   )
-  const canceled30 = await one("SELECT count(DISTINCT customer) AS n FROM events WHERE type = 'subscription_canceled' AND at >= ?1", since30)
+  const canceled30 = await one(`SELECT count(DISTINCT customer) AS n FROM events e WHERE type = 'subscription_canceled' AND at >= ?1 AND ${REAL('e.customer')}`, since30)
   const revenue = async (from, to) => {
-    const { results } = await db.prepare("SELECT props FROM events WHERE type = 'revenue' AND at >= ?1 AND at < ?2").bind(from, to).all()
+    const { results } = await db.prepare(`SELECT props FROM events e WHERE type = 'revenue' AND at >= ?1 AND at < ?2 AND ${REAL('e.customer')}`).bind(from, to).all()
     return results.reduce((sum, r) => sum + (JSON.parse(r.props).amountCents || 0), 0)
   }
   const { results: weekly } = await db
-    .prepare("SELECT (at / 604800000) AS week, count(*) AS n FROM events WHERE type = 'business_created' AND at >= ?1 GROUP BY week ORDER BY week")
+    .prepare(`SELECT (at / 604800000) AS week, count(*) AS n FROM events e WHERE type = 'business_created' AND at >= ?1 AND ${REAL('e.customer')} GROUP BY week ORDER BY week`)
     .bind(now - 8 * 7 * DAY)
     .all()
 

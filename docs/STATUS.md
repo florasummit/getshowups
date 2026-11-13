@@ -98,6 +98,14 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   production-only Google sign-in (refused, clear message, recover by reconnecting), server refusal of non-test /
   manager / production / unknown account ids, duplicate create prevention, cross-business isolation, 360px width.
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
+- Test-business isolation (2026-11-13, branch feature/test-business-isolation, NOT deployed): migration
+  0012_test_businesses.sql (new table only; dry-run on a production copy: applied twice, integrity + FK ok, PoolThru
+  identical). Admin marks/unmarks in the console (confirm + audit). Marked: Test tag, out of customer counts / MRR /
+  rates; Google Ads test accounts only even with ADS_LIVE_LAUNCH; only MESSAGE_TEST_RECIPIENTS even with
+  MESSAGES_LIVE (lead messages, outbox, SMS, GHL workflows); Stripe checkout/portal refused with a live key. Unmark:
+  records created up to that moment stay sandboxed; Ads connections reset to "choose an account". Business
+  structure: PoolThru (real pilot) and GetShowUps (real pilot) never marked; gsu-stripe-test-pools to be marked after
+  deploy. Order: migrate BEFORE deploy (the overview reads the table; other paths fail closed).
 - Production OAuth (2026-11-12, owner): Ads callback URI registered on the production Web client (verified by a
   no-sign-in authorize probe), adwords scope listed, consent screen In production / External, user cap 3/100.
 - Single-business pilot still needs (each an approval): deploy PR #1 (migrations: none new);

@@ -191,6 +191,13 @@ function CustomerDetail({ id, onBack, onChanged }) {
     const { data } = await api(`/api/platform/customer?id=${id}&health=1`)
     setHealth(data.health || { status: 'error' })
   }
+  const [testConfirm, setTestConfirm] = useState(false)
+  const setTest = async (test) => {
+    await api('/api/platform/test-business', { method: 'POST', body: { customer: id, test, confirm: true } })
+    setTestConfirm(false)
+    load()
+    onChanged()
+  }
   const setStatus = async (status) => {
     await api('/api/platform/status', { method: 'POST', body: { customer: id, status } })
     setConfirming(false)
@@ -310,6 +317,29 @@ function CustomerDetail({ id, onBack, onChanged }) {
         ) : (
           <button type="button" className="btn btn-sm btn-primary" onClick={() => setStatus('active')}>
             Reactivate account
+          </button>
+        )}
+      </section>
+
+      <section className="card" aria-label="Test business">
+        <h2 className="card-title">Test business</h2>
+        <p className="fine">
+          {d.testBusiness
+            ? 'Marked as a test business: left out of platform metrics, and it can never use real Google Ads accounts, message real recipients or use live billing.'
+            : 'A real business. Mark only businesses used for testing.'}
+        </p>
+        {testConfirm ? (
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setTestConfirm(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => setTest(!d.testBusiness)}>
+              {d.testBusiness ? 'Confirm: treat as a real business (ad accounts must be chosen again)' : 'Confirm: mark as test business'}
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="btn btn-sm btn-quiet" onClick={() => setTestConfirm(true)}>
+            {d.testBusiness ? 'Remove test mark' : 'Mark as test business'}
           </button>
         )}
       </section>
@@ -440,7 +470,9 @@ function Overview({ me }) {
             {attention.map((c) => (
               <li key={c.id} className="row row--link" onClick={() => setSelected(c.id)}>
                 <div className="row-main">
-                  <p className="row-title">{c.name}</p>
+                  <p className="row-title">
+                    {c.name} {c.testBusiness && <span className="tag" data-test-business>Test</span>}
+                  </p>
                   <p className="tags">
                     {c.attention.map((a) => (
                       <span key={a} className="tag tag--bad">
@@ -468,6 +500,11 @@ function Overview({ me }) {
                   <p className="row-title">
                     {c.name} <span className={`tag ${c.onboarding === 'live' ? 'tag--ok' : ''}`}>{ONBOARDING[c.onboarding]}</span>
                     {c.appointmentMode === 'at_customer' && <span className="tag">On-site</span>}
+                    {c.testBusiness && (
+                      <span className="tag" data-test-business>
+                        Test
+                      </span>
+                    )}
                   </p>
                   <p className="row-sub">
                     {c.owners || 'No owner yet'} · {c.booked30} booked / {plural(c.leads30, 'lead')} (30d) · {c.subscription ? c.subscription.status : 'no plan'} · since{' '}

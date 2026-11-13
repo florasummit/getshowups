@@ -14,6 +14,7 @@ import * as pInvites from '../functions/api/platform/invites.js'
 import * as pInviteAction from '../functions/api/platform/invite-action.js'
 import * as pStatus from '../functions/api/platform/status.js'
 import * as pPlans from '../functions/api/platform/plans.js'
+import * as pTest from '../functions/api/platform/test-business.js'
 import * as invitePeek from '../functions/api/invite.js'
 import * as accept from '../functions/api/dashboard/accept-invite.js'
 import * as me from '../functions/api/dashboard/me.js'
@@ -504,6 +505,85 @@ test('metrics: empty platform shows unavailable values, never estimates', async 
   assert.equal(m.cac, null)
   assert.equal(m.ltv, null)
   assert.equal(m.grossMargin, null)
+})
+
+test('test businesses: admin-only audited mark/unmark; tagged; excluded from counts and MRR; real businesses unaffected', async () => {
+  seed('poolthru-llc') // real internal pilot
+  seed('gsu-test') // test business
+  await connectKv('poolthru-llc')
+  await connectKv('gsu-test')
+  db.sql.prepare("INSERT INTO subscriptions (customer, status, mrr_cents, currency, updated_at) VALUES ('poolthru-llc', 'active', 9900, 'usd', 1), ('gsu-test', 'active', 49900, 'usd', 1)").run()
+  const mark = (cookie, body, origin) => call(pTest, 'POST', '/api/platform/test-business', { cookie, body, origin })
+  const ops = await admin()
+
+  // Authorization: owners (even of that business) and cross-site requests are refused; input is strict.
+  assert.equal((await mark(await session('owner@gsu-test.example'), { customer: 'gsu-test', test: true, confirm: true })).status, 403)
+  assert.equal((await mark(ops, { customer: 'gsu-test', test: true, confirm: true }, 'https://evil.example')).status, 403)
+  assert.equal((await mark(undefined, { customer: 'gsu-test', test: true, confirm: true })).status, 401)
+  assert.equal((await mark(ops, { customer: 'gsu-test', test: true })).status, 400, 'explicit confirm required')
+  assert.equal((await mark(ops, { customer: 'gsu-test', test: 'yes', confirm: true })).status, 400)
+  assert.equal((await mark(ops, { customer: 'nobody-here', test: true, confirm: true })).status, 404)
+  assert.deepEqual(auditActions(), [])
+
+  const metrics = async () => (await call(pOverview, 'GET', '/api/platform/overview', { cookie: ops })).json()
+  let o = await metrics()
+  assert.deepEqual([o.metrics.customers.total, o.metrics.billing.mrrCents, o.metrics.billing.payingCustomers], [2, 59800, 2])
+
+  assert.deepEqual((await mark(ops, { customer: 'gsu-test', test: true, confirm: true })).json(), { customer: 'gsu-test', test: true, changed: true })
+  assert.equal((await mark(ops, { customer: 'gsu-test', test: true, confirm: true })).json().changed, false, 'idempotent')
+  assert.deepEqual(auditActions(), ['customer.test_mark'], 'audited once')
+  o = await metrics()
+  assert.deepEqual([o.metrics.customers.total, o.metrics.billing.mrrCents, o.metrics.billing.payingCustomers], [1, 9900, 1], 'test business left out of counts and MRR')
+  assert.deepEqual(Object.fromEntries(o.customers.map((c) => [c.id, c.testBusiness])), { 'poolthru-llc': false, 'gsu-test': true }, 'still listed, tagged')
+  const detail = (await call(pCustomer, 'GET', '/api/platform/customer?id=gsu-test', { cookie: ops })).json()
+  assert.equal(detail.testBusiness, true)
+
+  // Unmark (audited): counted again. PoolThru's rows never changed.
+  const poolthru = () => JSON.stringify(db.sql.prepare("SELECT * FROM customers WHERE id = 'poolthru-llc'").all()) + JSON.stringify(db.sql.prepare("SELECT * FROM subscriptions WHERE customer = 'poolthru-llc'").all())
+  const pt = poolthru()
+  assert.equal((await mark(ops, { customer: 'gsu-test', test: false, confirm: true })).json().test, false)
+  assert.deepEqual(auditActions(), ['customer.test_mark', 'customer.test_unmark'])
+  assert.equal((await metrics()).metrics.customers.total, 2)
+  assert.equal(poolthru(), pt)
+  assert.equal(db.sql.prepare("SELECT count(*) c FROM test_businesses WHERE customer = 'poolthru-llc'").get().c, 0)
+})
+
+test('test businesses: sandbox rule is inclusive at the unmark moment and fails closed when unreadable', async () => {
+  const TB = await import('../server/testbusiness.js')
+  const unmarked = { test: false, unmarkedAt: 1000 }
+  assert.equal(TB.sandboxed({ test: true, unmarkedAt: null }, 5000), true)
+  assert.equal(TB.sandboxed(unmarked, 999), true)
+  assert.equal(TB.sandboxed(unmarked, 1000), true, 'created at the unmark moment stays sandboxed')
+  assert.equal(TB.sandboxed(unmarked, 1001), false)
+  assert.equal(TB.sandboxed(unmarked, null), true, 'unknown creation time → sandboxed')
+  assert.equal(TB.sandboxed({ test: false, unmarkedAt: null }, null), false, 'never-marked businesses are unaffected')
+  const broken = { ONBOARDING_DB: { prepare: () => { throw new Error('no such table') } } }
+  assert.equal((await TB.testStatus(broken, 'x')).test, true, 'unreadable → treated as a test business')
+  assert.equal(await TB.testStatuses(broken), null)
+  assert.equal(TB.statusIn(null, 'poolthru-llc').test, true)
+  assert.deepEqual(await TB.setTestBusiness(broken, 'x', true, 'ops'), { ok: false, httpStatus: 503, error: 'storage_error' })
+})
+
+test('test businesses: never reach live Stripe (checkout and portal refused with a live key); test mode unchanged', async () => {
+  const { setTestBusiness } = await import('../server/testbusiness.js')
+  seed('alpha')
+  seed('beta')
+  for (const id of ['alpha', 'beta']) db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES (?, 'starter', 1)").run(id)
+  configureStripe()
+  await addPlan(await admin())
+  await setTestBusiness(env, 'alpha', true, 'ops@getshowups.com')
+  const owner = await session('owner@alpha.example')
+  const pay = (cookie, action = 'checkout') => call(billing, 'POST', '/api/dashboard/billing', { cookie, body: { action, plan: 'starter' } })
+  // Test-mode Stripe (today): the test business can still run checkout against Stripe's test mode.
+  assert.equal((await pay(owner)).json().url, 'https://checkout.stripe.com/c/test')
+  // Live key (future, needs approval): refused before any request reaches Stripe.
+  Object.assign(env, { STRIPE_SECRET_KEY: 'sk_live_SECRETLIVE', STRIPE_LIVE_ENABLED: 'true' })
+  const before = fetches.length
+  for (const action of ['checkout', 'portal']) assert.deepEqual([(await pay(owner, action)).status, (await pay(owner, action)).json()], [403, { error: 'test_business' }])
+  assert.equal(fetches.length, before, 'no live Stripe call for a test business')
+  // A real business is unaffected.
+  stripe.customer = () => [200, { id: 'cus_beta' }]
+  assert.equal((await pay(await session('owner@beta.example'))).status, 200)
 })
 
 test('metrics and events: real activity drives activation, conversion, show-up, MRR', async () => {

@@ -1,7 +1,7 @@
 // GET /api/dashboard/ads — everything the Ads screen needs for the signed-in business (read-only).
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
-import { getProfile, listCampaigns, adResults, liveLaunchEnabled } from '../../../../server/ads/campaigns.js'
+import { getProfile, listCampaigns, adResults, liveFor } from '../../../../server/ads/campaigns.js'
 import { currentApproval, remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
@@ -25,6 +25,7 @@ export async function onRequestGet({ request, env }) {
       db.prepare('SELECT platform, account_id, account_name, currency, status, extra FROM ad_connections WHERE customer = ?1').bind(id).all(),
       db.prepare("SELECT id, kind, status, prompt, error, created_at FROM ad_creatives WHERE customer = ?1 AND status <> 'rejected' ORDER BY created_at DESC LIMIT 24").bind(id).all(),
     ])
+    const live = await liveFor(env, id) // false for a test business, whatever ADS_LIVE_LAUNCH says
     const connections = Object.fromEntries(conns.results.map((c) => [c.platform, { accountId: c.account_id, accountName: c.account_name, currency: c.currency, status: c.status, testAccount: JSON.parse(c.extra || '{}').testAccount === true }]))
     return json(200, {
       profile,
@@ -41,10 +42,10 @@ export async function onRequestGet({ request, env }) {
         // Google Ads access belongs to the Google Cloud project behind our OAuth client (no developer token).
         google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
         meta: Boolean(env.META_APP_ID && env.META_APP_SECRET),
-        liveLaunch: liveLaunchEnabled(env),
+        liveLaunch: live,
         // Google Ads test account connected: campaigns can be created (paused), resumed and changed
         // there without the live switch. Re-verified with Google before every change.
-        sandbox: !liveLaunchEnabled(env) && connections.google?.status === 'connected' && connections.google.testAccount === true,
+        sandbox: !live && connections.google?.status === 'connected' && connections.google.testAccount === true,
       },
       bookingUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${id}`,
     })

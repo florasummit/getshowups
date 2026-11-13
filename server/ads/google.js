@@ -26,6 +26,7 @@ import { googleFetch, refreshAccessToken } from '../google-oauth.js'
 import { siteOrigin } from '../auth.js'
 import { failure, getConnection, loadToken, markReconnect } from './connections.js'
 import { LIMITS } from './spec.js'
+import { sandboxed, testStatus } from '../testbusiness.js'
 
 export const GOOGLE_ADS_API_VERSION = 'v26'
 export const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords'
@@ -220,8 +221,9 @@ async function testAccountOk(env, token, conn) {
   const about = await describeAccountWithToken(env, token, conn.account_id, login(conn))
   return about.testAccount === true
 }
-async function guardServing(env, token, conn) {
-  if (liveSwitch(env)) return null
+// The live switch never applies to a test business or to a campaign created while it was one.
+async function guardServing(env, token, conn, createdAt) {
+  if (liveSwitch(env) && !sandboxed(await testStatus(env, conn.customer), createdAt)) return null
   return (await testAccountOk(env, token, conn)) ? null : failure('test_account_required')
 }
 
@@ -380,7 +382,7 @@ export async function launchCampaign(env, customerId, campaign, { validateOnly =
     const accountId = conn.account_id
     const loginCustomerId = login(conn)
     if (validateOnly === false) {
-      const blocked = await guardServing(env, token, conn)
+      const blocked = await guardServing(env, token, conn, campaign.createdAt)
       if (blocked) return blocked
     }
     const name = tagged(campaign)
@@ -444,7 +446,7 @@ export async function setStatus(env, customerId, row, status) {
     const res = resources(conn, row, customerId)
     if (!res) return failure('not_launched')
     if (status === 'ENABLED') {
-      const blocked = await guardServing(env, token, conn)
+      const blocked = await guardServing(env, token, conn, row.created_at)
       if (blocked) return blocked
     }
     const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaigns:mutate`, {
@@ -461,7 +463,7 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
     if (!res?.budget) return failure('not_launched')
-    const blocked = await guardServing(env, token, conn)
+    const blocked = await guardServing(env, token, conn, row.created_at)
     if (blocked) return blocked
     const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaignBudgets:mutate`, {
       body: { operations: [{ update: { resourceName: res.budget, amountMicros: String(dailyCents * 10000) }, updateMask: 'amountMicros' }] },

@@ -2,6 +2,7 @@
 // provider (Resend: RESEND_API_KEY + EMAIL_FROM). Without one, messages stay 'pending' and the admin
 // console says so; nothing is ever reported as sent unless the provider accepted it.
 import { track } from './events.js'
+import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
 
 export const emailConfigured = (env) => Boolean(env.RESEND_API_KEY && env.EMAIL_FROM)
 
@@ -15,8 +16,9 @@ const normalize = (v) => {
   const d = s.replace(/\D/g, '')
   return d.length === 10 ? `+1${d}` : d ? `+${d}` : ''
 }
-export function recipientAllowed(env, to) {
-  if (messagesLive(env)) return true
+// testOnly: the sender is a test business (server/testbusiness.js), so MESSAGES_LIVE never applies.
+export function recipientAllowed(env, to, { testOnly = false } = {}) {
+  if (messagesLive(env) && !testOnly) return true
   const target = normalize(to)
   if (!target) return false
   return String(env.MESSAGE_TEST_RECIPIENTS ?? '')
@@ -39,8 +41,8 @@ export async function enqueue(env, { id, to, customer = null, template, subject,
 // Sends one plain-text email through Resend. fromName/replyTo are optional (messages to a business's
 // leads go out as "<Business> via GetShowUps" with replies to the business owner).
 // Returns { ok, providerId } or { ok: false, error } with an allowlisted code.
-export async function sendEmail(env, { id, to, subject, text, fromName, replyTo }) {
-  if (!recipientAllowed(env, to)) return { ok: false, error: 'test_mode', permanent: true }
+export async function sendEmail(env, { id, to, subject, text, fromName, replyTo, testOnly = false }) {
+  if (!recipientAllowed(env, to, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
   const address = String(env.EMAIL_FROM).match(/<([^>]+)>/)?.[1] || String(env.EMAIL_FROM).trim()
   const name = fromName ? String(fromName).replace(/["<>\r\n\\]/g, '').slice(0, 70) : null
   try {
@@ -63,7 +65,7 @@ export async function sendEmail(env, { id, to, subject, text, fromName, replyTo 
   }
 }
 
-const deliver = (env, msg) => sendEmail(env, { id: msg.id, to: msg.to_email, subject: msg.subject, text: msg.body })
+const deliver = (env, msg, testOnly) => sendEmail(env, { id: msg.id, to: msg.to_email, subject: msg.subject, text: msg.body, testOnly })
 
 // Sends pending messages (max 3 attempts each). No-op when no provider is configured. In test mode,
 // messages to non-test recipients stay pending (held, not attempted).
@@ -73,9 +75,12 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
   const { results } = await db.prepare("SELECT * FROM email_outbox WHERE status = 'pending' ORDER BY created_at LIMIT ?1").bind(limit).all()
   let sent = 0
   let failed = 0
+  const tests = results.length ? await testStatuses(env) : new Map()
   for (const msg of results) {
-    if (!recipientAllowed(env, msg.to_email)) continue
-    const r = await deliver(env, msg)
+    // Mail queued by (or while it was) a test business only ever goes to test recipients.
+    const testOnly = msg.customer ? sandboxed(statusIn(tests, msg.customer), msg.created_at) : tests === null
+    if (!recipientAllowed(env, msg.to_email, { testOnly })) continue
+    const r = await deliver(env, msg, testOnly)
     if (r.ok) {
       sent++
       await db.prepare("UPDATE email_outbox SET status = 'sent', sent_at = ?2, attempts = attempts + 1, error = NULL WHERE id = ?1").bind(msg.id, now).run()

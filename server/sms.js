@@ -19,10 +19,10 @@ export function toE164(phone) {
 }
 
 // Returns { ok, providerId } or { ok: false, error, permanent } with an allowlisted error code.
-export async function sendSms(env, { to, text }) {
+export async function sendSms(env, { to, text, testOnly = false }) {
   const number = toE164(to)
   if (!number) return { ok: false, error: 'invalid_phone', permanent: true }
-  if (!recipientAllowed(env, number)) return { ok: false, error: 'test_mode', permanent: true }
+  if (!recipientAllowed(env, number, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
   const form = new URLSearchParams({ To: number, Body: text })
   if (env.TWILIO_MESSAGING_SERVICE_SID) form.set('MessagingServiceSid', env.TWILIO_MESSAGING_SERVICE_SID)
   else form.set('From', env.TWILIO_FROM)

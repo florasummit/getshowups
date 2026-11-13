@@ -20,6 +20,7 @@
 // the pipelines stages[].id field; whether OAuth-app rate limits (100 req/10 s, 200k/day) apply to PITs.
 import { decrypt, encrypt } from './google-oauth.js'
 import { recipientAllowed } from './email.js'
+import { sandboxed, testStatus } from './testbusiness.js'
 
 export const GHL_BASE = 'https://services.leadconnectorhq.com'
 export const GHL_VERSION = 'v3'
@@ -230,7 +231,8 @@ export async function syncLead(env, customerId, leadId, now = Date.now()) {
     if (cfg.workflowId && lead.status !== 'unqualified') {
       const enrollKey = `${leadId}:wf:${cfg.workflowId}`
       if (!(await getLink(db, customerId, 'contact', enrollKey))) {
-        if (!recipientAllowed(env, lead.email) && !recipientAllowed(env, lead.phone)) return { ok: true, skipped: 'test_mode', contactCreated: !hadContact }
+        const testOnly = sandboxed(await testStatus(env, customerId), lead.created_at) // test business: test recipients only
+        if (!recipientAllowed(env, lead.email, { testOnly }) && !recipientAllowed(env, lead.phone, { testOnly })) return { ok: true, skipped: 'test_mode', contactCreated: !hadContact }
         const r = await call(env, cfg.token, 'POST', `/contacts/${encodeURIComponent(contactId)}/workflow/${encodeURIComponent(cfg.workflowId)}`, {})
         if (!r.ok) return fail(r.error)
         await putLink(db, customerId, 'contact', enrollKey, cfg.workflowId, now)
