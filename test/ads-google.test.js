@@ -394,6 +394,24 @@ test('sandbox: only Google Ads TEST accounts can be connected until live launch 
   delete env.ADS_LIVE_LAUNCH
 })
 
+test('calendar isolation: connecting Google Ads never reads, changes or revokes the business Calendar connection', async () => {
+  // The Calendar connection (KV google:<id>, MOCK value) for the same business and the same OAuth client.
+  const CAL = 'calendar-connection-ENCRYPTED-blob'
+  kv.set('google:pools', CAL)
+  kv.set('google:salon', CAL)
+  const r = await connect()
+  assert.match(r.location, /\/dashboard\/ads\?ads=google_connected$/)
+  assert.equal(kv.get('google:pools'), CAL, 'Calendar connection untouched')
+  assert.equal(kv.get('google:salon'), CAL)
+  assert.ok(kv.has('ads:google:pools'), 'Ads token stored under its own key')
+  assert.deepEqual([...kv.keys()].filter((k) => !k.startsWith('ads:') && !k.startsWith('google:')), [])
+  assert.equal(calls.filter((c) => /revoke/.test(c.url)).length, 0, 'nothing revoked')
+  // Launch/resume/budget on the test account touch only the Ads token too.
+  await G.launchCampaign(env, 'pools', campaign(), { validateOnly: false })
+  await G.setStatus(env, 'pools', row(), 'ENABLED')
+  assert.equal(kv.get('google:pools'), CAL)
+})
+
 test('callback: several accounts → needs_account; missing scope or refresh token refused', async () => {
   assert.equal((await connect()).location, '/dashboard/ads?ads=google_connected')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
