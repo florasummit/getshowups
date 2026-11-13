@@ -299,10 +299,46 @@ test('headlines: whole words only, never cut mid-word; old comma-joined profiles
     for (const d of plan.google.descriptions) assert.ok(d.length <= 90, d)
     assert.deepEqual(validateSpec({ platform: 'google', name: 'x', dailyBudgetCents: 900, finalUrl: 'https://x.example', geo: { zips: ['29403'] }, google: plan.google })[0], [], 'the starter draft is valid as-is')
   }
-  assert.deepEqual(plan0Keywords(), ['weekly pool cleaning near me', 'weekly pool cleaning company', 'pool maintenance near me', 'green pool cleanup near me'])
+  assert.deepEqual(plan0Keywords(), ['weekly pool cleaning near me', 'pool maintenance near me', 'green pool cleanup near me'])
   function plan0Keywords() {
     return templatePlan({ name: 'Poolthru LLC' }, legacy).google.keywords.map((k) => k.text)
   }
+})
+
+test('keywords: towns split ("Charleston, Mount Pleasant"), high-intent local + near-me terms; exclusions become negatives', () => {
+  // PoolThru's saved shape: services AND towns each stored as one comma-joined string.
+  const legacy = {
+    ...PROFILE,
+    industry: 'Pool Service',
+    services: ['Weekly pool cleaning, Pool maintenance, Green pool cleanup'],
+    serviceArea: { zips: ['29403'], cities: ['Charleston, Mount Pleasant'] },
+    exclusions: 'Commercial Pools',
+  }
+  const g = templatePlan({ name: 'Poolthru LLC' }, legacy).google
+  const kws = g.keywords.map((k) => k.text)
+  assert.deepEqual(kws, [
+    'weekly pool cleaning charleston',
+    'weekly pool cleaning near me',
+    'pool maintenance charleston',
+    'pool maintenance near me',
+    'green pool cleanup charleston',
+    'green pool cleanup near me',
+    'pool service charleston',
+    'weekly pool cleaning mount pleasant',
+  ])
+  assert.ok(!kws.some((k) => k.includes('charleston mount pleasant')), 'no glued-together towns')
+  assert.ok(g.keywords.every((k) => k.match === 'PHRASE'))
+  assert.ok(g.negativeKeywords.includes('commercial pools') && g.negativeKeywords.includes('jobs'))
+  assert.ok(g.headlines.includes('Serving Charleston'))
+  // New profiles store towns separately.
+  assert.deepEqual(validateProfile({ ...PROFILE, serviceArea: { zips: ['29403'], cities: ['Charleston, Mount Pleasant', 'Summerville'] } }).profile.serviceArea.cities, ['Charleston', 'Mount Pleasant', 'Summerville'])
+  // AI plans: exclusions are added as negatives even when the model forgets; keywords naming them are dropped; duplicates removed.
+  const ai = sanitizePlan(
+    { recommendedChannels: ['google'], google: { keywords: [{ text: 'pool cleaning', match: 'PHRASE' }, { text: 'pool cleaning', match: 'PHRASE' }, { text: 'commercial pools', match: 'PHRASE' }], negativeKeywords: ['jobs'], headlines: ['A b c'], descriptions: ['d'] } },
+    { ...legacy, exclusions: 'Commercial pools, hot tubs' },
+  )
+  assert.deepEqual(ai.google.keywords.map((k) => k.text), ['pool cleaning'])
+  assert.deepEqual(ai.google.negativeKeywords, ['jobs', 'commercial pools', 'hot tubs'])
 })
 
 test('plan: one open draft per platform; repeats and simultaneous clicks never duplicate; existing drafts are kept', async () => {

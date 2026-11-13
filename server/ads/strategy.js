@@ -94,8 +94,10 @@ export function sanitizePlan(raw, profile) {
       keywords: (g.keywords || [])
         .map((k) => ({ text: String(k?.text || '').toLowerCase().replace(/[^a-z0-9 '&.-]/g, '').trim(), match: k?.match === 'EXACT' ? 'EXACT' : 'PHRASE' }))
         .filter((k) => k.text && k.text.length <= 80 && !(excluded && excluded.includes(k.text)))
+        .filter((k, i, all) => all.findIndex((x) => x.text === k.text && x.match === k.match) === i)
         .slice(0, LIMITS.google.keywords),
-      negativeKeywords: [...new Set((g.negativeKeywords || []).map((n) => String(n).toLowerCase().trim()))].filter(Boolean).slice(0, LIMITS.google.negatives),
+      // The owner's exclusions are always negatives, whatever the planner suggested.
+      negativeKeywords: [...new Set([...(g.negativeKeywords || []), ...exclusionTerms(profile)].map((n) => String(n).toLowerCase().trim()))].filter(Boolean).slice(0, LIMITS.google.negatives),
       headlines: keepTexts(g.headlines, LIMITS.google.headline, claims).slice(0, LIMITS.google.headlinesMax),
       descriptions: keepTexts(g.descriptions, LIMITS.google.description, claims).slice(0, LIMITS.google.descriptionsMax),
       ...(/^[A-Za-z0-9-]{1,15}$/.test(g.path1 || '') ? { path1: g.path1 } : {}),
@@ -120,6 +122,14 @@ export function sanitizePlan(raw, profile) {
 // split here (the stored profile is not rewritten).
 export const serviceList = (profile) =>
   [...new Set((profile?.services || []).flatMap((x) => String(x ?? '').split(/[,\n;]+/)).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean))]
+
+// Towns typed as "Charleston, Mount Pleasant" are separate places (older profiles were saved as one string).
+export const cityList = (profile) =>
+  [...new Set((profile?.serviceArea?.cities || []).flatMap((x) => String(x ?? '').split(/[,\n;]+/)).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean))]
+
+// The owner's "work you don't want" becomes negative keywords (as typed, lowercased, keyword-safe characters).
+export const exclusionTerms = (profile) =>
+  [...new Set(String(profile?.exclusions || '').split(/[,\n;]+/).map((x) => x.toLowerCase().replace(/[^a-z0-9 '&.-]/g, ' ').replace(/\s+/g, ' ').trim()).filter((x) => x.length >= 3 && x.length <= 80))]
 
 // Fits ad text into `max` characters without cutting a word in half: too-long text is shortened at a word
 // boundary and loses a dangling connector or punctuation ("Pool repair and" → "Pool repair"). Returns null
@@ -157,19 +167,23 @@ const uniqueFit = (list, max, limit) => {
 export function templatePlan(customer, profile) {
   const services = serviceList(profile)
   const service = (services[0] || profile.industry || 'service').toLowerCase()
-  const city = profile.serviceArea.cities?.[0] || ''
-  const local = city ? ` ${city.toLowerCase()}` : ' near me'
+  const cities = cityList(profile)
+  const city = cities[0] || ''
+  const near = city.toLowerCase()
+  // High-intent searches: each service in the main town and "near me", the trade in town, the main service in a second town.
+  const terms = (services.length ? services : [service]).slice(0, 5).map((x) => x.toLowerCase())
+  const keywords = [
+    ...terms.flatMap((t) => [...(near ? [`${t} ${near}`] : []), `${t} near me`]),
+    ...(near && profile.industry ? [`${profile.industry.toLowerCase()} ${near}`] : []),
+    ...(cities[1] ? [`${terms[0]} ${cities[1].toLowerCase()}`] : []),
+  ]
   return sanitizePlan(
     {
       recommendedChannels: ['google'],
       googleBudgetShare: 1,
       rationale: 'Starter draft without AI: people search for this service when they need it, so search ads come first. Edit before approving.',
       google: {
-        keywords: [
-          { text: `${service}${local}`, match: 'PHRASE' },
-          { text: `${service} company`, match: 'PHRASE' },
-          ...services.slice(1, 6).map((s) => ({ text: `${s.toLowerCase()}${local}`, match: 'PHRASE' })),
-        ],
+        keywords: keywords.map((text) => ({ text, match: 'PHRASE' })),
         negativeKeywords: ['jobs', 'job', 'hiring', 'salary', 'diy', 'how to', 'free', 'cheap'],
         // Whole words only: the business name, up to three services, then generic booking lines.
         headlines: uniqueFit(

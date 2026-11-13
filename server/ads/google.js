@@ -328,6 +328,8 @@ export function buildOperations(accountId, campaign, geo) {
           campaignBudget: budget,
           maximizeConversions: {},
           networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+          // Local service: show to people located in (not just searching about) the target ZIP codes.
+          geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' },
           containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
         },
       },

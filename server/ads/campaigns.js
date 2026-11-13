@@ -40,7 +40,7 @@ export function validateProfile(body) {
   if (!services.length) errors.push('services')
   const zips = [...new Set((b.serviceArea?.zips || []).map((z) => String(z).trim()))]
   if (!zips.length || zips.length > 200 || zips.some((z) => !ZIP_RE.test(z))) errors.push('zips')
-  const cities = list(b.serviceArea?.cities, 10, 60)
+  const cities = list(splitServices(b.serviceArea?.cities), 10, 60) // "Charleston, Mount Pleasant" = two towns
   const exclusions = String(b.exclusions ?? '').trim().slice(0, 500)
   const value = b.customerValueCents == null || b.customerValueCents === '' ? null : Number(b.customerValueCents)
   if (value != null && !(Number.isInteger(value) && value >= 0 && value <= 10000000)) errors.push('customerValue')

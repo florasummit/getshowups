@@ -542,6 +542,7 @@ test('launch: validateOnly by default; one atomic mutate with temp ids, PAUSED c
             campaignBudget: `${c}/campaignBudgets/-1`,
             maximizeConversions: {},
             networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+            geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' },
             containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
           },
         },

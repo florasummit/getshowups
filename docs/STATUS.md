@@ -100,7 +100,14 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Ads connection status polish (2026-11-13, branch feature/ads-connection-status, NOT deployed): four states in words +
+- First PoolThru sandbox campaign (2026-11-13): NOT created. The owner approved a $500/month budget and ran Check (no
+  spend), but never approved the campaign itself (draft umfJ…, no approver), and its daily budget ($20) is above the
+  approved ceiling ($16.44/day). Creating it needs the owner to set ≤ $16.44/day and press Approve, then Create. Audit
+  fixes on branch feature/ads-campaign-quality: towns split on commas (keywords were "… charleston mount pleasant"),
+  owner exclusions → negative keywords, near-me/local keywords, campaigns target people located in the ZIPs (PRESENCE).
+  Next missing piece: conversions back to Google (store gclid per lead, a conversion action, upload booked/completed).
+- Ads connection status polish: DEPLOYED 2026-11-13 (1eae80e, deployment a144ea2c).
+- Ads connection status polish (details): four states in words +
   icon (✓ Connected / • Choose an ad account / ! Reconnect required / ○ Not connected); primary button only for Connect
   or Reconnect required, otherwise a muted secondary Reconnect link; "Test mode" badge note + "Test account · no spend"
   badge; duplicate-draft notice neutral (was the red error style), "Google Ads is connected" success in green.
