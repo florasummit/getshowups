@@ -887,6 +887,20 @@
 .campaign-edit {
   margin: 12px 0;
 }
+.campaign-budget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 12px 0;
+}
+.campaign-budget .field {
+  flex: 1 1 180px;
+  margin: 0;
+}
+.campaign-live {
+  margin: 8px 0;
+}
 .campaign-edit summary {
   cursor: pointer;
   font-weight: 600;
@@ -1586,3 +1600,9 @@
 .segmented--wrap button {
   flex: 1 1 auto;
 }
+
+/* Ads: automatic account picker and the collapsed optional section */
+.account-pick .row { gap: 12px; flex-wrap: wrap; }
+.account-pick .chip { margin-left: 8px; }
+.more-options > summary { cursor: pointer; font-weight: 600; }
+.more-options[open] > summary { margin-bottom: 12px; }

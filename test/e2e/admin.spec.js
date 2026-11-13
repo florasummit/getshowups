@@ -21,7 +21,9 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await page.goto('/admin')
   await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText('No billing yet')
+  // The seeded Ads sandbox business has an active (fake) subscription, so MRR comes from that record.
+  // "No billing yet" (no subscriptions at all) is covered in test/operations.test.js.
+  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^\$[\d,]+\.\d{2}$/)
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()
 

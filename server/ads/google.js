@@ -173,6 +173,44 @@ export async function describeAccountWithToken(env, token, accountId, loginCusto
   }
 }
 
+// Every advertiser account this Google sign-in can use, found automatically: the directly accessible
+// accounts plus the client accounts under any accessible manager (customer_client hierarchy, any depth).
+// Manager accounts can't hold campaigns and are left out. `via` = the manager to call through
+// (login-customer-id) or null for direct access; it stays server-side and is never shown to the owner.
+// testAccount is Google's own flag (null when Google didn't say). Read-only. Bounded: ≤10 roots.
+const HIERARCHY =
+  'SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.test_account FROM customer_client LIMIT 500'
+export async function listSelectableAccountsWithToken(env, token) {
+  const roots = await listAccountsWithToken(env, token)
+  if (!roots.ok) return roots
+  const found = new Map()
+  let firstError = null
+  for (const root of roots.accounts.slice(0, 10)) {
+    const r = await call(env, token, 'POST', `/customers/${root}/googleAds:search`, { body: { query: HIERARCHY }, loginCustomerId: root })
+    if (!r.ok) {
+      firstError ||= r
+      continue
+    }
+    for (const x of r.data.results || []) {
+      const c = x.customerClient || {}
+      const id = String(c.id || '')
+      if (!ACCOUNT_RE.test(id) || c.manager === true) continue
+      const direct = id === root
+      const prev = found.get(id)
+      if (prev && (prev.via === null || !direct)) continue // keep direct access, else the first manager seen
+      found.set(id, {
+        id,
+        name: typeof c.descriptiveName === 'string' && c.descriptiveName.trim() ? c.descriptiveName.slice(0, 120) : null,
+        currency: /^[A-Z]{3}$/.test(c.currencyCode || '') ? c.currencyCode : null,
+        testAccount: typeof c.testAccount === 'boolean' ? c.testAccount : null,
+        via: direct ? null : root,
+      })
+    }
+  }
+  if (!found.size && firstError) return firstError
+  return { ok: true, accounts: [...found.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '') || a.id.localeCompare(b.id)) }
+}
+
 // ---------- test-account guard ----------
 // Without the operator switch ADS_LIVE_LAUNCH, every change that could make a campaign serve (create
 // for real, resume, budget change) is allowed ONLY on a Google Ads test account, verified fresh from
@@ -230,15 +268,6 @@ export async function readCampaigns(env, customerId) {
     const campaigns = [...byId.values()].map(({ spendMicros, ...c }) => ({ ...c, spendCents: centsFromMicros(spendMicros), gsuId: c.name.match(/\[gsu:([A-Za-z0-9_-]{1,40})\]$/)?.[1] || null }))
     return { ok: true, testAccount: await testAccountOk(env, token, conn), campaigns }
   })
-}
-
-// True when accountId is a client under the manager loginCustomerId (for accounts reached via an MCC).
-export async function isClientOfManager(env, token, managerId, accountId) {
-  const r = await call(env, token, 'POST', `/customers/${managerId}/googleAds:search`, {
-    body: { query: `SELECT customer_client.id FROM customer_client WHERE customer_client.id = ${accountId}` },
-    loginCustomerId: managerId,
-  })
-  return r.ok && (r.data.results || []).some((x) => String(x.customerClient?.id) === accountId)
 }
 
 // ---------- launch ----------

@@ -1,21 +1,29 @@
-// GET  /api/ads/google/accounts — accessible Google Ads customer ids for the signed-in business.
-// POST /api/ads/google/accounts { accountId, loginCustomerId? } — owner picks the account to use.
-// The account must be directly accessible, or a client of an accessible manager (loginCustomerId).
+// GET  /api/ads/google/accounts — the Google Ads accounts the signed-in business can choose, found
+//      automatically (direct + under accessible managers). While live launch is off (sandbox) only
+//      accounts Google flags as TEST accounts are offered. Manager ids never leave the server.
+// POST /api/ads/google/accounts { accountId } — owner picks one; the server works out the manager path.
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { getConnection, markReconnect, upsertConnection } from '../../../../server/ads/connections.js'
-import { accessToken, describeAccountWithToken, isClientOfManager, listAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
+import { accessToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { liveLaunchEnabled } from '../../../../server/ads/campaigns.js'
 
 const STATUS = { reconnect_required: 409, not_approved_for_production: 403, permission_denied: 403, quota_exhausted: 503, transient: 503 }
 const failed = (r) => json(STATUS[r.error] || 502, { error: r.error })
 
-async function listFor(env, customerId) {
+// { ok, token, offered, hidden }: offered = choosable now; hidden = how many non-test accounts were left out.
+async function selectable(env, customerId) {
   const t = await accessToken(env, customerId)
   if (!t.ok) return t
-  const r = await listAccountsWithToken(env, t.token)
-  if (!r.ok && r.reconnect) await markReconnect(env, customerId, 'google')
-  return r.ok ? { ...r, token: t.token } : r
+  const r = await listSelectableAccountsWithToken(env, t.token)
+  if (!r.ok) {
+    if (r.reconnect) await markReconnect(env, customerId, 'google')
+    return r
+  }
+  const live = liveLaunchEnabled(env)
+  const offered = live ? r.accounts : r.accounts.filter((a) => a.testAccount === true)
+  return { ok: true, token: t.token, offered, hidden: r.accounts.length - offered.length, all: r.accounts }
 }
 
 export async function onRequestGet({ request, env }) {
@@ -26,9 +34,15 @@ export async function onRequestGet({ request, env }) {
   const customerId = session.customer.id
   const conn = await getConnection(env, customerId, 'google')
   if (!conn) return json(404, { error: 'not_connected' })
-  const r = await listFor(env, customerId)
+  const r = await selectable(env, customerId)
   if (!r.ok) return failed(r)
-  return json(200, { status: conn.status, selected: conn.account_id || null, accounts: r.accounts.map((id) => ({ id })) })
+  return json(200, {
+    status: conn.status,
+    selected: conn.account_id || null,
+    sandbox: !liveLaunchEnabled(env),
+    accounts: r.offered.map(({ id, name, testAccount }) => ({ id, name, testAccount: testAccount === true })),
+    hidden: r.hidden,
+  })
 }
 
 export async function onRequestPost({ request, env }) {
@@ -44,24 +58,23 @@ export async function onRequestPost({ request, env }) {
     return json(400, { error: 'invalid_json' })
   }
   const accountId = normalizeAccountId(body?.accountId)
-  const loginCustomerId = body?.loginCustomerId == null || body.loginCustomerId === '' ? null : normalizeAccountId(body.loginCustomerId)
-  if (!accountId || (body?.loginCustomerId != null && body.loginCustomerId !== '' && !loginCustomerId)) return json(400, { error: 'invalid_account' })
+  if (!accountId) return json(400, { error: 'invalid_account' })
   if (!(await getConnection(env, customerId, 'google'))) return json(404, { error: 'not_connected' })
 
-  const r = await listFor(env, customerId)
+  const r = await selectable(env, customerId)
   if (!r.ok) return failed(r)
-  if (loginCustomerId) {
-    if (!r.accounts.includes(loginCustomerId) || !(await isClientOfManager(env, r.token, loginCustomerId, accountId))) return json(400, { error: 'account_not_accessible' })
-  } else if (!r.accounts.includes(accountId)) {
-    return json(400, { error: 'account_not_accessible' })
-  }
-  const about = await describeAccountWithToken(env, r.token, accountId, loginCustomerId || undefined)
+  const pick = r.offered.find((a) => a.id === accountId)
+  if (!pick) return json(r.all.some((a) => a.id === accountId) ? 409 : 400, { error: r.all.some((a) => a.id === accountId) ? 'test_account_required' : 'account_not_accessible' })
+  // Re-read the account itself through the same path (Google's flag again, plus name/currency).
+  const about = await describeAccountWithToken(env, r.token, accountId, pick.via || undefined)
+  // Sandbox: until live launch is switched on, only accounts Google flags as TEST accounts can be connected.
+  if (!liveLaunchEnabled(env) && about.testAccount !== true) return json(409, { error: 'test_account_required' })
   await upsertConnection(env, customerId, 'google', {
     accountId,
-    accountName: about.name,
-    currency: about.currency,
+    accountName: about.name || pick.name,
+    currency: about.currency || pick.currency,
     // testAccount: Google's own flag (test accounts never serve ads or spend). Re-checked live before any change.
-    extra: { ...(loginCustomerId ? { loginCustomerId } : {}), testAccount: about.testAccount === true },
+    extra: { ...(pick.via ? { loginCustomerId: pick.via } : {}), testAccount: about.testAccount === true },
     status: 'connected',
   })
   return json(200, { ok: true, accountId, status: 'connected', testAccount: about.testAccount === true })

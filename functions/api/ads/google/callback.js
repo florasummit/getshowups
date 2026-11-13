@@ -6,8 +6,9 @@ import { decrypt, googleApi, googleFetch, missingConfig, readCookie, timingSafeE
 import { cookie, getSession } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { saveToken, upsertConnection } from '../../../../server/ads/connections.js'
-import { ADS_SCOPE, ADS_STATE_COOKIE, ADS_STATE_TTL_SECONDS, adsRedirectUri, describeAccountWithToken, listAccountsWithToken } from '../../../../server/ads/google.js'
+import { ADS_SCOPE, ADS_STATE_COOKIE, ADS_STATE_TTL_SECONDS, adsRedirectUri, describeAccountWithToken, listSelectableAccountsWithToken } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { liveLaunchEnabled } from '../../../../server/ads/campaigns.js'
 
 function redirect(location) {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
@@ -75,15 +76,24 @@ export async function onRequestGet({ request, env }) {
 
   await saveToken(env, 'google', customerId, { refreshToken: tokens.refresh_token, clientId: env.GOOGLE_CLIENT_ID, scope: ADS_SCOPE })
 
-  const listed = await listAccountsWithToken(env, tokens.access_token)
+  // Find every usable account (direct + under managers). Exactly one choosable account → use it;
+  // otherwise the owner picks in the dashboard. Sandbox: only Google Ads TEST accounts are choosable.
+  const listed = await listSelectableAccountsWithToken(env, tokens.access_token)
   if (!listed.ok) {
     await upsertConnection(env, customerId, 'google', { status: 'needs_account' })
     return fail(listed.error)
   }
-  if (listed.accounts.length === 1) {
-    const accountId = listed.accounts[0]
-    const about = await describeAccountWithToken(env, tokens.access_token, accountId)
-    await upsertConnection(env, customerId, 'google', { accountId, accountName: about.name, currency: about.currency, extra: { testAccount: about.testAccount === true }, status: 'connected' })
+  const choosable = liveLaunchEnabled(env) ? listed.accounts : listed.accounts.filter((a) => a.testAccount === true)
+  const only = choosable.length === 1 ? choosable[0] : null
+  const about = only ? await describeAccountWithToken(env, tokens.access_token, only.id, only.via || undefined) : null
+  if (only && (liveLaunchEnabled(env) || about.testAccount === true)) {
+    await upsertConnection(env, customerId, 'google', {
+      accountId: only.id,
+      accountName: about.name || only.name,
+      currency: about.currency || only.currency,
+      extra: { ...(only.via ? { loginCustomerId: only.via } : {}), testAccount: about.testAccount === true },
+      status: 'connected',
+    })
   } else {
     await upsertConnection(env, customerId, 'google', { status: 'needs_account' })
   }

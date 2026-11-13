@@ -67,7 +67,12 @@ function defaultAds(path, body) {
     })
   }
   if (/googleAds:search$/.test(path)) {
-    if (body.query.includes('FROM customer_client')) return reply(200, { results: body.query.endsWith(ACCT2) ? [{ customerClient: { id: ACCT2 } }] : [] })
+    if (body.query.includes('FROM customer_client')) {
+      // Account hierarchy (MOCK): MCC is a manager with test client ACCT2; ACCT is a plain account.
+      const root = path.split('/')[2]
+      if (root === MCC) return reply(200, { results: [{ customerClient: { id: MCC, manager: true, descriptiveName: 'Pools Manager' } }, { customerClient: { id: ACCT2, manager: false, descriptiveName: 'Client Ads', currencyCode: 'USD', testAccount: true } }] })
+      return reply(200, { results: [{ customerClient: { id: root, manager: false, descriptiveName: 'Pools Ads', currencyCode: 'USD', ...(mockTestAccount === null ? {} : { testAccount: mockTestAccount }) } }] })
+    }
     if (body.query.includes('FROM customer ')) return reply(200, { results: [{ customer: { id: ACCT, descriptiveName: 'Pools Ads', currencyCode: 'USD', ...(mockTestAccount === null ? {} : { testAccount: mockTestAccount }) } }] })
     return reply(200, { results: [] })
   }
@@ -318,6 +323,50 @@ test('callback: exchanges with PKCE, stores the refresh token encrypted, single 
   assert.ok(!JSON.stringify(conn).includes(RT))
 })
 
+test('callback: sign-in that only reaches a manager → its one test client is found and auto-selected', async () => {
+  // Like the sandbox setup: the Google login can access the test MANAGER; the test client sits under it.
+  ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${MCC}`] }) : defaultAds(path, body, h))
+  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  const conn = await getConnection(env, 'pools', 'google')
+  assert.deepEqual([conn.status, conn.account_id, conn.extra], ['connected', ACCT2, { loginCustomerId: MCC, testAccount: true }])
+  assert.ok(adsCalls(/googleAds:search$/).every((c) => c.headers.get('login-customer-id') === MCC), 'every read goes through the manager')
+})
+
+test('sandbox: only Google Ads TEST accounts can be connected until live launch is switched on', async () => {
+  // Callback with ONE accessible account that Google does not flag as a test account → not auto-selected.
+  mockTestAccount = false
+  ads = (path, body, h) => (path === '/customers:listAccessibleCustomers' ? reply(200, { resourceNames: [`customers/${ACCT}`] }) : defaultAds(path, body, h))
+  assert.equal((await connect()).location, '/dashboard?ads=google_connected')
+  let conn = await getConnection(env, 'pools', 'google')
+  assert.deepEqual([conn.status, conn.account_id], ['needs_account', null])
+  // Choosing it explicitly is refused too, and nothing is stored.
+  const cookie = await session('owner@pools.example')
+  const pick = (body) => call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body })
+  const refused = await pick({ accountId: ACCT })
+  assert.deepEqual([refused.status, refused.json()], [409, { error: 'test_account_required' }])
+  conn = await getConnection(env, 'pools', 'google')
+  assert.deepEqual([conn.status, conn.account_id], ['needs_account', null])
+  // Unknown flag (lookup failed) is refused the same way (fails closed).
+  mockTestAccount = null
+  assert.equal((await pick({ accountId: ACCT })).json().error, 'test_account_required')
+  // The list offers only test accounts (the non-test one is counted, never shown); managers never appear.
+  mockTestAccount = false
+  ads = defaultAds
+  const offered = (await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json()
+  assert.deepEqual([offered.accounts.map((a) => a.id), offered.hidden, offered.sandbox], [[ACCT2], 1, true])
+  // A test account under a manager is accepted; the server works out the manager path itself.
+  mockTestAccount = true
+  assert.equal((await pick({ accountId: ACCT2 })).json().testAccount, true)
+  assert.equal((await getConnection(env, 'pools', 'google')).extra.loginCustomerId, MCC)
+  assert.equal((await getConnection(env, 'pools', 'google')).account_id, ACCT2)
+  // With the operator's live switch on, a non-test account can be chosen (real accounts need approval).
+  mockTestAccount = false
+  env.ADS_LIVE_LAUNCH = 'true'
+  const live = await pick({ accountId: ACCT })
+  assert.deepEqual([live.status, live.json().testAccount], [200, false])
+  delete env.ADS_LIVE_LAUNCH
+})
+
 test('callback: several accounts → needs_account; missing scope or refresh token refused', async () => {
   assert.equal((await connect()).location, '/dashboard?ads=google_connected')
   assert.equal((await getConnection(env, 'pools', 'google')).status, 'needs_account')
@@ -338,23 +387,32 @@ test('callback: test-access project → connection kept as needs_account with an
 
 // ---------- account selection ----------
 
-test('accounts: list and select only accessible accounts (direct or via a manager); owner + same-origin', async () => {
+test('accounts: found automatically (direct + under managers), select only those; owner + same-origin', async () => {
   await connect()
   const cookie = await session('owner@pools.example')
   const list = await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })
-  assert.deepEqual(list.json(), { status: 'needs_account', selected: null, accounts: [{ id: ACCT }, { id: MCC }] })
+  assert.deepEqual(list.json(), {
+    status: 'needs_account',
+    selected: null,
+    sandbox: true,
+    accounts: [
+      { id: ACCT2, name: 'Client Ads', testAccount: true },
+      { id: ACCT, name: 'Pools Ads', testAccount: true },
+    ],
+    hidden: 0,
+  })
+  assert.ok(!list.text.includes(MCC), 'manager ids never reach the browser')
   assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts')).status, 401)
 
   const post = (body, extra) => call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body, headers: extra })
   assert.equal((await post({ accountId: ACCT }, { Origin: 'https://evil.example' })).status, 403)
   assert.equal((await post({ accountId: '123' })).json().error, 'invalid_account')
-  assert.equal((await post({ accountId: ACCT, loginCustomerId: 'abc' })).json().error, 'invalid_account')
   assert.equal((await post({ accountId: '1111111111' })).json().error, 'account_not_accessible')
-  assert.equal((await post({ accountId: '1111111111', loginCustomerId: MCC })).json().error, 'account_not_accessible')
+  assert.equal((await post({ accountId: MCC })).json().error, 'account_not_accessible', 'a manager account cannot hold campaigns')
 
   const ok = await post({ accountId: '123-456-7890' })
   assert.deepEqual(ok.json(), { ok: true, accountId: ACCT, status: 'connected', testAccount: true })
-  const viaMcc = await post({ accountId: ACCT2, loginCustomerId: MCC })
+  const viaMcc = await post({ accountId: ACCT2, loginCustomerId: ACCT }) // client-sent manager ids are ignored
   assert.equal(viaMcc.status, 200)
   const conn = await getConnection(env, 'pools', 'google')
   assert.equal(conn.account_id, ACCT2)

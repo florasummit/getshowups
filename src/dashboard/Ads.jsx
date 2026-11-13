@@ -6,6 +6,7 @@ import { api } from '../lib/api.js'
 
 const money = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: c % 100 ? 2 : 0 })}`)
 const toCents = (v) => (v === '' || v == null ? null : Math.round(Number(v) * 100))
+const acct = (id) => String(id || '').replace(/^(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3')
 const lines = (t) => String(t || '').split('\n').map((s) => s.trim()).filter(Boolean)
 
 const ERRORS = {
@@ -28,6 +29,11 @@ const ERRORS = {
   ai_declined: 'The planner couldn’t write this plan. Try changing the services.',
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
+  account_not_accessible: 'That account isn’t reachable with this Google sign-in. If it sits under a manager account, choose the manager too.',
+  invalid_account: 'Enter a 10-digit Google Ads account ID (dashes are fine).',
+  invalid_budget: 'Enter a daily budget in dollars.',
+  invalid_status: 'Only a created campaign (running or paused) can change its budget.',
+  not_launched: 'Create the campaign on Google first.',
 }
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
 
@@ -150,7 +156,7 @@ function BudgetCard({ budget, profile, onSaved }) {
   }
   return (
     <section className="card">
-      <h2 className="card-title">Monthly ad budget</h2>
+      <h2 className="card-title">4. Approve your monthly ad budget</h2>
       {budget ? (
         <p>
           Approved: <strong>{money(budget.monthlyCents)}/month</strong> (up to {money(budget.dailyCeilingCents)}/day across all campaigns).
@@ -178,7 +184,59 @@ function BudgetCard({ budget, profile, onSaved }) {
   )
 }
 
-function Connections({ connections, capabilities }) {
+// Choose which Google Ads account to use. Accounts reachable only through a manager need the manager
+// chosen too. While live launch is off, the server only accepts accounts Google flags as test accounts.
+// Choose which Google Ads account to use. The server finds the accounts automatically (including ones
+// under a manager account) and works out how to reach them; while ads are in testing it offers only
+// accounts Google flags as test accounts.
+function GoogleAccountPicker({ onSaved }) {
+  const [list, setList] = useState(null)
+  const [state, setState] = useState({})
+  useEffect(() => {
+    api('/api/ads/google/accounts').then(({ status, data }) => setList(status === 200 ? data : { error: data.error }))
+  }, [])
+  const choose = async (accountId) => {
+    setState({ busy: accountId })
+    const { status, data } = await api('/api/ads/google/accounts', { method: 'POST', body: { accountId } })
+    if (status === 200) {
+      setState({})
+      onSaved()
+    } else setState({ error: errorText(data.error) })
+  }
+  if (!list) return <p className="fine" aria-busy="true">Finding your Google Ads accounts…</p>
+  if (list.error) return <p className="form-error" role="alert">{errorText(list.error)}</p>
+  if (!list.accounts.length)
+    return (
+      <p className="fine" role="status">
+        {list.sandbox
+          ? 'No Google Ads test accounts found for this Google sign-in. While ads are in testing, only test accounts can be used. Reconnect with the Google account that has your test account.'
+          : 'No Google Ads accounts found for this Google sign-in. Reconnect with the Google account that has access to your ad account.'}
+      </p>
+    )
+  return (
+    <div className="stack" role="group" aria-label="Choose a Google Ads account">
+      <p className="fine">Choose the account your ads should run in:</p>
+      <ul className="rows account-pick">
+        {list.accounts.map((a) => (
+          <li key={a.id} className="row">
+            <span>
+              <strong>{a.name || 'Google Ads account'}</strong> <span className="fine">{acct(a.id)}</span>
+              {a.testAccount && <span className="chip">Test account</span>}
+            </span>
+            <button type="button" className="btn btn-quiet" disabled={Boolean(state.busy)} onClick={() => choose(a.id)} aria-label={`Use ${a.name || 'account'} ${acct(a.id)}`}>
+              {state.busy === a.id ? 'Checking with Google…' : 'Use this account'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {list.sandbox && list.hidden > 0 && <p className="fine">Only test accounts are shown while ads are in testing.</p>}
+      {state.error && <p className="form-error" role="alert">{state.error}</p>}
+    </div>
+  )
+}
+
+function Connections({ connections, capabilities, onChange }) {
+  const [picking, setPicking] = useState(false)
   const row = (platform, label) => {
     const c = connections[platform]
     const available = capabilities[platform]
@@ -191,8 +249,21 @@ function Connections({ connections, capabilities }) {
           </p>
           {c?.status === 'connected' && c.testAccount && (
             <p className="fine" data-test-account>
-              Google Ads test account: ads never run and nothing is charged. Results here are test data.
+              Google Ads test account{c.accountId ? ` ${acct(c.accountId)}` : ''}: ads never run and nothing is charged. Results here are test data.
             </p>
+          )}
+          {platform === 'google' && c && (c.status === 'needs_account' || picking) && (
+            <GoogleAccountPicker
+              onSaved={() => {
+                setPicking(false)
+                onChange()
+              }}
+            />
+          )}
+          {platform === 'google' && c?.status === 'connected' && !picking && (
+            <button type="button" className="link-btn" onClick={() => setPicking(true)}>
+              Use a different account
+            </button>
           )}
         </div>
         {available ? (
@@ -207,10 +278,10 @@ function Connections({ connections, capabilities }) {
   }
   return (
     <section className="card">
-      <h2 className="card-title">Ad accounts</h2>
+      <h2 className="card-title">2. Connect your ad account</h2>
       <ul className="rows">
         {row('google', 'Google Ads')}
-        {row('meta', 'Facebook & Instagram')}
+        {(capabilities.meta || connections.meta) && row('meta', 'Facebook & Instagram')}
       </ul>
     </section>
   )
@@ -245,7 +316,7 @@ function MetaPreview({ spec }) {
   )
 }
 
-function CampaignEditor({ c, capabilities, onChange }) {
+function CampaignEditor({ c, capabilities, budgetApproved, onChange }) {
   const [spec, setSpec] = useState(c.spec)
   const [state, setState] = useState({})
   const editable = !c.launched && ['draft', 'approved', 'error'].includes(c.status)
@@ -259,6 +330,15 @@ function CampaignEditor({ c, capabilities, onChange }) {
   const setG = (patch) => set({ google: { ...g, ...patch } })
   const setM = (patch) => set({ meta: { ...m, ...patch } })
 
+  const [daily, setDaily] = useState(c.dailyBudgetCents / 100)
+  const [live, setLive] = useState(null)
+  const checkGoogle = async () => {
+    setLive({ busy: true })
+    const { status, data } = await api('/api/ads/google/campaigns')
+    if (status !== 200) return setLive({ error: errorText(data.error) })
+    const g = data.campaigns.find((x) => x.gsuId === c.id)
+    setLive(g ? { ...g, testAccount: data.testAccount } : { missing: true })
+  }
   const act = async (action, extra = {}) => {
     setState({ busy: action })
     const { status, data } = await api('/api/dashboard/ads/campaign', { method: 'POST', body: { action, id: c.id, ...extra } })
@@ -334,10 +414,45 @@ function CampaignEditor({ c, capabilities, onChange }) {
       )}
       {state.error && <p className="form-error" role="alert">{state.error}</p>}
       {state.note && <p className="fine" role="status">{state.note}</p>}
+      {['draft', 'error'].includes(c.status) && !c.launched && !budgetApproved && <p className="fine">Approve your monthly ad budget (step 4) to approve this campaign.</p>}
+
+      {c.launched && ['paused', 'active'].includes(c.status) && (
+        <form
+          className="campaign-budget"
+          aria-label="Daily budget"
+          onSubmit={(e) => {
+            e.preventDefault()
+            act('budget', { dailyCents: toCents(daily) })
+          }}
+        >
+          <label className="field">
+            <span>Daily budget ($) <em>(now {money(c.dailyBudgetCents)}/day)</em></span>
+            <input type="number" min="1" step="1" value={daily} onChange={(e) => setDaily(e.target.value)} />
+          </label>
+          <button type="submit" className="btn btn-quiet" disabled={!!state.busy || !canServe || toCents(daily) === c.dailyBudgetCents}>
+            Change daily budget{sandbox ? ' (test account)' : ''}
+          </button>
+        </form>
+      )}
+      {c.launched && c.platform === 'google' && (
+        <div className="campaign-live">
+          <button type="button" className="link-btn" disabled={live?.busy} onClick={checkGoogle}>
+            Check on Google
+          </button>
+          {live?.error && <p className="form-error" role="alert">{live.error}</p>}
+          {live?.missing && <p className="fine" role="status">Google didn’t return this campaign.</p>}
+          {live?.status && (
+            <p className="fine" role="status" data-google-live>
+              Google reports: {live.status === 'ENABLED' ? 'running' : live.status === 'PAUSED' ? 'paused' : 'other'} · {money(live.dailyBudgetCents)}/day
+              {live.testAccount ? ' · test account' : ''}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="card-actions">
         {['draft', 'error'].includes(c.status) && !c.launched && (
-          <button type="button" className="btn btn-primary" disabled={!!state.busy} onClick={() => act('approve')}>
+          <button type="button" className="btn btn-primary" disabled={!!state.busy || !budgetApproved} onClick={() => act('approve')} title={budgetApproved ? '' : 'Approve your monthly ad budget first'}>
             Approve
           </button>
         )}
@@ -473,9 +588,11 @@ export default function Ads() {
         <ProfileForm profile={d.profile} onSaved={load} />
       </section>
 
+      {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} onChange={load} />}
+
       {d.profile && (
         <section className="card">
-          <h2 className="card-title">2. Ad plan</h2>
+          <h2 className="card-title">3. Review your campaign</h2>
           <p className="fine">
             {d.capabilities.ai ? 'GetShowUps drafts a plan from your details.' : 'GetShowUps creates a starter draft from your details.'} Drafts are only suggestions; nothing runs
             until you approve it.
@@ -495,17 +612,25 @@ export default function Ads() {
         </section>
       )}
 
-      {d.profile && <BudgetCard budget={d.budget} profile={d.profile} onSaved={load} />}
-      {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} />}
-      {d.profile && <Creatives creatives={d.creatives} quota={d.quota} capabilities={d.capabilities} concepts={plan.result?.imageConcepts} onChange={load} />}
 
       {d.campaigns.length > 0 && (
         <section aria-label="Campaigns" className="stack">
           <h2 className="card-title">Campaigns</h2>
           {d.campaigns.map((c) => (
-            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} onChange={load} />
+            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budgetApproved={Boolean(d.budget)} onChange={load} />
           ))}
         </section>
+      )}
+
+      {d.profile && <BudgetCard budget={d.budget} profile={d.profile} onSaved={load} />}
+      {d.campaigns.some((c) => !c.launched) && (
+        <p className="fine">5. Launch: approve the campaign above, then create it on Google (it starts paused) and start it when you’re ready.</p>
+      )}
+      {d.profile && (d.capabilities.images || d.creatives.length > 0) && (
+        <details className="card more-options">
+          <summary>More options: ad images</summary>
+          <Creatives creatives={d.creatives} quota={d.quota} capabilities={d.capabilities} concepts={plan.result?.imageConcepts} onChange={load} />
+        </details>
       )}
 
       {d.results.actions.length > 0 && (

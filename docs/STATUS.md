@@ -77,8 +77,18 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
 - Per-business flag (2026-11-12): Ads needs ADS_ENABLED=true AND the business id in ADS_BUSINESSES (no wildcard;
   unset = nobody). Applies to every Ads route, both OAuth callbacks, me.features.ads, Overview and onboarding
   readiness. Cron metrics sync / optimizer still act on already-launched campaigns (read + pause only).
-- Single-business pilot still needs (each an approval): deploy PR #1 (migrations: none new); production OAuth client
-  gets the Ads redirect URI https://getshowups.com/api/ads/google/callback and the adwords scope on the consent screen;
+- Sandbox UI (2026-11-12, not deployed): the Ads page follows Your business → Connect your ad account → Review your
+  campaign → Approve your monthly ad budget → Launch (approve → create paused → start). Accounts are found
+  automatically (listAccessibleCustomers + customer_client hierarchy of each accessible manager, managers left out);
+  the owner clicks one; the server works out the manager path (login-customer-id) and never sends manager ids to the
+  browser. One choosable account → auto-selected in the callback. Without ADS_LIVE_LAUNCH only accounts Google flags
+  as test accounts are offered or accepted (others counted, not shown; POST 409 test_account_required). Created
+  campaigns get a daily-budget control and "Check on Google" (live status + budget read-back). Images moved under
+  "More options"; the Meta row is hidden until Meta is configured. Browser test covers connect → choose → approve →
+  create paused → start → pause → budget → read-back against a stateful MOCK Google Ads stand-in.
+- Production OAuth (2026-11-12, owner): Ads callback URI registered on the production Web client (verified by a
+  no-sign-in authorize probe), adwords scope listed, consent screen In production / External, user cap 3/100.
+- Single-business pilot still needs (each an approval): deploy PR #1 (migrations: none new);
   ADS_ENABLED=true + ADS_BUSINESSES=<pilot id>; a test connection first. Real (non-test) accounts additionally need
   Explorer/Basic access on the Cloud project and ADS_LIVE_LAUNCH=true + an owner budget approval before any spend.
 

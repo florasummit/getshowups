@@ -110,6 +110,65 @@ let events = []
 const idToken = (email) =>
   `h.${Buffer.from(JSON.stringify({ iss: 'https://accounts.google.com', aud: CLIENT_ID, sub: `sub-${email}`, email, email_verified: true })).toString('base64url')}.sig`
 
+// ---------- Google Ads stand-in (GOOGLE_ADS_API_MOCK_ORIGIN, test only; MOCK DATA) ----------
+const ADS_ACCOUNTS = {
+  1234567890: { name: 'MOCK Google Ads test account', manager: false },
+  5550000000: { name: 'MOCK test manager', manager: true, clients: ['6660000000', '7770000000'] },
+  6660000000: { name: 'MOCK test client', manager: false },
+  // A NON-test account under the manager: never offered while ads are in testing (sandbox).
+  7770000000: { name: 'MOCK non-test account', manager: false, test: false },
+}
+const adsCampaigns = new Map() // account id → [{ id, name, status, budget, amountMicros }]
+let adsNextId = 900000001
+function adsRoute(path, raw) {
+  if (path === '/v26/customers:listAccessibleCustomers') return [200, { resourceNames: ['customers/1234567890', 'customers/5550000000'] }]
+  if (path === '/v26/geoTargetConstants:suggest') {
+    const names = JSON.parse(raw || '{}').locationNames?.names || []
+    return [200, { geoTargetConstantSuggestions: names.map((n, i) => ({ searchTerm: n, geoTargetConstant: { resourceName: `geoTargetConstants/90${i}`, targetType: 'Postal Code' } })) }]
+  }
+  const m = path.match(/^\/v26\/customers\/(\d{10})\/(googleAds:search|googleAds:searchStream|googleAds:mutate|campaigns:mutate|campaignBudgets:mutate)$/)
+  if (!m) return null
+  const [, acct, op] = m
+  const list = adsCampaigns.get(acct) || []
+  adsCampaigns.set(acct, list)
+  const body = JSON.parse(raw || '{}')
+  const row = (c) => ({ campaign: { resourceName: `customers/${acct}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, campaignBudget: c.budget }, campaignBudget: { amountMicros: c.amountMicros }, metrics: {} })
+  if (op === 'googleAds:search') {
+    const q = body.query || ''
+    const a = ADS_ACCOUNTS[acct]
+    if (q.includes('FROM customer ')) return [200, { results: a ? [{ customer: { id: acct, descriptiveName: a.name, currencyCode: 'USD', testAccount: a.test !== false, manager: a.manager } }] : [] }]
+    if (q.includes('FROM customer_client')) {
+      // Account hierarchy: the account itself plus (for a manager) its clients.
+      const client = (id) => ({ customerClient: { id, descriptiveName: ADS_ACCOUNTS[id].name, currencyCode: 'USD', manager: ADS_ACCOUNTS[id].manager, testAccount: ADS_ACCOUNTS[id].test !== false } })
+      return [200, { results: a ? [acct, ...(a.clients || [])].map(client) : [] }]
+    }
+    const name = q.match(/campaign\.name = '((?:[^'\\]|\\.)*)'/)?.[1]?.replace(/\\(.)/g, '$1')
+    return [200, { results: list.filter((c) => c.name === name).map(row) }]
+  }
+  if (op === 'googleAds:searchStream') return [200, [{ results: list.map(row) }]]
+  if (op === 'googleAds:mutate') {
+    if (body.validateOnly) return [200, {}]
+    const ops = body.mutateOperations || []
+    const budget = ops.find((o) => o.campaignBudgetOperation)?.campaignBudgetOperation.create
+    const camp = ops.find((o) => o.campaignOperation)?.campaignOperation.create
+    const id = String(adsNextId++)
+    const budgetRn = `customers/${acct}/campaignBudgets/${id}`
+    list.push({ id, name: camp.name, status: camp.status, budget: budgetRn, amountMicros: budget.amountMicros })
+    return [200, { mutateOperationResponses: [{ campaignBudgetResult: { resourceName: budgetRn } }, { campaignResult: { resourceName: `customers/${acct}/campaigns/${id}` } }, { adGroupResult: { resourceName: `customers/${acct}/adGroups/${id}` } }, { adGroupAdResult: { resourceName: `customers/${acct}/adGroupAds/${id}~1` } }] }]
+  }
+  const u = body.operations?.[0]?.update || {}
+  if (op === 'campaigns:mutate') {
+    const c = list.find((x) => `customers/${acct}/campaigns/${x.id}` === u.resourceName)
+    if (!c) return [404, { error: { code: 404, status: 'NOT_FOUND' } }]
+    c.status = u.status
+    return [200, { results: [{ resourceName: u.resourceName }] }]
+  }
+  const c = list.find((x) => x.budget === u.resourceName)
+  if (!c) return [404, { error: { code: 404, status: 'NOT_FOUND' } }]
+  c.amountMicros = u.amountMicros
+  return [200, { results: [{ resourceName: u.resourceName }] }]
+}
+
 const send = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(body === undefined ? '' : JSON.stringify(body))
@@ -170,15 +229,11 @@ createServer(async (req, res) => {
     return send(res, 400, { error: 'invalid_grant' })
   }
 
-  // Google Ads API stand-in (GOOGLE_ADS_API_MOCK_ORIGIN). MOCK DATA: one account that reports itself as a
-  // Google Ads TEST account, no campaigns and no metrics. Never shown as real results.
-  if (url.pathname === '/v26/customers:listAccessibleCustomers') return send(res, 200, { resourceNames: ['customers/1234567890'] })
-  if (/^\/v26\/customers\/\d{10}\/googleAds:search$/.test(url.pathname)) {
-    const q = JSON.parse(raw || '{}').query || ''
-    if (q.includes('FROM customer ')) return send(res, 200, { results: [{ customer: { id: '1234567890', descriptiveName: 'MOCK Google Ads test account', currencyCode: 'USD', testAccount: true } }] })
-    return send(res, 200, { results: [] })
-  }
-  if (/^\/v26\/customers\/\d{10}\/googleAds:searchStream$/.test(url.pathname)) return send(res, 200, [{ results: [] }])
+  // Google Ads API stand-in (GOOGLE_ADS_API_MOCK_ORIGIN). MOCK DATA, never shown as real results: the
+  // signed-in Google user reaches a MOCK test client (123-456-7890) directly and a MOCK test manager
+  // (555-000-0000) with one client (666-000-0000). Campaigns live in memory per account; no metrics.
+  const ads = adsRoute(url.pathname, raw)
+  if (ads) return send(res, ads[0], ads[1])
 
   if (url.pathname === '/calendar/v3/freeBusy' && req.method === 'POST') {
     const owner = req.headers.authorization

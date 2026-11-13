@@ -37,9 +37,10 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   const campaign = page.locator('.campaign').first()
   await expect(campaign.getByLabel('Ad preview')).toContainText('Book Online in Minutes')
 
-  // Approval is blocked until a budget is approved; the checkbox is required.
-  await campaign.getByRole('button', { name: 'Approve' }).click()
-  await expect(campaign.getByRole('alert')).toHaveText('Approve a monthly budget first.')
+  // Approval is blocked until a budget is approved (button disabled with a hint; the server refuses too,
+  // see test/ads.test.js); the checkbox is required.
+  await expect(campaign.getByRole('button', { name: 'Approve' })).toBeDisabled()
+  await expect(campaign.getByText('Approve your monthly ad budget (step 4) to approve this campaign.')).toBeVisible()
   const budget = page.locator('.card', { has: page.getByRole('heading', { name: 'Monthly ad budget' }) })
   await budget.getByLabel('Monthly limit ($)').fill('300')
   await expect(budget.getByRole('button', { name: 'Approve budget' })).toBeDisabled()
@@ -67,22 +68,82 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
 })
 
 test('connect Google Ads: a Google Ads TEST account is connected and clearly labelled (mock API)', async ({ page, context }) => {
-  // Google sign-in for Ads and the Google Ads API are local stand-ins (MOCK DATA: one test account, no
+  // Google sign-in for Ads and the Google Ads API are local stand-ins (MOCK DATA: test accounts only, no
   // campaigns, no metrics). Nothing here reaches Google, creates a campaign or spends money.
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
   await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads:owner@e2e.example')
   await page.goto('/dashboard/ads')
-  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Ad accounts' }) })
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
   await accounts.getByRole('link', { name: 'Connect' }).first().click()
   await page.waitForURL(/\/dashboard/)
   await page.goto('/dashboard/ads')
-  await expect(accounts.getByText('Connected: MOCK Google Ads test account')).toBeVisible()
-  await expect(accounts.locator('[data-test-account]')).toHaveText('Google Ads test account: ads never run and nothing is charged. Results here are test data.')
+  // Accounts are found automatically: one direct, one under a manager. Only TEST accounts are offered;
+  // the manager itself and the non-test client are never listed, and no account ids need typing.
+  await expect(accounts.getByText('Choose an ad account')).toBeVisible()
+  const picker = accounts.getByRole('group', { name: 'Choose a Google Ads account' })
+  await expect(picker.getByRole('button', { name: /^Use .* \d{3}-\d{3}-\d{4}$/ })).toHaveCount(2)
+  await expect(picker).toContainText('MOCK Google Ads test account')
+  await expect(picker).toContainText('MOCK test client')
+  await expect(picker).not.toContainText('MOCK test manager')
+  await expect(picker).not.toContainText('555-000-0000')
+  await expect(picker).not.toContainText('MOCK non-test account')
+  await expect(picker.getByText('Only test accounts are shown while ads are in testing.')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: /account ID/i })).toHaveCount(0)
+  await picker.getByRole('button', { name: 'Use MOCK test client 666-000-0000' }).click()
+  await expect(accounts.getByText('Connected: MOCK test client')).toBeVisible()
+  await expect(accounts.locator('[data-test-account]')).toHaveText('Google Ads test account 666-000-0000: ads never run and nothing is charged. Results here are test data.')
   // Reading the account works and is read-only; the Overview labels test-account figures.
   const read = await (await page.request.get('/api/ads/google/campaigns')).json()
   expect(read).toEqual({ testAccount: true, campaigns: [] })
   await page.goto('/dashboard')
   await expect(page.locator('[data-ads-results]')).toContainText('Google Ads test account: no real ads ran')
+})
+
+test('Google Ads sandbox: choose a test account, create paused, start, pause and change the budget (mock API)', async ({ page, context }) => {
+  // MOCK DATA throughout: a local Google Ads stand-in with test accounts only. Nothing reaches Google or spends.
+  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads:owner@e2e-ads.example')
+  await page.goto('/dashboard/ads')
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  await accounts.getByRole('link', { name: 'Connect' }).first().click()
+  await page.waitForURL(/\/dashboard/)
+  await page.goto('/dashboard/ads')
+  const picker = accounts.getByRole('group', { name: 'Choose a Google Ads account' })
+  await picker.getByRole('button', { name: 'Use MOCK Google Ads test account 123-456-7890' }).click()
+  await expect(accounts.locator('[data-test-account]')).toContainText('Google Ads test account 123-456-7890')
+
+  // A draft whose booking link is https (local e2e serves http, so the starter draft cannot be approved here).
+  const saved = await page.evaluate(async () => {
+    const spec = {
+      platform: 'google', name: 'E2E Pool Search', dailyBudgetCents: 900, finalUrl: 'https://e2e-ads.example/book', geo: { zips: ['29403'] },
+      google: { keywords: [{ text: 'pool cleaning', match: 'PHRASE' }], negativeKeywords: ['jobs'], headlines: ['Pool Cleaning Service', 'Book Online in Minutes', 'Local Pool Care'],
+        descriptions: ['Weekly pool cleaning and repair. Pick a time that suits you online.', 'Tell us what you need and book a visit online today.'] },
+    }
+    const r = await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', spec }) })
+    return r.status
+  })
+  expect(saved).toBeLessThan(300)
+  await page.reload()
+  const c = page.locator('.campaign').first()
+  await c.getByRole('button', { name: 'Approve' }).click()
+  await expect(c.locator('.chip')).toHaveText('approved')
+  await c.getByRole('button', { name: 'Create on Google (paused) · test account' }).click()
+  await expect(c.locator('.chip')).toHaveText('Paused')
+
+  await c.getByRole('button', { name: 'Start ads (test account, no spend)' }).click()
+  await expect(c.locator('.chip')).toHaveText('Running')
+  await c.getByRole('button', { name: 'Check on Google' }).click()
+  await expect(c.locator('[data-google-live]')).toHaveText('Google reports: running · $9/day · test account')
+
+  await c.getByRole('button', { name: 'Pause' }).click()
+  await expect(c.locator('.chip')).toHaveText('Paused')
+  const budget = c.getByRole('form', { name: 'Daily budget' })
+  await budget.getByLabel(/Daily budget/).fill('8')
+  await budget.getByRole('button', { name: 'Change daily budget (test account)' }).click()
+  await expect(budget.getByText('(now $8/day)')).toBeVisible()
+  await c.getByRole('button', { name: 'Check on Google' }).click()
+  await expect(c.locator('[data-google-live]')).toHaveText('Google reports: paused · $8/day · test account')
+  await expect(page.getByText('Daily budget set to 800 cents')).toBeVisible()
 })
 
 test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context }) => {
