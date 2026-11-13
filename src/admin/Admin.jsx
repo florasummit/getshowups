@@ -427,6 +427,33 @@ function Plans() {
   )
 }
 
+// One row per business in the platform lists (Customers, Test businesses).
+function CustomerRows({ list, onOpen }) {
+  return (
+    <ul className="rows">
+      {list.map((c) => (
+        <li key={c.id} className="row row--link" onClick={() => onOpen(c.id)}>
+          <div className="row-main">
+            <p className="row-title">
+              {c.name} <span className={`tag ${c.onboarding === 'live' ? 'tag--ok' : ''}`}>{ONBOARDING[c.onboarding]}</span>
+              {c.appointmentMode === 'at_customer' && <span className="tag">On-site</span>}
+              {c.testBusiness && (
+                <span className="tag" data-test-business>
+                  Test
+                </span>
+              )}
+            </p>
+            <p className="row-sub">
+              {c.owners || 'No owner yet'} · {c.booked30} booked / {plural(c.leads30, 'lead')} (30d) · {c.subscription ? c.subscription.status : 'no plan'} · since{' '}
+              {date(c.createdAt)} · {c.source}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function Overview({ me }) {
   const [data, setData] = useState(null)
   const [query, setQuery] = useState('')
@@ -447,6 +474,8 @@ function Overview({ me }) {
   if (selected) return <CustomerDetail id={selected} onBack={() => setSelected(null)} onChanged={load} />
 
   const attention = data.customers.filter((c) => c.attention.length)
+  const real = filtered.filter((c) => !c.testBusiness)
+  const tests = filtered.filter((c) => c.testBusiness)
   return (
     <div className="enter">
       <div className="page-head">
@@ -487,37 +516,29 @@ function Overview({ me }) {
         </section>
       )}
 
-      <section className="card">
+      <section className="card" aria-labelledby="customers-title">
         <div className="page-head">
-          <h2 className="card-title">Customers</h2>
+          <h2 className="card-title" id="customers-title">
+            Customers
+          </h2>
           <input className="search" type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search customers" />
         </div>
-        {filtered.length ? (
-          <ul className="rows">
-            {filtered.map((c) => (
-              <li key={c.id} className="row row--link" onClick={() => setSelected(c.id)}>
-                <div className="row-main">
-                  <p className="row-title">
-                    {c.name} <span className={`tag ${c.onboarding === 'live' ? 'tag--ok' : ''}`}>{ONBOARDING[c.onboarding]}</span>
-                    {c.appointmentMode === 'at_customer' && <span className="tag">On-site</span>}
-                    {c.testBusiness && (
-                      <span className="tag" data-test-business>
-                        Test
-                      </span>
-                    )}
-                  </p>
-                  <p className="row-sub">
-                    {c.owners || 'No owner yet'} · {c.booked30} booked / {plural(c.leads30, 'lead')} (30d) · {c.subscription ? c.subscription.status : 'no plan'} · since{' '}
-                    {date(c.createdAt)} · {c.source}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {real.length ? (
+          <CustomerRows list={real} onOpen={setSelected} />
         ) : (
-          <p className="empty">{data.customers.length ? 'No matches.' : 'No customers yet.'}</p>
+          <p className="empty">{data.customers.some((c) => !c.testBusiness) ? 'No matches.' : 'No customers yet.'}</p>
         )}
       </section>
+
+      {data.customers.some((c) => c.testBusiness) && (
+        <section className="card" aria-labelledby="test-businesses-title">
+          <h2 className="card-title" id="test-businesses-title">
+            Test businesses
+          </h2>
+          <p className="fine">Left out of customer counts and MRR. Never use live ads, messages or billing.</p>
+          {tests.length ? <CustomerRows list={tests} onOpen={setSelected} /> : <p className="empty">No matches.</p>}
+        </section>
+      )}
 
       {me.billingConfigured && <Plans />}
 

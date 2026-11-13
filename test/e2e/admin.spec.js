@@ -23,9 +23,9 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await page.goto('/admin')
   await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
-  // The only subscription belongs to the seeded Ads sandbox business, which is marked as a TEST
-  // business, so it is left out: no real billing yet.
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText('No billing yet')
+  // The seeded Ads sandbox business pays $499/month but is marked as a TEST business, so it is left
+  // out of MRR. (selfserve.spec may add a real $0 subscription in parallel, so don't expect an exact text.)
+  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|\$0\.00)$/)
   await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()
@@ -38,6 +38,50 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   const detail = await (await page.request.get(`/api/platform/customer?id=${fixtures.E2E_CUSTOMER}`)).text()
   expect(detail).not.toContain('pat@example.net')
   expect(detail).not.toContain('555-010-0100')
+})
+
+test('customers and test businesses are listed in separate sections; each business appears exactly once', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto('/admin')
+  const customers = page.getByRole('region', { name: 'Customers', exact: true })
+  const tests = page.getByRole('region', { name: 'Test businesses', exact: true })
+  await expect(customers.getByRole('heading', { name: 'Customers' })).toBeVisible()
+  await expect(tests.getByRole('heading', { name: 'Test businesses' })).toBeVisible()
+  // The seeded test business is only under Test businesses; the real ones only under Customers.
+  await expect(tests.locator('.row--link', { hasText: 'E2E Ads Pools' })).toHaveCount(1)
+  await expect(customers.locator('.row--link', { hasText: 'E2E Ads Pools' })).toHaveCount(0)
+  await expect(customers.locator('.row--link', { hasText: fixtures.E2E_CUSTOMER_NAME })).toHaveCount(1)
+  await expect(tests.locator('.row--link', { hasText: fixtures.E2E_CUSTOMER_NAME })).toHaveCount(0)
+  await expect(customers.locator('[data-test-business]')).toHaveCount(0)
+
+  // Every listed business is in exactly one section, matching the server's flag (one snapshot; other
+  // spec files add businesses in parallel, so compare against the overview fetched after the page).
+  const o = await (await page.request.get('/api/platform/overview')).json()
+  const names = async (region) => (await region.locator('.row--link .row-title').allTextContents()).map((t) => t.trim())
+  const [shownReal, shownTest] = [await names(customers), await names(tests)]
+  for (const c of o.customers.filter((x) => x.testBusiness)) {
+    expect(shownTest.some((t) => t.startsWith(c.name))).toBe(true)
+    expect(shownReal.some((t) => t.startsWith(c.name))).toBe(false)
+  }
+  expect(shownTest.length).toBe(o.customers.filter((x) => x.testBusiness).length)
+  // The Customers stat counts real businesses only (test businesses are excluded server-side).
+  expect(o.metrics.customers.total).toBe(o.customers.filter((x) => !x.testBusiness).length)
+
+  // Phones: both sections fit without sideways scrolling.
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    await expect(tests.locator('.row--link').first()).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `overflow at ${width}`).toBeLessThanOrEqual(0)
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
+
+  // Search filters both sections; an existing detail page still opens from the test section.
+  await page.getByLabel('Search customers').fill('ads pools')
+  await expect(customers.getByText('No matches.')).toBeVisible()
+  await expect(tests.locator('.row--link')).toHaveCount(1)
+  await tests.locator('.row--link', { hasText: 'E2E Ads Pools' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Ads Pools' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Test business' })).toContainText('Marked as a test business')
 })
 
 test('admin marks and unmarks a test business (confirmed, audited); counts follow; PoolThru-like businesses unaffected', async ({ page, context }) => {
@@ -61,7 +105,9 @@ test('admin marks and unmarks a test business (confirmed, audited); counts follo
   const [t1, real1, spare1] = await counted()
   expect([t1, spare1]).toEqual([real1, true])
   await page.goto('/admin')
-  await expect(page.locator('.row--link', { hasText: 'E2E Spare Co' }).first().locator('[data-test-business]')).toBeVisible()
+  // Marked: it moves to the Test businesses section and leaves Customers.
+  await expect(page.getByRole('region', { name: 'Test businesses', exact: true }).locator('.row--link', { hasText: 'E2E Spare Co' })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Customers', exact: true }).locator('.row--link', { hasText: 'E2E Spare Co' })).toHaveCount(0)
   // The primary (PoolThru-like) business is never tagged.
   await expect(page.locator('.row--link', { hasText: fixtures.E2E_CUSTOMER_NAME }).first().locator('[data-test-business]')).toHaveCount(0)
 
@@ -72,6 +118,9 @@ test('admin marks and unmarks a test business (confirmed, audited); counts follo
   await expect(page.locator('.card', { hasText: 'Audit trail' }).getByText('customer.test_unmark')).toBeVisible()
   const [t2, real2, spare2] = await counted()
   expect([t2, spare2]).toEqual([real2, false])
+  await page.goto('/admin')
+  await expect(page.getByRole('region', { name: 'Customers', exact: true }).locator('.row--link', { hasText: 'E2E Spare Co' })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Test businesses', exact: true }).locator('.row--link', { hasText: 'E2E Spare Co' })).toHaveCount(0)
   // Owners can't mark anything.
   const owner = await context.browser().newContext()
   await useSession(owner, fixtures.E2E_SESSION_TOKEN)

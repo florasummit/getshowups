@@ -98,6 +98,11 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   production-only Google sign-in (refused, clear message, recover by reconnecting), server refusal of non-test /
   manager / production / unknown account ids, duplicate create prevention, cross-business isolation, 360px width.
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
+- Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
+  integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
+- Admin console layout (2026-11-13, branch feature/admin-test-businesses-section, NOT deployed): the Customers list
+  shows real businesses only; marked businesses appear only under a separate "Test businesses" section (frontend only,
+  same API/metrics). Admin e2e MRR check made race-safe (selfserve.spec can add a real $0 subscription in parallel).
 - Test-business isolation (2026-11-13, branch feature/test-business-isolation, NOT deployed): migration
   0012_test_businesses.sql (new table only; dry-run on a production copy: applied twice, integrity + FK ok, PoolThru
   identical). Admin marks/unmarks in the console (confirm + audit). Marked: Test tag, out of customer counts / MRR /
