@@ -88,6 +88,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
+  url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)
   testbusiness.js    Admin-marked test businesses (test_businesses): out of metrics; never live Ads/messaging/Stripe
   domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
   onboarding.js      Self-serve signup plan, ordered onboarding steps (derived from data), business profile, readiness
@@ -166,6 +167,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - `GOOGLE_API_MOCK_ORIGIN` is test-only and honored only for http://127.0.0.1:port. Never set it in production.
 - State-changing dashboard routes (POST) must check `isSameOrigin()`; GET routes must be read-only.
 - Validate customer IDs with `CUSTOMER_RE` before any storage lookup.
+- Website URLs typed by owners go through `normalizeWebsiteUrl()` (server/url.js): example.com → https://example.com,
+  explicit http(s) kept, other protocols / credentials / localhost / IPs / private names refused. UI fields use
+  `inputMode="url"` (not `type="url"`, which rejects bare domains). Own-domain hostnames use normalizeHostname().
 - Google scopes are least-privilege (`calendar.events.owned`, `calendar.freebusy`). Adding a scope needs approval.
 - Tests use the fake values in `test/e2e/fixtures.env` and mocked Google. Never real credentials.
 

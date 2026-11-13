@@ -227,10 +227,38 @@ test('routes: auth, same-origin and tenant isolation', async () => {
 })
 
 test('routes: profile validation rejects bad input with field codes', async () => {
-  const r = await call(adsProfile, 'POST', '/x', { cookie: await owner(), body: { ...PROFILE, website: 'http://insecure.example', serviceArea: { zips: ['abc'] }, monthlyBudgetCents: 100 } })
+  const r = await call(adsProfile, 'POST', '/x', { cookie: await owner(), body: { ...PROFILE, website: 'javascript:alert(1)', serviceArea: { zips: ['abc'] }, monthlyBudgetCents: 100 } })
   assert.equal(r.status, 400)
   assert.deepEqual(r.json.fields.sort(), ['monthlyBudget', 'website', 'zips'])
   assert.deepEqual(validateProfile({ ...PROFILE }).errors, undefined)
+})
+
+test('profile website: every business can type example.com / www / http / https; saved normalized; unsafe refused', async () => {
+  const owners = { pools: await owner(), salon: await cookieFor('owner@salon.example') }
+  const cases = [
+    ['pools', 'poolthru.example', 'https://poolthru.example'],
+    ['salon', 'www.salon.example/book?ref=1', 'https://www.salon.example/book?ref=1'],
+    ['pools', 'http://poolthru.example', 'http://poolthru.example'],
+    ['salon', 'https://shop.salon.example', 'https://shop.salon.example'],
+    ['pools', '', ''],
+  ]
+  for (const [biz, input, saved] of cases) {
+    const r = await call(adsProfile, 'POST', '/x', { cookie: owners[biz], body: { ...PROFILE, website: input } })
+    assert.equal(r.status, 200, `${biz} ${input}`)
+    assert.equal(r.json.profile.website, saved)
+    const view = await call(adsIndex, 'GET', '/x', { cookie: owners[biz] })
+    assert.equal(view.json.profile.website, saved, 'stored normalized, per business')
+  }
+  // Each business keeps its own value.
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.salon })).json.profile.website, 'https://shop.salon.example')
+  for (const input of ['javascript:alert(1)', 'ftp://salon.example', 'localhost:8788', 'http://169.254.169.254/', 'https://u:p@salon.example', 'not a url']) {
+    const r = await call(adsProfile, 'POST', '/x', { cookie: owners.salon, body: { ...PROFILE, website: input } })
+    assert.deepEqual([r.status, r.json.fields], [400, ['website']], input)
+  }
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.salon })).json.profile.website, 'https://shop.salon.example', 'a refused save changes nothing')
+  // A value saved before this change (https) is returned exactly as stored.
+  await saveProfile(db, 'pools', validateProfile({ ...PROFILE, website: 'https://poolthru.example' }).profile)
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.profile.website, 'https://poolthru.example')
 })
 
 test('budget: owner must confirm; campaigns cannot be approved above the ceiling; launch is off by default', async () => {

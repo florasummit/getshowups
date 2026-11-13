@@ -145,8 +145,8 @@ function ProfileForm({ profile, onSaved }) {
         </label>
       </div>
       <label className="field">
-        <span>Website <em>(optional, https)</em></span>
-        <input name="website" type="url" defaultValue={p.website} placeholder="https://" />
+        <span>Website <em>(optional)</em></span>
+        <input name="website" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck="false" maxLength={2048} defaultValue={p.website} placeholder="yourbusiness.com" />
       </label>
       <label className="field">
         <span>

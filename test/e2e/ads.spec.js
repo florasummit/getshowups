@@ -32,8 +32,14 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await page.getByLabel('ZIP codes you serve').fill('29403, 29407')
   await page.getByLabel('Typical first job ($)').fill('300')
   await page.getByLabel('Monthly ad budget ($)').fill('600')
+  // Website: a bare address is accepted by the browser and saved with https://; unsafe input is refused.
+  await page.getByLabel(/^Website/).fill('localhost:8788')
+  await page.getByRole('button', { name: 'Save details' }).click()
+  await expect(page.getByText('Check: website')).toBeVisible()
+  await page.getByLabel(/^Website/).fill('www.e2e-pools.example/book?ref=ads')
   await page.getByRole('button', { name: 'Save details' }).click()
   await expect(page.getByText('Saved.')).toBeVisible()
+  expect((await (await page.request.get('/api/dashboard/ads')).json()).profile.website).toBe('https://www.e2e-pools.example/book?ref=ads')
 
   await page.getByRole('button', { name: 'Draft my plan' }).click()
   await expect(page.getByText('Starter draft (AI planning is not switched on).')).toBeVisible()

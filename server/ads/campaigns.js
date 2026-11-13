@@ -6,6 +6,7 @@ import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
 import { stripeConfigured, getSubscription } from '../stripe.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
+import { normalizeWebsiteUrl } from '../url.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -24,13 +25,12 @@ const list = (v, max, len) => (Array.isArray(v) ? [...new Set(v.map((x) => Strin
 export function validateProfile(body) {
   const b = body && typeof body === 'object' ? body : {}
   const errors = []
-  const website = String(b.website ?? '').trim()
+  // Optional. example.com → https://example.com; an explicit http(s):// is kept (server/url.js).
+  let website = String(b.website ?? '').trim()
   if (website) {
-    try {
-      if (new URL(website).protocol !== 'https:') errors.push('website')
-    } catch {
-      errors.push('website')
-    }
+    const [bad, url] = normalizeWebsiteUrl(website)
+    if (bad) errors.push('website')
+    else website = url
   }
   const industry = String(b.industry ?? '').trim().slice(0, 80)
   if (!industry) errors.push('industry')

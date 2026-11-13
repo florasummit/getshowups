@@ -100,6 +100,10 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
+- Website URL input (2026-11-13, branch feature/url-normalization, NOT deployed): server/url.js normalizeWebsiteUrl()
+  for every business; Ads profile website accepts example.com / www / http / https (https default), refuses unsafe.
+- PoolThru Ads sandbox: DEPLOYED 2026-11-13 (c46662a, deployment 8b69546f; ADS_BUSINESSES = gsu-stripe-test-pools,
+  poolthru-llc). Owner connect (step 6) pending.
 - PoolThru Ads sandbox prep (2026-11-13, branch feature/ads-sandbox-pilot, NOT deployed): sandbox launch/resume on a
   verified Google Ads test account no longer requires a GetShowUps subscription (pilots are never billed); live keeps
   the rule. Enabling PoolThru = add poolthru-llc to ADS_BUSINESSES (secret) + redeploy (approval). PoolThru stays a
