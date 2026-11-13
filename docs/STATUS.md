@@ -100,7 +100,11 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Campaign review (2026-11-13, branch feature/campaign-review, NOT deployed). Root causes found in PoolThru's data:
+- Ads connection status polish (2026-11-13, branch feature/ads-connection-status, NOT deployed): four states in words +
+  icon (✓ Connected / • Choose an ad account / ! Reconnect required / ○ Not connected); primary button only for Connect
+  or Reconnect required, otherwise a muted secondary Reconnect link; "Test mode" badge note + "Test account · no spend"
+  badge; duplicate-draft notice neutral (was the red error style), "Google Ads is connected" success in green.
+- Campaign review: DEPLOYED 2026-11-13 (f95717e, deployment c2e89690). Root causes found in PoolThru's data:
   services saved as one comma-joined item → template headline cut to "Weekly pool cleaning, Pool mai"; two identical
   drafts 12.5 s apart = "Draft my plan" clicked twice (no guard). Launch was already duplicate-safe (atomic claim +
   tagged-name lookup on Google). Fix: services split on commas/newlines; whole-word headlines; one open draft per

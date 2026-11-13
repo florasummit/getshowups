@@ -255,14 +255,13 @@ function GoogleAdsAccount({ c, onChange }) {
     return (
       <div className="stack" data-ads-account>
         <p className="account-selected">
-          <span aria-hidden="true">✓</span> Ad account: <strong>{c.accountName || 'Google Ads account'}</strong> <span className="fine">{acct(selected)}</span>
-          {c.testAccount && <span className="chip">Test account</span>}
+          <strong>{c.accountName || 'Google Ads account'}</strong> <span className="fine">{acct(selected)}</span>
+          {c.testAccount && (
+            <span className="badge badge--test" data-test-account title="Google Ads test account: ads never show and nothing is charged.">
+              Test account · no spend
+            </span>
+          )}
         </p>
-        {c.testAccount && (
-          <p className="fine" data-test-account>
-            Google Ads test account: ads never run and nothing is charged. Results here are test data.
-          </p>
-        )}
         {others.length > 0 && (
           <button type="button" className="link-btn" onClick={() => setChanging(true)}>
             Change account
@@ -334,26 +333,50 @@ function GoogleAdsAccount({ c, onChange }) {
   )
 }
 
+// One status per connection, always as words plus an icon (never color alone).
+const CONN = {
+  connected: { icon: '✓', text: 'Connected', tone: 'ok' },
+  needs_account: { icon: '•', text: 'Choose an ad account', tone: 'info' },
+  reconnect_required: { icon: '!', text: 'Reconnect required', tone: 'warn' },
+  none: { icon: '○', text: 'Not connected', tone: 'off' },
+}
+const connState = (c) => (!c ? 'none' : c.status === 'reconnect_required' ? 'reconnect_required' : c.status === 'connected' ? 'connected' : 'needs_account')
+
 function Connections({ connections, capabilities, onChange }) {
   const row = (platform, label) => {
     const c = connections[platform]
     const available = capabilities[platform]
-    const expired = c?.status === 'reconnect_required'
+    const state = connState(c)
+    const s = CONN[state]
+    const start = `/api/ads/${platform}/start`
+    const attention = state === 'none' || state === 'reconnect_required'
     return (
-      <li key={platform} className="row">
-        <div>
+      <li key={platform} className="row conn-row">
+        <div className="conn-main">
           <strong>{label}</strong>
-          <p className="fine" data-google-signin={platform === 'google' ? (c ? (expired ? 'expired' : 'ok') : 'none') : undefined}>
-            {!c ? 'Not connected' : expired ? 'Sign-in expired. Click Reconnect; your campaigns stay as they are.' : platform === 'google' ? 'Signed in with Google' : c.status === 'connected' ? `Connected${c.accountName ? `: ${c.accountName}` : ''}` : 'Choose an ad account'}
+          <p className={`conn-status conn-status--${s.tone}`} data-conn-status={state} data-platform={platform}>
+            <span className="conn-icon" aria-hidden="true">
+              {s.icon}
+            </span>
+            {s.text}
           </p>
-          {platform === 'google' && c && !expired && <GoogleAdsAccount c={c} onChange={onChange} />}
+          {state === 'reconnect_required' && <p className="fine">The sign-in expired. Your campaigns stay as they are.</p>}
+          {platform === 'google' && (state === 'connected' || state === 'needs_account') && <GoogleAdsAccount c={c} onChange={onChange} />}
+          {platform === 'meta' && state === 'connected' && c.accountName && <p className="account-selected">{c.accountName}</p>}
+          {available && !attention && (
+            <a className="link-btn conn-secondary" href={start}>
+              Reconnect
+            </a>
+          )}
         </div>
-        {available ? (
-          <a className={`btn ${!c || expired ? 'btn-primary' : 'btn-quiet'}`} href={`/api/ads/${platform}/start`}>
-            {c ? 'Reconnect' : 'Connect'}
-          </a>
-        ) : (
+        {!available ? (
           <span className="fine">Coming soon</span>
+        ) : (
+          attention && (
+            <a className="btn btn-primary" href={start}>
+              {state === 'none' ? 'Connect' : 'Reconnect'}
+            </a>
+          )
         )}
       </li>
     )
@@ -844,8 +867,8 @@ export default function Ads() {
     <div className="enter">
       <h1 className="title">Ads</h1>
       {returned?.ok && (
-        <p className="notice" role="status">
-          {returned.ok}
+        <p className="notice-ok" role="status">
+          <span aria-hidden="true">✓</span> {returned.ok}
         </p>
       )}
       {returned?.error && (
@@ -854,8 +877,9 @@ export default function Ads() {
         </p>
       )}
       {!d.capabilities.liveLaunch && (
-        <p className="fine" data-testing-mode>
-          Testing mode: only Google Ads test accounts can be connected. Test campaigns never show to anyone and nothing is ever charged.
+        <p className="mode-note" data-testing-mode>
+          <span className="badge badge--test">Test mode</span>
+          <span>Only Google Ads test accounts. Test campaigns never show ads, and nothing is ever charged.</span>
         </p>
       )}
       {anyLaunched && <Results r={d.results} />}
@@ -882,8 +906,8 @@ export default function Ads() {
               </button>
             </>
           ) : openGoogle.length > 1 ? (
-            <p className="notice" role="status" data-duplicate-drafts>
-              You have {openGoogle.length} Google Search drafts. Keep the one you want and remove the others.
+            <p className="notice-info" role="status" data-duplicate-drafts>
+              Tidy up: you have {openGoogle.length} Google Search drafts. Keep the one you want and remove the others.
             </p>
           ) : null}
           {plan.error && <p className="form-error" role="alert">{plan.error}</p>}

@@ -236,6 +236,8 @@ createServer(async (req, res) => {
     // One calendar per connected Google account: the access token is derived from the refresh token.
     // A Google sign-in that reaches only REAL (production) Google Ads accounts keeps a recognisable token.
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
+    // ads-revoked: the sign-in worked once, then Google rejects the stored refresh token (expired/revoked access).
+    if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-revoked-')) return send(res, 400, { error: 'invalid_grant' })
     const variant = String(p.get('refresh_token')).match(/^mock-ads-(one|flaky)-refresh-/)?.[1]
     if (p.get('grant_type') === 'refresh_token' && variant) return send(res, 200, { access_token: `mock-ads-${variant}-access`, expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     if (p.get('grant_type') === 'refresh_token') return send(res, 200, { access_token: `mock-access-${createHmac('sha256', 'cal').update(String(p.get('refresh_token'))).digest('hex').slice(0, 16)}`, expires_in: 3600, scope: SCOPE })
@@ -243,6 +245,7 @@ createServer(async (req, res) => {
     if (kind === 'login') return send(res, 200, { access_token: 'mock-login', id_token: idToken(email), scope: 'openid email' })
     if (kind === 'connect') return send(res, 200, { access_token: 'mock-access-token', refresh_token: `mock-refresh-${email}`, id_token: idToken(email), scope: SCOPE })
     if (kind === 'ads-prod') return send(res, 200, { access_token: 'mock-ads-prod-access', refresh_token: `mock-ads-prod-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
+    if (kind === 'ads-revoked') return send(res, 200, { access_token: 'mock-ads-revoked-access', refresh_token: `mock-ads-revoked-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads-one' || kind === 'ads-flaky') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     return send(res, 400, { error: 'invalid_grant' })
