@@ -174,6 +174,18 @@ export async function describeAccountWithToken(env, token, accountId, loginCusto
   }
 }
 
+// Whether Google can bill this account (read-only, best effort). Ad payments are set up and collected by Google in
+// Google Ads; GetShowUps never sees payment details. 'ready' | 'pending' | 'missing' | 'unknown' (couldn't read:
+// e.g. our API access level doesn't allow billing reads).
+export async function billingStatusWithToken(env, token, accountId, loginCustomerId) {
+  const r = await call(env, token, 'POST', `/customers/${accountId}/googleAds:search`, { body: { query: 'SELECT billing_setup.status FROM billing_setup' }, loginCustomerId })
+  if (!r.ok) return 'unknown'
+  const states = (r.data.results || []).map((x) => x.billingSetup?.status)
+  if (states.some((x) => x === 'APPROVED' || x === 'APPROVED_HELD')) return 'ready'
+  if (states.includes('PENDING')) return 'pending'
+  return 'missing'
+}
+
 // Every advertiser account this Google sign-in can use, found automatically: the directly accessible
 // accounts plus the client accounts under any accessible manager (customer_client hierarchy, any depth).
 // Manager accounts can't hold campaigns and are left out. `via` = the manager to call through

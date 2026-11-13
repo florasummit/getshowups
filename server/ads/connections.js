@@ -8,6 +8,14 @@ export async function saveToken(env, platform, customer, token) {
   await env.GOOGLE_TOKENS.put(key(platform, customer), await encrypt(env, JSON.stringify({ ...token, savedAt: Date.now() })))
 }
 
+// Owner disconnect: forget our stored access. Never revokes at Google: the same Google grant may also power the
+// business's Calendar connection (one grant per Google account + OAuth client); the owner can remove access in
+// their Google Account.
+export async function forgetConnection(env, platform, customer) {
+  await env.GOOGLE_TOKENS.delete(key(platform, customer))
+  await env.ONBOARDING_DB.prepare('DELETE FROM ad_connections WHERE customer = ?1 AND platform = ?2').bind(customer, platform).run()
+}
+
 export async function loadToken(env, platform, customer) {
   const raw = await env.GOOGLE_TOKENS.get(key(platform, customer))
   if (!raw) return null

@@ -100,7 +100,10 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Google Ads verification + safety + compliance gate (2026-11-13, branch feature/ads-verify-safety): read-back of created
+- Google Ads connection management (2026-11-13, branch feature/ads-connection-management): Disconnect (pause-first or
+  leave-running, honest notice, no revoke), guided setup when a sign-in has no Ads account, payment status from Google,
+  in-app data-use disclosure, privacy policy now describes Google Ads use.
+- Google Ads verification + safety + compliance gate: DEPLOYED 2026-11-13 (60e94fe, deployment 0e4a154a): read-back of created
   campaigns (after creation + daily), Google state reconciliation, account-switch approval reset, lower-budget
   enforcement on running campaigns, Maximize clicks bidding, accurate charging wording, optimizer recommend-only by
   default (policy). docs/GOOGLE_ADS_COMPLIANCE.md: verified Google facts + our Test-level status + launch blockers.

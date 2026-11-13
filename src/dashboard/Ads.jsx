@@ -36,6 +36,7 @@ const ERRORS = {
   draft_exists: 'You already have a draft. Edit it below, or remove it to start over.',
   account_changed: 'This campaign is in a different Google Ads account than the one connected now. Switch back to manage it, or manage it in Google Ads.',
   removed_on_google: 'This campaign was removed in Google Ads.',
+  campaigns_running: 'A campaign is still running. Choose whether to pause it first.',
   account_not_accessible: 'That account isn’t available with this Google sign-in. Choose one from the list.',
   invalid_account: 'Choose an account from the list.',
   invalid_budget: 'Enter a daily budget in dollars.',
@@ -232,6 +233,30 @@ function BudgetCard({ budget, profile, onSaved }) {
 //      in, no account chosen yet.
 // The server finds the choosable accounts (including ones under a manager); while ads are in testing it offers
 // only accounts Google flags as test accounts, and it re-checks every choice.
+// Ad payments are set up in Google Ads; Google bills the business directly. GetShowUps only shows the state.
+const BILLING_URL = 'https://ads.google.com/aw/billing/summary'
+function Payment({ state }) {
+  const ok = state === 'ready'
+  return (
+    <p className={`conn-status conn-status--${ok ? 'ok' : 'warn'}`} data-billing={state}>
+      <span className="conn-icon" aria-hidden="true">
+        {ok ? '✓' : '!'}
+      </span>
+      <span>
+        {ok ? 'Payment set up in Google Ads' : state === 'pending' ? 'Payment setup is pending in Google Ads' : state === 'missing' ? 'Add a payment method in Google Ads before ads can run' : 'Check that a payment method is set up in Google Ads'}
+        {!ok && (
+          <>
+            {' '}
+            <a href={BILLING_URL} target="_blank" rel="noreferrer">
+              Open billing
+            </a>
+          </>
+        )}
+      </span>
+    </p>
+  )
+}
+
 function GoogleAdsAccount({ c, onChange }) {
   const [list, setList] = useState(null)
   const [attempt, setAttempt] = useState(0)
@@ -279,6 +304,7 @@ function GoogleAdsAccount({ c, onChange }) {
             </span>
           )}
         </p>
+        {list?.billing && list.billing !== 'not_needed' && <Payment state={list.billing} />}
         {others.length > 0 && (
           <button type="button" className="link-btn" onClick={() => setChanging(true)}>
             Change account
@@ -305,13 +331,43 @@ function GoogleAdsAccount({ c, onChange }) {
       </p>
     )
   if (state.busy && !changing && list.accounts.length === 1) return <p className="fine" aria-busy="true">Selecting {name(list.accounts[0])}…</p>
+  const again = (
+    <button
+      type="button"
+      className="btn btn-quiet"
+      onClick={() => {
+        setList(null)
+        setAttempt((n) => n + 1)
+      }}
+    >
+      Check again
+    </button>
+  )
   if (!list.accounts.length)
-    return (
-      <p className="fine" role="status">
-        {list.sandbox
-          ? 'No Google Ads test accounts found for this Google sign-in. While ads are in testing, only test accounts can be used. Reconnect with the Google account that has your test account.'
-          : 'No Google Ads accounts found for this Google sign-in. Reconnect with the Google account that has access to your ad account.'}
-      </p>
+    return list.sandbox ? (
+      <div className="stack" role="status" data-no-accounts="sandbox">
+        <p className="fine">
+          No Google Ads test accounts found for this Google sign-in. While ads are in testing, only test accounts can be used. Reconnect with the Google
+          account that has your test account.
+        </p>
+        {again}
+      </div>
+    ) : (
+      <div className="stack" role="status" data-no-accounts="live">
+        <p>This Google sign-in has no Google Ads account yet. Setting one up takes a few minutes:</p>
+        <ol className="setup-steps">
+          <li>
+            Create a free account at{' '}
+            <a href="https://ads.google.com/" target="_blank" rel="noreferrer">
+              ads.google.com
+            </a>
+            . If Google starts a campaign, choose to set up the account without one (GetShowUps creates the campaign).
+          </li>
+          <li>Add a payment method in Google Ads (Billing). Google charges you directly for ads; GetShowUps never sees your card.</li>
+          <li>Come back here and check again.</li>
+        </ol>
+        {again}
+      </div>
     )
   return (
     <div className="stack" role="group" aria-label="Choose a Google Ads account">
@@ -359,7 +415,53 @@ const CONN = {
 }
 const connState = (c) => (!c ? 'none' : c.status === 'reconnect_required' ? 'reconnect_required' : c.status === 'connected' ? 'connected' : 'needs_account')
 
-function Connections({ connections, capabilities, onChange }) {
+// Disconnect: GetShowUps stops managing and reporting. Campaigns in Google Ads stay there; if any run, the owner
+// chooses to pause them first or leave them running (never implied to have stopped).
+function DisconnectGoogle({ running, onDone, onCancel }) {
+  const [state, setState] = useState({})
+  const go = async (extra) => {
+    setState({ busy: true })
+    const { status, data } = await api('/api/ads/google/disconnect', { method: 'POST', body: { confirm: true, ...extra } })
+    if (status === 200) onDone(data)
+    else setState({ error: data.error === 'pause_failed' ? 'Couldn’t pause a campaign on Google, so nothing was disconnected. Try again, or pause it in Google Ads.' : errorText(data.error) })
+  }
+  return (
+    <div className="confirm" role="group" aria-label="Confirm disconnect">
+      <p>
+        Disconnect Google Ads? GetShowUps stops managing and reporting your ads.{' '}
+        {running ? <strong>{plural(running, 'campaign')} still running in Google Ads will keep running and spending unless paused.</strong> : 'Campaigns already in Google Ads stay there.'}
+      </p>
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      <div className="card-actions">
+        {running ? (
+          <>
+            <button type="button" className="btn btn-primary" disabled={state.busy} onClick={() => go({ pauseRunning: true })}>
+              Pause and disconnect
+            </button>
+            <button type="button" className="btn btn-quiet" disabled={state.busy} onClick={() => go({ leaveRunning: true })}>
+              Disconnect, keep running
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn btn-danger" disabled={state.busy} onClick={() => go({})}>
+            Confirm: disconnect
+          </button>
+        )}
+        <button type="button" className="link-btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Connections({ connections, capabilities, running = 0, onChange }) {
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [done, setDone] = useState(null)
   const row = (platform, label) => {
     const c = connections[platform]
     const available = capabilities[platform]
@@ -380,10 +482,39 @@ function Connections({ connections, capabilities, onChange }) {
           {state === 'reconnect_required' && <p className="fine">The sign-in expired. Your campaigns stay as they are.</p>}
           {platform === 'google' && (state === 'connected' || state === 'needs_account') && <GoogleAdsAccount c={c} onChange={onChange} />}
           {platform === 'meta' && state === 'connected' && c.accountName && <p className="account-selected">{c.accountName}</p>}
-          {available && !attention && (
-            <a className="link-btn conn-secondary" href={start}>
-              Reconnect
-            </a>
+          {available && !attention && !(platform === 'google' && disconnecting) && (
+            <p className="conn-links">
+              <a className="link-btn conn-secondary" href={start}>
+                Reconnect
+              </a>
+              {platform === 'google' && (
+                <button type="button" className="link-btn conn-secondary" onClick={() => setDisconnecting(true)}>
+                  Disconnect
+                </button>
+              )}
+            </p>
+          )}
+          {platform === 'google' && c && disconnecting && (
+            <DisconnectGoogle
+              running={running}
+              onCancel={() => setDisconnecting(false)}
+              onDone={(r) => {
+                setDisconnecting(false)
+                setDone(r)
+                onChange()
+              }}
+            />
+          )}
+          {platform === 'google' && !c && done && (
+            <p className="notice-info" role="status" data-disconnected>
+              Disconnected.{' '}
+              {done.leftRunning ? `${plural(done.leftRunning, 'campaign')} still running in Google Ads. Pause it there if you want it to stop. ` : done.stillInGoogleAds ? 'Your campaigns stay in Google Ads, paused. ' : ''}
+              To remove GetShowUps’ access completely, use your{' '}
+              <a href="https://myaccount.google.com/connections" target="_blank" rel="noreferrer">
+                Google Account’s connections
+              </a>{' '}
+              (this also removes calendar access if it’s the same Google account).
+            </p>
           )}
         </div>
         {!available ? (
@@ -401,6 +532,7 @@ function Connections({ connections, capabilities, onChange }) {
   return (
     <section className="card">
       <h2 className="card-title">2. Connect your ad account</h2>
+      <p className="fine">GetShowUps uses your Google Ads access only to create, change and report on the campaigns you approve here.</p>
       <ul className="rows">
         {row('google', 'Google Ads')}
         {(capabilities.meta || connections.meta) && row('meta', 'Facebook & Instagram')}
@@ -938,7 +1070,7 @@ export default function Ads() {
         <ProfileForm profile={d.profile} onSaved={load} />
       </section>
 
-      {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} onChange={load} />}
+      {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />}
 
       {d.profile && (
         <section className="card" aria-labelledby="review-title">

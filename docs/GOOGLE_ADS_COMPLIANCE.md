@@ -63,5 +63,8 @@ Reviewed 2026-11-13 from official Google pages (links below). **Verified** = sta
 - **Account switching:** switching Google Ads accounts resets approvals on campaigns not yet created. Created campaigns
   are never acted on in another account (`account_changed`).
 - **Lower budgets:** a lower budget approval lowers running campaigns on Google, or pauses them if that fails.
+- **Disassociation:** the owner can disconnect in the dashboard. That deletes our stored access and keeps campaigns in
+  Google Ads under the owner's control. On request we do it within 3 business days (privacy policy).
+- **Disclosure:** the data-use line is in the app (Connect card), and the privacy policy describes Google Ads data use.
 - **Charging wording:** the daily budget is described as an average. Google may spend up to 2× on a day, but at most
   about 30.4× the average in a month.

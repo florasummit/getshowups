@@ -5,7 +5,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { getConnection, markReconnect, upsertConnection } from '../../../../server/ads/connections.js'
-import { accessToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
+import { accessToken, billingStatusWithToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 import { liveFor, logAction } from '../../../../server/ads/campaigns.js'
 
@@ -37,9 +37,13 @@ export async function onRequestGet({ request, env }) {
   if (!conn) return json(404, { error: 'not_connected' })
   const r = await selectable(env, customerId)
   if (!r.ok) return failed(r)
+  // Payment setup of the chosen account (Google bills the business directly). Test accounts never bill.
+  const chosen = conn.status === 'connected' && conn.account_id ? r.offered.find((a) => a.id === conn.account_id) : null
+  const billing = !chosen ? null : chosen.testAccount === true ? 'not_needed' : await billingStatusWithToken(env, r.token, conn.account_id, chosen.via || undefined)
   return json(200, {
     status: conn.status,
     selected: conn.account_id || null,
+    billing,
     sandbox: !r.live,
     accounts: r.offered.map(({ id, name, testAccount }) => ({ id, name, testAccount: testAccount === true })),
     hidden: r.hidden,

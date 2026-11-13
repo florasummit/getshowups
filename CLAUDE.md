@@ -51,7 +51,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      HTML), assets (image upload), export (owner's content + images as JSON)
   api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
   p/[customer]       Public website (server-rendered).  site-assets/[id]: website images.  _middleware.js: domain routing
-  api/ads/google/     Google Ads connect: start, callback, accounts.  api/ads/meta/: start, callback, accounts, webhook (leads)
+  api/ads/google/     Google Ads connect: start, callback, accounts (+ billing status), disconnect.  api/ads/meta/: start, callback, accounts, webhook (leads)
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
@@ -152,6 +152,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   approvals of not-yet-created campaigns; a created campaign is never acted on in another account (account_changed).
   A lower budget approval lowers running campaigns on Google (enforceApproval) or pauses them. Bidding is Maximize
   clicks until conversions reach Google. The daily budget is an average (Google: up to 2×/day, ≤30.4×/month).
+- Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
+  may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
+  stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).
 - Google Ads policy (docs/GOOGLE_ADS_COMPLIANCE.md): no unattended changes. The optimizer only recommends unless
   ADS_AUTOMATION_ENABLED is exactly 'true' (approval). Offline conversions need the Data Manager API (new sensitive
   scope = approval). Our Cloud project is Test-level: real accounts need Explorer access (external, approval).

@@ -363,6 +363,7 @@ export async function verifyLaunched(env, { now = Date.now(), limit = 10 } = {})
   const { results } = await db
     .prepare(
       `SELECT c.* FROM ad_campaigns c WHERE c.platform = 'google' AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
+       AND EXISTS (SELECT 1 FROM ad_connections x WHERE x.customer = c.customer AND x.platform = 'google' AND x.status = 'connected')
        AND coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) < ?1
        ORDER BY coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) LIMIT ?2`,
     )

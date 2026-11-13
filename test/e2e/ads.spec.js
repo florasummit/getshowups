@@ -383,3 +383,38 @@ test('booking page passes ad attribution with the lead', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /Pick a/ })).toBeVisible()
   expect(sent.attribution).toEqual({ utm_source: 'google', utm_medium: 'paid', utm_campaign: 'abc123def456' })
 })
+
+test('Google Ads: disconnect is confirmed and honest; a sign-in without an Ads account gets setup guidance; reconnect restores (mock API)', async ({ page, context }) => {
+  // MOCK DATA: local Google stand-in. Runs last: leaves the business connected again.
+  await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  const status = accounts.locator('[data-conn-status][data-platform="google"]')
+  await expect(status).toHaveText('✓Connected')
+  await expect(accounts.getByText('GetShowUps uses your Google Ads access only to create, change and report on the campaigns you approve here.')).toBeVisible()
+  await accounts.getByRole('button', { name: 'Disconnect' }).click()
+  const confirm = accounts.getByRole('group', { name: 'Confirm disconnect' })
+  await expect(confirm).toContainText('Campaigns already in Google Ads stay there.')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(status).toHaveText('✓Connected')
+  await accounts.getByRole('button', { name: 'Disconnect' }).click()
+  await confirm.getByRole('button', { name: 'Confirm: disconnect' }).click()
+  await expect(status).toHaveText('○Not connected')
+  await expect(accounts.locator('[data-disconnected]')).toContainText('To remove GetShowUps’ access completely')
+  await expect(accounts.locator('[data-disconnected]').getByRole('link', { name: 'Google Account’s connections' })).toHaveAttribute('href', 'https://myaccount.google.com/connections')
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveClass(/btn-primary/)
+
+  // A Google sign-in with no Ads account: clear next steps and a way to check again (test mode wording).
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-none:owner@e2e.example')
+  await accounts.getByRole('link', { name: 'Connect', exact: true }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(accounts.locator('[data-no-accounts="sandbox"]')).toContainText('No Google Ads test accounts found')
+  await expect(accounts.getByRole('button', { name: 'Check again' })).toBeVisible()
+
+  // Reconnect with a sign-in that has one test account → Connected again.
+  await page.unroute('**/api/ads/google/start')
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-one:owner@e2e.example')
+  await accounts.getByRole('link', { name: 'Reconnect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(status).toHaveText('✓Connected')
+})

@@ -15,6 +15,7 @@ import * as G from '../server/ads/google.js'
 import * as start from '../functions/api/ads/google/start.js'
 import * as callback from '../functions/api/ads/google/callback.js'
 import * as accounts from '../functions/api/ads/google/accounts.js'
+import * as disconnect from '../functions/api/ads/google/disconnect.js'
 
 const ORIGIN = 'https://getshowups.com'
 const ADS = 'https://googleads.googleapis.com/v26'
@@ -111,7 +112,7 @@ beforeEach(async () => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k) },
     GOOGLE_ADS_RETRY_MS: '0',
   }
   seed('pools', 'owner@pools.example')
@@ -439,6 +440,7 @@ test('accounts: found automatically (direct + under managers), select only those
   assert.deepEqual(list.json(), {
     status: 'needs_account',
     selected: null,
+    billing: null,
     sandbox: true,
     accounts: [
       { id: ACCT2, name: 'Client Ads', testAccount: true },
@@ -1005,6 +1007,80 @@ test('account switch: approved-but-not-created campaigns go back to draft; creat
   assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'made0000001'").get().status, 'paused')
   assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'salon000001'").get().status, 'approved')
   assert.ok(db.sql.prepare("SELECT 1 FROM ad_actions WHERE kind = 'approval_reset' AND campaign_id = 'appr0000001'").get())
+})
+
+test('disconnect: owner-only and confirmed; running campaigns are paused first or explicitly left running; never revokes; isolated', async () => {
+  await connected()
+  await connected('salon')
+  kv.set('google:pools', 'calendar-connection-ENCRYPTED') // same business's Calendar connection (MOCK)
+  const cookie = await session('owner@pools.example')
+  const now = Date.now()
+  const spec = JSON.stringify({ ...campaign().spec, finalUrl: 'https://pools.example/book' })
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'active', ?, 2500, '222', ?, ?, ?)").run(spec, row().platform_ids, now, now)
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('appr0000001', 'pools', 'google', 'approved', ?, 2500, 'o', ?, ?, ?)").run(spec, now, now, now)
+  const post = (body, headers) => call(disconnect, 'POST', '/api/ads/google/disconnect', { cookie, body, headers })
+  assert.equal((await post({})).status, 400, 'needs confirm')
+  assert.equal((await post({ confirm: true }, { Origin: 'https://evil.example' })).status, 403)
+  assert.equal((await call(disconnect, 'POST', '/api/ads/google/disconnect', { body: { confirm: true } })).status, 401)
+  // A running campaign: the owner must choose; nothing changes yet.
+  assert.deepEqual([(await post({ confirm: true })).status, (await post({ confirm: true })).json()], [409, { error: 'campaigns_running', running: 1 }])
+  assert.ok(kv.has('ads:google:pools'))
+  // Pausing fails on Google → stays connected (nothing half-done).
+  ads = (path, body, h) => (/campaigns:mutate$/.test(path) ? adsError(500, 'INTERNAL', { internalError: 'INTERNAL_ERROR' }) : defaultAds(path, body, h))
+  assert.equal((await post({ confirm: true, pauseRunning: true })).json().error, 'pause_failed')
+  assert.ok(kv.has('ads:google:pools') && (await getConnection(env, 'pools', 'google')))
+  // Pause and disconnect.
+  ads = defaultAds
+  calls = []
+  const r = await post({ confirm: true, pauseRunning: true })
+  assert.deepEqual([r.status, r.json()], [200, { disconnected: true, paused: 1, leftRunning: 0, stillInGoogleAds: 1 }])
+  assert.equal(adsCalls(/campaigns:mutate$/)[0].body.operations[0].update.status, 'PAUSED')
+  assert.equal(kv.has('ads:google:pools'), false, 'our stored Ads access is deleted')
+  assert.equal(await getConnection(env, 'pools', 'google'), null)
+  assert.equal(kv.get('google:pools'), 'calendar-connection-ENCRYPTED', 'Calendar untouched')
+  assert.equal(calls.filter((c) => /revoke/.test(c.url)).length, 0, 'nothing revoked at Google')
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, approved_by FROM ad_campaigns WHERE id = 'appr0000001'").get() }, { status: 'draft', approved_by: null })
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status, 'paused', 'history kept')
+  assert.match(db.sql.prepare("SELECT reason FROM ad_actions WHERE kind = 'disconnect'").get().reason, /paused 1 running campaign first/)
+  // Salon unaffected; disconnected businesses are skipped by the daily read-back.
+  assert.ok(kv.has('ads:google:salon') && (await getConnection(env, 'salon', 'google')))
+  const C = await import('../server/ads/campaigns.js')
+  assert.deepEqual(await C.verifyLaunched(env, { now: now + 2 * 86400000 }), { checked: 0, failed: 0 })
+  assert.equal((await post({ confirm: true })).status, 404, 'already disconnected')
+})
+
+test('disconnect: leaving campaigns running is explicit and reported, never implied stopped', async () => {
+  await connected()
+  const cookie = await session('owner@pools.example')
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'active', '{}', 2500, '222', ?, ?, ?)").run(row().platform_ids, now, now)
+  calls = []
+  const r = await call(disconnect, 'POST', '/api/ads/google/disconnect', { cookie, body: { confirm: true, leaveRunning: true } })
+  assert.deepEqual(r.json(), { disconnected: true, paused: 0, leftRunning: 1, stillInGoogleAds: 1 })
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'no change on Google')
+  assert.match(db.sql.prepare("SELECT reason FROM ad_actions WHERE kind = 'disconnect'").get().reason, /1 left running in Google Ads/)
+})
+
+test('accounts: payment status of the chosen account (Google bills directly); test accounts never need it', async () => {
+  await connected()
+  const cookie = await session('owner@pools.example')
+  // Test account → not needed, and no billing read.
+  calls = []
+  assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json().billing, 'not_needed')
+  assert.equal(adsCalls(/googleAds:search$/).filter((c) => /billing_setup/.test(c.body.query)).length, 0)
+  // Real account (live operation approved): ready / pending / missing / unknown (couldn't read).
+  env.ADS_LIVE_LAUNCH = 'true'
+  mockTestAccount = false
+  for (const [answer, want] of [
+    [reply(200, { results: [{ billingSetup: { status: 'APPROVED' } }] }), 'ready'],
+    [reply(200, { results: [{ billingSetup: { status: 'PENDING' } }] }), 'pending'],
+    [reply(200, { results: [] }), 'missing'],
+    [adsError(403, 'PERMISSION_DENIED', { authorizationError: 'ACTION_NOT_PERMITTED' }), 'unknown'],
+  ]) {
+    ads = (path, body, h) => (/googleAds:search$/.test(path) && /billing_setup/.test(body.query) ? answer.clone() : defaultAds(path, body, h))
+    assert.equal((await call(accounts, 'GET', '/api/ads/google/accounts', { cookie })).json().billing, want)
+  }
+  delete env.ADS_LIVE_LAUNCH
 })
 
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {

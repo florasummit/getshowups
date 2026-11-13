@@ -2,7 +2,7 @@
 // exactly what the product does with Google user data. Keep it in sync with server/ behaviour.
 import '../app.css'
 
-const UPDATED = 'November 9, 2026'
+const UPDATED = 'November 13, 2026'
 
 export default function Privacy() {
   return (
@@ -31,6 +31,13 @@ export default function Privacy() {
           create and manage the appointment events GetShowUps adds to calendars the business owns.
         </li>
         <li>
+          <strong>Google Ads, when a business connects it:</strong> permission to manage the business’s Google Ads
+          account; the names, IDs and currency of the Google Ads accounts that sign-in can use; and, for campaigns
+          GetShowUps creates, their settings, budgets, keywords, ads, review status and performance figures (cost, clicks,
+          impressions and conversions). We never receive or store advertising payment details: Google bills the business
+          directly.
+        </li>
+        <li>
           <strong>People who request an appointment on a booking page:</strong> the name, email address, phone number,
           service request, and ZIP code they enter, and, for businesses that visit their customers, the service address. These are shared with that business so it can serve them, and are
           included in the appointment added to the business’s Google Calendar, which sends you a calendar invitation.
@@ -44,7 +51,9 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
-          contact details, the campaign source of a first visit (for example a utm_source link), one-way hashed IP
+          contact details, the campaign source of a first visit (for example a utm_source link), the ad campaign tags of a
+          booking request that came from an ad (and whether a Google click identifier was present, not its value) so the
+          business can see which ads lead to bookings, one-way hashed IP
           addresses kept briefly to limit abuse, and standard request logs processed by our hosting provider.
         </li>
       </ul>
@@ -70,6 +79,12 @@ export default function Privacy() {
         data, use it for advertising, or use it to train AI models.
       </p>
       <p>
+        For businesses that connect Google Ads, we use that access only to do what the business owner approves in
+        GetShowUps: create the campaigns they approve (always paused until they start them), make the changes they
+        request (start, pause, budget), read those campaigns back to confirm they match what was approved, and report
+        their cost and results to the business. GetShowUps doesn’t change campaigns on its own; it may recommend changes.
+      </p>
+      <p>
         GetShowUps’ use and transfer of information received from Google APIs adheres to the{' '}
         <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
         including the Limited Use requirements.
@@ -87,7 +102,7 @@ export default function Privacy() {
 
       <h2>Storage and security</h2>
       <p>
-        Data is stored with Cloudflare. Google calendar access tokens are encrypted, and access to business data is
+        Data is stored with Cloudflare. Google calendar and Google Ads access tokens are encrypted, and access to business data is
         limited to that business’s signed-in users and to authorized GetShowUps staff for support.
       </p>
 
@@ -103,6 +118,11 @@ export default function Privacy() {
         <li>
           A business can disconnect GetShowUps at any time from its Google Account’s third-party access settings, or by
           contacting us.
+        </li>
+        <li>
+          A business can disconnect Google Ads in GetShowUps (Ads → Disconnect). We then delete our stored Google Ads access
+          and stop managing and reporting the account; campaigns already in Google Ads stay under the business’s control
+          there. We can also do this on request within 3 business days.
         </li>
         <li>
           To access or delete your information, email <a href="mailto:brandon@getshowups.com">brandon@getshowups.com</a>. If
