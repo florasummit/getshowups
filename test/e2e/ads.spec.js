@@ -5,7 +5,10 @@ import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle, useSession } from './helpers.js'
 
-test.describe.configure({ mode: 'serial', timeout: 60_000 })
+// No retries: these tests are one stateful sequence on a database seeded once per run. A retry re-runs
+// the file from the top against the already-changed records (e.g. "Draft my plan" has become "Draft
+// another plan"), so it can never pass and only hides the real failure behind a timeout.
+test.describe.configure({ mode: 'serial', timeout: 60_000, retries: 0 })
 
 test('owner drafts, previews, edits and approves a budget; approval enforces it @mobile', async ({ page, context }, testInfo) => {
   // Each project gets its own seeded business so the flow starts from scratch in both.
@@ -178,9 +181,12 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await expect(c.locator('[data-google-live]')).toHaveText('Google reports: paused · $8/day · test account')
   await expect(page.getByText('Daily budget set to 800 cents')).toBeVisible()
 
-  // Phone width: the created-campaign controls and account row fit without horizontal scrolling.
-  await page.setViewportSize({ width: 360, height: 800 })
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+  // Phones to desktop: the created-campaign controls (longest labels on the page) never widen it.
+  for (const width of [320, 360, 375, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 })
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow, `horizontal overflow at ${width}px`).toBeLessThanOrEqual(0)
+  }
 
   // Tenant isolation: another Ads business sees none of this business's campaigns or connection.
   const other = await browser.newContext()

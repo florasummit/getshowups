@@ -901,6 +901,12 @@
 .campaign-live {
   margin: 8px 0;
 }
+/* Long campaign labels ("Start ads (test account, no spend)") wrap on phones instead of widening the page. */
+.campaign .btn {
+  white-space: normal;
+  max-width: 100%;
+  text-align: center;
+}
 .campaign-edit summary {
   cursor: pointer;
   font-weight: 600;
