@@ -194,6 +194,27 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
 
+## GitHub automation (PRs and CI)
+
+All GitHub calls go through `scripts/gh.sh` (GitHub CLI + the credential git already uses, for one process).
+Never run `gh auth login`, print the token, or put it in a file, URL, or commit. The repo is public.
+
+```
+git push -u origin <feature-branch>                       # never push to main without deploy approval
+scripts/gh.sh pr create --base main --head <branch> --title "…" --body-file <file>   # body ends with the Claude Code line
+scripts/gh.sh pr checks <n> --watch --fail-fast           # CI: "verify" job (lint, unit, build, Functions, Playwright)
+scripts/gh.sh run view <run-id> --log-failed              # read the first failure, fix, push again (CI re-runs on push)
+scripts/gh.sh pr view <n> --json headRefOid,mergeable,statusCheckRollup   # release readiness
+```
+
+- Allowed without asking (when the task asks for PR work): push feature branches, open/update PRs, comment on PRs,
+  watch CI, read logs, push fixes. Still needs approval: merge, push to main (= production deploy), closing others' PRs,
+  deleting branches, repo settings, token changes.
+- Token: fine-grained PAT, repo florasummit/getshowups only. Needed: Contents R/W, Pull requests R/W, Actions read
+  (+ Metadata read, automatic). Not needed: Administration, Secrets, Workflows, Actions write.
+  "Resource not accessible by personal access token" = a permission above is missing; ask the owner, never work around it.
+- CI runs on pull_request and on push to main/release/**. A feature branch without a PR has no CI.
+
 ## Requires explicit human approval
 
 Commit · push · production deploy · `--remote` D1/KV writes · migrations on production ·
