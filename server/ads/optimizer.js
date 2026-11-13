@@ -102,7 +102,13 @@ export async function runOptimizer(env, { pause, now = Date.now(), limit = 50 } 
       const exists = await db.prepare('SELECT 1 AS x FROM ad_actions WHERE id = ?1').bind(d.id).first()
       if (exists) continue
       let status = d.status
-      if (d.kind === 'pause' && d.status === 'applied') {
+      let reason = d.reason
+      if (d.kind === 'pause' && d.status === 'applied' && !pause) {
+        // Automatic changes are off: the owner sees a recommendation and decides.
+        status = 'recommended'
+        reason = `Recommended: pause this campaign. ${d.reason}`
+        summary.recommended++
+      } else if (d.kind === 'pause' && d.status === 'applied') {
         const r = pause ? await pause(env, campaign) : { ok: false }
         if (r.ok) {
           await db.prepare("UPDATE ad_campaigns SET status = 'paused', updated_at = ?2 WHERE id = ?1").bind(campaign.id, now).run()
@@ -114,7 +120,7 @@ export async function runOptimizer(env, { pause, now = Date.now(), limit = 50 } 
       } else summary.recommended++
       await db
         .prepare("INSERT OR IGNORE INTO ad_actions (id, customer, campaign_id, actor, kind, status, reason, details, at) VALUES (?1, ?2, ?3, 'optimizer', ?4, ?5, ?6, ?7, ?8)")
-        .bind(d.id, campaign.customer, campaign.id, d.kind, status, d.reason, JSON.stringify(d.details), now)
+        .bind(d.id, campaign.customer, campaign.id, d.kind, status, reason, JSON.stringify(d.details), now)
         .run()
     }
   }

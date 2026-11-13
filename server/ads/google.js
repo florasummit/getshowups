@@ -326,7 +326,9 @@ export function buildOperations(accountId, campaign, geo) {
           status: 'PAUSED',
           advertisingChannelType: 'SEARCH',
           campaignBudget: budget,
-          maximizeConversions: {},
+          // Maximize clicks within the budget: no conversion data reaches Google yet (see docs/STATUS.md), so
+          // conversion-based bidding would optimize toward nothing. Switching later is a separate owner decision.
+          targetSpend: {},
           networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
           // Local service: show to people located in (not just searching about) the target ZIP codes.
           geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' },
@@ -436,6 +438,8 @@ function resources(conn, row, customerId) {
   if (row?.customer !== undefined && row.customer !== customerId) return null
   const ids = idsOf(row)
   const cust = `customers/${conn.account_id}/`
+  // Created in another Google Ads account (the owner switched accounts): never act on this one by id.
+  if (typeof ids.campaign === 'string' && !ids.campaign.startsWith(cust)) return { otherAccount: true }
   const campaignId = String(row?.platform_campaign_id || row?.platformCampaignId || lastId(ids.campaign) || '')
   if (!/^\d{1,20}$/.test(campaignId)) return null
   const budget = typeof ids.budget === 'string' && ids.budget.startsWith(`${cust}campaignBudgets/`) ? ids.budget : null
@@ -446,6 +450,7 @@ export async function setStatus(env, customerId, row, status) {
   if (!['PAUSED', 'ENABLED'].includes(status)) return failure('invalid_request')
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
+    if (res?.otherAccount) return failure('account_changed')
     if (!res) return failure('not_launched')
     if (status === 'ENABLED') {
       const blocked = await guardServing(env, token, conn, row.created_at)
@@ -464,6 +469,7 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
   if (!Number.isInteger(dailyCents) || dailyCents < LIMITS.minDailyBudgetCents) return failure('invalid_request')
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
+    if (res?.otherAccount) return failure('account_changed')
     if (!res?.budget) return failure('not_launched')
     const blocked = await guardServing(env, token, conn, row.created_at)
     if (blocked) return blocked
@@ -475,6 +481,72 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
   })
 }
 
+// ---------- read-back verification ----------
+
+const rowsOf = (data) => (Array.isArray(data) ? data : [data]).flatMap((b) => b?.results || [])
+const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
+
+// Reads one created campaign back from Google (read-only) and compares it with the approved spec:
+// paused/enabled status, daily budget, Search-only network, location targeting (people in the area),
+// locations, negative keywords, one ad group, keywords + match types, the responsive search ad and its
+// final URL. Returns { ok, google: {status, ...}, checks: [{ name, ok }] }; no tokens or account data.
+export async function verifyCampaign(env, customerId, row) {
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = resources(conn, row, customerId)
+    if (res?.otherAccount) return failure('account_changed')
+    if (!res) return failure('not_launched')
+    const spec = typeof row.spec === 'string' ? JSON.parse(row.spec) : row.spec
+    const q = (query) => call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    const id = res.campaignId
+    const [c, crit, kw, ads] = await Promise.all([
+      q(
+        `SELECT campaign.id, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.network_settings.target_google_search, campaign.network_settings.target_search_network, campaign.network_settings.target_content_network, campaign.geo_target_type_setting.positive_geo_target_type, campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${id}`,
+      ),
+      q(`SELECT campaign_criterion.type, campaign_criterion.negative, campaign_criterion.location.geo_target_constant, campaign_criterion.keyword.text FROM campaign_criterion WHERE campaign.id = ${id}`),
+      q(`SELECT ad_group.id, ad_group.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE campaign.id = ${id} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE`),
+      q(`SELECT ad_group.id, ad_group_ad.status, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.policy_summary.approval_status FROM ad_group_ad WHERE campaign.id = ${id}`),
+    ])
+    for (const r of [c, crit, kw, ads]) if (!r.ok) return r
+    const camp = rowsOf(c.data)[0]
+    if (!camp) return { ok: true, found: false, google: null, checks: [{ name: 'campaign exists on Google', ok: false }] }
+    const cr = rowsOf(crit.data).map((x) => x.campaignCriterion || {})
+    const locations = cr.filter((x) => x.type === 'LOCATION' && !x.negative).length
+    const negatives = cr.filter((x) => x.type === 'KEYWORD' && x.negative).map((x) => String(x.keyword?.text || '').toLowerCase())
+    const kws = rowsOf(kw.data)
+    const keywords = kws.map((x) => `${String(x.adGroupCriterion?.keyword?.text || '').toLowerCase()}|${x.adGroupCriterion?.keyword?.matchType}`)
+    const adGroups = new Set([...kws, ...rowsOf(ads.data)].map((x) => String(x.adGroup?.id || '')).filter(Boolean))
+    const ad = rowsOf(ads.data)[0]?.adGroupAd
+    const rsa = ad?.ad?.responsiveSearchAd || {}
+    const texts = (list) => (list || []).map((t) => t.text)
+    const g = spec.google || {}
+    const google = {
+      status: camp.campaign?.status || null,
+      dailyBudgetCents: camp.campaignBudget?.amountMicros != null ? centsFromMicros(camp.campaignBudget.amountMicros) : null,
+      bidding: camp.campaign?.biddingStrategyType || null,
+      adGroups: adGroups.size,
+      keywords: keywords.length,
+      negatives: negatives.length,
+      locations,
+      ads: rowsOf(ads.data).length,
+      adReview: ad?.policySummary?.approvalStatus || null,
+    }
+    const checks = [
+      { name: 'campaign exists on Google', ok: true },
+      { name: 'status matches', ok: google.status === (row.status === 'active' ? 'ENABLED' : 'PAUSED') },
+      { name: 'Search ads only', ok: camp.campaign?.advertisingChannelType === 'SEARCH' && camp.campaign?.networkSettings?.targetGoogleSearch === true && !camp.campaign?.networkSettings?.targetContentNetwork && !camp.campaign?.networkSettings?.targetSearchNetwork },
+      { name: 'daily budget', ok: google.dailyBudgetCents === row.daily_budget_cents },
+      { name: 'people in your area', ok: camp.campaign?.geoTargetTypeSetting?.positiveGeoTargetType === 'PRESENCE' },
+      { name: 'service area', ok: locations === new Set(spec.geo?.zips || []).size },
+      { name: 'excluded searches', ok: same(negatives, (g.negativeKeywords || []).map((x) => x.toLowerCase())) },
+      { name: 'one ad group', ok: adGroups.size === 1 },
+      { name: 'keywords', ok: same(keywords, (g.keywords || []).map((k) => `${k.text.toLowerCase()}|${k.match}`)) },
+      { name: 'ad text', ok: same(texts(rsa.headlines), g.headlines || []) && same(texts(rsa.descriptions), g.descriptions || []) },
+      { name: 'landing page', ok: (ad?.ad?.finalUrls || [])[0] === spec.finalUrl },
+    ]
+    return { ok: true, found: true, google, checks }
+  })
+}
+
 const YMD = /^\d{4}-\d{2}-\d{2}$/
 
 // Daily rows for one campaign: money in cents of the account currency (cost_micros / 10,000, rounded).
@@ -482,6 +554,7 @@ export async function fetchDailyMetrics(env, customerId, row, sinceYmd, untilYmd
   if (!YMD.test(sinceYmd) || !YMD.test(untilYmd) || sinceYmd > untilYmd) return failure('invalid_request')
   return withAccount(env, customerId, async (token, conn) => {
     const res = resources(conn, row, customerId)
+    if (res?.otherAccount) return failure('account_changed')
     if (!res) return failure('not_launched')
     const query = `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${res.campaignId} AND segments.date BETWEEN '${sinceYmd}' AND '${untilYmd}'`
     const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })

@@ -1,7 +1,7 @@
 // Campaign service: ad profile, drafts, owner approval, launch (non-spending by default), pause/resume,
 // metrics sync, and the dashboard results summary. Routes stay thin and call these.
 import { randomToken } from '../google-oauth.js'
-import { validateSpec, dailyCeilingCents } from './spec.js'
+import { validateSpec, dailyCeilingCents, LIMITS } from './spec.js'
 import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
 import { stripeConfigured, getSubscription } from '../stripe.js'
@@ -97,7 +97,18 @@ const publicCampaign = (r) => ({
 
 export async function listCampaigns(db, customer) {
   const { results } = await db.prepare("SELECT * FROM ad_campaigns WHERE customer = ?1 AND status <> 'removed' ORDER BY created_at DESC LIMIT 20").bind(customer).all()
-  return results.map(publicCampaign)
+  const { results: checks } = await db
+    .prepare("SELECT campaign_id, status, details, at FROM ad_actions WHERE customer = ?1 AND kind = 'verify' ORDER BY at DESC LIMIT 100")
+    .bind(customer)
+    .all()
+  return results.map((r) => {
+    const v = checks.find((x) => x.campaign_id === r.id)
+    let d = {}
+    try {
+      d = JSON.parse(v?.details || '{}')
+    } catch {}
+    return { ...publicCampaign(r), verification: v ? { ok: v.status === 'applied', at: v.at, failed: d.failed || [], google: d.google || null, error: d.error || null } : null }
+  })
 }
 
 const getRow = (db, customer, id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(id) ? db.prepare('SELECT * FROM ad_campaigns WHERE id = ?1 AND customer = ?2').bind(id, customer).first() : null)
@@ -246,7 +257,14 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     .bind(id, customer.id, r.platformCampaignId || null, ids, now)
     .run()
   await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'launch', reason: 'Created on the platform, paused' }, now)
-  return { ok: true, live: true, status: 'paused' }
+  // Read it straight back from Google (best effort; the daily cron re-checks).
+  let verification = null
+  if (row.platform === 'google') {
+    const fresh = await getRow(db, customer.id, id)
+    const v = await verifyAndRecord(env, fresh, now).catch(() => ({ ok: false, error: 'storage_error' }))
+    verification = v.ok ? { ok: v.failed.length === 0, failed: v.failed } : { ok: false, error: v.error }
+  }
+  return { ok: true, live: true, status: 'paused', verification }
 }
 
 export async function setCampaignStatus(env, customer, id, target, actor, now = Date.now()) {
@@ -298,6 +316,100 @@ export async function setCampaignBudget(env, customer, id, dailyCents, actor, no
   await db.prepare('UPDATE ad_campaigns SET daily_budget_cents = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(id, customer.id, dailyCents, now).run()
   await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'budget', reason: `Daily budget set to ${dailyCents} cents`, details: { dailyCents } }, now)
   return { ok: true, dailyBudgetCents: dailyCents }
+}
+
+// Reads a created campaign back from Google and records the result (ad_actions kind 'verify'); keeps our
+// status in step with Google when the owner changed it in Google Ads (paused/enabled/removed). Read-only on
+// Google. Never raises a budget or resumes anything.
+export async function verifyAndRecord(env, row, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const a = await adapter(row.platform)
+  if (!a?.verifyCampaign) return { ok: false, error: 'platform_unavailable' }
+  const r = await a.verifyCampaign(env, row.customer, row)
+  if (!r.ok) {
+    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'verify', status: 'failed', reason: `Couldn't read the campaign from Google (${r.error})`, details: { error: r.error } }, now)
+    return r
+  }
+  const failed = r.checks.filter((c) => !c.ok).map((c) => c.name)
+  await logAction(
+    db,
+    {
+      customer: row.customer,
+      campaignId: row.id,
+      actor: 'system',
+      kind: 'verify',
+      status: failed.length ? 'failed' : 'applied',
+      reason: failed.length ? `Checked on Google: ${failed.length} difference(s): ${failed.join(', ')}` : `Checked on Google: all ${r.checks.length} checks match`,
+      details: { failed, google: r.google },
+    },
+    now,
+  )
+  // Reconcile: Google is the source of truth for whether the campaign runs.
+  const g = r.google?.status
+  const next = !r.found || g === 'REMOVED' ? 'error' : g === 'ENABLED' ? 'active' : g === 'PAUSED' ? 'paused' : null
+  if (next && next !== row.status && ['paused', 'active'].includes(row.status)) {
+    await db
+      .prepare('UPDATE ad_campaigns SET status = ?3, last_error = ?4, updated_at = ?5 WHERE id = ?1 AND customer = ?2')
+      .bind(row.id, row.customer, next, next === 'error' ? 'removed_on_google' : null, now)
+      .run()
+    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'reconcile', reason: `Google Ads shows this campaign as ${next === 'error' ? 'removed' : g.toLowerCase()}; updated to match` }, now)
+  }
+  return { ok: true, failed, google: r.google }
+}
+
+// Cron: re-check created campaigns at most once a day each (oldest first).
+export async function verifyLaunched(env, { now = Date.now(), limit = 10 } = {}) {
+  const db = env.ONBOARDING_DB
+  const { results } = await db
+    .prepare(
+      `SELECT c.* FROM ad_campaigns c WHERE c.platform = 'google' AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
+       AND coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) < ?1
+       ORDER BY coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) LIMIT ?2`,
+    )
+    .bind(now - 86400000, limit)
+    .all()
+  let checked = 0
+  let failed = 0
+  for (const row of results) {
+    const r = await verifyAndRecord(env, row, now)
+    if (r.ok) checked++
+    else failed++
+  }
+  return { checked, failed }
+}
+
+// A lower budget approval must also hold for campaigns already running: each running campaign above
+// its share is lowered on Google (a reduction is always safe); if that fails it is paused instead.
+export async function enforceApproval(env, customerId, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const approval = await currentApproval(db, customerId)
+  if (!approval) return { lowered: 0, paused: 0 }
+  const ceiling = dailyCeilingCents(approval.monthly_cents)
+  const { results } = await db.prepare("SELECT * FROM ad_campaigns WHERE customer = ?1 AND status = 'active' AND platform_campaign_id IS NOT NULL").bind(customerId).all()
+  const total = results.reduce((n, r) => n + r.daily_budget_cents, 0)
+  if (total <= ceiling) return { lowered: 0, paused: 0 }
+  let lowered = 0
+  let paused = 0
+  for (const row of results) {
+    const target = Math.floor((row.daily_budget_cents * ceiling) / total)
+    const a = await adapter(row.platform)
+    const r = target >= LIMITS.minDailyBudgetCents ? await a.setDailyBudget(env, customerId, row, target) : { ok: false, error: 'below_minimum' }
+    if (r.ok) {
+      await db.prepare('UPDATE ad_campaigns SET daily_budget_cents = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(row.id, customerId, target, now).run()
+      await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'budget', reason: `Daily budget lowered to ${target} cents to fit the new approved budget`, details: { dailyCents: target } }, now)
+      lowered++
+      continue
+    }
+    const p = await a.setStatus(env, customerId, row, PLATFORM_STATUS[row.platform].paused)
+    if (p.ok) {
+      await db.prepare("UPDATE ad_campaigns SET status = 'paused', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(row.id, customerId, now).run()
+      await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', reason: 'Paused: it no longer fits the new approved budget' }, now)
+      paused++
+    } else {
+      await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'budget', status: 'failed', reason: `Couldn't lower or pause the campaign on Google (${p.error}); pause it in Google Ads` }, now)
+    }
+  }
+  return { lowered, paused, failed: results.length - lowered - paused }
 }
 
 // Optimizer pause hook (cron).

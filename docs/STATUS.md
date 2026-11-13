@@ -100,6 +100,10 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
+- Google Ads verification + safety + compliance gate (2026-11-13, branch feature/ads-verify-safety): read-back of created
+  campaigns (after creation + daily), Google state reconciliation, account-switch approval reset, lower-budget
+  enforcement on running campaigns, Maximize clicks bidding, accurate charging wording, optimizer recommend-only by
+  default (policy). docs/GOOGLE_ADS_COMPLIANCE.md: verified Google facts + our Test-level status + launch blockers.
 - First PoolThru sandbox campaign (2026-11-13): NOT created. The owner approved a $500/month budget and ran Check (no
   spend), but never approved the campaign itself (draft umfJ…, no approver), and its daily budget ($20) is above the
   approved ceiling ($16.44/day). Creating it needs the owner to set ≤ $16.44/day and press Approve, then Create. Audit

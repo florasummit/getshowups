@@ -6,7 +6,7 @@ import { processDueMessages } from '../../../server/messages.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
-import { syncMetrics, pauseForOptimizer } from '../../../server/ads/campaigns.js'
+import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { runOptimizer } from '../../../server/ads/optimizer.js'
 import { pollVideos } from '../../../server/ads/creative.js'
 import { checkDueDomains } from '../../../server/domains.js'
@@ -34,7 +34,10 @@ export async function onRequestPost({ request, env }) {
     const outbox = await flushOutbox(env)
     const ads = {
       metrics: await adsStep('metrics', () => syncMetrics(env)),
-      optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: pauseForOptimizer })),
+      verify: await adsStep('verify', () => verifyLaunched(env)),
+      // Google Ads Developer Policies restrict unattended ("headless") changes: unless ADS_AUTOMATION_ENABLED is
+      // exactly 'true' (approval), the optimizer only recommends; owners make every change themselves.
+      optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: env.ADS_AUTOMATION_ENABLED === 'true' ? pauseForOptimizer : null })),
       videos: await adsStep('videos', () => pollVideos(env)),
     }
     const domains = await adsStep('domains', () => checkDueDomains(env))

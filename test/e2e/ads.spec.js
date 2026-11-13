@@ -295,6 +295,9 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await c.getByRole('button', { name: 'Create on Google (paused) · test account' }).click()
   await expect(c.getByRole('group', { name: 'Confirm create' })).toContainText('nothing is charged')
   await c.getByRole('button', { name: 'Confirm: create on Google (paused)' }).click()
+  // Read straight back from Google (MOCK API): budget, area, keywords, ad and landing page all match.
+  await expect(c.locator('[data-verification="ok"]')).toHaveText('✓Checked on Google: budget, area, keywords and ad match')
+  await expect(c.getByText('Google may spend up to twice the average on a busy day')).toBeVisible()
   await expect(c.locator('.chip')).toHaveText('Paused')
   // Duplicate prevention: a second create request for the same campaign is refused; Google has one copy.
   const campaignId = (await (await page.request.get('/api/dashboard/ads')).json()).campaigns.find((x) => x.launched).id

@@ -145,7 +145,17 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads drafts: one open (unlaunched) draft per business and platform from "Draft my plan" (409 draft_exists; atomic
   INSERT … WHERE NOT EXISTS). Existing duplicates are shown with a notice, never removed automatically; removal is an
   explicit confirmed owner action (status 'removed', row kept). Services split on commas/newlines; starter ad text
-  is fitted with fitText() (whole words, never mid-word). Automation may pause or recommend, never raise budgets or resume. Every spec goes
+  is fitted with fitText() (whole words, never mid-word).
+- Ads after creation: every created campaign is read back from Google (verifyCampaign: status, budget, Search-only,
+  PRESENCE geo, locations, negatives, ad group, keywords, ad text, final URL) right after creation and daily by cron
+  (verifyLaunched); Google's paused/enabled/removed state wins (reconcile). Switching Google Ads accounts resets
+  approvals of not-yet-created campaigns; a created campaign is never acted on in another account (account_changed).
+  A lower budget approval lowers running campaigns on Google (enforceApproval) or pauses them. Bidding is Maximize
+  clicks until conversions reach Google. The daily budget is an average (Google: up to 2×/day, ≤30.4×/month).
+- Google Ads policy (docs/GOOGLE_ADS_COMPLIANCE.md): no unattended changes. The optimizer only recommends unless
+  ADS_AUTOMATION_ENABLED is exactly 'true' (approval). Offline conversions need the Data Manager API (new sensitive
+  scope = approval). Our Cloud project is Test-level: real accounts need Explorer access (external, approval).
+  Automation may pause or recommend, never raise budgets or resume. Every spec goes
   through validateSpec(); AI output never reaches a platform unvalidated. Ad mock origins are loopback-only test vars.
 - Self-serve billing: when Stripe is configured and a plan is active, every new self-serve business gets a self_signups
   row (same batch as the business) and must pay before onboarding; access follows the verified webhook. Businesses

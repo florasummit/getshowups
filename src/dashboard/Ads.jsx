@@ -34,6 +34,8 @@ const ERRORS = {
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
   draft_exists: 'You already have a draft. Edit it below, or remove it to start over.',
+  account_changed: 'This campaign is in a different Google Ads account than the one connected now. Switch back to manage it, or manage it in Google Ads.',
+  removed_on_google: 'This campaign was removed in Google Ads.',
   account_not_accessible: 'That account isn’t available with this Google sign-in. Choose one from the list.',
   invalid_account: 'Choose an account from the list.',
   invalid_budget: 'Enter a daily budget in dollars.',
@@ -174,7 +176,15 @@ function BudgetCard({ budget, profile, onSaved }) {
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/ads/budget', { method: 'POST', body: { monthlyCents: toCents(amount), confirm: ok } })
     if (status === 200) {
-      setState({})
+      const e = data.enforced || {}
+      setState({
+        note:
+          e.lowered || e.paused
+            ? `Approved. To fit it, ${e.lowered ? `${plural(e.lowered, 'running campaign')} got a lower daily budget` : ''}${e.lowered && e.paused ? ' and ' : ''}${e.paused ? `${plural(e.paused, 'campaign')} was paused` : ''}.`
+            : e.failed
+              ? 'Approved, but a running campaign couldn’t be lowered on Google. Pause it in Google Ads.'
+              : null,
+      })
       setOk(false)
       onSaved()
     } else setState({ error: data.error === 'invalid_budget' ? 'Choose between $150 and $50,000 a month.' : errorText(data.error) })
@@ -184,7 +194,8 @@ function BudgetCard({ budget, profile, onSaved }) {
       <h2 className="card-title">4. Approve your monthly ad budget</h2>
       {budget ? (
         <p>
-          Approved: <strong>{money(budget.monthlyCents)}/month</strong> (up to {money(budget.dailyCeilingCents)}/day across all campaigns).
+          Approved: <strong>{money(budget.monthlyCents)}/month</strong>. GetShowUps sets Google’s average daily budget for you: up to {money(budget.dailyCeilingCents)}/day across
+          all campaigns.
         </p>
       ) : (
         <p>No budget approved yet. Nothing can launch until you approve one.</p>
@@ -200,7 +211,13 @@ function BudgetCard({ budget, profile, onSaved }) {
             I approve up to {money(toCents(amount))} a month in ad spend. Google and Meta bill my own ad account directly; GetShowUps never raises this limit.
           </span>
         </label>
+        <p className="fine">{CHARGING} Lowering the limit also lowers campaigns that are running.</p>
         {state.error && <p className="form-error" role="alert">{state.error}</p>}
+        {state.note && (
+          <p className="fine" role="status">
+            {state.note}
+          </p>
+        )}
         <button className="btn btn-primary" disabled={!ok || state.busy}>
           Approve budget
         </button>
@@ -499,11 +516,11 @@ function BudgetSummary({ dailyCents, budget }) {
   return (
     <dl className="budget-summary" aria-label="Budget">
       <div>
-        <dt>Per day</dt>
+        <dt>Average per day</dt>
         <dd>{money(dailyCents)}</dd>
       </div>
       <div>
-        <dt>Per month</dt>
+        <dt>Most per month</dt>
         <dd>about {money(Math.round(((dailyCents || 0) * 30.4) / 100) * 100)}</dd>
       </div>
       <div>
@@ -511,6 +528,29 @@ function BudgetSummary({ dailyCents, budget }) {
         <dd>{budget ? `${money(budget.monthlyCents)}/month` : 'Not yet (step 4)'}</dd>
       </div>
     </dl>
+  )
+}
+
+// Google's charging rule, in plain words: the daily budget is an average, not a hard daily cap.
+const CHARGING = 'Google may spend up to twice the average on a busy day, but never charges more than about 30 days of the average in a month.'
+
+function Verification({ v }) {
+  if (!v) return null
+  if (v.error) return <p className="fine" data-verification="unknown">Couldn’t check this campaign on Google yet. We’ll try again automatically.</p>
+  return v.ok ? (
+    <p className="conn-status conn-status--ok" data-verification="ok">
+      <span className="conn-icon" aria-hidden="true">
+        ✓
+      </span>
+      Checked on Google: budget, area, keywords and ad match
+    </p>
+  ) : (
+    <p className="conn-status conn-status--warn" data-verification="differs">
+      <span className="conn-icon" aria-hidden="true">
+        !
+      </span>
+      Google shows a difference: {v.failed.join(', ')}
+    </p>
   )
 }
 
@@ -547,6 +587,7 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
     validate: 'Check passed. Nothing was created and nothing was spent.',
     approve: 'Approved. Next: create it on Google (it starts paused).',
     launch: sandbox ? 'Created on Google, paused. It’s a test account, so it never shows and nothing is charged.' : 'Created on Google, paused. Nothing runs until you press Start.',
+    launch_differs: 'Created on Google, paused, but Google shows a difference. See below.',
     resume: sandbox ? 'Started on the test account. It never shows and nothing is charged.' : 'Started.',
     pause: 'Paused.',
     budget: 'Daily budget changed.',
@@ -563,7 +604,8 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
     if (status === 200) {
       if (action === 'save') setSaved(extra.spec)
       const problems = data.errors?.length ? data.errors : null
-      setState({ note: action === 'save' && problems ? 'Saved. Fix the marked fields before approving.' : NOTES[action], problems })
+      const note = action === 'save' && problems ? 'Saved. Fix the marked fields before approving.' : action === 'launch' && data.verification && !data.verification.ok && !data.verification.error ? NOTES.launch_differs : NOTES[action]
+      setState({ note, problems })
       onChange()
     } else setState({ error: errorText(data.error), problems: data.errors })
   }
@@ -578,6 +620,13 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
 
       {c.platform === 'google' ? <GooglePreview spec={spec} /> : <MetaPreview spec={spec} />}
       <BudgetSummary dailyCents={spec.dailyBudgetCents} budget={budget} />
+      <p className="fine">{CHARGING}</p>
+      {c.launched && <Verification v={c.verification} />}
+      {c.lastError && (
+        <p className="form-error" role="alert">
+          {errorText(c.lastError)}
+        </p>
+      )}
 
       {editable && c.platform === 'google' && (
         <div className="campaign-groups">

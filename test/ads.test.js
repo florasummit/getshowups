@@ -458,6 +458,23 @@ test('optimizer: rules pause on ceiling/overspend, alert on stale data and track
   }
 })
 
+test('optimizer: with automatic changes off (default), a safety pause is only recommended to the owner', async () => {
+  const now = Date.now()
+  await saveProfile(db, 'pools', validateProfile(PROFILE).profile)
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('ap1', 'pools', 30000, 'o', ?)").run(now)
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, created_at, updated_at) VALUES ('camp0001', 'pools', 'google', 'active', '{}', 1000, '123', 1, 1)").run()
+  db.sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, fetched_at) VALUES ('camp0001', 'pools', ?, 30500, ?)").run(new Date(now).toISOString().slice(0, 10), now)
+  const r = await runOptimizer(env, { pause: null, now })
+  assert.deepEqual([r.paused, r.recommended, r.failed], [0, 1, 0])
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'camp0001'").get().status, 'active', 'nothing changed on its own')
+  const a = db.sql.prepare("SELECT kind, status, reason FROM ad_actions WHERE campaign_id = 'camp0001'").get()
+  assert.deepEqual([a.kind, a.status], ['pause', 'recommended'])
+  assert.match(a.reason, /^Recommended: pause this campaign\./)
+  // The cron passes no pause hook unless ADS_AUTOMATION_ENABLED is exactly 'true'.
+  const cron = readFileSync(new URL('../functions/api/cron/run.js', import.meta.url), 'utf8')
+  assert.match(cron, /pause: env\.ADS_AUTOMATION_ENABLED === 'true' \? pauseForOptimizer : null/)
+})
+
 test('optimizer: applies safety pauses once per day (idempotent) and records failures', async () => {
   const now = Date.now()
   await saveProfile(db, 'pools', validateProfile(PROFILE).profile)

@@ -4,7 +4,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { approveBudget } from '../../../../server/ads/budget.js'
-import { logAction } from '../../../../server/ads/campaigns.js'
+import { logAction, enforceApproval } from '../../../../server/ads/campaigns.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestPost({ request, env }) {
@@ -19,5 +19,7 @@ export async function onRequestPost({ request, env }) {
   const r = await approveBudget(env.ONBOARDING_DB, session.customer.id, body.monthlyCents, session.email)
   if (!r.ok) return json(400, { error: r.error })
   await logAction(env.ONBOARDING_DB, { customer: session.customer.id, campaignId: null, actor: `owner:${session.email}`, kind: 'budget_approve', reason: 'Owner approved a monthly ad budget', details: { monthlyCents: r.monthlyCents } })
-  return json(200, { monthlyCents: r.monthlyCents, dailyCeilingCents: r.dailyCeilingCents })
+  // A lower approval also applies to campaigns already running (lowered on Google, or paused).
+  const enforced = await enforceApproval(env, session.customer.id, `owner:${session.email}`).catch((err) => (console.error('ads budget enforce failed:', err?.name), { failed: 1 }))
+  return json(200, { monthlyCents: r.monthlyCents, dailyCeilingCents: r.dailyCeilingCents, enforced })
 }

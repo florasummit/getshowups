@@ -7,7 +7,7 @@ import { requireSession } from '../../../../server/auth.js'
 import { getConnection, markReconnect, upsertConnection } from '../../../../server/ads/connections.js'
 import { accessToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
-import { liveFor } from '../../../../server/ads/campaigns.js'
+import { liveFor, logAction } from '../../../../server/ads/campaigns.js'
 
 const STATUS = { reconnect_required: 409, not_approved_for_production: 403, permission_denied: 403, quota_exhausted: 503, transient: 503 }
 const failed = (r) => json(STATUS[r.error] || 502, { error: r.error })
@@ -70,6 +70,17 @@ export async function onRequestPost({ request, env }) {
   const about = await describeAccountWithToken(env, r.token, accountId, pick.via || undefined)
   // Sandbox: until live launch is switched on, only accounts Google flags as TEST accounts can be connected.
   if (!r.live && about.testAccount !== true) return json(409, { error: 'test_account_required' })
+  // Switching to a different Google Ads account: approvals were given for the previous account, so approved
+  // but not-yet-created campaigns go back to draft and need the owner's approval again.
+  const before = await getConnection(env, customerId, 'google')
+  if (before?.account_id && before.account_id !== accountId) {
+    const reset = await env.ONBOARDING_DB.prepare(
+      "UPDATE ad_campaigns SET status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = ?2 WHERE customer = ?1 AND status = 'approved' AND platform_campaign_id IS NULL RETURNING id",
+    )
+      .bind(customerId, Date.now())
+      .all()
+    for (const r of reset.results || []) await logAction(env.ONBOARDING_DB, { customer: customerId, campaignId: r.id, actor: `owner:${session.email}`, kind: 'approval_reset', reason: 'Ad account changed: approve this campaign again' })
+  }
   await upsertConnection(env, customerId, 'google', {
     accountId,
     accountName: about.name || pick.name,

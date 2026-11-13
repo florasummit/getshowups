@@ -158,7 +158,19 @@ function adsRoute(path, raw, auth = '') {
     const name = q.match(/campaign\.name = '((?:[^'\\]|\\.)*)'/)?.[1]?.replace(/\\(.)/g, '$1')
     return [200, { results: list.filter((c) => c.name === name).map(row) }]
   }
-  if (op === 'googleAds:searchStream') return [200, [{ results: list.map(row) }]]
+  if (op === 'googleAds:searchStream') {
+    // Read-back of one created campaign (verifyCampaign).
+    const byId = (body.query || '').match(/WHERE campaign\.id = (\d+)/)?.[1]
+    const c = byId && list.find((x) => x.id === byId)
+    if (byId && !c) return [200, [{ results: [] }]]
+    if (c && /FROM campaign_criterion/.test(body.query))
+      return [200, [{ results: [...Array.from({ length: c.locations }, () => ({ campaignCriterion: { type: 'LOCATION', negative: false } })), ...c.negatives.map((text) => ({ campaignCriterion: { type: 'KEYWORD', negative: true, keyword: { text } } }))] }]]
+    if (c && /FROM ad_group_criterion/.test(body.query)) return [200, [{ results: c.keywords.map((k) => ({ adGroup: { id: c.id }, adGroupCriterion: { keyword: k } })) }]]
+    if (c && /FROM ad_group_ad/.test(body.query)) return [200, [{ results: [{ adGroup: { id: c.id }, adGroupAd: { status: 'ENABLED', ad: c.ad, policySummary: { approvalStatus: 'APPROVED' } } }] }]]
+    if (c && /FROM campaign /.test(body.query))
+      return [200, [{ results: [{ campaign: { id: c.id, status: c.status, advertisingChannelType: c.channel, biddingStrategyType: c.bidding, networkSettings: c.network, geoTargetTypeSetting: { positiveGeoTargetType: c.geoType } }, campaignBudget: { amountMicros: c.amountMicros } }] }]]
+    return [200, [{ results: list.map(row) }]]
+  }
   if (op === 'googleAds:mutate') {
     if (body.validateOnly) return [200, {}]
     const ops = body.mutateOperations || []
@@ -166,7 +178,15 @@ function adsRoute(path, raw, auth = '') {
     const camp = ops.find((o) => o.campaignOperation)?.campaignOperation.create
     const id = String(adsNextId++)
     const budgetRn = `customers/${acct}/campaignBudgets/${id}`
-    list.push({ id, name: camp.name, status: camp.status, budget: budgetRn, amountMicros: budget.amountMicros })
+    // Keep everything that was created, so read-back queries answer like Google would (MOCK DATA).
+    const crit = ops.filter((o) => o.campaignCriterionOperation).map((o) => o.campaignCriterionOperation.create)
+    const kws = ops.filter((o) => o.adGroupCriterionOperation).map((o) => o.adGroupCriterionOperation.create.keyword)
+    const ad = ops.find((o) => o.adGroupAdOperation)?.adGroupAdOperation.create.ad
+    list.push({
+      id, name: camp.name, status: camp.status, budget: budgetRn, amountMicros: budget.amountMicros,
+      channel: camp.advertisingChannelType, network: camp.networkSettings, geoType: camp.geoTargetTypeSetting?.positiveGeoTargetType, bidding: camp.targetSpend ? 'TARGET_SPEND' : 'OTHER',
+      locations: crit.filter((c) => c.location).length, negatives: crit.filter((c) => c.negative && c.keyword).map((c) => c.keyword.text), keywords: kws, ad,
+    })
     return [200, { mutateOperationResponses: [{ campaignBudgetResult: { resourceName: budgetRn } }, { campaignResult: { resourceName: `customers/${acct}/campaigns/${id}` } }, { adGroupResult: { resourceName: `customers/${acct}/adGroups/${id}` } }, { adGroupAdResult: { resourceName: `customers/${acct}/adGroupAds/${id}~1` } }] }]
   }
   const u = body.operations?.[0]?.update || {}

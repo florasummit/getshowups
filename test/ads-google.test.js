@@ -540,7 +540,7 @@ test('launch: validateOnly by default; one atomic mutate with temp ids, PAUSED c
             status: 'PAUSED',
             advertisingChannelType: 'SEARCH',
             campaignBudget: `${c}/campaignBudgets/-1`,
-            maximizeConversions: {},
+            targetSpend: {},
             networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false },
             geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' },
             containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
@@ -758,11 +758,12 @@ test('cross-customer isolation: tokens, accounts and campaigns never cross busin
   assert.equal((await G.setStatus(env, 'salon', row(), 'PAUSED')).error, 'not_launched')
   assert.equal((await G.fetchDailyMetrics(env, 'salon', row(), '2026-11-01', '2026-11-02')).error, 'not_launched')
   assert.equal(adsCalls(/./).length, 0)
-  // A salon row with a pools budget resource name is refused (budget must live in salon's account).
-  assert.equal((await G.setDailyBudget(env, 'salon', row({ customer: 'salon' }), 3000)).error, 'not_launched')
+  // A salon row with pools resource names is refused (it was created in another account: never acted on by id).
+  assert.equal((await G.setDailyBudget(env, 'salon', row({ customer: 'salon' }), 3000)).error, 'account_changed')
   // Salon's call uses salon's own refresh token and account.
   calls = []
-  await G.setStatus(env, 'salon', row({ customer: 'salon' }), 'PAUSED')
+  const salonRow = row({ customer: 'salon', platform_ids: JSON.stringify({ campaign: `customers/${ACCT2}/campaigns/222`, budget: `customers/${ACCT2}/campaignBudgets/111` }) })
+  await G.setStatus(env, 'salon', salonRow, 'PAUSED')
   assert.equal(calls.find((c) => c.form).form.get('refresh_token'), '1//salon-refresh')
   assert.equal(adsCalls(/campaigns:mutate$/)[0].path, `/customers/${ACCT2}/campaigns:mutate`)
   assert.equal(adsCalls(/campaigns:mutate$/)[0].body.operations[0].update.resourceName, `customers/${ACCT2}/campaigns/222`)
@@ -863,7 +864,8 @@ test('pilot (never billed, NOT a test business): sandbox launch/resume on a Goog
 
   // Verified Google Ads TEST account → created PAUSED in the sandbox and resumable, no subscription needed.
   mockTestAccount = true
-  assert.deepEqual(await C.launch(env, pools, 'cmp_sandbox', 'owner@pools.example', { live: true }), { ok: true, live: true, status: 'paused' })
+  const created = await C.launch(env, pools, 'cmp_sandbox', 'owner@pools.example', { live: true })
+  assert.deepEqual([created.ok, created.live, created.status], [true, true, 'paused'])
   assert.deepEqual(await C.setCampaignStatus(env, pools, 'cmp_sandbox', 'active', 'owner:owner@pools.example'), { ok: true, status: 'active' })
   // The account flips to real between checks → the adapter's own re-check refuses (fails closed).
   mockTestAccount = false
@@ -890,6 +892,119 @@ test('launch: two simultaneous Launch clicks create exactly one Google campaign 
   assert.equal(adsCalls(/googleAds:mutate$/).filter((c) => c.body.validateOnly === false).length, 1, 'one create sent to Google')
   // A third click later is refused too (already created, paused).
   assert.equal((await C.launch(env, { id: 'pools' }, 'cmp_twice01', 'owner@pools.example', { live: true })).error, 'approval_required')
+})
+
+// MOCK DATA: what Google would return for a campaign created from campaign() (read-back queries), with overrides.
+function verifyMock(spec, over = {}) {
+  const g = spec.google
+  const st = { status: 'PAUSED', budgetMicros: String(2500 * 10000), geoType: 'PRESENCE', channel: 'SEARCH', content: false, locations: spec.geo.zips.length, negatives: g.negativeKeywords, keywords: g.keywords, headlines: g.headlines, descriptions: g.descriptions, finalUrl: spec.finalUrl, exists: true, ...over }
+  return (path, body, h) => {
+    if (!/googleAds:searchStream$/.test(path)) return defaultAds(path, body, h)
+    const q = body.query
+    assert.match(q, /WHERE campaign\.id = 222/)
+    if (/FROM campaign_criterion/.test(q))
+      return reply(200, [{ results: [...Array.from({ length: st.locations }, (_, i) => ({ campaignCriterion: { type: 'LOCATION', negative: false, location: { geoTargetConstant: `geoTargetConstants/9${i}` } } })), ...st.negatives.map((text) => ({ campaignCriterion: { type: 'KEYWORD', negative: true, keyword: { text } } }))] }])
+    if (/FROM ad_group_criterion/.test(q)) return reply(200, [{ results: st.keywords.map((k) => ({ adGroup: { id: '333' }, adGroupCriterion: { keyword: { text: k.text, matchType: k.match } } })) }])
+    if (/FROM ad_group_ad/.test(q))
+      return reply(200, [{ results: [{ adGroup: { id: '333' }, adGroupAd: { status: 'ENABLED', ad: { finalUrls: [st.finalUrl], responsiveSearchAd: { headlines: st.headlines.map((text) => ({ text })), descriptions: st.descriptions.map((text) => ({ text })) } }, policySummary: { approvalStatus: 'APPROVED' } } }] }])
+    if (/FROM campaign /.test(q))
+      return reply(200, [{ results: st.exists ? [{ campaign: { id: '222', status: st.status, advertisingChannelType: st.channel, biddingStrategyType: 'TARGET_SPEND', networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: st.content }, geoTargetTypeSetting: { positiveGeoTargetType: st.geoType } }, campaignBudget: { amountMicros: st.budgetMicros } }] : [] }])
+    throw new Error(`unexpected query ${q}`)
+  }
+}
+const launchedRow = (extra = {}) => ({ ...row(), spec: JSON.stringify({ ...campaign().spec, finalUrl: 'https://pools.example/book' }), status: 'paused', daily_budget_cents: 2500, created_at: Date.now(), ...extra })
+
+test('verify: a created campaign is read back from Google and compared with the approved spec (read-only)', async () => {
+  await connected()
+  const spec = { ...campaign().spec, finalUrl: 'https://pools.example/book' }
+  ads = verifyMock(spec)
+  const ok = await G.verifyCampaign(env, 'pools', launchedRow())
+  assert.equal(ok.ok, true)
+  assert.deepEqual(ok.checks.filter((c) => !c.ok), [])
+  assert.deepEqual(ok.google, { status: 'PAUSED', dailyBudgetCents: 2500, bidding: 'TARGET_SPEND', adGroups: 1, keywords: 2, negatives: 2, locations: 2, ads: 1, adReview: 'APPROVED' })
+  assert.equal(adsCalls(/:mutate$/).length, 0, 'read-only')
+  // Every difference is named (budget changed in Google Ads, partner network on, interest targeting, keyword missing, other URL).
+  ads = verifyMock(spec, { budgetMicros: '40000000', content: true, geoType: 'PRESENCE_OR_INTEREST', keywords: spec.google.keywords.slice(1), finalUrl: 'https://elsewhere.example' })
+  const diff = await G.verifyCampaign(env, 'pools', launchedRow())
+  assert.deepEqual(diff.checks.filter((c) => !c.ok).map((c) => c.name), ['Search ads only', 'daily budget', 'people in your area', 'keywords', 'landing page'])
+  ads = verifyMock(spec, { exists: false })
+  assert.deepEqual((await G.verifyCampaign(env, 'pools', launchedRow())).checks, [{ name: 'campaign exists on Google', ok: false }])
+  // A campaign created in another Google Ads account is never touched by id after an account switch.
+  await connected('pools', { accountId: ACCT2 })
+  for (const r of [await G.verifyCampaign(env, 'pools', launchedRow()), await G.setStatus(env, 'pools', launchedRow(), 'PAUSED'), await G.setDailyBudget(env, 'pools', launchedRow(), 2000)]) assert.equal(r.error, 'account_changed')
+})
+
+test('verify: recorded after creation and daily by cron; Google is the source of truth for paused/running/removed', async () => {
+  const C = await import('../server/ads/campaigns.js')
+  await connected()
+  const now = Date.now()
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('b1', 'pools', 300000, 'owner@pools.example', ?)").run(now)
+  const spec = { ...campaign().spec, finalUrl: 'https://pools.example/book' }
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'approved', ?, 2500, 'owner@pools.example', ?, ?, ?)").run(JSON.stringify(spec), now, now, now)
+  ads = verifyMock(spec)
+  const r = await C.launch(env, { id: 'pools' }, 'cmp_abc123', 'owner@pools.example', { live: true })
+  assert.deepEqual([r.ok, r.status, r.verification], [true, 'paused', { ok: true, failed: [] }])
+  const listed = (await C.listCampaigns(env.ONBOARDING_DB, 'pools'))[0]
+  assert.deepEqual([listed.verification.ok, listed.verification.google.keywords], [true, 2])
+  // Cron: checked at most once a day.
+  assert.deepEqual(await C.verifyLaunched(env, { now: now + 1000 }), { checked: 0, failed: 0 })
+  // Next day the owner had enabled it inside Google Ads → our status follows Google.
+  ads = verifyMock(spec, { status: 'ENABLED' })
+  assert.deepEqual(await C.verifyLaunched(env, { now: now + 86400000 + 1000 }), { checked: 1, failed: 0 })
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status, 'active')
+  assert.ok(db.sql.prepare("SELECT 1 FROM ad_actions WHERE kind = 'reconcile' AND campaign_id = 'cmp_abc123'").get())
+  // Removed in Google Ads → shown as removed (needs attention), never recreated automatically.
+  ads = verifyMock(spec, { status: 'REMOVED' })
+  await C.verifyLaunched(env, { now: now + 2 * 86400000 + 2000 })
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, last_error FROM ad_campaigns WHERE id = 'cmp_abc123'").get() }, { status: 'error', last_error: 'removed_on_google' })
+  assert.equal(adsCalls(/googleAds:mutate$/).filter((c) => c.body.validateOnly === false).length, 1, 'one creation only')
+})
+
+test('budget: a lower approval also lowers running campaigns on Google (or pauses them); paused ones need room to resume', async () => {
+  const C = await import('../server/ads/campaigns.js')
+  const B = await import('../server/ads/budget.js')
+  await connected()
+  const now = Date.now()
+  await B.approveBudget(env.ONBOARDING_DB, 'pools', 60000, 'owner@pools.example', now) // $600/mo → 1973/day
+  const spec = { ...campaign().spec, finalUrl: 'https://pools.example/book', dailyBudgetCents: 1900 }
+  db.sql
+    .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'active', ?, 1900, '222', ?, ?, ?)")
+    .run(JSON.stringify(spec), row().platform_ids, now, now)
+  await B.approveBudget(env.ONBOARDING_DB, 'pools', 30000, 'owner@pools.example', now + 1) // $300/mo → 986/day
+  calls = []
+  assert.deepEqual(await C.enforceApproval(env, 'pools', 'owner:owner@pools.example', now + 2), { lowered: 1, paused: 0, failed: 0 })
+  const m = adsCalls(/campaignBudgets:mutate$/)
+  assert.equal(m.length, 1)
+  assert.equal(m[0].body.operations[0].update.amountMicros, String(986 * 10000))
+  assert.equal(db.sql.prepare("SELECT daily_budget_cents FROM ad_campaigns WHERE id = 'cmp_abc123'").get().daily_budget_cents, 986)
+  // Within the approval → nothing changes; Google rejecting the reduction → paused instead.
+  assert.deepEqual(await C.enforceApproval(env, 'pools', 'owner:owner@pools.example'), { lowered: 0, paused: 0 })
+  await B.approveBudget(env.ONBOARDING_DB, 'pools', 15000, 'owner@pools.example', now + 3) // 493/day < $5 minimum → pause
+  calls = []
+  assert.deepEqual(await C.enforceApproval(env, 'pools', 'owner:owner@pools.example'), { lowered: 0, paused: 1, failed: 0 })
+  assert.equal(adsCalls(/campaigns:mutate$/)[0].body.operations[0].update.status, 'PAUSED')
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status, 'paused')
+  // Resuming needs room under the approval (986 > 493) → refused.
+  assert.equal((await C.setCampaignStatus(env, { id: 'pools' }, 'cmp_abc123', 'active', 'owner:x')).error, 'exceeds_approved_budget')
+})
+
+test('account switch: approved-but-not-created campaigns go back to draft; created ones are untouched', async () => {
+  await connected()
+  const cookie = await session('owner@pools.example')
+  const now = Date.now()
+  const spec = JSON.stringify({ ...campaign().spec, finalUrl: 'https://pools.example/book' })
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('appr0000001', 'pools', 'google', 'approved', ?, 2500, 'owner@pools.example', ?, ?, ?)").run(spec, now, now, now)
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, platform_campaign_id, created_at, updated_at) VALUES ('made0000001', 'pools', 'google', 'paused', ?, 2500, 'owner@pools.example', ?, '222', ?, ?)").run(spec, now, now, now)
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('salon000001', 'salon', 'google', 'approved', ?, 2500, 'owner@salon.example', ?, ?, ?)").run(spec, now, now, now)
+  // Same account chosen again → nothing reset.
+  assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body: { accountId: ACCT } })).status, 200)
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'appr0000001'").get().status, 'approved')
+  // Different account → approval reset (logged), created campaign and other businesses untouched.
+  assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie, body: { accountId: ACCT2 } })).status, 200)
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, approved_by FROM ad_campaigns WHERE id = 'appr0000001'").get() }, { status: 'draft', approved_by: null })
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'made0000001'").get().status, 'paused')
+  assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'salon000001'").get().status, 'approved')
+  assert.ok(db.sql.prepare("SELECT 1 FROM ad_actions WHERE kind = 'approval_reset' AND campaign_id = 'appr0000001'").get())
 })
 
 test('read: campaigns with status, daily budget and 30-day metrics; read-only; errors map to safe codes', async () => {
