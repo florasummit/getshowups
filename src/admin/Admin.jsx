@@ -453,6 +453,56 @@ function Plans() {
 }
 
 // One row per business in the platform lists (Customers, Test businesses).
+// Permanent audit log: chain status (recomputed on every load), newest entries, full JSON export.
+function AuditLog() {
+  const [a, setA] = useState(null)
+  useEffect(() => {
+    api('/api/platform/audit').then(({ status, data }) => setA(status === 200 ? data : { error: true }))
+  }, [])
+  return (
+    <section className="card" aria-labelledby="audit-log-title">
+      <h2 className="card-title" id="audit-log-title">
+        Audit log
+      </h2>
+      {!a ? (
+        <p className="fine">Loading…</p>
+      ) : a.error ? (
+        <p className="empty">The audit log isn’t available.</p>
+      ) : (
+        <>
+          <p className={a.chain.ok ? 'fine' : 'form-error'} role="status" data-audit-chain={a.chain.ok ? 'ok' : 'broken'}>
+            {a.chain.ok
+              ? `Intact: all ${a.chain.checked} entries verified (append-only, hash-chained).`
+              : `Integrity check failed at entry ${a.chain.brokenAt} (${a.chain.reason}). Investigate before trusting entries after it.`}{' '}
+            <a href="/api/platform/audit?format=export" download>
+              Download full log (JSON)
+            </a>
+          </p>
+          {a.entries.length ? (
+            <ul className="rows">
+              {a.entries.slice(0, 20).map((e) => (
+                <li key={e.seq} className="row">
+                  <div className="row-main">
+                    <p className="row-title">
+                      #{e.seq} {e.action}
+                      {e.customer ? ` · ${e.customer}` : ''}
+                    </p>
+                    <p className="row-sub">
+                      {e.actorType === 'admin' ? e.actor : e.actorType} · {date(e.at)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty">No entries yet.</p>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
 function CustomerRows({ list, onOpen }) {
   return (
     <ul className="rows">
@@ -566,6 +616,8 @@ function Overview({ me }) {
       )}
 
       {me.billingConfigured && <Plans />}
+
+      <AuditLog />
 
       <section className="card">
         <h2 className="card-title">Email</h2>

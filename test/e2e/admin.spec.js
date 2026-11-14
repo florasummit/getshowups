@@ -233,6 +233,14 @@ test('admin suspends and reactivates an account (audited); booking page pauses m
   await page.getByRole('button', { name: 'Reactivate account' }).click()
   await expect(page.getByRole('button', { name: 'Suspend account' })).toBeVisible()
   expect((await book()).status()).toBe(200)
+  // The permanent audit log on the console home: chain verified, newest entries, export link.
+  await page.goto('/admin')
+  const log = page.locator('.card', { has: page.getByRole('heading', { name: 'Audit log' }) })
+  await expect(log.locator('[data-audit-chain="ok"]')).toContainText('Intact: all')
+  await expect(log.getByText('customer.reactivate').first()).toBeVisible()
+  const exp = await page.request.get('/api/platform/audit?format=export')
+  expect(exp.headers()['content-disposition']).toMatch(/^attachment;/)
+  expect((await exp.json()).chain.ok).toBe(true)
 })
 
 test('admin-assisted setup: invite → owner signs in with Google → joins → connects own calendar step', async ({ page, context, browser }) => {
