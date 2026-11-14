@@ -259,8 +259,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   ERASED_TABLES or to the retained list in docs/DATA_RETENTION.md.
 - Lifecycle (server/lifecycle.js): one view of stage (subscribed / payment problem / cancel scheduled / canceled-recoverable /
   recovery over / deleting / deleted), hosting, ads hold, recovery, deletion (admin detail "Lifecycle"). Cancellation without
-  deletion: billed accounts stay fully recoverable 90 days after the paid period ends (owner Billing card + admin attention);
-  then the cron starts deletion ONLY when ACCOUNT_DELETION_ENABLED (never pilots or test businesses).
+  deletion: billed accounts stay fully recoverable 90 days after the paid period ends (owner Billing card + admin attention).
+  Day 90 is NOT authorization to delete: the expiry is recorded (lifecycle.recovery_expired); data is removed only by the
+  separately approved retention schedule (RETENTION_SCHEDULE_ENABLED AND ACCOUNT_DELETION_ENABLED; never pilots/test).
 - Billing reconciliation (server/reconcile.js): daily cron + /admin "Run now": Stripe subscriptions + 35 days of paid
   invoices vs our records (status, amount, cancellation, mode, missing either side, payments, billing after deletion).
   Read-only toward Stripe; recorded in audit_log; never auto-fixes. "Resync from Stripe" (admin, confirm, audited) applies

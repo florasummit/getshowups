@@ -702,3 +702,26 @@ test('platform audit log: admin-only, read-only, chain verified live, customer f
   // Customer detail reads the permanent log.
   assert.deepEqual((await call(pCustomer, 'GET', '/api/platform/customer?id=alpha', { cookie })).json().audit.map((a) => a.action), ['customer.reactivate', 'customer.suspend'])
 })
+
+test('webhook idempotency: a duplicate delivery records nothing twice (no second audit entry or hold check); live events refused while billing is test-only', async () => {
+  configureStripe()
+  seed('alpha')
+  const pending = []
+  waitUntil = (p) => pending.push(p)
+  try {
+    const ev = { id: 'evt_dup1', type: 'invoice.payment_failed', created: Math.floor(Date.now() / 1000), data: { object: { id: 'in_dup', customer: 'cus_1', metadata: { customer: 'alpha' } } } }
+    db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, last_event_at, updated_at) VALUES ('alpha', 'cus_1', 'sub_1', 'active', 0, 1)").run()
+    assert.equal((await signed(ev)).status, 200)
+    const again = await signed(ev)
+    assert.deepEqual([again.status, again.json().duplicate], [200, true])
+    await Promise.all(pending)
+    assert.equal(pending.length, 1, 'one hold check')
+    assert.equal(db.sql.prepare("SELECT count(*) n FROM audit_log WHERE action = 'billing.payment_failed'").get().n, 1)
+    assert.equal(db.sql.prepare("SELECT count(*) n FROM events WHERE type = 'payment_failed'").get().n, 1)
+    const live = await signed({ ...ev, id: 'evt_live1', livemode: true })
+    assert.deepEqual([live.status, live.json().error], [400, 'livemode_not_enabled'])
+    assert.equal(db.sql.prepare("SELECT count(*) n FROM stripe_events WHERE id = 'evt_live1'").get().n, 0, 'never recorded')
+  } finally {
+    waitUntil = undefined
+  }
+})

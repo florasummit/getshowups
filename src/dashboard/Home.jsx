@@ -135,10 +135,10 @@ function BillingCard({ billing }) {
             <p className="notice-info" role="status" data-recovery={billing.recovery.expired ? 'ended' : 'open'}>
               Your plan ended {shortDate(billing.recovery.endedAt)}.{' '}
               {billing.recovery.expired
-                ? billing.recovery.deletesAfter
-                  ? 'The 90-day recovery period is over; this account is being deleted.'
-                  : 'The 90-day recovery period is over. Reactivate to keep using GetShowUps.'
-                : `Everything is kept until ${shortDate(billing.recovery.until)}. Reactivate before then and your website, bookings and settings come back as they were.${billing.recovery.deletesAfter ? ' After that date the account and its data are deleted.' : ''}`}
+                ? billing.recovery.retentionScheduled
+                  ? 'The 90-day recovery period is over, so this account and its data are being removed under our retention policy.'
+                  : 'The 90-day recovery period is over. Reactivate to keep using GetShowUps, or contact us about your data.'
+                : `Everything is kept until ${shortDate(billing.recovery.until)}. Reactivate before then and your website, bookings and settings come back as they were.${billing.recovery.retentionScheduled ? ' After that date the account and its data are removed under our retention policy.' : ''}`}
             </p>
           )}
           {billing.plans.map((p) => (

@@ -1,73 +1,84 @@
-# Data retention and account deletion
+# Data retention, cancellation and account deletion — DRAFT
 
-Status: **DRAFT, needs the owner's approval** (and ideally a lawyer's review) before `ACCOUNT_DELETION_ENABLED=true` is
-set in production. The retention periods below are proposals, not legal advice. Code: `server/deletion.js`
-(workflow), migration `0016_account_deletions.sql`; owner decision of 2026-11-14.
+**Status: draft for the owner's decision. Not legal advice.** The periods below are engineering proposals based on
+common practice; tax, consumer-protection and privacy obligations depend on where GetShowUps and its customers operate
+(e.g. US federal/state tax rules, CCPA/CPRA, GDPR if EU residents are involved). Have them reviewed by a qualified
+professional before relying on them or publishing them. Nothing here is switched on in production:
+`ACCOUNT_DELETION_ENABLED` and `RETENTION_SCHEDULE_ENABLED` are unset.
 
-## Policy (owner decision 2026-11-14)
+Code: `server/deletion.js` (workflow, migration 0016), `server/lifecycle.js` (recovery, schedule),
+`server/auditlog.js` (permanent log, migration 0015). Owner decisions of 2026-11-14.
 
-- **Deleting an account is permanent.** No undo window and no founder approval for routine deletions. Services stop at
-  once; data is erased promptly by a durable, audited, retried workflow. A returning customer starts a new account
-  (the old business id is never reused).
-- **Canceling a subscription is not deletion.** After cancellation the account and its data stay recoverable for
-  **90 days**; resubscribing brings everything back. (The website itself stays online for 14 days after the paid
-  period, as the FAQ says.) Today canceled accounts are kept indefinitely; the 90-day rule is the next change.
-- Only records with a documented legal, financial, dispute or security reason are kept after a deletion.
+## 1. Two separate things
 
-## What happens when an account is deleted
+| | Cancel the subscription | Delete the account |
+| --- | --- | --- |
+| Who | Owner, in Stripe's billing portal | Owner (Settings, typed business name) or platform admin (verified request, typed id) |
+| Billing | Stops at the end of the paid period | Canceled immediately, no further charges |
+| Website | Online until the paid period ends + 14 days | Offline immediately |
+| Ads (managed by GetShowUps) | Paused when the subscription ends (ads hold) | Paused and confirmed immediately |
+| Data | Kept, fully recoverable for **90 days** after the paid period | Erased promptly (section 3) |
+| Undo | Reactivate any time in the 90 days: everything comes back | None. A returning customer starts a new account |
+
+## 2. After the 90-day recovery period (cancellation only)
+
+Day 90 does **not** delete anything by itself. Recovery eligibility expires and is recorded; the founder sees
+"Recovery period over". What happens next is the **retention schedule**, which must be approved and disclosed (privacy
+policy and the owner's Billing card) before `RETENTION_SCHEDULE_ENABLED=true` is set. Proposed schedule: the account
+then goes through the same deletion workflow as section 3, keeping only the records in section 4.
+
+Until the schedule is approved, canceled accounts' data is kept indefinitely. That is the conservative default for
+now but not a good long-term state (it keeps end customers' personal data with no purpose): **decide this soon.**
+
+## 3. Deletion workflow (what is erased, and how we know)
 
 | Step | What | Verified by |
 | --- | --- | --- |
-| 1. Lockout (immediately) | Business suspended: website, booking page and own domain stop serving. All members lose access (memberships removed). Scheduled reminders/follow-ups cancelled; pending invitations revoked; unsent emails dropped. | Booking API 404; `/api/dashboard/me` has no business |
-| 2. Ads | Every running campaign paused on Google/Meta, read back from Google. New launches/starts refused (ads hold `account_deleted`). A campaign that can't be paused blocks the deletion and is retried; it is never skipped. | Read-back `PAUSED`; no active campaign rows |
-| 3. Billing | Every Stripe subscription of the business canceled **now** (no further charges, no proration credit), confirmed by asking Stripe again; the Stripe customer object is deleted. | Stripe reports `canceled` |
-| 4. Integrations | Google Calendar token (and archived tokens from older OAuth clients) deleted; the Google grant is revoked unless another stored connection still uses the same grant. Google Ads / Meta tokens deleted (campaigns stay paused in the advertiser's own account). GoHighLevel key deleted. Own domain detached from Cloudflare. Ad creative files deleted. | KV keys absent |
-| 5. Data | All records below under "Erased" deleted; the business row is reduced to a tombstone; emails in the staff log replaced by one-way references. | Row counts 0 |
-| 6. Verify | Re-checks every erased table, KV key and the Stripe status; only then marked completed, with a report. | `account_deletions.report.verify.clean` |
+| 1. Lockout (immediately) | Business suspended; website unpublished and own domain stops serving; booking page off; all members lose access; scheduled messages cancelled; invitations revoked; unsent emails dropped | Booking API 404; no membership |
+| 2. Ads | Every running GetShowUps-managed campaign paused on Google/Meta and read back. An unreachable campaign (account disconnected/switched) blocks the deletion until a platform admin records the advertiser's confirmation that it is paused. Credentials are not removed before this. | Read-back PAUSED or audited confirmation |
+| 3. Billing | All Stripe subscriptions canceled now and re-checked; Stripe customer object deleted | Stripe reports canceled |
+| 4. Integrations | Calendar tokens (incl. archived) deleted; Google grant revoked unless another stored connection uses it; Ads/Meta/GoHighLevel tokens deleted; own domain detached; ad creative files deleted | KV keys absent |
+| 5. Data | Tables in `ERASED_TABLES` (leads, addresses, appointments, messages, consents, opt-outs, websites and versions, images, profiles, settings, Ads records, memberships, invitations, queued email, non-billing analytics) | Row counts 0 |
+| 6. Verify | Re-checks every table, key and the Stripe status; only then "completed" | report.verify.clean |
 
-Each step is idempotent. A failed step is retried by the cron with backoff (5 min, doubling, max 6 h) and recorded in
-the permanent audit log; `/admin` shows the status and offers "Retry now".
+Steps are idempotent; failures retry with backoff (5 min doubling to 6 h), are recorded as failure events, and after 3
+failed attempts show as "Deletion stuck" in /admin. A deletion is never reported complete while anything is left.
 
-## Erased (per business)
-
-Leads (names, emails, phones, needs, ZIPs), service addresses, appointments, outcomes, confirmations, attendance
-changes, messages, SMS consents, message opt-outs, test marks, attribution, Meta lead events, GoHighLevel links;
-website drafts, versions, AI generations, images, domains, landing pages; business profile (phone, description,
-services), booking/service settings, automation settings, onboarding marks, self-serve signup; Ads profile, budget
-approvals, campaigns, creatives, metrics, Ads action history; memberships, invitations, onboarding invites; queued
-emails; analytics events that are not billing events.
-
-## Retained after deletion, and why
+## 4. Kept after deletion, and why (proposed)
 
 | Record | Contents | Why | Proposed period |
 | --- | --- | --- | --- |
-| `customers` tombstone | Business id, "Deleted business", status suspended, created date | Links the retained billing and audit records; prevents the id from being reused | As long as any record below |
-| `subscriptions`, `subscription_modes` | Stripe customer/subscription ids, plan, status, monthly amount, period end | Tax/accounting, chargebacks and disputes, revenue reconciliation | 7 years, then delete |
-| Billing events (`revenue`, `payment_*`, `subscription_*`) | Amounts, currency, dates (no personal data) | Same | 7 years, then delete |
-| `ai_usage` | GetShowUps' own AI cost records (no personal data) | Our cost accounting | 7 years |
-| `test_businesses` | Test flag, staff who set it | Keeps test data out of metrics | With the tombstone |
-| `audit_log` | Hash-chained actions; emails only as one-way refs | Security and accountability; tamper evidence | Permanent (no personal data) |
-| `admin_audit` | Staff actions; emails in details replaced by refs | Security and accountability | Permanent |
-| `account_deletions` | When, who (one-way ref or staff email), per-step results, counts | Proof that the deletion happened; replay list after a backup restore | Permanent |
-| `stripe_events`, `rate_limits`, `sessions` | Event ids / hashed keys / sign-in sessions (not tied to the business) | Idempotency, abuse protection | Expire on their own schedule |
+| `customers` tombstone | Business id, "Deleted business", status | Links the records below; stops the id being reused | As long as any record below |
+| `subscriptions`, `subscription_modes`, billing events | Stripe ids, plan, status, amounts, dates; no end-customer data | Tax/accounting, chargebacks, disputes, revenue reconciliation | 7 years (common US practice for tax records; confirm) |
+| `ai_usage` | GetShowUps' own AI costs | Cost accounting | 7 years |
+| `audit_log` | Hash-chained events; emails only as one-way refs, no free text | Security, accountability, tamper evidence | Permanent (no personal data by construction); the business id may contain a business name |
+| `admin_audit` | Staff actions; emails → refs, free text erased at deletion | Security, accountability | Permanent |
+| `account_deletions` | When, who (ref or staff email), per-step results | Proof of deletion; replay list after a backup restore | Permanent |
+| `test_businesses` | Test flag | Keeps test data out of metrics | With the tombstone |
+| `stripe_events`, `rate_limits`, `sessions` | Event ids, hashed keys, sign-in sessions (not tied to the business) | Idempotency, abuse prevention | Their own expiry |
 
-The owner's Google Calendar events and Google Ads campaigns live in the owner's own Google accounts and are theirs; we
-stop accessing them but do not delete them.
+## 5. Processors and backups (what we can and can't control)
 
-## External processors and backups
-
-| Where | What remains | Schedule |
+| Where | What may remain | Our control |
 | --- | --- | --- |
-| Cloudflare D1 (Time Travel backups) | Point-in-time copies of the database | Erased data leaves backups after the Time Travel window (30 days on paid plans). **Never restore a backup over production without re-running every completed deletion in `account_deletions`** (the table is the replay list). |
-| Cloudflare KV / R2 | Tokens, creative files | Deleted in step 4 (no versioning). |
-| Stripe | Transaction records (charges, invoices) | Kept by Stripe under its own legal obligations; the customer object is deleted in step 3. |
-| Google | OAuth grant | Revoked in step 4 unless shared with another stored connection. |
-| Resend (email) | Delivery logs of emails already sent | Per Resend's log retention; to confirm. |
-| Cloudflare logs | Status codes/error codes only (we never log payloads) | Per Cloudflare's retention. |
+| **Cloudflare D1 backups (Time Travel)** | Point-in-time copies of the whole database | Data leaves backups when the Time Travel window passes (30 days on paid plans; verify the plan). **Never restore over production without re-running every completed deletion in `account_deletions`.** |
+| Cloudflare KV / R2 | Tokens, creative files | Deleted in step 4 (no versioning used). |
+| Cloudflare logs | Status/error codes only (no payloads are logged) | Cloudflare's retention. |
+| **Stripe** | Charges, invoices, payment records | Stripe keeps these under its own legal obligations even after the customer object is deleted; we can't erase them. |
+| **Google** | The OAuth grant; events we created in the owner's calendar; campaigns in the owner's Ads account | Grant revoked unless shared; calendar events and campaigns belong to the owner's Google account and stay there (paused). |
+| **Resend** | Logs of emails already sent (recipient, subject) | Resend's log retention (check the current plan; we can't delete individual logs from here). |
+| GoHighLevel | Contacts we synced (if GHL was used) | In the owner's GHL account; the owner controls them. We delete our key. |
+| Downloads/exports | Website export, audit exports the founder saved | Outside the system; the founder's responsibility. |
 
-## To approve before enabling in production
+## 6. Security logs
 
-1. The retention table (periods, and keeping billing records 7 years).
-2. Deleting the Stripe customer object at deletion time.
-3. Apply migrations 0015 (audit log) and 0016 (account deletions), then set `ACCOUNT_DELETION_ENABLED=true`.
-4. Privacy policy wording for deletion and retention (`src/legal/Privacy.jsx`), currently not changed.
+The permanent audit log holds no personal data by construction (emails → one-way refs; free text → fingerprints).
+Staff identities are kept for accountability. Limits of its tamper evidence: docs/AUDIT.md.
+
+## 7. Decisions needed before anything is enabled
+
+1. Approve section 4 periods (or set others) and deleting the Stripe customer object.
+2. Approve the retention schedule after day 90 (section 2), including how it is disclosed.
+3. Approve enabling the deletion workflow (`ACCOUNT_DELETION_ENABLED`) after migrations 0015 and 0016.
+4. Privacy policy and FAQ wording (`src/legal/Privacy.jsx`, `src/content/site.js`), not changed yet.
+5. Whether to send the daily audit head hash outside Cloudflare (stronger tamper evidence).

@@ -504,7 +504,7 @@ function Lifecycle({ l }) {
             <dt>Recovery</dt>
             <dd>
               {l.recovery.expired ? `over since ${date(l.recovery.until)}` : `until ${date(l.recovery.until)} (${l.recovery.daysLeft} days)`}
-              {l.recovery.deletesAfter ? ' · then deleted' : ' · deletion not enabled'}
+              {l.recovery.retentionScheduled ? ' · then removed (retention schedule on)' : ' · no retention schedule yet (decision pending)'}
             </dd>
           </div>
         )}

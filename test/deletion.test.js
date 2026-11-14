@@ -335,7 +335,7 @@ test('recovery: a canceled billed account is kept and recoverable for 90 days; o
   const ended = now - 10 * DAY
   await cancelAlpha(ended)
   const r = await recoveryFor(env, 'alpha-co', now)
-  assert.deepEqual(r, { endedAt: ended, until: ended + 90 * DAY, daysLeft: 80, expired: false, deletesAfter: true })
+  assert.deepEqual(r, { endedAt: ended, until: ended + 90 * DAY, daysLeft: 80, expired: false, retentionScheduled: false })
   const l = await lifecycle(env, 'alpha-co', now)
   assert.deepEqual([l.stage, l.hosting.status, l.adsHold], ['canceled_recoverable', 'grace', 'subscription_ended'])
   db.sql.prepare("INSERT INTO plans (id, name, stripe_price_id, trial_days, entitlements, active, created_at) VALUES ('founding', 'Founding', 'price_X', 0, '{}', 1, 1)").run()
@@ -356,22 +356,29 @@ test('recovery: a canceled billed account is kept and recoverable for 90 days; o
   assert.ok((await rowsAt(ended + 91 * DAY)).includes('recovery_ended'))
 })
 
-test('recovery: when the 90 days are over the account enters deletion (only when enabled; never test businesses, never early)', async () => {
+test('recovery: day 90 is NOT authorization to delete — the expiry is recorded once; only the separately approved retention schedule removes data', async () => {
   const { processRecoveryExpiries } = await import('../server/lifecycle.js')
   const now = Date.now()
   await cancelAlpha(now - 89 * DAY)
-  assert.deepEqual(await processRecoveryExpiries(env, { now }), { enabled: true, started: 0 }, 'not yet')
-  delete env.ACCOUNT_DELETION_ENABLED
-  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: false }, 'off → nothing, ever')
+  assert.deepEqual(await processRecoveryExpiries(env, { now }), { expired: 0, retentionSchedule: false, started: 0 }, 'not yet')
+  // Day 91, deletion enabled but no retention schedule: nothing removed, the expiry recorded once.
+  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { expired: 1, retentionSchedule: false, started: 0 })
+  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 3 * DAY }), { expired: 0, retentionSchedule: false, started: 0 }, 'recorded once')
   assert.equal(job('alpha-co'), undefined)
+  assert.equal(count('leads', 'alpha-co'), 1)
+  const ev = db.sql.prepare("SELECT capability, outcome FROM audit_log WHERE action = 'lifecycle.recovery_expired'").all()
+  assert.deepEqual(ev.map((e) => ({ ...e })), [{ capability: 'billing.lifecycle', outcome: 'info' }])
+  // The schedule switch alone is not enough: deletion must be enabled too.
+  env.RETENTION_SCHEDULE_ENABLED = 'true'
+  delete env.ACCOUNT_DELETION_ENABLED
+  assert.equal((await processRecoveryExpiries(env, { now: now + 3 * DAY })).started, 0)
   env.ACCOUNT_DELETION_ENABLED = 'true'
   db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha-co', 1, 'founder@getshowups.example', 1)").run()
-  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: true, started: 0 }, 'test business: kept')
+  assert.equal((await processRecoveryExpiries(env, { now: now + 3 * DAY })).started, 0, 'test business: kept')
   db.sql.prepare("UPDATE test_businesses SET is_test = 0, unmarked_at = 2 WHERE customer = 'alpha-co'").run()
-  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: true, started: 1 })
+  assert.equal((await processRecoveryExpiries(env, { now: now + 3 * DAY })).started, 1)
   const j = job('alpha-co')
-  assert.deepEqual([j.status, j.requested_by], ['completed', 'system:recovery_expired'])
+  assert.deepEqual([j.status, j.requested_by], ['completed', 'system:retention_schedule'])
   assert.equal(count('leads', 'alpha-co'), 0)
   assert.equal(count('leads', 'beta-co'), 1)
-  assert.deepEqual({ ...db.sql.prepare("SELECT actor_type, actor FROM audit_log WHERE action = 'account.deletion_requested'").get() }, { actor_type: 'system', actor: 'system:recovery_expired' })
 })
