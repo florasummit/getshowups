@@ -13,6 +13,8 @@ AI appointment-conversion platform for service businesses. Production: https://g
 | `npm test` | Unit/integration tests (`node --test`, real handlers, SQLite-backed fake D1, mocked Google) |
 | `npm run test:e2e` | Playwright: full site + Functions on local workerd, fake credentials, Google mocked |
 | `npm run check:functions` | `wrangler pages functions build` with the production compatibility date |
+| `npx playwright test test/e2e/journey.spec.js` | Autonomous journey (mock Google): detects state from the backend, performs the next step until ready |
+| `JOURNEY_LIVE=1 JOURNEY_BUSINESS=<test business> node scripts/journey-live.mjs` | Opt-in LIVE check with real Google accounts (authorized checks only; pauses at every Google consent; never clicks on Google) |
 
 First-time setup: `npm ci && npx playwright install chromium`. Node ≥ 22.13 (CI uses 24).
 
@@ -95,7 +97,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
-test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config
+test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config; journey.js = state
+                     detection + runner shared by journey.spec.js (CI, mocked) and scripts/journey-live.mjs (opt-in live)
 docs/                WORKFLOW.md (how we build), STATUS.md (decisions, progress, next actions)
 ```
 

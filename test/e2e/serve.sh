@@ -41,6 +41,9 @@ d1 "
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-spare.example', '$E2E_SPARE_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES
     ('$(hash "$E2E_ADMIN_SESSION_TOKEN")', '$E2E_PLATFORM_ADMIN', $NOW, $FAR);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_JOURNEY_CUSTOMER', 'E2E Journey Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_JOURNEY_EMAIL', '$E2E_JOURNEY_CUSTOMER', $NOW);
   INSERT INTO plans (id, name, stripe_price_id, trial_days, entitlements, active, created_at) VALUES
     ('founding', 'GetShowUps Founding', 'price_E2EFOUNDING', 0, '{}', 1, $NOW);
   INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
@@ -103,7 +106,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TOKEN_ENCRYPTION_KEY="$E2E_TOKEN_ENCRYPTION_KEY" \
   --binding ADMIN_API_TOKEN="$E2E_ADMIN_API_TOKEN" \
   --binding ADS_ENABLED=true \
-  --binding ADS_BUSINESSES="$E2E_CUSTOMER,$E2E_HOME_CUSTOMER,$E2E_ADS_CUSTOMER" \
+  --binding ADS_BUSINESSES="$E2E_CUSTOMER,$E2E_HOME_CUSTOMER,$E2E_ADS_CUSTOMER,$E2E_JOURNEY_CUSTOMER" \
   --binding STRIPE_SECRET_KEY="$E2E_STRIPE_SECRET_KEY" \
   --binding STRIPE_WEBHOOK_SECRET="$E2E_STRIPE_WEBHOOK_SECRET" \
   --binding STRIPE_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
