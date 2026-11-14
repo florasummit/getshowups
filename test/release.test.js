@@ -331,7 +331,10 @@ test('migrations: 0002 is additive and idempotent over production state; PoolThr
 
   for (let i = 0; i < 2; i++) for (const f of MIGRATIONS.filter((x) => x !== '0001_onboarding_invites.sql')) db.sql.exec(migration(f))
   assert.equal(JSON.stringify(db.sql.prepare('SELECT * FROM onboarding_invites').all()), invitesBefore)
-  for (const f of MIGRATIONS) assert.doesNotMatch(migration(f), /\b(DROP|DELETE|ALTER|UPDATE)\b/i, `${f} must be additive`)
+  // Append-only guards are the one allowed mention of UPDATE/DELETE: a trigger that only refuses the change.
+  const GUARD = /CREATE TRIGGER IF NOT EXISTS \w+ BEFORE (UPDATE|DELETE) ON \w+ BEGIN SELECT RAISE\(ABORT, '[^']*'\); END;/g
+  for (const f of MIGRATIONS) assert.doesNotMatch(migration(f).replace(GUARD, ''), /\b(DROP|DELETE|ALTER|UPDATE)\b/i, `${f} must be additive`)
+  assert.equal("CREATE TRIGGER IF NOT EXISTS t BEFORE DELETE ON x BEGIN DELETE FROM y; END;".replace(GUARD, '').includes('DELETE'), true, 'only pure refusal triggers are exempt')
 
   const linked = await call(customers, 'POST', '/api/admin/customers', {
     headers: { Authorization: `Bearer ${ADMIN}` },

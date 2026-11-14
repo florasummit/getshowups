@@ -9,6 +9,7 @@ import { flushOutbox } from '../../../server/email.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { enforceAdsHolds } from '../../../server/ads/holds.js'
+import { auditCheckpoint } from '../../../server/auditlog.js'
 import { runOptimizer } from '../../../server/ads/optimizer.js'
 import { pollVideos } from '../../../server/ads/creative.js'
 import { checkDueDomains } from '../../../server/domains.js'
@@ -48,7 +49,11 @@ export async function onRequestPost({ request, env }) {
       videos: await adsStep('videos', () => pollVideos(env)),
     }
     const domains = await adsStep('domains', () => checkDueDomains(env))
-    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains })
+    const audit = await adsStep('audit', async () => {
+      const r = await auditCheckpoint(env.ONBOARDING_DB)
+      return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
+    })
+    return json(200, { messages, onboardingQueued, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

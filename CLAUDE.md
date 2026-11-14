@@ -135,7 +135,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   entry point, and /dashboard offers it the console instead of starting onboarding. Landing grants nothing: /admin
   authorizes every request.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
-  privileged write with `audit()`. Admin views show counts, never lead/appointment contact details.
+  privileged write with `audit()`.
+- Permanent audit log (server/auditlog.js, migration 0015 `audit_log`): append-only (SQLite triggers refuse UPDATE/DELETE),
+  hash-chained (verifyAuditChain; cron checkpoint daily; /admin shows the status and exports JSON). Written by
+  `audit()` (admin), ad changes (logAction state-change kinds), Stripe billing changes, website publish/unpublish/restore.
+  NO personal data: emails anywhere become `ref:<sha256 prefix>` (staff admin actors stay readable), so deletion never
+  touches it. appendAudit never throws. Never add a migration or code path that edits or removes audit_log rows. Admin views show counts, never lead/appointment contact details.
 - Opt-outs (server/optouts.js, migration 0014): every follow-up email (unbooked-lead, no-show) has a signed unsubscribe
   link (GET read-only, POST records) plus List-Unsubscribe/List-Unsubscribe-Post one-click headers (RFC 8058, same
   link); a Twilio 21610 records a text opt-out. Opted-out addresses get no follow-ups from that

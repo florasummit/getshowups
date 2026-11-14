@@ -2,6 +2,15 @@
 
 _Update at the end of every task. Newest first._
 
+## Permanent audit log (2026-11-14) — branch feature/audit-log (stacked on #24), NOT deployed
+
+Migration 0015 `audit_log` (CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS only; the release test now exempts exactly the
+pure `BEFORE UPDATE|DELETE … RAISE(ABORT)` guard triggers). Hash chain + append-only triggers; no personal data
+(emails → refs). Producers: admin audit(), ad state changes, Stripe billing (status, cancellation scheduled/withdrawn,
+payment failed/succeeded), website publish/unpublish/restore. Cron: daily chain verification checkpoint. Admin: Audit
+log card (chain status, newest entries, JSON export); customer detail reads audit_log (falls back before 0015).
+Apply 0015 before deploying (until then appendAudit logs `table_missing` and the action proceeds).
+
 ## Ads safety stop (2026-11-14) — branch feature/ads-billing-hold, NOT deployed
 
 Defect: running campaigns kept running after a failed payment, an ended subscription, or an admin suspension (only

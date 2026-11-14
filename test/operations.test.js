@@ -15,6 +15,7 @@ import * as pInviteAction from '../functions/api/platform/invite-action.js'
 import * as pStatus from '../functions/api/platform/status.js'
 import * as pPlans from '../functions/api/platform/plans.js'
 import * as pTest from '../functions/api/platform/test-business.js'
+import * as pAudit from '../functions/api/platform/audit.js'
 import * as invitePeek from '../functions/api/invite.js'
 import * as accept from '../functions/api/dashboard/accept-invite.js'
 import * as me from '../functions/api/dashboard/me.js'
@@ -672,4 +673,32 @@ test('metrics and events: real activity drives activation, conversion, show-up, 
   const missing = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
   delete env.STRIPE_LIVE_ENABLED
   assert.deepEqual([missing.mode, missing.mrrCents, missing.arrCents, missing.payingCustomers, missing.churn30], ['live', null, null, null, null])
+})
+
+test('platform audit log: admin-only, read-only, chain verified live, customer filter, full export; customer detail shows it', async () => {
+  seed('alpha')
+  seed('beta')
+  const cookie = await admin()
+  for (const [c, st] of [['alpha', 'suspended'], ['alpha', 'active'], ['beta', 'suspended']]) {
+    assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: c, status: st } })).status, 200)
+  }
+  const all = await call(pAudit, 'GET', '/api/platform/audit', { cookie })
+  assert.equal(all.status, 200)
+  assert.deepEqual(all.json().chain, { ok: true, checked: 3, headSeq: 3, headHash: all.json().entries[0].hash })
+  assert.deepEqual(all.json().entries.map((e) => `${e.seq}:${e.action}:${e.customer}`), ['3:customer.suspend:beta', '2:customer.reactivate:alpha', '1:customer.suspend:alpha'])
+  assert.equal(all.json().entries[0].actor, 'ops@getshowups.com')
+  const alpha = await call(pAudit, 'GET', '/api/platform/audit?customer=alpha', { cookie })
+  assert.deepEqual(alpha.json().entries.map((e) => e.seq), [2, 1])
+  assert.deepEqual((await call(pAudit, 'GET', '/api/platform/audit?before=2', { cookie })).json().entries.map((e) => e.seq), [1])
+  assert.equal((await call(pAudit, 'GET', '/api/platform/audit?customer=../x', { cookie })).status, 400)
+  const exp = await call(pAudit, 'GET', '/api/platform/audit?format=export', { cookie })
+  assert.match(exp.res.headers.get('Content-Disposition'), /^attachment; filename="getshowups-audit-\d{4}-\d{2}-\d{2}\.json"$/)
+  assert.deepEqual(exp.json().entries.map((e) => e.seq), [1, 2, 3])
+  assert.equal(exp.json().chain.ok, true)
+  // Not for customers or signed-out visitors; no write method.
+  assert.equal((await call(pAudit, 'GET', '/api/platform/audit', { cookie: await session('owner@alpha.example') })).status, 403)
+  assert.equal((await call(pAudit, 'GET', '/api/platform/audit')).status, 401)
+  assert.equal(pAudit.onRequestPost, undefined)
+  // Customer detail reads the permanent log.
+  assert.deepEqual((await call(pCustomer, 'GET', '/api/platform/customer?id=alpha', { cookie })).json().audit.map((a) => a.action), ['customer.reactivate', 'customer.suspend'])
 })

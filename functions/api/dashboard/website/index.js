@@ -8,6 +8,7 @@
 //        { action: 'generate' }                    AI copy + three designs from the business details, stored (draft untouched)
 //        { action: 'revise', instruction }         AI revision of the draft ("make it more modern"), stored (draft untouched)
 //        { action: 'apply', generationId, option } make a stored design the private draft (owner photos kept)
+import { appendAudit } from '../../../../server/auditlog.js'
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../../server/auth.js'
 import { track } from '../../../../server/events.js'
@@ -115,11 +116,13 @@ export async function onRequestPost({ request, env }) {
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
       const version = await publish(db, customer.id, content)
       await track(env, 'website_published', { customer: customer.id, props: { version } })
+      await appendAudit(db, { actorType: 'owner', actor: `owner:${session.email}`, action: 'website.publish', customer: customer.id, details: { version } })
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'unpublish') {
       await unpublish(db, customer)
       await track(env, 'website_unpublished', { customer: customer.id })
+      await appendAudit(db, { actorType: 'owner', actor: `owner:${session.email}`, action: 'website.unpublish', customer: customer.id })
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'restore') {
@@ -127,6 +130,7 @@ export async function onRequestPost({ request, env }) {
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
       if (!(await restore(db, customer.id, body.version))) return json(404, { error: 'not_found' })
       await track(env, 'website_restored', { customer: customer.id, props: { version: body.version } })
+      await appendAudit(db, { actorType: 'owner', actor: `owner:${session.email}`, action: 'website.restore', customer: customer.id, details: { version: Number(body.version) || null } })
       return json(200, await state(env, customer, session.email))
     }
     return json(400, { error: 'invalid_request' })

@@ -20,7 +20,10 @@ export async function onRequestGet({ request, env }) {
   const invites = await list(
     'SELECT id, email, created_by, created_at, expires_at, accepted_at, revoked_at, sent_count FROM account_invites WHERE customer = ?1 ORDER BY created_at DESC LIMIT 20',
   )
-  const auditLog = await list('SELECT at, actor, action, details FROM admin_audit WHERE customer = ?1 ORDER BY at DESC LIMIT 30')
+  // The permanent audit log (admin, billing, ads, website changes); before migration 0015, the admin-only table.
+  const auditLog = await list('SELECT at, actor, action, details FROM audit_log WHERE customer = ?1 ORDER BY seq DESC LIMIT 30').catch(() =>
+    list('SELECT at, actor, action, details FROM admin_audit WHERE customer = ?1 ORDER BY at DESC LIMIT 30'),
+  )
   const totals = await db
     .prepare(
       "SELECT (SELECT count(*) FROM leads WHERE customer = ?1) AS leads, (SELECT count(*) FROM appointments WHERE customer = ?1 AND status IN ('booked','showed','no_show')) AS booked, (SELECT count(*) FROM appointments WHERE customer = ?1 AND status = 'showed') AS showed, (SELECT count(*) FROM appointments WHERE customer = ?1 AND status = 'no_show') AS no_show",

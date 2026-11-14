@@ -2,6 +2,7 @@
 // downgrades, cancellation and reactivation, and signed webhooks to mirror subscription state.
 // Configured only when STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are set. No card data is stored;
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
+import { appendAudit } from './auditlog.js'
 import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
@@ -168,7 +169,7 @@ async function customerFor(db, obj) {
 async function upsertSubscription(env, customer, event, sub) {
   const db = env.ONBOARDING_DB
   const at = event.created * 1000
-  const prior = await db.prepare('SELECT status, last_event_at FROM subscriptions WHERE customer = ?1').bind(customer).first()
+  const prior = await db.prepare('SELECT status, last_event_at, cancel_at_period_end FROM subscriptions WHERE customer = ?1').bind(customer).first()
   if (prior && prior.last_event_at > at) return // an older event arriving late: ignore
   const status = event.type === 'customer.subscription.deleted' ? 'canceled' : STATUS[sub.status] || 'incomplete'
   const priceId = sub.items?.data?.[0]?.price?.id
@@ -190,6 +191,9 @@ async function upsertSubscription(env, customer, event, sub) {
     .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, cancelScheduled ? 1 : 0, at, Date.now())
     .run()
   await recordMode(db, customer, event)
+  const billingAudit = (action, details) => appendAudit(db, { actorType: 'stripe', actor: 'stripe', action, customer, details: { eventId: event.id, subscription: sub.id, livemode: event.livemode === true, ...details }, at })
+  if (prior?.status !== status) await billingAudit('billing.subscription_status', { from: prior?.status ?? null, to: status, plan: plan?.id ?? null })
+  if (Boolean(prior?.cancel_at_period_end) !== cancelScheduled && status !== 'canceled') await billingAudit(cancelScheduled ? 'billing.cancellation_scheduled' : 'billing.cancellation_withdrawn', { periodEnd: periodEnd ? periodEnd * 1000 : null })
   if (prior?.status !== status) {
     const type = status === 'canceled' ? 'subscription_canceled' : !prior || prior.status === 'incomplete' || prior.status === 'canceled' ? 'subscription_started' : 'subscription_status_changed'
     await track(env, type, { id: `stripe:${event.id}`, customer, props: { from: prior?.status ?? null, to: status, plan: plan?.id ?? null }, at })
@@ -240,7 +244,10 @@ export async function handleEvent(env, event, { after = null } = {}) {
       return { handled: Boolean(customer) }
     case 'invoice.paid':
       // Any successful payment (including $0) closes an earlier payment failure for ads holds.
-      if (customer) await track(env, 'payment_succeeded', { id: `paid:${obj.id}`, customer, at: event.created * 1000 })
+      if (customer) {
+        await track(env, 'payment_succeeded', { id: `paid:${obj.id}`, customer, at: event.created * 1000 })
+        await appendAudit(db, { actorType: 'stripe', actor: 'stripe', action: 'billing.payment_succeeded', customer, details: { eventId: event.id, invoice: obj.id, amountCents: obj.amount_paid ?? null, currency: obj.currency ?? null, livemode: event.livemode === true }, at: event.created * 1000 })
+      }
       if (customer && obj.amount_paid > 0) {
         await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency, livemode: event.livemode === true }, at: event.created * 1000 })
       }
@@ -248,6 +255,7 @@ export async function handleEvent(env, event, { after = null } = {}) {
     case 'invoice.payment_failed':
       if (customer) {
         await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
+        await appendAudit(db, { actorType: 'stripe', actor: 'stripe', action: 'billing.payment_failed', customer, details: { eventId: event.id, invoice: obj.id ?? null, livemode: event.livemode === true }, at: event.created * 1000 })
         holdCheck(customer) // owner decision: ads pause on the first failed payment
       }
       return { handled: Boolean(customer) }
