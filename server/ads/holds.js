@@ -9,7 +9,7 @@
 // Billing holds apply only to billed businesses (a self-serve signup or a Stripe subscription) and only
 // while billing is configured. Never-billed pilots (PoolThru) are never paused for billing.
 import { stripeConfigured } from '../stripe.js'
-import { adapter, logAction, verifyAndRecord } from './campaigns.js'
+import { adapter, logAction, verifyAndRecord, UNREACHABLE } from './campaigns.js'
 
 export const HOLD_REASONS = {
   suspended: 'GetShowUps paused this business',
@@ -63,10 +63,10 @@ export async function adsHold(env, customerId) {
 
 // Pauses every running campaign of one business on its platform, then reads each Google campaign back to
 // confirm it is paused. Failures are recorded and retried by the cron sweep. Never resumes anything.
-export async function enforceAdsHold(env, customerId, { actor = 'system:hold', hold = undefined, now = Date.now() } = {}) {
+export async function enforceAdsHold(env, customerId, { actor = 'system:hold', hold = undefined, now = Date.now(), correlationId = null } = {}) {
   const db = env.ONBOARDING_DB
   const h = hold === undefined ? await adsHold(env, customerId) : hold
-  if (!h) return { hold: null, paused: 0, verified: 0, failed: 0 }
+  if (!h) return { hold: null, paused: 0, verified: 0, failed: 0, unreachable: 0 }
   const why = `Paused automatically: ${HOLD_REASONS[h.reason] || 'ads are on hold'}. It stays paused until you start it again.`
   const { results } = await db
     .prepare("SELECT * FROM ad_campaigns WHERE customer = ?1 AND status = 'active' AND (platform_campaign_id IS NOT NULL OR platform_ids LIKE '%campaignId%')")
@@ -75,16 +75,34 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
   let paused = 0
   let verified = 0
   let failed = 0
+  let unreachable = 0
   for (const row of results) {
     const a = await adapter(row.platform)
     const r = a ? await a.setStatus(env, customerId, row, PAUSED[row.platform]).catch(() => ({ ok: false, error: 'transient' })) : { ok: false, error: 'platform_unavailable' }
     if (!r.ok) {
       failed++
-      await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', status: 'failed', reason: `Couldn't pause on ${row.platform === 'google' ? 'Google' : 'Meta'} (${r.error}); retrying every few minutes`, details: { hold: h.reason } }, now)
+      const lost = UNREACHABLE.includes(r.error)
+      if (lost) unreachable++
+      const where = row.platform === 'google' ? 'Google Ads' : 'Meta'
+      await logAction(
+        db,
+        {
+          customer: customerId,
+          campaignId: row.id,
+          actor,
+          kind: 'pause',
+          platform: row.platform,
+          correlationId,
+          status: 'failed',
+          reason: lost ? `Can't reach this campaign (${r.error}): it must be paused in ${where} by the advertiser` : `Couldn't pause on ${where} (${r.error}); retrying every few minutes`,
+          details: { hold: h.reason, error: r.error, unreachable: lost },
+        },
+        now,
+      )
       continue
     }
     await db.prepare("UPDATE ad_campaigns SET status = 'paused', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(row.id, customerId, now).run()
-    await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', reason: why, details: { hold: h.reason } }, now)
+    await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', reason: why, details: { hold: h.reason }, platform: row.platform, correlationId }, now)
     paused++
     if (row.platform === 'google') {
       // Read back: Google's state wins (verifyAndRecord reconciles). If Google still shows it running, the row
@@ -93,20 +111,33 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
       if (v.ok && v.google?.status === 'PAUSED') verified++
     }
   }
-  return { hold: h.reason, paused, verified, failed }
+  return { hold: h.reason, paused, verified, failed, unreachable }
 }
 
 // Cron safety net: every business that still has a running campaign is re-checked; held ones are paused.
 export async function enforceAdsHolds(env, { now = Date.now(), limit = 25 } = {}) {
   const db = env.ONBOARDING_DB
   const { results } = await db.prepare("SELECT DISTINCT customer FROM ad_campaigns WHERE status = 'active' LIMIT ?1").bind(limit).all()
-  const out = { checked: 0, held: 0, paused: 0, failed: 0 }
+  const out = { checked: 0, held: 0, paused: 0, failed: 0, unreachable: 0 }
   for (const { customer } of results) {
     out.checked++
     const r = await enforceAdsHold(env, customer, { now })
     if (r.hold) out.held++
     out.paused += r.paused
     out.failed += r.failed
+    out.unreachable += r.unreachable
   }
+  if (out.failed) console.error('ads holds: campaigns still running on hold', out.failed, 'unreachable', out.unreachable)
   return out
+}
+
+// Escalation: campaigns still running although the business is on hold (pause failed or unreachable).
+export async function runningOnHold(env, customerId) {
+  const hold = await adsHold(env, customerId)
+  if (!hold) return null
+  const { results } = await env.ONBOARDING_DB.prepare("SELECT id, platform FROM ad_campaigns WHERE customer = ?1 AND status = 'active'").bind(customerId).all()
+  if (!results.length) return null
+  const last = await env.ONBOARDING_DB.prepare("SELECT details FROM ad_actions WHERE customer = ?1 AND kind = 'pause' AND status = 'failed' ORDER BY at DESC LIMIT 1").bind(customerId).first()
+  const d = last ? JSON.parse(last.details || '{}') : {}
+  return { hold: hold.reason, running: results.length, unreachable: d.unreachable === true, lastError: d.error ?? null }
 }

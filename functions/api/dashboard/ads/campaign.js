@@ -9,7 +9,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
-import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction } from '../../../../server/ads/campaigns.js'
+import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction, confirmPausedExternally } from '../../../../server/ads/campaigns.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 const STATUS = { test_account_required: 409, invalid_budget: 400, invalid_status: 409, not_found: 404, live_launch_disabled: 409, approval_required: 409, budget_approval_required: 409, exceeds_approved_budget: 409, monthly_budget_reached: 409, not_editable: 409, not_launched: 409, needs_account: 409, profile_required: 409, too_many_campaigns: 409, creative_not_approved: 409, subscription_required: 402 }
@@ -43,6 +43,10 @@ export async function onRequestPost({ request, env }) {
       case 'pause':
       case 'resume':
         r = await setCampaignStatus(env, customer, body.id, body.action === 'pause' ? 'paused' : 'active', actor)
+        break
+      case 'confirm_paused_externally':
+        if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
+        r = await confirmPausedExternally(env, customer.id, body.id, actor)
         break
       case 'budget':
         r = await setCampaignBudget(env, customer, body.id, body.dailyCents, actor)
