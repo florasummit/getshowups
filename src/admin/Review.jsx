@@ -20,6 +20,7 @@ const STATUS_HELP = {
   missing: 'not built yet',
   unknown: 'couldn’t be checked',
 }
+const HEALTH_LABEL = { failing: 'Failing', degraded: 'Quiet lately', healthy: 'Working', unknown: 'No evidence yet', not_applicable: '' }
 const when = (ms) => (ms ? fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
 const Badge = ({ s }) => (
   <span className={`tag st st--${s}`} data-status={s}>
@@ -37,7 +38,10 @@ function Capability({ c, names }) {
           {c.name}
           {c.openFailures.length > 0 && <span className="bad"> · {plural(c.openFailures.length, 'problem')}</span>}
         </span>
-        <Badge s={c.status} />
+        <span className="cap-badges">
+          {HEALTH_LABEL[c.health] && ['failing', 'degraded'].includes(c.health) && <span className={`tag hl hl--${c.health}`} data-health={c.health}>{HEALTH_LABEL[c.health]}</span>}
+          <Badge s={c.status} />
+        </span>
       </summary>
       {c.description && <p className="fine">{c.description}</p>}
       <dl className="cap-facts">
@@ -100,8 +104,32 @@ function Capability({ c, names }) {
           </div>
         )}
       </dl>
+      <CapabilityEvents id={c.id} />
       </details>
     </li>
+  )
+}
+
+// Drill-down: the capability's recent events, loaded on demand.
+function CapabilityEvents({ id }) {
+  const [ev, setEv] = useState(null)
+  const load = () => api(`/api/platform/audit?capability=${encodeURIComponent(id)}`).then(({ status, data }) => setEv(status === 200 ? data.entries : []))
+  if (!ev)
+    return (
+      <button type="button" className="link-btn fine" onClick={load}>
+        Show recent events
+      </button>
+    )
+  if (!ev.length) return <p className="fine">No events recorded.</p>
+  return (
+    <ul className="cap-events" data-cap-events={id}>
+      {ev.slice(0, 10).map((e) => (
+        <li key={e.seq}>
+          <span className={`tag ${e.outcome === 'failure' ? 'tag--bad' : e.outcome === 'success' ? 'tag--ok' : ''}`}>{e.outcome}</span> {e.action}
+          {e.customer ? ` · ${e.customer}` : ''} · {when(e.at)}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -123,6 +151,7 @@ function Platform({ r, openBusiness }) {
           ))}
         </ul>
         <p className="fine">
+          {r.health ? `Working ${r.health.healthy} · failing ${r.health.failing} · quiet lately ${r.health.degraded} · no evidence yet ${r.health.unknown} · ` : ''}
           {r.release.build?.commit ? `Release ${r.release.build.commit.slice(0, 7)}` : 'Release unknown'}
           {r.audit ? ` · audit log ${r.audit.ok ? 'intact' : `BROKEN at ${r.audit.brokenAt}`}` : ''} · generated {when(r.generatedAt)}
         </p>

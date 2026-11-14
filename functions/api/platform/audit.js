@@ -12,6 +12,8 @@ export async function onRequestGet({ request, env }) {
   const url = new URL(request.url)
   const customer = url.searchParams.get('customer') ? String(url.searchParams.get('customer')).toLowerCase() : null
   if (customer && !CUSTOMER_RE.test(customer)) return json(400, { error: 'invalid_customer' })
+  const capability = url.searchParams.get('capability')
+  if (capability !== null && !/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/.test(capability)) return json(400, { error: 'invalid_request' })
   const before = url.searchParams.get('before') ? Number(url.searchParams.get('before')) : null
   if (before !== null && !(Number.isInteger(before) && before > 0)) return json(400, { error: 'invalid_request' })
   const db = env.ONBOARDING_DB
@@ -34,7 +36,7 @@ export async function onRequestGet({ request, env }) {
         headers: { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="getshowups-audit-${new Date().toISOString().slice(0, 10)}.json"`, 'Cache-Control': 'no-store' },
       })
     }
-    const [entries, chain] = await Promise.all([listAudit(db, { customer, beforeSeq: before, limit: 50 }), verifyAuditChain(db)])
+    const [entries, chain] = await Promise.all([listAudit(db, { customer, capability, beforeSeq: before, limit: 50 }), verifyAuditChain(db)])
     return json(200, { chain, entries })
   } catch (err) {
     console.error('audit read failed:', err?.message?.includes('no such table') ? 'table_missing' : 'storage_error')

@@ -154,7 +154,7 @@ test('a failing check never breaks the review: that capability shows "unknown"/u
     const r = await platformReview(env)
     const c = r.capabilities.find((x) => x.id === 'example.broken')
     assert.equal(c.status, 'unknown')
-    assert.deepEqual(c.verification, { ok: false, at: null, evidence: 'Check failed' })
+    assert.deepEqual(c.verification, { ok: false, at: null, evidence: 'Check failed or timed out' })
     assert.ok(r.capabilities.length > 20)
   } finally {
     unregisterCapability('example.broken')
@@ -240,4 +240,24 @@ test('sign-in can return to /admin/review (allowlisted); other admin paths still
   assert.equal(safeNext('/admin/review'), '/admin/review')
   assert.equal(safeNext('/admin/other'), '/dashboard')
   assert.equal(safeNext('/admin/review/../x'), '/dashboard')
+})
+
+test('a hanging check is cut off after the timeout; health is a separate axis (failing / quiet / working / no evidence)', async () => {
+  registerCapability({ id: 'example.slow', name: 'Slow', journey: 'platform', state: () => ({ mode: 'live' }), verify: () => new Promise(() => {}) })
+  registerCapability({ id: 'example.quiet', name: 'Quiet', journey: 'platform', state: () => ({ mode: 'live' }), verify: async () => ({ ok: false, at: Date.now() - 90 * DAY, evidence: 'Last seen long ago' }) })
+  try {
+    await recordEvent(db, { type: 'x.fail', capability: 'example.quiet', resource: { type: 'x', id: '1' }, outcome: 'failure' })
+    const t0 = Date.now()
+    const r = await platformReview(env)
+    assert.ok(Date.now() - t0 < 8000, 'review returned despite a hanging check')
+    const cap = (id) => r.capabilities.find((c) => c.id === id)
+    assert.deepEqual([cap('example.slow').status, cap('example.slow').health], ['built_tested', 'unknown'])
+    assert.equal(cap('example.quiet').health, 'failing', 'open failure wins')
+    assert.equal(cap('calendar.google').health, 'healthy')
+    assert.equal(cap('account.deletion').health, 'not_applicable')
+    assert.equal(Object.values(r.health).reduce((a, b) => a + b, 0), r.capabilities.length)
+  } finally {
+    unregisterCapability('example.slow')
+    unregisterCapability('example.quiet')
+  }
 })

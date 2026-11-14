@@ -117,7 +117,15 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
 // Cron safety net: every business that still has a running campaign is re-checked; held ones are paused.
 export async function enforceAdsHolds(env, { now = Date.now(), limit = 25 } = {}) {
   const db = env.ONBOARDING_DB
-  const { results } = await db.prepare("SELECT DISTINCT customer FROM ad_campaigns WHERE status = 'active' LIMIT ?1").bind(limit).all()
+  // Fair rotation: businesses whose last pause attempt is oldest go first, so campaigns that keep failing (e.g.
+  // unreachable) can never starve the others.
+  const { results } = await db
+    .prepare(
+      `SELECT c.customer, coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.customer = c.customer AND a.kind = 'pause'), 0) AS tried
+         FROM (SELECT DISTINCT customer FROM ad_campaigns WHERE status = 'active') c ORDER BY tried, c.customer LIMIT ?1`,
+    )
+    .bind(limit)
+    .all()
   const out = { checked: 0, held: 0, paused: 0, failed: 0, unreachable: 0 }
   for (const { customer } of results) {
     out.checked++

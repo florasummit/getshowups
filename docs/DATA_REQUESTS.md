@@ -3,6 +3,12 @@
 The privacy policy (https://getshowups.com/privacy) promises that people can email brandon@getshowups.com to access or
 delete their information. There is no self-service tool: requests are handled manually with the steps below.
 
+> **Deleting a whole business account:** once migrations 0015–0016 are applied and `ACCOUNT_DELETION_ENABLED` is
+> approved, use the deletion workflow instead of manual SQL: the owner deletes from Settings, or a platform admin opens
+> the business in /admin → Account deletion (typed id) on a verified request. It is permanent (no undo window), retried
+> until verified, and audited (docs/DATA_RETENTION.md, docs/OPERATIONS.md). The steps below remain for **one person's**
+> data (a lead asking to be forgotten), which is not automated yet.
+
 Rules
 - Verify the requester first: reply to the address on record (or have the business owner confirm) before sharing or
   deleting anything. Never send someone else's data to a new address.

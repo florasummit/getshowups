@@ -20,9 +20,17 @@ import { CUSTOMER_RE } from '../invites.js'
 const DAY = 86400000
 export const STATUS = ['live_verified', 'built_tested', 'sandbox', 'disabled', 'missing', 'unknown']
 
-const safe = async (fn, fallback) => {
+const CHECK_TIMEOUT_MS = 4000 // a slow check must never stall the review (adopted from the parallel ops-core patch)
+const safe = async (fn, fallback, timeoutMs = 0) => {
   try {
-    return await fn()
+    if (!timeoutMs) return await fn()
+    let timer
+    const timeout = new Promise((_, reject) => (timer = setTimeout(() => reject(new Error('timeout')), timeoutMs)))
+    try {
+      return await Promise.race([fn(), timeout])
+    } finally {
+      clearTimeout(timer)
+    }
   } catch (err) {
     console.error('review check failed:', err?.message?.includes('no such table') ? 'table_missing' : err?.name)
     return fallback
@@ -58,6 +66,18 @@ async function openFailures(db, { capability = null, customer = null, since }) {
   return out
 }
 
+// Health is a second axis, separate from how far a capability is built: is it working right now?
+//   failing       an open failure (no later success)          degraded  was seen working, not recently
+//   healthy       seen working recently                       unknown   no evidence either way
+//   not_applicable  not switched on (off / not built)
+function healthOf(state, check, open) {
+  if (!state || ['disabled', 'missing'].includes(state.mode)) return 'not_applicable'
+  if (open.length) return 'failing'
+  if (check?.ok) return 'healthy'
+  if (check?.at) return 'degraded'
+  return 'unknown'
+}
+
 async function eventStats(db, capability, now) {
   const r = await db
     .prepare(
@@ -70,13 +90,14 @@ async function eventStats(db, capability, now) {
   return { lastSuccess: r?.last_success ?? null, lastFailure: r?.last_failure ?? null, failures7: r?.failures7 ?? 0, total: r?.total ?? 0 }
 }
 
+export { CHECK_TIMEOUT_MS }
 export async function capabilityStatuses(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const caps = listCapabilities()
   const rows = []
   for (const c of caps) {
     const state = await safe(() => c.state(env), null)
-    const check = c.verify ? await safe(() => c.verify(env, now), { ok: false, at: null, evidence: 'Check failed' }) : null
+    const check = c.verify ? await safe(() => c.verify(env, now), { ok: false, at: null, evidence: 'Check failed or timed out' }, CHECK_TIMEOUT_MS) : null
     const events = await safe(() => eventStats(db, c.id, now), { lastSuccess: null, lastFailure: null, failures7: 0, total: 0 })
     const open = await safe(() => openFailures(db, { capability: c.id, since: now - 14 * DAY }), [])
     rows.push({
@@ -87,6 +108,7 @@ export async function capabilityStatuses(env, now = Date.now()) {
       external: c.external || null,
       dependsOn: c.dependsOn,
       status: statusOf(state, check),
+      health: healthOf(state, check, open),
       mode: state?.mode ?? 'unknown',
       note: state?.note ?? null,
       approval: state?.approval ?? null,
@@ -111,7 +133,14 @@ export async function platformReview(env, now = Date.now()) {
   const businesses = await safe(() => customerRows(env, now), [])
   const build = await buildInfo(env)
   const migrations = await safe(() => migrationStatus(env, build), null)
-  const chain = await safe(() => verifyAuditChain(db), null)
+  // Page loads verify only what was added since the last verified daily checkpoint (the cron verifies the whole
+  // chain every day); cost stays flat as the log grows.
+  const chain = await safe(async () => {
+    const cp = await db.prepare("SELECT details FROM audit_log WHERE action = 'audit.checkpoint' AND outcome = 'success' ORDER BY seq DESC LIMIT 1").first()
+    const head = cp ? JSON.parse(cp.details).headSeq : 0
+    const r = await verifyAuditChain(db, { fromSeq: head > 0 ? head + 1 : 1 })
+    return { ...r, since: head > 0 ? head + 1 : 1 }
+  }, null)
   const changes = await safe(() => listAudit(db, { capability: 'platform.release', limit: 20 }), [])
   const incidents = []
   for (const c of capabilities) {
@@ -129,16 +158,18 @@ export async function platformReview(env, now = Date.now()) {
   const approvals = capabilities.filter((c) => c.approval && ['disabled', 'sandbox'].includes(c.status)).map((c) => ({ capability: c.id, name: c.name, approval: c.approval }))
   const blocked = capabilities.filter((c) => c.blockers.length || c.blockedBy.length).map((c) => ({ capability: c.id, name: c.name, blockers: c.blockers, blockedBy: c.blockedBy }))
   const counts = Object.fromEntries(STATUS.map((s) => [s, capabilities.filter((c) => c.status === s).length]))
+  const health = Object.fromEntries(['failing', 'degraded', 'healthy', 'unknown', 'not_applicable'].map((h) => [h, capabilities.filter((c) => c.health === h).length]))
   return {
     generatedAt: now,
     journey: JOURNEY.map((j) => ({ ...j, capabilities: capabilities.filter((c) => c.journey === j.id).map((c) => c.id) })),
     capabilities,
     counts,
+    health,
     incidents,
     approvals,
     blocked,
     release: { build: build ? { commit: build.commit, builtAt: build.builtAt, branch: build.branch } : null, migrations, config: configSnapshot(env), history: changes },
-    audit: chain ? { ok: chain.ok, checked: chain.checked ?? null, brokenAt: chain.brokenAt ?? null } : null,
+    audit: chain ? { ok: chain.ok, checked: chain.checked ?? null, brokenAt: chain.brokenAt ?? null, sinceSeq: chain.since } : null,
     businesses: businesses.map((b) => ({ id: b.id, name: b.name, deleted: Boolean(b.deleted), testBusiness: b.testBusiness, attention: b.attention })),
   }
 }
@@ -148,7 +179,7 @@ export async function platformReview(env, now = Date.now()) {
 export async function businessReview(env, id, now = Date.now()) {
   if (!CUSTOMER_RE.test(id || '')) return null
   const db = env.ONBOARDING_DB
-  const summary = (await customerRows(env, now)).find((c) => c.id === id)
+  const [summary] = await customerRows(env, now, { only: id })
   if (!summary) return null
   const since30 = now - 30 * DAY
   const REAL = "NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id AND t.is_test = 1)"

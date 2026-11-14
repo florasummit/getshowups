@@ -40,7 +40,7 @@ beforeEach(() => {
     GOOGLE_REDIRECT_URI: `${ORIGIN}/x`,
     TOKEN_ENCRYPTION_KEY: btoa('k'.repeat(32)),
     ADMIN_API_TOKEN: 'a'.repeat(40),
-    GOOGLE_TOKENS: { get: async () => null },
+    GOOGLE_TOKENS: { get: async () => null, list: async () => ({ keys: [], list_complete: true }) },
     PLATFORM_ADMIN_EMAILS: 'founder@getshowups.example',
   }
   origFetch = globalThis.fetch

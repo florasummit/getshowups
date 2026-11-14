@@ -87,7 +87,7 @@ beforeEach(async () => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
     PLATFORM_ADMIN_EMAILS: 'ops@getshowups.com',
     RESEND_API_KEY: 're_test',
     EMAIL_FROM: 'GetShowUps <hello@getshowups.com>',

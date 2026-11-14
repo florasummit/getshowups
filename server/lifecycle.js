@@ -81,9 +81,11 @@ export async function processRecoveryExpiries(env, { now = Date.now(), limit = 5
       `SELECT s.customer FROM subscriptions s
         WHERE s.status = 'canceled' AND coalesce(s.current_period_end, 0) <= ?1
           AND NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.customer = s.customer)
-        LIMIT 50`,
+          AND (?2 = 1 OR NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.customer = s.customer AND a.action = 'lifecycle.recovery_expired'))
+        ORDER BY s.current_period_end
+        LIMIT 25`, // per cron run: measured ~5 queries each; keeps the run under D1's per-request query limit
     )
-    .bind(now - RECOVERY_MS)
+    .bind(now - RECOVERY_MS, retentionScheduleEnabled(env) ? 1 : 0)
     .all()
     .catch((err) => (err?.message?.includes('no such table') ? { results: [] } : Promise.reject(err)))
   const scheduled = retentionScheduleEnabled(env)

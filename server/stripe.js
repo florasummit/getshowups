@@ -2,6 +2,7 @@
 // downgrades, cancellation and reactivation, and signed webhooks to mirror subscription state.
 // Configured only when STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are set. No card data is stored;
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
+import { queueRecoveryEmail } from './billing-recovery.js'
 import { recordEvent } from './auditlog.js'
 import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
@@ -259,6 +260,8 @@ export async function handleEvent(env, event, { after = null } = {}) {
         await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
         await recordEvent(db, { type: 'billing.payment_failed', actor: 'stripe', customer, capability: 'billing.stripe', resource: { type: 'invoice', id: obj.id ?? event.id }, correlationId, details: { livemode: event.livemode === true }, at: event.created * 1000 })
         holdCheck(customer) // owner decision: ads pause on the first failed payment
+        // One recovery email per invoice to the owners (outbox; the MESSAGES_LIVE gate applies).
+        await queueRecoveryEmail(env, customer, String(obj.id || event.id), { correlationId, now: event.created * 1000 })
       }
       return { handled: Boolean(customer) }
     default:
@@ -312,14 +315,15 @@ export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscr
 
 // ---------- reconciliation (read-only) ----------
 // Lists every subscription (all statuses) and the paid invoices since a time, following Stripe's pagination.
-async function listAll(env, path, params, cap = 1000) {
+async function listAll(env, path, params, cap = 20000) {
   const out = []
   let after
   for (;;) {
     const r = await stripePost(env, path, { ...params, limit: 100, starting_after: after }, { method: 'GET' })
     if (!r.ok) return r
     out.push(...(r.body.data || []))
-    if (!r.body.has_more || out.length >= cap || !out.length) return { ok: true, data: out }
+    if (!r.body.has_more || !out.length) return { ok: true, data: out, complete: true }
+    if (out.length >= cap) return { ok: true, data: out, complete: false }
     after = out.at(-1).id
   }
 }

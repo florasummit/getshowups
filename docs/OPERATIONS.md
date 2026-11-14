@@ -82,3 +82,38 @@ Command per migration (from a checkout containing the file):
 
 Restoring a database backup: re-run every completed deletion in `account_deletions` afterwards, and compare the audit
 head hash with the last export (docs/DATA_RETENTION.md, docs/AUDIT.md).
+
+## 6. Scalability (measured, `node --no-warnings scripts/scale-bench.mjs 10 100 1000`)
+
+Synthetic, deterministic data on the real schema (node:sqlite; each first/all/run counted as one D1 request). Times
+are local SQLite execution, not production latency; query and KV counts are what production would issue.
+
+| At 1,000 businesses (25,000 audit entries) | D1 queries | KV ops | Note |
+| --- | --- | --- | --- |
+| Admin customer list (`customerRows`) | 2 | 1 | was 472 queries + 1,000 KV gets (hit the ~1,000 KV ops/request limit) |
+| Business Review, Platform (after daily checkpoint) | 92 | 3 | same at 10 and 100; was 918 + 1,001 |
+| Business Review, one business | 43 | 2 | independent of size; was 513 + 1,001 |
+| Full audit chain verify (daily cron) | 54 | 0 | ~190 ms locally for 25k entries; page loads verify only entries since the checkpoint |
+| Ads hold sweep, one cron run | ~195 | 0 | 25 businesses per run, least-recently-tried first (was: the same 25 forever) |
+| Recovery expiry, one cron run | ≤ ~125 | 0 | 25 per run, already-recorded ones skipped (was: starved after 50) |
+| One full account deletion | 118 | 14 | 2 per cron run (≈ 576/day) |
+| 50 concurrent audit writes | 564 | 0 | all written, chain intact; the chain head is a serialization point (see below) |
+
+Limits to watch: D1 allows ~1,000 queries per Worker request (paid plan). Worst-case cron run with every job busy at
+1,000 businesses ≈ 200 (holds) + 125 (recovery) + 236 (deletions) + 54 (checkpoint) + existing jobs; split the cron into
+separate triggers before that sum approaches the limit. Audit writes serialize on the chain head: fine for today's
+volume (a few events per request); for sustained high write rates, batch per request or sequence through a Durable
+Object. Stripe reconciliation lists up to 20,000 subscriptions per run and reports "incomplete listing" beyond that
+instead of false alarms. Regression tests: `test/scale.test.js`.
+
+## 7. The parallel "business-review.patch" (another agent, based on main d426fef)
+
+Not used to build #28 (built independently on #24–#27). Reviewed in an isolated worktree (its own suite: 338 unit / 73
+e2e passing). It re-implements systems the stack already has, so it is not merged. Adopted: health as a separate axis
+with a 4 s check timeout; one payment-recovery email per invoice to owners (outbox, launch gate applies); a capability
+event drill-down; a note in docs/DATA_REQUESTS.md. Not adopted: `audit_events` (purgeable, not tamper-evident;
+duplicates audit_log), `lifecycle_states` (duplicates derived state), `deletion_requests` with a 14-day cancellable grace
+period (contradicts the owner's no-undo-window decision; also deletes the business row so ids could be reused),
+`ads/shutdown.js` (duplicates holds; no Google read-back, no billing triggers, no unreachable handling), a generic action
+route (specific audited routes exist), and its migration `0015_operations_core.sql` (number collides with
+`0015_audit_log.sql`; duplicate tables).

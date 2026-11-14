@@ -11,6 +11,7 @@ const LIVE = ['active', 'trialing', 'past_due', 'incomplete']
 
 export const ISSUE_TEXT = {
   billing_after_deletion: 'Stripe still has a running subscription for a deleted account',
+  incomplete_listing: 'Too many subscriptions to list in one run; missing-subscription check skipped',
   stripe_only: 'Subscription in Stripe that our records don’t have',
   ours_only: 'Our records point to a subscription Stripe doesn’t have',
   status_mismatch: 'Status differs from Stripe',
@@ -67,9 +68,12 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
     if (o.status !== 'canceled' && cancel !== Boolean(o.cancel_at_period_end)) add('cancel_mismatch', o.customer, { subscription: s.id, ours: Boolean(o.cancel_at_period_end), stripe: cancel })
     if (modes.has(o.customer) && modes.get(o.customer) !== (s.livemode === true)) add('mode_mismatch', o.customer, { subscription: s.id, ours: modes.get(o.customer), stripe: s.livemode === true })
   }
-  for (const o of ours) {
-    if (o.stripe_subscription_id && !seen.has(o.stripe_subscription_id) && o.status !== 'canceled') add('ours_only', o.customer, { subscription: o.stripe_subscription_id, ours: o.status })
-  }
+  // Only when Stripe's list was complete: a truncated list would turn every unseen subscription into a false alarm.
+  if (subs.complete !== false) {
+    for (const o of ours) {
+      if (o.stripe_subscription_id && !seen.has(o.stripe_subscription_id) && o.status !== 'canceled') add('ours_only', o.customer, { subscription: o.stripe_subscription_id, ours: o.status })
+    }
+  } else add('incomplete_listing', null, { stripe: subs.data.length })
 
   // Payments in the last 35 days, both ways (only invoices with money; $0 invoices are not revenue).
   const paid = invoices.data.filter((i) => (i.amount_paid || 0) > 0)

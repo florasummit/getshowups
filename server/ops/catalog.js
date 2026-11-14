@@ -15,6 +15,7 @@ import { conversionsEnabled } from '../ads/conversions.js'
 import { deletionEnabled, deletionStatus } from '../deletion.js'
 import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
+import { customerRows } from '../metrics.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
 
 const DAY = 86400000
@@ -216,10 +217,8 @@ registerCapability({
   dependsOn: ['billing.stripe', 'platform.cron', 'platform.audit'],
   state: (env) => (adsEnabled(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Ads off' }),
   verify: async (env, now) => {
-    // Healthy = no business on hold with a campaign still running.
-    const { results } = await env.ONBOARDING_DB.prepare("SELECT DISTINCT customer FROM ad_campaigns WHERE status = 'active'").all()
-    let stuck = 0
-    for (const r of results) if (await runningOnHold(env, r.customer)) stuck++
+    // Healthy = no business on hold with a campaign still running (one query for all businesses).
+    const stuck = (await customerRows(env, now)).filter((b) => b.attention.includes('ads_running_on_hold')).length
     const last = await env.ONBOARDING_DB.prepare("SELECT max(at) AS at FROM audit_log WHERE action = 'ads.pause' AND actor LIKE 'system:%' AND outcome = 'success'").first()
     return { ok: stuck === 0, at: last?.at ?? null, evidence: stuck ? `${stuck} business(es) on hold with campaigns still running` : last?.at ? `Last automatic pause ${ago(last.at, now)}; none running on hold` : 'Never triggered in production; none running on hold' }
   },

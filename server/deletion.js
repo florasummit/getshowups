@@ -269,7 +269,8 @@ function summary(name, r) {
 }
 
 // Cron: advance due deletions (bounded).
-export async function processDeletions(env, { now = Date.now(), limit = 3 } = {}) {
+// limit 2: a full deletion measured 118 D1 queries (scripts/scale-bench.mjs); the cron run shares ~1,000 per request.
+export async function processDeletions(env, { now = Date.now(), limit = 2 } = {}) {
   if (!deletionEnabled(env)) return { enabled: false }
   let rows
   try {
