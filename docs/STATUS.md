@@ -615,3 +615,7 @@ Everything below is **local and tested**, not in production.
    login → connect Google Calendar → connection status → submit test lead → view availability → see bookings.
    First step: verify what GHL access actually exists before choosing CRM/SMS build-vs-reuse.
 2. Then: lead capture → qualification → booking → reminders → show-up tracking.
+
+## 2026-11-14: post-audit launch readiness
+
+See docs/LAUNCH_READINESS.md. Draft PRs: #30 (review accuracy, +unmark fix 60e7959), #31 (cancel appointments, noindex test sites, deep links). Next action: approve and deploy #30 and #31, then cancel the journey appointment and run the Stripe live activation checklist.
