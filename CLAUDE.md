@@ -156,6 +156,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. With Stripe configured, LIVE launch/resume also needs an active subscription;
   sandbox (verified Google Ads test account) does not, so never-billed pilots (PoolThru) can test.
+- Ads holds (server/ads/holds.js; owner decision 2026-11-14): a business on hold gets every running campaign paused
+  on its platform immediately and read back from Google; launch/Start are refused (`ads_on_hold`) while it lasts.
+  Holds are derived, never stored: admin suspension (customers.status), and for BILLED businesses only (self-serve
+  signup or a Stripe subscription; never-billed pilots like PoolThru are exempt) while Stripe is configured: the first
+  failed payment (payment_failed event newer than the last paid/good-standing time, or past_due/incomplete), or an
+  ended subscription. Triggers: Stripe webhook (after the receipt, via waitUntil), admin suspend (inline, counts in the
+  audit), and the 5-min cron sweep (retries). Decrease-only safety stop; nothing ever resumes automatically.
 - Ads drafts: one open (unlaunched) draft per business and platform from "Draft my plan" (409 draft_exists; atomic
   INSERT … WHERE NOT EXISTS). Existing duplicates are shown with a notice, never removed automatically; removal is an
   explicit confirmed owner action (status 'removed', row kept). Services split on commas/newlines; starter ad text

@@ -29,8 +29,11 @@ Reviewed 2026-11-13 from official Google pages (links below). **Verified** = sta
 **Fits the policy text (inference):**
 - Each business signs in with its **own Google account** (per-advertiser OAuth).
 - GetShowUps calls Google directly from its own Cloud project. It offers no API or MCP interface to anyone.
-- Every change is started by the owner in the dashboard. Automatic pausing is **off** unless
+- Every change is started by the owner in the dashboard. Automatic pausing by the optimizer is **off** unless
   `ADS_AUTOMATION_ENABLED=true` (approval). The optimizer only recommends.
+- One owner-approved exception (2026-11-14), the **safety stop**: when a business is suspended by GetShowUps or a
+  billed business's payment fails or its subscription ends, its running campaigns are paused (never resumed,
+  budgets never raised) and read back from Google. It only reduces spend. See open item 4.
 - Ads tokens are AES-GCM encrypted at rest.
 
 **Open (needs confirmation from Google):**
@@ -42,6 +45,8 @@ Reviewed 2026-11-13 from official Google pages (links below). **Verified** = sta
    to us here).
 3. Whether the scheduled reads (daily metrics sync, daily read-back of created campaigns) count as acceptable
    per-advertiser-authenticated automation. They are read-only.
+4. Whether the safety stop (pause-only, triggered by suspension or a billing failure, under the advertiser's own
+   OAuth grant) is acceptable as an unattended change. Confirm before real (non-test) spend.
 
 ## Launch blockers for a real (non-test) PoolThru pilot
 

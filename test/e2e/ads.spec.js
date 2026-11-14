@@ -340,6 +340,41 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await other.close()
 })
 
+test('ads hold: a platform admin suspension pauses the running campaign on Google at once; owner sees why; reactivation restarts nothing (mock API)', async ({ page, context, browser }) => {
+  // MOCK DATA: the local Google Ads stand-in (test account). Continues from the sandbox test's created campaign.
+  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  const c = page.locator('.campaign').first()
+  await c.getByRole('button', { name: 'Start ads (test account, no spend)' }).click()
+  await expect(c.locator('.chip')).toHaveText('Running')
+
+  const admin = await browser.newContext()
+  await useSession(admin, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  const a = await admin.newPage()
+  await a.goto('/admin')
+  await a.locator('.row--link', { hasText: 'E2E Ads Pools' }).first().click()
+  await a.getByRole('button', { name: 'Suspend account' }).click()
+  await expect(a.getByText('every running ad campaign (checked on Google)')).toBeVisible()
+  await a.getByRole('button', { name: 'Confirm: pause booking page and ads' }).click()
+  await expect(a.locator('[data-ads-paused]')).toHaveText('Ads: 1 campaign paused (1 confirmed on Google).')
+
+  await page.reload()
+  await expect(page.locator('[data-ads-hold="suspended"]')).toContainText('Your ads are paused because GetShowUps paused this business')
+  await expect(c.locator('.chip')).toHaveText('Paused')
+  await c.getByRole('button', { name: 'Check on Google' }).click()
+  await expect(c.locator('[data-google-live]')).toContainText('Google reports: paused')
+  await c.getByRole('button', { name: 'Start ads (test account, no spend)' }).click()
+  await expect(page.getByText('Ads are paused while there’s a problem with this account')).toBeVisible()
+  await expect(c.locator('.chip')).toHaveText('Paused')
+
+  await a.getByRole('button', { name: 'Reactivate account' }).click()
+  await expect(a.getByRole('button', { name: 'Suspend account' })).toBeVisible()
+  await admin.close()
+  await page.reload()
+  await expect(page.locator('[data-ads-hold]')).toHaveCount(0)
+  await expect(c.locator('.chip')).toHaveText('Paused') // never restarted automatically
+})
+
 test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context, browser }) => {
   await useSession(context, fixtures.E2E_OTHER_SESSION_TOKEN)
   expect((await (await page.request.get('/api/dashboard/me')).json()).features.ads).toBe(false)

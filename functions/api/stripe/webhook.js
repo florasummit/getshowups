@@ -4,7 +4,7 @@
 import { json } from '../../../server/google-oauth.js'
 import { handleEvent, stripeConfigured, stripeLiveEnabled, verifySignature } from '../../../server/stripe.js'
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   if (!stripeConfigured(env) || !env.ONBOARDING_DB) return json(503, { error: 'not_configured' })
   const raw = await request.text()
   if (!(await verifySignature(raw, request.headers.get('Stripe-Signature'), env.STRIPE_WEBHOOK_SECRET))) {
@@ -23,12 +23,21 @@ export async function onRequestPost({ request, env }) {
   const db = env.ONBOARDING_DB
   const receipt = await db.prepare('INSERT OR IGNORE INTO stripe_events (id, type, received_at) VALUES (?1, ?2, ?3)').bind(event.id, event.type, Date.now()).run()
   if ((receipt?.meta?.changes ?? receipt?.changes ?? 0) === 0) return json(200, { received: true, duplicate: true })
+  const later = []
+  let result
   try {
-    const result = await handleEvent(env, event)
-    return json(200, { received: true, handled: result.handled })
+    result = await handleEvent(env, event, { after: (fn) => later.push(fn) })
   } catch (err) {
     console.error('stripe webhook failed:', event.type, err?.message)
     await db.prepare('DELETE FROM stripe_events WHERE id = ?1').bind(event.id).run().catch(() => {})
     return json(500, { error: 'processing_failed' })
   }
+  // Follow-up work (pausing ads on a billing problem) runs after the receipt; failures are retried by cron.
+  const follow = Promise.allSettled(later.map((fn) => Promise.resolve().then(fn))).then((rs) => {
+    for (const r of rs) if (r.status === 'rejected') console.error('stripe webhook follow-up failed:', r.reason?.name)
+  })
+  if (typeof waitUntil === 'function') waitUntil(follow)
+  else await follow
+  return json(200, { received: true, handled: result.handled })
 }
+
