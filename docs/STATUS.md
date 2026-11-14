@@ -100,7 +100,12 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Ads review UX (2026-11-13, branch feature/ads-review-ux): one owner step "Approve and create (paused)" when the account
+- Autonomous journey testing (2026-11-14, branch feature/autonomous-journey): test/e2e/journey.js detects the next
+  step from backend state (sign_in → setup_<step> → ads_profile → ads_connect/reconnect/choose_account → ready) and
+  runs it until ready, failing with a diagnosis when a step doesn't change state. CI: journey.spec.js on the isolated
+  e2e-journey fixture (cold start, self-healing reconnect, stuck-step diagnosis). Live: scripts/journey-live.mjs
+  (opt-in, test business only, pauses at Google consent, never clicks Google). Replaces the scripted demo recorder.
+- Ads review UX: DEPLOYED 2026-11-13 (dcc15f1, deployment f0e4ebad): one owner step "Approve and create (paused)" when the account
   is connected (Start stays separate); "Where: people in ZIP …"; every result tile says where its number comes from.
 - Google Ads conversion feedback: DEPLOYED OFF 2026-11-13 (9565e99, deployment 6281da42): conversion actions via the
   Google Ads API at campaign creation; Data Manager events:ingest uploader (lead/booked/completed, deduped, retries);
