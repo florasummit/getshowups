@@ -78,7 +78,7 @@ export async function onRequestPost({ request, env }) {
       const draft = (await loadWebsite(db, customer)).draft
       const r =
         kind === 'generation'
-          ? await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), allowAi: !usage.monthlyCapReached })
+          ? await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), logo: draft.logo || null, allowAi: !usage.monthlyCapReached })
           : await reviseWebsite(env, customer, draft, body.instruction)
       if (!r.ok) return json(r.httpStatus, { error: r.error, aiUsage: usage })
       // Only successful AI results count against the allowance (template fallbacks are free).
