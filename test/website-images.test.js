@@ -158,3 +158,73 @@ test('revise: an existing draft\'s off-industry photo is dropped, not kept; draf
   await generateWebsite(env, customer('poolthru-llc'))
   assert.deepEqual({ ...db.sql.prepare("SELECT draft, live_version FROM websites WHERE customer = 'poolthru-llc'").get() }, { ...before }, 'stored draft and live version untouched')
 })
+
+// ---------- the logo is never used as a photo ----------
+const LOGO = 'a'.repeat(32)
+const PHOTO = 'b'.repeat(32)
+const addAsset = (id, customerId) =>
+  db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, ?, 'image/png', x'00', 1, ?)").run(id, customerId, Date.now())
+
+test('generate: the business logo is never offered or placed as a hero/About photo (as happened on PoolThru)', async () => {
+  addAsset(LOGO, 'poolthru-llc')
+  // The model tries to place the logo asset as the hero in every design.
+  reply = () => ({
+    headline: 'Pool service in Charleston', intro: 'Pick a time online.', about: 'We help.', services: [], seoTitle: 'Pool service', seoDescription: 'Book online.',
+    designs: Array.from({ length: 3 }, () => ({ name: 'X', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'round', sections: ['services', 'about'], heroImage: `asset:${LOGO}`, aboutImage: `asset:${LOGO}` })),
+  })
+  let prompt = ''
+  env.AI = { run: async (_m, input) => ((prompt = JSON.stringify(input)), { response: reply(), usage: {} }) }
+  const g = (await generateWebsite(env, customer('poolthru-llc'), { logo: LOGO })).generation
+  const refs = g.designs.flatMap((d) => [d.heroImage, d.aboutImage])
+  assert.ok(!refs.includes(`asset:${LOGO}`), refs.join(', '))
+  assert.ok(!prompt.includes(LOGO), 'the logo is not offered to the model as an image')
+  // A real owner photo is still used first.
+  addAsset(PHOTO, 'poolthru-llc')
+  const g2 = (await generateWebsite(env, customer('poolthru-llc'), { logo: LOGO, draftPhotos: [PHOTO] })).generation
+  assert.ok(!g2.designs.flatMap((d) => [d.heroImage, d.aboutImage]).includes(`asset:${LOGO}`))
+})
+
+test('render: a saved design that placed the logo as the hero shows the design\'s other photo; the logo stays in the header', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const biz = { id: 'poolthru-llc', name: 'Poolthru LLC', phone: '', appointmentMode: 'at_customer' }
+  const content = {
+    headline: 'Pool service in Charleston', intro: 'Book online.', about: 'We help.', services: [], area: 'Charleston', highlights: [], photos: [], logo: LOGO,
+    design: { name: 'Clear Water', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'sharp', sections: ['services', 'about'], heroImage: `asset:${LOGO}`, aboutImage: 'stock:pool-backyard' },
+  }
+  const html = renderDesigned(biz, content, { canonical: 'https://x.example/', bookUrl: '/book/poolthru-llc' })
+  assert.equal(html.split(`/site-assets/${LOGO}`).length - 1, 1, 'logo only once (header)')
+  assert.match(html, /<a class="brand"[^>]*><img src="\/site-assets\/a{32}"/)
+  assert.ok(html.includes('/site-stock/pool-backyard'), 'hero falls back to the design\'s other photo')
+  // Unaffected: a real photo as hero still renders.
+  const normal = renderDesigned(biz, { ...content, design: { ...content.design, heroImage: 'stock:pool-water' } }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  assert.ok(normal.includes('/site-stock/pool-water') && normal.includes('/site-stock/pool-backyard'))
+})
+
+test('render: the statement layout sets only a short lead in display type; long text continues as body (same words)', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const about = 'We understand that maintaining a pool can be time-consuming. We handle the upkeep so you can focus on enjoying your outdoor space. Our process is simple: you pick a time online.'
+  const biz = { id: 'p', name: 'P', phone: '', appointmentMode: 'at_customer' }
+  const d = { name: 'Deep End', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', about: 'statement', shape: 'sharp', sections: ['about'], heroImage: 'stock:pool-loungers', aboutImage: null }
+  const html = renderDesigned(biz, { headline: 'H', intro: 'I', about, services: [], area: '', highlights: [], photos: [], design: d }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  const at = html.indexOf('class="wrap ab-statement"')
+  const block = html.slice(at, html.indexOf('</section>', at))
+  assert.match(block, /<p>We understand that maintaining a pool can be time-consuming\.<\/p>\s*<p>We handle the upkeep/)
+  const short = renderDesigned(biz, { headline: 'H', intro: 'I', about: 'Family-run since day one.', services: [], area: '', highlights: [], photos: [], design: d }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  assert.match(short, /<p>Family-run since day one\.<\/p>/)
+})
+
+test('render: neighbouring sections never share a background (closing section flips after an alt section)', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const biz = { id: 'p', name: 'P', phone: '', appointmentMode: 'at_customer' }
+  const tones = (html) => [...html.matchAll(/<section class="s( alt| band)?"/g)].map((m) => (m[1] || '').trim() || 'plain')
+  const base = { headline: 'H', intro: 'I', about: 'We help.', services: [{ name: 'Cleaning' }], area: 'Charleston', highlights: [], photos: [] }
+  const d = { name: 'X', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', shape: 'sharp', heroImage: 'stock:pool-loungers', aboutImage: null }
+  for (const design of [
+    { ...d, about: 'statement', sections: ['about', 'process'] }, // Deep End shape: band, alt → closing plain
+    { ...d, about: 'text', sections: ['process', 'about'] }, // alt, plain → closing alt
+    { ...d, about: 'text', sections: ['services', 'process', 'about'] }, // alt, plain, alt → closing plain
+  ]) {
+    const t = tones(renderDesigned(biz, { ...base, design }, { canonical: 'https://x.example/', bookUrl: '/b' }))
+    for (let i = 1; i < t.length; i++) assert.notEqual(t[i], t[i - 1], `${design.sections.join(',')}: ${t.join(' → ')}`)
+  }
+})

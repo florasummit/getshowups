@@ -5,6 +5,13 @@
 import { FONTS, PALETTES, stockById } from './site-design.js'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+// Statement layout: only a short lead is set in display type. A long first paragraph keeps its first sentence as the
+// statement and continues as body text (same words, just split), so it never becomes a wall of large type.
+const statementText = (about) => {
+  const [first, ...rest] = String(about || '').split(/\n{2,}/)
+  const m = first.length > 160 && first.match(/^(.{20,200}?[.!?])\s+(\S[\s\S]*)$/)
+  return m ? [m[1], m[2], ...rest].join('\n\n') : String(about || '')
+}
 const para = (s) =>
   String(s || '')
     .split(/\n{2,}/)
@@ -123,7 +130,7 @@ section.s.alt{background:var(--surface)}
 .ab-text p+p{margin-top:16px}.ab-text p{color:var(--muted);font-size:1.08rem}
 .ab-statement{padding:20px 0}
 .ab-statement p{font-family:var(--head);font-weight:var(--hw);letter-spacing:var(--track);font-size:clamp(1.7rem,3.6vw,2.9rem);line-height:1.18;max-width:24em}
-.ab-statement p+p{font-family:var(--body);font-weight:400;letter-spacing:0;font-size:1.1rem;color:var(--muted);margin-top:24px;max-width:40em}
+.ab-statement p+p{font-family:var(--body);font-weight:400;letter-spacing:0;font-size:1.1rem;line-height:1.6;color:var(--muted);margin-top:24px;max-width:40em}
 .band{background:var(--accent);color:var(--on-accent)}
 .band .ab-statement p+p{color:inherit;opacity:.85}
 .facts-list{list-style:none;padding:0;margin:28px 0 0;display:grid;gap:12px}
@@ -143,6 +150,7 @@ section.s.alt{background:var(--surface)}
 .close{display:grid;grid-template-columns:1.2fr 1fr;gap:56px;align-items:center}
 .close h2{font-size:clamp(2.2rem,4.6vw,3.8rem)}
 .close .box{padding:34px;border-radius:var(--r-card);background:var(--bg);border:1px solid var(--line)}
+section.s:not(.alt) .close .box{background:var(--surface)}
 .close .box dt{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .close .box dd{margin:4px 0 20px;font-weight:600;font-size:1.1rem}
 footer{padding:36px 0 110px;font-size:.88rem;color:var(--muted);border-top:1px solid var(--line)}
@@ -186,8 +194,14 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   const description = c.seoDescription || c.intro.slice(0, 160)
   // The owner's own main photo always wins over a chosen stock photo. With a no-photo hero it moves to About.
   const own = c.hero ? `asset:${c.hero}` : null
-  const heroIm = imageFor(own && d.hero !== 'typographic' ? own : d.heroImage)
-  const aboutIm = imageFor(own && d.hero === 'typographic' ? own : d.aboutImage)
+  // The logo is shown in the header, never as a photo: a design that placed it as the hero or About image (older
+  // generations could) falls back to the design's other photo for the hero, so the page still leads with an image.
+  const logoRef = c.logo ? `asset:${c.logo}` : null
+  const photo = (ref) => (ref && ref !== logoRef ? ref : null)
+  const heroRef = photo(d.heroImage) ?? (d.heroImage && d.hero !== 'typographic' ? photo(d.aboutImage) : null)
+  const aboutRef = photo(d.aboutImage) === heroRef && !photo(d.heroImage) ? null : photo(d.aboutImage)
+  const heroIm = imageFor(own && d.hero !== 'typographic' ? own : heroRef)
+  const aboutIm = imageFor(own && d.hero === 'typographic' ? own : aboutRef)
   const ownPhotos = (c.photos || []).map((id) => imageFor(`asset:${id}`))
   const industryLine = [c.services[0]?.name, c.area].filter(Boolean).join(' · ')
   const buttons = (alt = 'btn-line') =>
@@ -223,7 +237,7 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
         : '',
     about: (alt) => {
       if (!c.about && !facts) return ''
-      if (d.about === 'statement') return `<section class="s band" id="about" aria-labelledby="h-about"><div class="wrap ab-statement"><h2 id="h-about" class="eyebrow" style="color:inherit;opacity:.8;margin-bottom:24px">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></section>`
+      if (d.about === 'statement') return `<section class="s band" id="about" aria-labelledby="h-about"><div class="wrap ab-statement"><h2 id="h-about" class="eyebrow" style="color:inherit;opacity:.8;margin-bottom:24px">About ${esc(biz.name)}</h2>${para(statementText(c.about))}${facts}</div></section>`
       if (d.about === 'split' && aboutIm) return `<section class="s${alt}" id="about" aria-labelledby="h-about"><div class="wrap ab-split">${imgTag(aboutIm, { sizes: '(max-width:900px) 100vw, 50vw' })}<div class="ab-text"><h2 id="h-about">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></div></section>`
       return `<section class="s${alt}" id="about" aria-labelledby="h-about"><div class="wrap"><div class="ab-text" style="max-width:760px"><h2 id="h-about">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></div></section>`
     },
@@ -234,14 +248,20 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   }
   // Alternate section backgrounds, counting only sections that actually render.
   let alt = false
+  let lastAlt = false // tone of the last rendered section (band counts as its own tone)
   const body = d.sections
     .map((s) => {
       const html = blocks[s](alt ? '' : ' alt')
-      if (html && !html.includes('class="s band"')) alt = !alt
+      if (html) {
+        const band = html.includes('class="s band"')
+        lastAlt = !band && !alt
+        if (!band) alt = !alt
+      }
       return html
     })
     .join('')
-  const closing = `<section class="s alt" id="contact" aria-labelledby="h-book"><div class="wrap close"><div><p class="eyebrow">${esc(biz.name)}</p><h2 id="h-book" style="margin-top:14px">${visit ? 'Ready when you are.' : 'Book your time today.'}</h2>${buttons()}</div><dl class="box">${c.area ? `<dt>Service area</dt><dd>${esc(c.area)}</dd>` : ''}${tel ? `<dt>Phone</dt><dd><a ${link(tel)} style="text-decoration:none">${esc(biz.phone)}</a></dd>` : ''}<dt>Booking</dt><dd>Online, any time</dd></dl></div></section>`
+  // The closing section never repeats the tone of the section right above it (two same-colour sections read as a gap).
+  const closing = `<section class="s${lastAlt ? '' : ' alt'}" id="contact" aria-labelledby="h-book"><div class="wrap close"><div><p class="eyebrow">${esc(biz.name)}</p><h2 id="h-book" style="margin-top:14px">${visit ? 'Ready when you are.' : 'Book your time today.'}</h2>${buttons()}</div><dl class="box">${c.area ? `<dt>Service area</dt><dd>${esc(c.area)}</dd>` : ''}${tel ? `<dt>Phone</dt><dd><a ${link(tel)} style="text-decoration:none">${esc(biz.phone)}</a></dd>` : ''}<dt>Booking</dt><dd>Online, any time</dd></dl></div></section>`
 
   const schema = {
     '@context': 'https://schema.org',

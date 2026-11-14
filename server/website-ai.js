@@ -237,14 +237,17 @@ async function store(db, customer, { content, designs, source, usage, latencyMs,
   return id
 }
 
+const withoutLogo = (ids, logo) => new Set([...ids].filter((id) => id !== logo))
 // Images the model may place: the owner's own photos first, then licensed stock for the industry.
 const imageChoices = (assetIds, industry, photos = []) => [...[...new Set([...photos, ...assetIds])].map((id) => `asset:${id}`), ...stockFor(industry).map((s) => `stock:${s.id}`)]
 
 // Generates copy + three designs for a business and stores them (website_generations). Never touches the
 // draft or the live site. Returns { ok, generation: { id, content, designs, source } }.
 // `allowAi: false` (usage policy: monthly cost ceiling reached) uses the standard layouts without a model call.
-export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], allowAi = true } = {}) {
-  const { db, base, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
+export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], logo = null, allowAi = true } = {}) {
+  const ctx = await context(env, customer)
+  const { db, base, profile, claims, industry, allowedStock } = ctx
+  const assetIds = withoutLogo(ctx.assetIds, logo) // the logo is never placed as a photo
   const facts = websiteFacts(customer, profile, base)
   const photos = draftPhotos.filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
@@ -284,7 +287,9 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   const ask = String(instruction ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
   if (!ask) return { ok: false, httpStatus: 400, error: 'instruction_required' }
   if (!aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
-  const { db, profile, claims, assetIds, industry, allowedStock } = await context(env, customer)
+  const ctx = await context(env, customer)
+  const { db, profile, claims, industry, allowedStock } = ctx
+  const assetIds = withoutLogo(ctx.assetIds, draft.logo) // the logo is never placed as a photo
   const photos = (draft.photos || []).filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
   const preset = draft.design || presetDesigns(industry, photos)[0]

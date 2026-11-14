@@ -212,7 +212,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - AI website design: the model only picks named options from site-design.js and writes prose; it never writes
   HTML/CSS/JS. Unknown options are repaired from presets. Stock photos: CC0 library only (public/site-stock,
   generic scenes, no identifiable people), never in the "Our work" gallery (owner photos only); the owner's
-  uploaded main photo always beats a stock choice. Fonts are self-hosted OFL files in public/site-fonts.
+  uploaded main photo always beats a stock choice. The business logo is never a photo: generation never offers it as an image, and a saved
+  design that placed it as hero/About falls back to the design's other photo (logo stays in the header). Fonts are self-hosted OFL files in public/site-fonts.
 - AI website copy: the model writes prose only; names, services, prices, area and phone always come from records.
   Every field passes the claims filter and the invented-number check, otherwise the template text is used. A
   generation never changes the draft or live site (apply → private draft; publish → live). Previews, design
