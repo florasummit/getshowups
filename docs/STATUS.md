@@ -2,6 +2,25 @@
 
 _Update at the end of every task. Newest first._
 
+## Released 2026-11-14: PRs #22, #21, #20 + migrations 0014, 0013 (merge commits ca99eb5, de5bac9, d426fef)
+
+Order: migrations 0014 (`message_optouts`) and 0013 (`subscription_modes`) applied first (CREATE TABLE IF NOT EXISTS
+only; schemas verified; all other record counts unchanged), then #22 → deployment **360750ef**, #21 → **a183cbab**,
+#20 → **0020f305** (current). Rollback target: **14afca51** (feb34f1) via Cloudflare dashboard → Deployments → Rollback,
+or `git revert -m 1` of a merge. Leave the two new tables in place (old code ignores them; never drop).
+Before: each PR verify:all green; combined merge and final main d426fef 326/326 unit, 68/68 Playwright.
+After (production, no session, no writes): PoolThru page hero = licensed pool photo (logo only in header), neighbouring
+sections differ, booking links + booking API (160 slots, live Google free/busy) OK; toys-for-us page/booking OK;
+unsubscribe: missing/malformed/forged links (GET, form POST, one-click POST) → 404 "Link not valid", PUT 405; sign-in
+start → Google with openid+email, PKCE, fixed redirect URI; admin/dashboard/ads/website routes 401 signed out, 403
+cross-origin; Stripe webhook 400 unsigned; cron 401; homepage + simulation checks pass; deployed admin code shows
+test-mode billing as no revenue. Records unchanged (customers, members, leads, appointments, websites incl. PoolThru
+live version 4, subscriptions, messages); 0 opt-outs, 0 subscription modes, 0 active campaigns.
+Not verified live (needs Google sign-in by the founder / PoolThru owner): signed-in admin metrics view, PoolThru
+dashboard access, website publish permission, Ads test-mode workflow. First production use of the opt-out lookup: the
+two lead_followup_2 emails due 2026-11-15 ~04:43 UTC (check: status sent/skipped, never `optout_unknown`).
+PoolThru stays on its current design (Deep End not applied or published). No live switches changed.
+
 ## Released 2026-11-14: PRs #17, #18, #19 (merge commits 90e9057, be8224a, feb34f1)
 
 Production deployment **14afca51** (feb34f1); intermediate a5b3c698 (#17), e5f794a1 (#18). Rollback target:
