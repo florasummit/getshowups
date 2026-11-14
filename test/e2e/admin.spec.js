@@ -18,6 +18,92 @@ test('customers without platform access are refused', async ({ page, context }) 
   expect((await page.request.get('/api/platform/overview')).status()).toBe(403)
 })
 
+test('platform admin without a business: signing in from /dashboard lands on the console, never "create your business"', async ({ browser }) => {
+  // A non-admin on the console's "No platform access" page signs out back to the console's own sign-in
+  // (which asks Google to return to /admin), not to the dashboard.
+  const otherCtx = await browser.newContext()
+  const other = await otherCtx.newPage()
+  await returnFromGoogle(other, '**/api/auth/google/start**', 'GET', '/api/auth/google/callback', 'login:someone.else@example.org')
+  await other.goto('/dashboard')
+  await other.getByRole('link', { name: 'Continue with Google' }).click()
+  await other.goto('/admin')
+  await expect(other.getByRole('heading', { name: 'No platform access' })).toBeVisible()
+  await other.getByRole('button', { name: 'Sign out' }).click()
+  await expect(other).toHaveURL(/\/admin$/)
+  await expect(other.getByRole('heading', { name: 'Platform sign-in' })).toBeVisible()
+  await otherCtx.close()
+
+  // The admin (no business membership) starts sign-in from the dashboard and lands on the console.
+  const adminCtx = await browser.newContext()
+  const admin = await adminCtx.newPage()
+  await returnFromGoogle(admin, '**/api/auth/google/start**', 'GET', '/api/auth/google/callback', `login:${fixtures.E2E_PLATFORM_ADMIN}`)
+  await admin.goto('/dashboard')
+  await admin.getByRole('link', { name: 'Continue with Google' }).click()
+  await expect(admin).toHaveURL(/\/admin$/)
+  await expect(admin.getByRole('heading', { name: 'Platform' })).toBeVisible()
+  await expect(admin.getByText('What’s your business called?')).toHaveCount(0)
+  expect((await (await admin.request.get('/api/dashboard/me')).json()).customer).toBeNull()
+  await adminCtx.close()
+})
+
+test('auth routing: /admin round trip, admin-only at /dashboard, customer at /admin, cancel returns to /admin, deep link kept', async ({ browser }) => {
+  // MOCK Google (local stand-in issues the codes). Each case uses its own fresh browser context.
+  const fresh = async () => {
+    const ctx = await browser.newContext()
+    return [ctx, await ctx.newPage()]
+  }
+  // 1) Admin starts at /admin, signs in, returns to the console (admin access needs no business).
+  let [ctx, page] = await fresh()
+  await returnFromGoogle(page, '**/api/auth/google/start**', 'GET', '/api/auth/google/callback', `login:${fixtures.E2E_PLATFORM_ADMIN}`)
+  await page.goto('/admin')
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
+  await expect(page).toHaveURL(/\/admin$/)
+  await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
+  // 2) The same admin-only account opening /dashboard: pointed to the console, not into onboarding.
+  await page.goto('/dashboard')
+  await expect(page.locator('[data-admin-account]')).toContainText('You’re signed in with an admin account')
+  await expect(page.getByText('What’s your business called?')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Open the admin console' }).click()
+  await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
+  // ...but setting up a business stays possible.
+  await page.goto('/dashboard')
+  await page.getByRole('button', { name: 'Set up a business with this account instead' }).click()
+  await expect(page.getByText('What’s your business called?')).toBeVisible()
+  await ctx.close()
+
+  // 3) A customer at /admin: no platform access, with a way to their dashboard.
+  ;[ctx, page] = await fresh()
+  await useSession(ctx, fixtures.E2E_OTHER_SESSION_TOKEN)
+  await page.goto('/admin')
+  await expect(page.getByRole('heading', { name: 'No platform access' })).toBeVisible()
+  await page.getByRole('link', { name: 'Go to your dashboard' }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await ctx.close()
+
+  // 4) Cancelling at Google from /admin returns to /admin with a clear message (URL cleaned).
+  ;[ctx, page] = await fresh()
+  await page.route('**/api/auth/google/start**', async (route) => {
+    const res = await route.fetch({ maxRedirects: 0 })
+    const state = new URL(res.headers()['location']).searchParams.get('state')
+    await route.fulfill({ status: 302, headers: { location: `/api/auth/google/callback?error=access_denied&state=${state}`, 'set-cookie': res.headers()['set-cookie'] } })
+  })
+  await page.goto('/admin')
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
+  await expect(page.getByRole('heading', { name: 'Platform sign-in' })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveText('Sign-in was cancelled.')
+  await expect(page).toHaveURL(/\/admin$/)
+  await ctx.close()
+
+  // 5) A customer opening a dashboard deep link returns there after signing in.
+  ;[ctx, page] = await fresh()
+  await returnFromGoogle(page, '**/api/auth/google/start**', 'GET', '/api/auth/google/callback', `login:${fixtures.E2E_OTHER_USER_EMAIL}`)
+  await page.goto('/dashboard/appointments')
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute('href', '/api/auth/google/start?next=%2Fdashboard%2Fappointments')
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
+  await expect(page).toHaveURL(/\/dashboard\/appointments$/)
+  await ctx.close()
+})
+
 test('admin sees customers, metrics, and customer detail without lead contact data', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin')
@@ -25,7 +111,12 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
   // The seeded Ads sandbox business pays $499/month but is marked as a TEST business, so it is left
   // out of MRR. (selfserve.spec may add a real $0 subscription in parallel, so don't expect an exact text.)
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|\$0\.00)$/)
+  // Other spec files may add real subscriptions in parallel, so check the invariant in one snapshot: MRR is the sum of
+  // the NON-test businesses' active subscriptions, so the test business's $499 is never counted.
+  const o = await (await page.request.get('/api/platform/overview')).json()
+  const realMrr = o.customers.filter((c) => !c.testBusiness && c.subscription?.status === 'active').reduce((n, c) => n + (c.subscription.mrrCents || 0), 0)
+  expect(o.customers.find((c) => c.name === 'E2E Ads Pools')).toMatchObject({ testBusiness: true, subscription: { status: 'active', mrrCents: 49900 } })
+  expect(o.metrics.billing?.mrrCents ?? 0).toBe(realMrr)
   await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()

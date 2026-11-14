@@ -2,7 +2,7 @@
 // Requests openid + email only (no calendar access). State + PKCE verifier travel in an
 // encrypted, HttpOnly cookie separate from the calendar-connection flow's cookie.
 import { GOOGLE_AUTH_URL, encrypt, missingConfig, page, pkceChallenge, randomToken } from '../../../../server/google-oauth.js'
-import { LOGIN_COOKIE, LOGIN_SCOPES, LOGIN_TTL_SECONDS, cookie, loginRedirectUri } from '../../../../server/auth.js'
+import { LOGIN_COOKIE, LOGIN_SCOPES, LOGIN_TTL_SECONDS, cookie, loginRedirectUri, safeNext } from '../../../../server/auth.js'
 import { hitByIp, tooManyPage } from '../../../../server/ratelimit.js'
 
 export async function onRequestGet({ request, env }) {
@@ -16,8 +16,8 @@ export async function onRequestGet({ request, env }) {
 
   const state = randomToken()
   const verifier = randomToken(48)
-  // Where to land after sign-in: only the two known app areas are accepted.
-  const next = new URL(request.url).searchParams.get('next') === '/admin' ? '/admin' : '/dashboard'
+  // Where to land after sign-in: the admin console or a dashboard tab (allowlist; see safeNext).
+  const next = safeNext(new URL(request.url).searchParams.get('next'))
   const sealed = await encrypt(env, JSON.stringify({ state, verifier, next, iat: Date.now() }))
 
   const auth = new URL(GOOGLE_AUTH_URL)
