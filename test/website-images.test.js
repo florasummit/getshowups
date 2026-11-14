@@ -212,3 +212,19 @@ test('render: the statement layout sets only a short lead in display type; long 
   const short = renderDesigned(biz, { headline: 'H', intro: 'I', about: 'Family-run since day one.', services: [], area: '', highlights: [], photos: [], design: d }, { canonical: 'https://x.example/', bookUrl: '/b' })
   assert.match(short, /<p>Family-run since day one\.<\/p>/)
 })
+
+test('render: neighbouring sections never share a background (closing section flips after an alt section)', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const biz = { id: 'p', name: 'P', phone: '', appointmentMode: 'at_customer' }
+  const tones = (html) => [...html.matchAll(/<section class="s( alt| band)?"/g)].map((m) => (m[1] || '').trim() || 'plain')
+  const base = { headline: 'H', intro: 'I', about: 'We help.', services: [{ name: 'Cleaning' }], area: 'Charleston', highlights: [], photos: [] }
+  const d = { name: 'X', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', shape: 'sharp', heroImage: 'stock:pool-loungers', aboutImage: null }
+  for (const design of [
+    { ...d, about: 'statement', sections: ['about', 'process'] }, // Deep End shape: band, alt → closing plain
+    { ...d, about: 'text', sections: ['process', 'about'] }, // alt, plain → closing alt
+    { ...d, about: 'text', sections: ['services', 'process', 'about'] }, // alt, plain, alt → closing plain
+  ]) {
+    const t = tones(renderDesigned(biz, { ...base, design }, { canonical: 'https://x.example/', bookUrl: '/b' }))
+    for (let i = 1; i < t.length; i++) assert.notEqual(t[i], t[i - 1], `${design.sections.join(',')}: ${t.join(' → ')}`)
+  }
+})

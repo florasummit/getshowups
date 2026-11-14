@@ -150,6 +150,7 @@ section.s.alt{background:var(--surface)}
 .close{display:grid;grid-template-columns:1.2fr 1fr;gap:56px;align-items:center}
 .close h2{font-size:clamp(2.2rem,4.6vw,3.8rem)}
 .close .box{padding:34px;border-radius:var(--r-card);background:var(--bg);border:1px solid var(--line)}
+section.s:not(.alt) .close .box{background:var(--surface)}
 .close .box dt{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .close .box dd{margin:4px 0 20px;font-weight:600;font-size:1.1rem}
 footer{padding:36px 0 110px;font-size:.88rem;color:var(--muted);border-top:1px solid var(--line)}
@@ -247,14 +248,20 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   }
   // Alternate section backgrounds, counting only sections that actually render.
   let alt = false
+  let lastAlt = false // tone of the last rendered section (band counts as its own tone)
   const body = d.sections
     .map((s) => {
       const html = blocks[s](alt ? '' : ' alt')
-      if (html && !html.includes('class="s band"')) alt = !alt
+      if (html) {
+        const band = html.includes('class="s band"')
+        lastAlt = !band && !alt
+        if (!band) alt = !alt
+      }
       return html
     })
     .join('')
-  const closing = `<section class="s alt" id="contact" aria-labelledby="h-book"><div class="wrap close"><div><p class="eyebrow">${esc(biz.name)}</p><h2 id="h-book" style="margin-top:14px">${visit ? 'Ready when you are.' : 'Book your time today.'}</h2>${buttons()}</div><dl class="box">${c.area ? `<dt>Service area</dt><dd>${esc(c.area)}</dd>` : ''}${tel ? `<dt>Phone</dt><dd><a ${link(tel)} style="text-decoration:none">${esc(biz.phone)}</a></dd>` : ''}<dt>Booking</dt><dd>Online, any time</dd></dl></div></section>`
+  // The closing section never repeats the tone of the section right above it (two same-colour sections read as a gap).
+  const closing = `<section class="s${lastAlt ? '' : ' alt'}" id="contact" aria-labelledby="h-book"><div class="wrap close"><div><p class="eyebrow">${esc(biz.name)}</p><h2 id="h-book" style="margin-top:14px">${visit ? 'Ready when you are.' : 'Book your time today.'}</h2>${buttons()}</div><dl class="box">${c.area ? `<dt>Service area</dt><dd>${esc(c.area)}</dd>` : ''}${tel ? `<dt>Phone</dt><dd><a ${link(tel)} style="text-decoration:none">${esc(biz.phone)}</a></dd>` : ''}<dt>Booking</dt><dd>Online, any time</dd></dl></div></section>`
 
   const schema = {
     '@context': 'https://schema.org',
