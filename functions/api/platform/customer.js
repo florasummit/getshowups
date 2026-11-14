@@ -6,6 +6,7 @@ import { requirePlatformAdmin } from '../../../server/platform.js'
 import { CUSTOMER_RE } from '../../../server/invites.js'
 import { customerRows } from '../../../server/metrics.js'
 import { checkConnection } from '../../../server/calendar.js'
+import { deletionEnabled, deletionStatus } from '../../../server/deletion.js'
 
 export async function onRequestGet({ request, env }) {
   const { response } = await requirePlatformAdmin(request, env)
@@ -33,5 +34,6 @@ export async function onRequestGet({ request, env }) {
   const health = url.searchParams.get('health') === '1' ? (await checkConnection(env, id)).body : null
   const now = Date.now()
   const withState = invites.map((i) => ({ ...i, active: !i.accepted_at && !i.revoked_at && i.expires_at > now }))
-  return json(200, { ...summary, totals, invites: withState, audit: auditLog.map((a) => ({ ...a, details: JSON.parse(a.details) })), health })
+  const deletion = { enabled: deletionEnabled(env), ...((await deletionStatus(db, id)) ?? {}) }
+  return json(200, { ...summary, totals, invites: withState, audit: auditLog.map((a) => ({ ...a, details: JSON.parse(a.details) })), health, deletion })
 }

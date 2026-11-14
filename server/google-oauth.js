@@ -109,7 +109,7 @@ export function googleFetch(env, url, init = {}) {
 // Best effort: revoking a refresh token also revokes the grant's access tokens.
 export async function revokeToken(token, env) {
   try {
-    await googleFetch(env, GOOGLE_REVOKE_URL, {
+    await googleFetch(env, googleApi(env).revoke, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ token }),
@@ -164,6 +164,7 @@ export function googleApi(env) {
   const mock = typeof o === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(o) ? o : null
   return {
     token: mock ? `${mock}/token` : GOOGLE_TOKEN_URL,
+    revoke: mock ? `${mock}/revoke` : GOOGLE_REVOKE_URL,
     calendar: mock ? `${mock}/calendar/v3` : 'https://www.googleapis.com/calendar/v3',
   }
 }

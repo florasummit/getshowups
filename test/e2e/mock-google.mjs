@@ -10,6 +10,9 @@ import { createHmac } from 'node:crypto'
 const APP = `http://127.0.0.1:${process.env.E2E_PORT || 8788}`
 const WHSEC = process.env.E2E_STRIPE_WEBHOOK_SECRET || ''
 const stripe = { customers: new Map(), sessions: new Map(), subs: new Map(), n: 0 }
+// MOCK: the account-deletion business's subscription (seeded in D1 by serve.sh with the same ids).
+stripe.customers.set('cus_E2EDEL', { id: 'cus_E2EDEL', metadata: { customer: 'e2e-delete' } })
+stripe.subs.set('sub_E2EDEL', { id: 'sub_E2EDEL', customer: 'cus_E2EDEL', status: 'active', metadata: { customer: 'e2e-delete', plan: 'founding' }, price: 'price_e2e' })
 const dnsRecords = new Map()
 const nextId = (p) => `${p}_e2e${++stripe.n}`
 async function sendEvent(type, object, { times = 1 } = {}) {
@@ -45,6 +48,21 @@ async function stripeMock(req, res, url, raw) {
     const c = existing || { id: nextId('cus'), key, metadata: { customer: form.get('metadata[customer]') } }
     stripe.customers.set(c.id, c)
     return send(res, 200, { id: c.id, object: 'customer', livemode: false })
+  }
+  const one = p.match(/^\/v1\/subscriptions\/([^/]+)$/)
+  if (one && (req.method === 'GET' || req.method === 'DELETE')) {
+    const sub = stripe.subs.get(one[1])
+    if (!sub) return send(res, 404, { error: { code: 'resource_missing', message: 'No such subscription' } })
+    if (req.method === 'DELETE' && sub.status !== 'canceled') {
+      sub.status = 'canceled' // canceled now (account deletion); Stripe then sends customer.subscription.deleted
+      await sendEvent('customer.subscription.deleted', subObject(sub))
+    }
+    return send(res, 200, subObject(sub))
+  }
+  const cus = p.match(/^\/v1\/customers\/([^/]+)$/)
+  if (cus && req.method === 'DELETE') {
+    if (!stripe.customers.delete(cus[1])) return send(res, 404, { error: { code: 'resource_missing', message: 'No such customer' } })
+    return send(res, 200, { id: cus[1], object: 'customer', deleted: true })
   }
   if (p === '/v1/subscriptions' && req.method === 'GET') {
     return send(res, 200, { data: [...stripe.subs.values()].filter((s) => s.customer === url.searchParams.get('customer')).map(subObject) })
@@ -252,6 +270,9 @@ createServer(async (req, res) => {
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/__stripe/')) {
     if ((await stripeMock(req, res, url, raw)) !== null || res.writableEnded) return
   }
+
+  // Google OAuth token revocation (MOCK): always succeeds.
+  if (url.pathname === '/revoke' && req.method === 'POST') return send(res, 200, {})
 
   if (url.pathname === '/token' && req.method === 'POST') {
     const p = new URLSearchParams(raw)
