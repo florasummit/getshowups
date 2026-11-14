@@ -622,7 +622,7 @@ test('ads hold: the Ads screen says why ads are paused (suspended / failed payme
   const owners = { pools: await cookieFor('owner@pools.example'), salon: await cookieFor('owner@salon.example') }
   assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold, null)
   db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'pools'").run()
-  assert.deepEqual((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold, { reason: 'suspended', text: 'GetShowUps paused this business' })
+  assert.deepEqual((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold, { reason: 'suspended', text: 'GetShowUps paused this business', stillRunning: 0, unreachable: false })
   assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.salon })).json.hold, null, 'isolated')
   db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'pools'").run()
   Object.assign(env, { STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_WEBHOOK_SECRET: 'whsec_fake' })
