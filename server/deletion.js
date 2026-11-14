@@ -9,7 +9,7 @@
 //   verify       re-checks that nothing erasable is left, then records the report
 // Each step is idempotent; a failed step is retried with backoff by the cron (processDeletions). No undo window.
 // Runs only when ACCOUNT_DELETION_ENABLED is exactly 'true' (approval); otherwise nothing is requested or run.
-import { appendAudit, emailRef } from './auditlog.js'
+import { emailRef, recordEvent } from './auditlog.js'
 import { decrypt, revokeUnlessInUse } from './google-oauth.js'
 import { enforceAdsHold } from './ads/holds.js'
 import { forgetConnection } from './ads/connections.js'
@@ -18,6 +18,8 @@ import { deleteGhlConfig } from './ghl.js'
 import { disconnectDomain } from './domains.js'
 
 export const deletionEnabled = (env) => env.ACCOUNT_DELETION_ENABLED === 'true'
+// Standard event fields for one deletion: every step of it shares one correlation id.
+const ev = (customer, outcome) => ({ customer, capability: 'account.deletion', resource: { type: 'customer', id: customer }, outcome, correlationId: `deletion:${customer}` })
 export const STEPS = ['lockout', 'ads', 'billing', 'integrations', 'data', 'verify']
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 
@@ -64,7 +66,7 @@ export async function requestDeletion(env, customerId, actor, now = Date.now()) 
     .run()
   if ((created?.meta?.changes ?? 0) > 0) {
     const actorType = ['admin', 'owner'].includes(actor.type) ? actor.type : 'system'
-    await appendAudit(db, { actorType, actor: actorType === 'owner' ? `owner:${actor.id}` : actorType === 'admin' ? actor.id : by, action: 'account.deletion_requested', customer: customerId, at: now })
+    await recordEvent(db, { type: 'account.deletion_requested', actorType, actor: actorType === 'owner' ? `owner:${actor.id}` : actorType === 'admin' ? actor.id : by, ...ev(customerId, 'success'), at: now })
   }
   const r = await advanceDeletion(env, customerId, now)
   return { ok: true, ...r }
@@ -78,13 +80,18 @@ async function lockout(env, id, now) {
   const messages = await db.prepare("UPDATE messages SET status = 'skipped', error = 'account_deleted', updated_at = ?2 WHERE customer = ?1 AND status IN ('scheduled', 'sending')").bind(id, now).run()
   const invites = await db.prepare('UPDATE account_invites SET revoked_at = coalesce(revoked_at, ?2) WHERE customer = ?1').bind(id, now).run()
   await db.prepare("DELETE FROM email_outbox WHERE customer = ?1 AND status = 'pending'").bind(id).run()
-  return { membersRemoved: members.meta.changes, messagesCancelled: messages.meta.changes, invitesRevoked: invites.meta.changes }
+  // The hosted website goes offline now (suspension already stops serving; this also clears the published version).
+  const site = await db.prepare('UPDATE websites SET live_version = NULL, published_at = NULL, updated_at = ?2 WHERE customer = ?1 AND live_version IS NOT NULL').bind(id, now).run()
+  return { websiteUnpublished: site.meta.changes > 0, membersRemoved: members.meta.changes, messagesCancelled: messages.meta.changes, invitesRevoked: invites.meta.changes }
 }
 
 async function ads(env, id, now) {
-  const r = await enforceAdsHold(env, id, { actor: 'system:deletion', hold: { reason: 'account_deleted' }, now })
+  const r = await enforceAdsHold(env, id, { actor: 'system:deletion', hold: { reason: 'account_deleted' }, now, correlationId: `deletion:${id}` })
   const left = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM ad_campaigns WHERE customer = ?1 AND status IN ('active', 'launching')").bind(id).first()
-  if (r.failed || left.n) throw step('ads_not_paused')
+  // Credentials are never removed (next step) while a managed campaign may still run. A campaign we can't reach needs a
+  // platform admin to record that it was paused in Google Ads (/api/platform/campaign-pause); until then we wait.
+  if (r.unreachable) throw step('ads_unreachable_confirm_paused', { running: left.n })
+  if (r.failed || left.n) throw step('ads_not_paused', { running: left.n })
   return { paused: r.paused, verified: r.verified }
 }
 
@@ -151,14 +158,20 @@ async function data(env, id, now) {
   const ev = await db.prepare(`DELETE FROM events WHERE customer = ?1 AND type NOT IN (${FINANCIAL_EVENTS.map((t) => `'${t}'`).join(',')})`).bind(id).run()
   if (ev.meta.changes) erased.events = ev.meta.changes
   // admin_audit (staff log): keep the entries, replace any email in their details with a one-way ref.
+  // admin_audit (staff log): keep the entries; emails become refs and free text (names, reasons) is erased.
   const { results: audits } = await db.prepare('SELECT id, details FROM admin_audit WHERE customer = ?1').bind(id).all()
   let scrubbed = 0
   for (const a of audits) {
-    let d = a.details || ''
-    const emails = new Set(d.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [])
-    if (!emails.size) continue
-    for (const e of emails) d = d.split(e).join(await emailRef(e))
-    await db.prepare('UPDATE admin_audit SET details = ?2 WHERE id = ?1').bind(a.id, d).run()
+    let parsed
+    try {
+      parsed = JSON.parse(a.details || '{}')
+    } catch {
+      parsed = {}
+    }
+    const clean = await scrubStaffDetails(parsed)
+    const next = JSON.stringify(clean)
+    if (next === a.details) continue
+    await db.prepare('UPDATE admin_audit SET details = ?2 WHERE id = ?1').bind(a.id, next).run()
     scrubbed++
   }
   if (scrubbed) erased.admin_audit_scrubbed = scrubbed
@@ -191,6 +204,22 @@ async function verify(env, id) {
   return { clean: true, retained: RETAINED }
 }
 
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+async function scrubStaffDetails(v) {
+  if (typeof v === 'string') {
+    let s = v
+    for (const e of new Set(v.match(EMAIL) || [])) s = s.split(e).join(await emailRef(e))
+    return /^[A-Za-z0-9_.:/+@-]{1,80}$/.test(s) ? s : '[erased]'
+  }
+  if (Array.isArray(v)) return Promise.all(v.map(scrubStaffDetails))
+  if (v && typeof v === 'object') {
+    const o = {}
+    for (const [k, x] of Object.entries(v)) o[k] = await scrubStaffDetails(x)
+    return o
+  }
+  return v
+}
+
 const RUN = { lockout, ads, billing, integrations, data, verify }
 const step = (code, extra = {}) => Object.assign(new Error(code), { code, extra })
 
@@ -217,7 +246,7 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
         .prepare('UPDATE account_deletions SET step = ?2, attempts = ?3, last_error = ?4, next_attempt_at = ?5, report = ?6 WHERE customer = ?1')
         .bind(customerId, name, attempts, code, now + wait, JSON.stringify(report))
         .run()
-      await appendAudit(db, { actorType: 'system', actor: 'system:deletion', action: 'account.deletion_step_failed', customer: customerId, details: { step: name, code, attempts }, at: now })
+      await recordEvent(db, { type: 'account.deletion_step_failed', actor: 'system:deletion', ...ev(customerId, 'failure'), details: { step: name, code, attempts, nextAttemptAt: now + wait }, at: now })
       return { status: 'in_progress', step: name, error: code, attempts }
     }
     delete report[`${name}_error`]
@@ -227,9 +256,9 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
       .prepare(`UPDATE account_deletions SET step = ?2, attempts = 0, last_error = NULL, report = ?3${next === 'done' ? ", status = 'completed', completed_at = ?4" : ''} WHERE customer = ?1`)
       .bind(customerId, next, JSON.stringify(report), ...(next === 'done' ? [now] : []))
       .run()
-    await appendAudit(db, { actorType: 'system', actor: 'system:deletion', action: `account.deletion_${name}`, customer: customerId, details: summary(name, report[name]), at: now })
+    await recordEvent(db, { type: `account.deletion_${name}`, actor: 'system:deletion', ...ev(customerId, 'success'), details: summary(name, report[name]), at: now })
   }
-  await appendAudit(db, { actorType: 'system', actor: 'system:deletion', action: 'account.deletion_completed', customer: customerId, details: { retained: RETAINED.length }, at: now })
+  await recordEvent(db, { type: 'account.deletion_completed', actor: 'system:deletion', ...ev(customerId, 'success'), details: { retained: RETAINED.length }, at: now })
   return { status: 'completed', step: 'done' }
 }
 

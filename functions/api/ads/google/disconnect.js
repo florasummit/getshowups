@@ -9,6 +9,7 @@ import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { getConnection, forgetConnection } from '../../../../server/ads/connections.js'
 import { setCampaignStatus, logAction } from '../../../../server/ads/campaigns.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsHold } from '../../../../server/ads/holds.js'
 
 export async function onRequestPost({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -26,6 +27,8 @@ export async function onRequestPost({ request, env }) {
   try {
     const { results: running } = await db.prepare("SELECT id FROM ad_campaigns WHERE customer = ?1 AND platform = 'google' AND status = 'active' AND platform_campaign_id IS NOT NULL").bind(customer.id).all()
     if (running.length && body.pauseRunning !== true && body.leaveRunning !== true) return json(409, { error: 'campaigns_running', running: running.length })
+    // On hold, running campaigns must be paused (and confirmed) before our access goes: never leave them orphaned.
+    if (running.length && body.pauseRunning !== true && (await adsHold(env, customer.id))) return json(409, { error: 'ads_on_hold_pause_first', running: running.length })
     let paused = 0
     if (running.length && body.pauseRunning === true) {
       for (const r of running) {

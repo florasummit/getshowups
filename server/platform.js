@@ -1,7 +1,7 @@
 // Platform (GetShowUps staff) authorization, separate from customer access: a signed-in Google
 // identity is a platform admin only if its verified email is listed in PLATFORM_ADMIN_EMAILS.
 // Business membership (customer_users) never grants platform access, and vice versa.
-import { appendAudit } from './auditlog.js'
+import { newCorrelationId, recordEvent } from './auditlog.js'
 import { json, missingConfig } from './google-oauth.js'
 import { getSession, isSameOrigin } from './auth.js'
 
@@ -32,5 +32,5 @@ export async function audit(env, actor, action, customer = null, details = {}) {
   await env.ONBOARDING_DB.prepare('INSERT INTO admin_audit (at, actor, action, customer, details) VALUES (?1, ?2, ?3, ?4, ?5)')
     .bind(Date.now(), actor, action, customer, JSON.stringify(details))
     .run()
-  await appendAudit(env.ONBOARDING_DB, { actorType: 'admin', actor, action, customer, details })
+  await recordEvent(env.ONBOARDING_DB, { type: action, actorType: 'admin', actor, customer, capability: 'platform.admin', resource: customer ? { type: 'customer', id: customer } : null, outcome: 'success', correlationId: newCorrelationId('admin'), details })
 }

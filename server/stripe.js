@@ -2,7 +2,7 @@
 // downgrades, cancellation and reactivation, and signed webhooks to mirror subscription state.
 // Configured only when STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are set. No card data is stored;
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
-import { appendAudit } from './auditlog.js'
+import { recordEvent } from './auditlog.js'
 import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
@@ -191,7 +191,8 @@ async function upsertSubscription(env, customer, event, sub) {
     .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, cancelScheduled ? 1 : 0, at, Date.now())
     .run()
   await recordMode(db, customer, event)
-  const billingAudit = (action, details) => appendAudit(db, { actorType: 'stripe', actor: 'stripe', action, customer, details: { eventId: event.id, subscription: sub.id, livemode: event.livemode === true, ...details }, at })
+  const billingAudit = (action, details) =>
+    recordEvent(db, { type: action, actor: 'stripe', customer, capability: 'billing.stripe', resource: { type: 'subscription', id: sub.id }, correlationId: `stripe:${event.id}`, details: { livemode: event.livemode === true, ...details }, at })
   if (prior?.status !== status) await billingAudit('billing.subscription_status', { from: prior?.status ?? null, to: status, plan: plan?.id ?? null })
   if (Boolean(prior?.cancel_at_period_end) !== cancelScheduled && status !== 'canceled') await billingAudit(cancelScheduled ? 'billing.cancellation_scheduled' : 'billing.cancellation_withdrawn', { periodEnd: periodEnd ? periodEnd * 1000 : null })
   if (prior?.status !== status) {
@@ -218,7 +219,8 @@ async function recordMode(db, customer, event) {
 // after(fn): work that must follow the stored change but must not fail or delay the receipt (ads holds:
 // pausing campaigns on Google). The webhook runs it after responding; the cron sweep retries any failure.
 export async function handleEvent(env, event, { after = null } = {}) {
-  const holdCheck = (customer) => after?.(() => enforceAdsHold(env, customer, { actor: 'system:billing' }))
+  const correlationId = `stripe:${event.id}`
+  const holdCheck = (customer) => after?.(() => enforceAdsHold(env, customer, { actor: 'system:billing', correlationId }))
   const db = env.ONBOARDING_DB
   const obj = event.data?.object || {}
   const customer = await customerFor(db, obj)
@@ -246,7 +248,7 @@ export async function handleEvent(env, event, { after = null } = {}) {
       // Any successful payment (including $0) closes an earlier payment failure for ads holds.
       if (customer) {
         await track(env, 'payment_succeeded', { id: `paid:${obj.id}`, customer, at: event.created * 1000 })
-        await appendAudit(db, { actorType: 'stripe', actor: 'stripe', action: 'billing.payment_succeeded', customer, details: { eventId: event.id, invoice: obj.id, amountCents: obj.amount_paid ?? null, currency: obj.currency ?? null, livemode: event.livemode === true }, at: event.created * 1000 })
+        await recordEvent(db, { type: 'billing.payment_succeeded', actor: 'stripe', customer, capability: 'billing.stripe', resource: { type: 'invoice', id: obj.id }, correlationId, details: { amountCents: obj.amount_paid ?? null, currency: obj.currency ?? null, livemode: event.livemode === true }, at: event.created * 1000 })
       }
       if (customer && obj.amount_paid > 0) {
         await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency, livemode: event.livemode === true }, at: event.created * 1000 })
@@ -255,7 +257,7 @@ export async function handleEvent(env, event, { after = null } = {}) {
     case 'invoice.payment_failed':
       if (customer) {
         await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
-        await appendAudit(db, { actorType: 'stripe', actor: 'stripe', action: 'billing.payment_failed', customer, details: { eventId: event.id, invoice: obj.id ?? null, livemode: event.livemode === true }, at: event.created * 1000 })
+        await recordEvent(db, { type: 'billing.payment_failed', actor: 'stripe', customer, capability: 'billing.stripe', resource: { type: 'invoice', id: obj.id ?? event.id }, correlationId, details: { livemode: event.livemode === true }, at: event.created * 1000 })
         holdCheck(customer) // owner decision: ads pause on the first failed payment
       }
       return { handled: Boolean(customer) }

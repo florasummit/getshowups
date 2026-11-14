@@ -1,6 +1,7 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
 // Test records (server/testdata.js) are excluded from every count.
 import { recoveryFor } from './lifecycle.js'
+import { runningOnHold } from './ads/holds.js'
 import { internalEmails, isTestLead } from './testdata.js'
 import { isTestBusinessSql } from './testbusiness.js'
 import { stripeLiveEnabled } from './stripe.js'
@@ -29,6 +30,7 @@ export async function customerRows(env, now = Date.now()) {
               (SELECT count(*) FROM events e WHERE e.customer = c.id AND e.type = 'booking_failed' AND e.at >= ?3) AS failures7,
               s.status AS sub_status, s.plan_id, s.mrr_cents, s.cancel_at_period_end, coalesce(ss.appointment_mode, 'at_business') AS appointment_mode,
               (SELECT 1 FROM self_signups x WHERE x.customer = c.id) AS self_serve,
+              (SELECT count(*) FROM ad_campaigns ac WHERE ac.customer = c.id AND ac.status = 'active') AS ads_active,
               ${isTestBusinessSql('c.id')} AS is_test
          FROM customers c LEFT JOIN subscriptions s ON s.customer = c.id LEFT JOIN service_settings ss ON ss.customer = c.id
         ORDER BY c.created_at DESC`,
@@ -41,7 +43,10 @@ export async function customerRows(env, now = Date.now()) {
   for (const r of results) {
     if (deleted.has(r.id)) {
       // Deleted account (tombstone): listed for the record, never in metrics, nothing to act on.
-      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: [] })
+      const job = deleted.get(r.id)
+      // A deletion that keeps failing needs a person (e.g. an unreachable ad campaign to confirm, Stripe down for long).
+      const stuck = job.status === 'in_progress' && job.last_error && job.attempts >= 3
+      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
       continue
     }
     const calendar = Boolean(await env.GOOGLE_TOKENS.get(`google:${r.id}`))
@@ -61,6 +66,8 @@ export async function customerRows(env, now = Date.now()) {
     // Self-serve signup that never completed checkout within a day.
     if (r.self_serve && (!r.sub_status || r.sub_status === 'incomplete') && now - r.created_at > DAY) attention.push('checkout_abandoned')
     if (r.failures7 > 0) attention.push('booking_failures')
+    // Escalation: a business on hold still has a running campaign (pause failed or GetShowUps can't reach it).
+    if (r.ads_active > 0 && (await runningOnHold(env, r.id))) attention.push('ads_running_on_hold')
     // Domains: ownership proven but hosting can't attach it yet, or a connected domain stopped working.
     if (r.domain_status === 'verifying' && (r.domain_detail === 'provider_error' || !providerConfigured(env))) attention.push('domain_activation')
     if (r.domain_status === 'needs_attention') attention.push('domain_problem')
@@ -97,9 +104,9 @@ export async function customerRows(env, now = Date.now()) {
 // Businesses with a deletion requested or completed (migration 0016). Missing table → none.
 async function deletedIds(db) {
   try {
-    return new Set((await db.prepare('SELECT customer FROM account_deletions').all()).results.map((r) => r.customer))
+    return new Map((await db.prepare('SELECT customer, status, last_error, attempts FROM account_deletions').all()).results.map((r) => [r.customer, r]))
   } catch (err) {
-    if (err?.message?.includes('no such table')) return new Set()
+    if (err?.message?.includes('no such table')) return new Map()
     throw err
   }
 }

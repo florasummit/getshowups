@@ -72,7 +72,8 @@ test('privacy: customer/owner emails become one-way refs (stable), staff admin a
   assert.match(ref, /^ref:[0-9a-f]{20}$/)
   const [first, second] = await listAudit(db, { limit: 10 }).then((l) => l.reverse())
   assert.equal(first.actor, `owner:${ref}`, 'same person → same ref (case-insensitive)')
-  assert.equal(first.details.note, `sent to ${ref}`)
+  assert.match(first.details.note, /^text:[0-9a-f]{16}$/, 'free text never stored, only a fingerprint')
+  assert.match(first.details.nested.list[0], /^ref:/)
   assert.equal(second.actor, 'founder@getshowups.example', 'staff identity kept (accountable)')
   assert.match(second.details.email, /^ref:/)
 })
@@ -127,6 +128,29 @@ test('producers: admin audit() and Stripe billing changes (status, cancellation 
       'stripe:billing.subscription_status',
     ],
   )
-  assert.deepEqual(JSON.parse(rows().at(-1).details), { eventId: `evt_${t - 1}`, subscription: 'sub_1', livemode: false, from: 'active', to: 'canceled', plan: null })
+  const last = rows().at(-1)
+  assert.deepEqual(JSON.parse(last.details), { livemode: false, from: 'active', to: 'canceled', plan: null })
+  assert.deepEqual([last.capability, last.resource_type, last.resource_id, last.outcome, last.correlation_id], ['billing.stripe', 'subscription', 'sub_1', 'info', `stripe:evt_${t - 1}`])
+  const admin = rows()[0]
+  assert.deepEqual([admin.capability, admin.resource_type, admin.resource_id, admin.outcome], ['platform.admin', 'customer', 'alpha', 'success'])
+  assert.match(admin.correlation_id, /^admin_/)
+  assert.match(JSON.parse(admin.details).reason, /^r$/, 'short codes are kept')
   assert.equal((await verifyAuditChain(db)).ok, true)
+})
+
+test('standard events: resource, outcome, correlation and capability are recorded, hashed and filterable; free text is fingerprinted', async () => {
+  const { recordEvent } = await import('../server/auditlog.js')
+  await recordEvent(db, { type: 'ads.pause', actor: 'system:hold', customer: 'alpha', capability: 'ads.google', resource: { type: 'campaign', id: 'cmp_1' }, outcome: 'failure', correlationId: 'stripe:evt_9', details: { error: 'transient', note: 'Called Jamie at 843-555-0100 about it' } })
+  await recordEvent(db, { type: 'ads.pause', actor: 'system:hold', customer: 'alpha', capability: 'ads.google', resource: { type: 'campaign', id: 'cmp_1' }, outcome: 'success', correlationId: 'stripe:evt_9' })
+  const r = rows()
+  assert.equal(r[0].actor_type, 'system')
+  assert.match(JSON.parse(r[0].details).note, /^text:/)
+  assert.ok(!JSON.stringify(r).includes('Jamie') && !JSON.stringify(r).includes('843-555'))
+  const list = await listAudit(db, { correlationId: 'stripe:evt_9' })
+  assert.deepEqual(list.map((e) => e.outcome), ['success', 'failure'], 'a retry outcome follows the failure, linked by correlation id')
+  assert.deepEqual((await listAudit(db, { capability: 'ads.google', outcome: 'failure' })).map((e) => e.resource), [{ type: 'campaign', id: 'cmp_1' }])
+  // The new fields are covered by the hash.
+  db.sql.exec('DROP TRIGGER audit_log_append_only_u')
+  db.sql.exec("UPDATE audit_log SET outcome = 'success' WHERE seq = 1")
+  assert.deepEqual(await verifyAuditChain(db), { ok: false, checked: 0, brokenAt: 1, reason: 'altered' })
 })
