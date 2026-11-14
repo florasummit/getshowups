@@ -223,7 +223,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Tests use the fake values in `test/e2e/fixtures.env` and mocked Google. Never real credentials.
 
 - Websites: one renderer, no scripts on business sites, every text through the claims filter, drafts private until
-  an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content.
+  an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content
+  (only exception: permanent account deletion, server/deletion.js).
 - Domains: never attach a hostname before its TXT proof; never claim "connected" without DNS pointing at us AND hosting reporting the domain active with a validated
   certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN
@@ -239,7 +240,7 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   switches, edits and site visits never call the model. Limits: 10/day (rate limit) + MONTHLY_GENERATIONS per business.
   The production `AI` binding on the Pages project needs approval. AI_API_MOCK_ORIGIN is a loopback-only test var.
 - Pilot / invited / admin-created businesses are never billed: no plan card, checkout refused (no placeholder rows).
-- Test records (testdata.js) are listed with a tag and excluded from every count; never deleted.
+- Test records (testdata.js) are listed with a tag and excluded from every count; never deleted (except by account deletion).
 - Test businesses (server/testbusiness.js, table test_businesses): marked/unmarked only by a platform admin via
   POST /api/platform/test-business (same-origin, confirm, audited). A marked business is listed with a Test tag but
   left out of every platform metric/count/MRR, and NEVER uses live operations whatever the global switches say:
@@ -248,6 +249,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
+- Account deletion (server/deletion.js, migration 0016, docs/DATA_RETENTION.md; owner decision 2026-11-14): permanent, no undo
+  window, no founder approval. Owner (Settings, typed business name) or platform admin (typed id, on a verified request).
+  Steps lockout → ads (pause + read back; never skipped) → billing (Stripe canceled now + confirmed; customer deleted) →
+  integrations (tokens deleted, grant revoked unless shared, domain detached, creatives) → data (ERASED_TABLES; tombstone;
+  admin_audit emails → refs) → verify. Idempotent steps, cron retries with backoff, audited. Deleted ids are never reused
+  and are left out of metrics. OFF unless ACCOUNT_DELETION_ENABLED is exactly 'true' (approval of implementation AND
+  retention policy). Never delete production data any other way. New tables holding business data must be added to
+  ERASED_TABLES or to the retained list in docs/DATA_RETENTION.md.
 
 ## GitHub automation (PRs and CI)
 

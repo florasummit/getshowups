@@ -33,6 +33,12 @@ export async function adsHold(env, customerId) {
   const db = env.ONBOARDING_DB
   const biz = await db.prepare('SELECT status FROM customers WHERE id = ?1').bind(customerId).first()
   if (!biz) return { reason: 'account_deleted' }
+  const deleting = await db
+    .prepare('SELECT 1 AS x FROM account_deletions WHERE customer = ?1')
+    .bind(customerId)
+    .first()
+    .catch((err) => (err?.message?.includes('no such table') ? null : Promise.reject(err)))
+  if (deleting) return { reason: 'account_deleted' }
   if (biz.status === 'suspended') return { reason: 'suspended' }
   if (!stripeConfigured(env)) return null
   const [sub, signup] = await Promise.all([

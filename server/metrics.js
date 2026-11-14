@@ -37,8 +37,17 @@ export async function customerRows(env, now = Date.now()) {
     .bind(since30, now, now - 7 * DAY, internalEmails(env))
     .all()
 
+  const deleted = await deletedIds(db)
   const rows = []
   for (const r of results) {
+    if (deleted.has(r.id)) {
+      // Deleted account (tombstone): listed for the record, never in metrics, nothing to act on.
+      const job = deleted.get(r.id)
+      // A deletion that keeps failing needs a person (e.g. an unreachable ad campaign to confirm, Stripe down for long).
+      const stuck = job.status === 'in_progress' && job.last_error && job.attempts >= 3
+      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
+      continue
+    }
     const calendar = Boolean(await env.GOOGLE_TOKENS.get(`google:${r.id}`))
     const hours = Boolean(r.hours_confirmed_at)
     const onboarding =
@@ -86,6 +95,16 @@ export async function customerRows(env, now = Date.now()) {
   return rows
 }
 
+// Businesses with a deletion requested or completed (migration 0016). Missing table → none.
+async function deletedIds(db) {
+  try {
+    return new Map((await db.prepare('SELECT customer, status, last_error, attempts FROM account_deletions').all()).results.map((r) => [r.customer, r]))
+  } catch (err) {
+    if (err?.message?.includes('no such table')) return new Map()
+    throw err
+  }
+}
+
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null)
 
 // rows: output of customerRows(), so activation reflects each business's actual current state
@@ -97,7 +116,9 @@ export async function growth(env, rows, now = Date.now()) {
   const prior30 = now - 60 * DAY
 
   const customers = await one(`SELECT count(*) AS total, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active FROM customers c WHERE ${REAL('c.id')}`)
-  const real = rows.filter((r) => !r.testBusiness)
+  const gone = rows.filter((r) => r.deleted && !r.testBusiness).length // deleted accounts are not customers any more
+  customers.total = (customers.total || 0) - gone
+  const real = rows.filter((r) => !r.testBusiness && !r.deleted)
   const activated = { n: real.filter((r) => r.calendarConnected && r.onboarding !== 'invited' && r.onboarding !== 'calendar' && r.onboarding !== 'hours').length }
   const firstBooked = { n: real.filter((r) => r.lastBooking && r.calendarConnected).length }
   const internal = internalEmails(env)

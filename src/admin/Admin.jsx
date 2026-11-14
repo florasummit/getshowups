@@ -11,6 +11,7 @@ const ATTENTION = {
   suspended: 'Suspended',
   past_due: 'Payment failed',
   ads_running_on_hold: 'Ads still running while on hold',
+  deletion_stuck: 'Deletion stuck (needs a look)',
   booking_failures: 'Booking failures',
   calendar_disconnected: 'Calendar disconnected',
   setup_stalled: 'Setup stalled',
@@ -346,6 +347,8 @@ function CustomerDetail({ id, onBack, onChanged }) {
         )}
       </section>
 
+      {d.deletion?.enabled && <Deletion id={d.id} deletion={d.deletion} onDone={() => (load(), onChanged())} />}
+
       <section className="card" aria-label="Test business">
         <h2 className="card-title">Test business</h2>
         <p className="fine">
@@ -453,6 +456,66 @@ function Plans() {
 }
 
 // One row per business in the platform lists (Customers, Test businesses).
+// Permanent account deletion (on a verified request) and the status of a running one.
+const DELETION_STEPS = { lockout: 'Turning services off', ads: 'Pausing ads', billing: 'Ending billing', integrations: 'Disconnecting integrations', data: 'Erasing data', verify: 'Verifying', done: 'Done' }
+function Deletion({ id, deletion, onDone }) {
+  const [typed, setTyped] = useState('')
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState(null)
+  const send = async (action) => {
+    setError(null)
+    const { status, data } = await api('/api/platform/deletion', { method: 'POST', body: { customer: id, action, confirm: true, confirmId: action === 'retry' ? id : typed } })
+    if (status !== 200) setError(data.error || 'failed')
+    onDone()
+  }
+  return (
+    <section className="card" aria-labelledby="deletion-title">
+      <h2 className="card-title" id="deletion-title">
+        Account deletion
+      </h2>
+      {deletion.status ? (
+        <div className="stack" data-deletion={deletion.status}>
+          <p className={deletion.lastError ? 'form-error' : 'fine'} role="status">
+            {deletion.status === 'completed'
+              ? `Deleted ${date(deletion.completedAt)}. Retained only: billing records, audit entries and this record.`
+              : `In progress: ${DELETION_STEPS[deletion.step] || deletion.step}${deletion.lastError ? ` (failed ${deletion.attempts}×: ${deletion.lastError}; retrying automatically)` : ''}.`}
+          </p>
+          {deletion.status === 'in_progress' && (
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => send('retry')}>
+              Retry now
+            </button>
+          )}
+        </div>
+      ) : !open ? (
+        <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(true)}>
+          Delete account permanently…
+        </button>
+      ) : (
+        <div className="stack">
+          <p className="fine">For a verified deletion request. Everything stops at once and the data is erased; there is no undo.</p>
+          <label className="field">
+            <span>Type the business id ({id}) to confirm</span>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </label>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" disabled={typed.trim().toLowerCase() !== id} onClick={() => send('request')}>
+              Delete permanently
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 // Permanent audit log: chain status (recomputed on every load), newest entries, full JSON export.
 function AuditLog() {
   const [a, setA] = useState(null)
@@ -549,8 +612,9 @@ function Overview({ me }) {
   if (selected) return <CustomerDetail id={selected} onBack={() => setSelected(null)} onChanged={load} />
 
   const attention = data.customers.filter((c) => c.attention.length)
-  const real = filtered.filter((c) => !c.testBusiness)
-  const tests = filtered.filter((c) => c.testBusiness)
+  const real = filtered.filter((c) => !c.testBusiness && !c.deleted)
+  const tests = filtered.filter((c) => c.testBusiness && !c.deleted)
+  const deleted = filtered.filter((c) => c.deleted)
   return (
     <div className="enter">
       <div className="page-head">
@@ -601,17 +665,27 @@ function Overview({ me }) {
         {real.length ? (
           <CustomerRows list={real} onOpen={setSelected} />
         ) : (
-          <p className="empty">{data.customers.some((c) => !c.testBusiness) ? 'No matches.' : 'No customers yet.'}</p>
+          <p className="empty">{data.customers.some((c) => !c.testBusiness && !c.deleted) ? 'No matches.' : 'No customers yet.'}</p>
         )}
       </section>
 
-      {data.customers.some((c) => c.testBusiness) && (
+      {data.customers.some((c) => c.testBusiness && !c.deleted) && (
         <section className="card" aria-labelledby="test-businesses-title">
           <h2 className="card-title" id="test-businesses-title">
             Test businesses
           </h2>
           <p className="fine">Left out of customer counts and MRR. Never use live ads, messages or billing.</p>
           {tests.length ? <CustomerRows list={tests} onOpen={setSelected} /> : <p className="empty">No matches.</p>}
+        </section>
+      )}
+
+      {deleted.length > 0 && (
+        <section className="card" aria-labelledby="deleted-title">
+          <h2 className="card-title" id="deleted-title">
+            Deleted accounts
+          </h2>
+          <p className="fine">Permanently deleted (or being deleted). Not customers and never in metrics; open one to see the deletion record.</p>
+          <CustomerRows list={deleted} onOpen={setSelected} />
         </section>
       )}
 

@@ -265,3 +265,47 @@ export async function handleEvent(env, event, { after = null } = {}) {
       return { handled: false }
   }
 }
+
+// ---------- account deletion ----------
+// Ends billing for a deleted business at once: every subscription of its Stripe customer is canceled now (no
+// proration credit, no final invoice), Stripe is asked again to confirm, then the Stripe customer object is
+// deleted (Stripe keeps its own transaction records for its legal duties). Idempotent: already canceled or
+// already deleted counts as done. Returns { ok, canceled, customerDeleted } or { ok: false, error }.
+const ENDED_SUB = ['canceled', 'incomplete_expired']
+
+// Read-only: true when Stripe reports the subscription ended (or no longer exists).
+export async function subscriptionEnded(env, id) {
+  const r = await stripePost(env, `/subscriptions/${encodeURIComponent(id)}`, {}, { method: 'GET' })
+  if (!r.ok) return r.error === 'resource_missing' ? { ok: true, ended: true } : r
+  return { ok: true, ended: ENDED_SUB.includes(r.body.status) }
+}
+
+export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscriptionId = null } = {}) {
+  const ids = new Set(stripeSubscriptionId ? [stripeSubscriptionId] : [])
+  if (stripeCustomerId) {
+    const list = await stripePost(env, '/subscriptions', { customer: stripeCustomerId, status: 'all', limit: 100 }, { method: 'GET' })
+    if (!list.ok && list.error !== 'resource_missing') return list
+    for (const s of list.ok ? list.body.data || [] : []) if (LIVE_SUB.includes(s.status)) ids.add(s.id)
+  }
+  let canceled = 0
+  for (const id of ids) {
+    const path = `/subscriptions/${encodeURIComponent(id)}`
+    const before = await stripePost(env, path, {}, { method: 'GET' })
+    if (!before.ok && before.error !== 'resource_missing') return before
+    if (before.ok && !ENDED_SUB.includes(before.body.status)) {
+      const del = await stripePost(env, path, {}, { method: 'DELETE' })
+      if (!del.ok && del.error !== 'resource_missing') return del
+    }
+    const check = await stripePost(env, path, {}, { method: 'GET' })
+    if (!check.ok && check.error !== 'resource_missing') return check
+    if (check.ok && !ENDED_SUB.includes(check.body.status)) return { ok: false, error: 'not_canceled' }
+    canceled++
+  }
+  let customerDeleted = false
+  if (stripeCustomerId) {
+    const del = await stripePost(env, `/customers/${encodeURIComponent(stripeCustomerId)}`, {}, { method: 'DELETE' })
+    if (!del.ok && del.error !== 'resource_missing') return del
+    customerDeleted = true
+  }
+  return { ok: true, canceled, customerDeleted }
+}

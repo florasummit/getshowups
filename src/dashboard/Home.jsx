@@ -46,6 +46,67 @@ async function openBilling(body, setState) {
 const SUB_LABEL = { trialing: 'Free trial', active: 'Active', past_due: 'Payment failed', canceled: 'Ended', incomplete: 'Not completed' }
 const shortDate = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric' })
 
+// Permanent deletion (only when the platform has it switched on). No undo: the owner types the business name.
+function DeleteAccount({ name }) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [state, setState] = useState({})
+  const matches = typed.trim().replace(/\s+/g, ' ').toLowerCase() === String(name).trim().replace(/\s+/g, ' ').toLowerCase()
+  const submit = async (e) => {
+    e.preventDefault()
+    setState({ busy: true })
+    const { status, data } = await api('/api/dashboard/account', { method: 'POST', body: { action: 'delete', confirm: true, name: typed } })
+    setState(status === 202 ? { done: true } : { error: data.error === 'name_mismatch' ? 'The name doesn’t match.' : 'Couldn’t delete the account. Please try again.' })
+  }
+  if (state.done)
+    return (
+      <div className="stack" role="status" data-account-deleted>
+        <p>
+          <strong>Your account is being deleted.</strong> Your website and booking page are offline, your ads are paused, billing has stopped and
+          your data is being erased. This can’t be undone.
+        </p>
+        <a className="btn btn-sm" href="/">
+          Done
+        </a>
+      </div>
+    )
+  return (
+    <div className="stack">
+      <p className="fine">
+        Permanently deletes {name}: the website and booking page go offline, running ads are paused, your subscription is canceled right away
+        (no further charges), connected Google, ad and GoHighLevel accounts are disconnected, and your customers’ details, appointments and
+        website are erased. Billing records we must keep for tax and accounting stay, without your customers’ details. There is no undo; to
+        come back later you start a new account. To stop paying but keep everything, cancel your plan in Billing instead.
+      </p>
+      {!open ? (
+        <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(true)}>
+          Delete account…
+        </button>
+      ) : (
+        <form className="stack" onSubmit={submit} aria-label="Confirm account deletion">
+          <label className="field">
+            <span>Type the business name ({name}) to confirm</span>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </label>
+          {state.error && (
+            <p className="form-error" role="alert">
+              {state.error}
+            </p>
+          )}
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-sm btn-danger" disabled={!matches || state.busy}>
+              Permanently delete account
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  )
+}
+
 function BillingCard({ billing }) {
   const [state, setState] = useState({})
   const sub = billing.subscription
@@ -405,6 +466,14 @@ function Settings({ me, reload, billing }) {
           <Suspense fallback={<div aria-busy="true" />}>
             <GhlSettings />
           </Suspense>
+        </section>
+      )}
+      {me.features?.accountDeletion && (
+        <section className="card" aria-labelledby="delete-account-title">
+          <h2 className="card-title" id="delete-account-title">
+            Delete account
+          </h2>
+          <DeleteAccount name={c.name} />
         </section>
       )}
     </div>

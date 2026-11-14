@@ -2,6 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
+## Account deletion workflow (2026-11-14) — branch feature/account-deletion (stacked on #25), NOT deployed, OFF
+
+Owner policy 2026-11-14: permanent, no undo window, no founder approval; durable/retryable/audited; retained records
+documented (docs/DATA_RETENTION.md, DRAFT for approval). Migration 0016 `account_deletions`. server/deletion.js steps:
+lockout → ads (pause + read back) → billing (Stripe canceled now + confirmed, customer deleted) → integrations → data →
+verify; cron retries with backoff; admin status + retry; deleted ids never reused, left out of metrics ("Deleted
+accounts" in /admin). Owner UI: Settings → Delete account (typed business name). Gate: ACCOUNT_DELETION_ENABLED
+(unset in production; set only in the local e2e server). Guard test: every table with a customer column is erased or
+documented as retained. Revoke now goes through googleApi() (mockable in e2e; production URL unchanged).
+Tests: 349 unit, 70 Playwright (owner deletes in the browser; admin sees the record). Found + fixed in e2e: the admin
+detail crashed for deleted rows (missing createdVia).
+Next: 90-day cancellation recovery → Stripe ↔ records reconciliation.
+
 ## Permanent audit log (2026-11-14) — branch feature/audit-log (stacked on #24), NOT deployed
 
 Migration 0015 `audit_log` (CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS only; the release test now exempts exactly the

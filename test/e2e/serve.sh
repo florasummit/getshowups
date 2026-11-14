@@ -77,7 +77,15 @@ d1 "
   INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
     ('$E2E_ADS_CUSTOMER', 'Pool service', '[\"Weekly pool cleaning\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
   INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-ads-budget', '$E2E_ADS_CUSTOMER', 30000, 'owner@e2e-ads.example', $NOW);
-  INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_ADS_CUSTOMER', 1, 'admin@e2e.example', $NOW);"
+  INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_ADS_CUSTOMER', 1, 'admin@e2e.example', $NOW);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_DELETE_CUSTOMER', 'E2E Delete Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-delete.example', '$E2E_DELETE_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DELETE_SESSION_TOKEN")', 'owner@e2e-delete.example', $NOW, $FAR);
+  INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, currency, current_period_end, last_event_at, updated_at) VALUES
+    ('$E2E_DELETE_CUSTOMER', 'cus_E2EDEL', 'sub_E2EDEL', 'founding', 'active', 49900, 'usd', $FAR, 0, $NOW);
+  INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES
+    ('seed-lead-delete', '$E2E_DELETE_CUSTOMER', 'Dee Delete', 'dee@example.net', '555-010-0107', 'Pool opening', '29403', 'new', 'x', $NOW, $NOW);"
 
 # One seeded Google connection per business (its own refresh token → its own mock calendar), like real
 # businesses that each connect their own Google account.
@@ -89,7 +97,7 @@ record() {
     scope: 'openid email https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy',
     refreshToken, connectedAt: new Date().toISOString() }))"
 }
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
@@ -111,4 +119,5 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding GOOGLE_ADS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding DNS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
+  --binding ACCOUNT_DELETION_ENABLED=true \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN"

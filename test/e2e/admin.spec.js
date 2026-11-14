@@ -154,7 +154,7 @@ test('customers and test businesses are listed in separate sections; each busine
   }
   expect(shownTest.length).toBe(o.customers.filter((x) => x.testBusiness).length)
   // The Customers stat counts real businesses only (test businesses are excluded server-side).
-  expect(o.metrics.customers.total).toBe(o.customers.filter((x) => !x.testBusiness).length)
+  expect(o.metrics.customers.total).toBe(o.customers.filter((x) => !x.testBusiness && !x.deleted).length)
 
   // Phones: both sections fit without sideways scrolling.
   for (const width of [320, 390]) {
@@ -180,7 +180,7 @@ test('admin marks and unmarks a test business (confirmed, audited); counts follo
   // count equals the listed businesses minus the ones tagged Test.
   const counted = async () => {
     const o = await (await page.request.get('/api/platform/overview')).json()
-    return [o.metrics.customers.total, o.customers.filter((c) => !c.testBusiness).length, o.customers.find((c) => c.name === 'E2E Spare Co').testBusiness]
+    return [o.metrics.customers.total, o.customers.filter((c) => !c.testBusiness && !c.deleted).length, o.customers.find((c) => c.name === 'E2E Spare Co').testBusiness]
   }
   const [t0, real0, spare0] = await counted()
   expect([t0, spare0]).toEqual([real0, false])
