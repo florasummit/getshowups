@@ -22,9 +22,11 @@ import {
   cookie,
   createSession,
   loginRedirectUri,
+  safeNext,
 } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { track } from '../../../../server/events.js'
+import { adminEmails } from '../../../../server/platform.js'
 
 function redirect(location, cookies = []) {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
@@ -32,7 +34,17 @@ function redirect(location, cookies = []) {
   for (const c of cookies) headers.append('Set-Cookie', c)
   return new Response(null, { status: 303, headers })
 }
-const fail = (code) => redirect(`/dashboard?login_error=${code}`)
+// Errors return to where sign-in started (admin console or dashboard), with an allowlisted code.
+const failTo = (origin) => (code) => redirect(`${origin === '/admin' ? '/admin' : '/dashboard'}?login_error=${code}`)
+// Best effort: which area started this sign-in (from our encrypted login cookie). Unreadable → dashboard.
+async function startedFrom(env, request) {
+  try {
+    const sealed = readCookie(request, LOGIN_COOKIE)
+    return sealed ? JSON.parse(await decrypt(env, sealed)).next : null
+  } catch {
+    return null
+  }
+}
 
 export async function onRequestGet({ request, env }) {
   const missing = missingConfig(env)
@@ -41,6 +53,7 @@ export async function onRequestGet({ request, env }) {
     return page(503, 'Sign-in unavailable', 'Dashboard sign-in is not configured yet.')
   }
 
+  const fail = failTo(await startedFrom(env, request))
   if ((await hitByIp(env, 'loginCallback', request)).limited) return fail('rate_limited')
 
   const url = new URL(request.url)
@@ -107,5 +120,20 @@ export async function onRequestGet({ request, env }) {
     return fail('failed')
   }
   await track(env, 'signup', { id: `signup:${await sha256Hex(email)}` }) // first sign-in only (deduped)
-  return redirect(saved.next === '/admin' ? '/admin' : '/dashboard', [cookie(SESSION_COOKIE, token, SESSION_TTL_SECONDS)])
+  return redirect(await landing(env, email, saved.next), [cookie(SESSION_COOKIE, token, SESSION_TTL_SECONDS)])
+}
+
+// Where a new session lands. A platform admin with no business membership goes to the console even if
+// sign-in started from /dashboard, instead of being shown "create your business". This only changes
+// the landing page: /admin still authorizes every request via PLATFORM_ADMIN_EMAILS. On a lookup error
+// the ordinary landing is kept.
+async function landing(env, email, next) {
+  const want = safeNext(next)
+  if (want === '/admin' || !adminEmails(env).includes(email)) return want
+  try {
+    const member = await env.ONBOARDING_DB.prepare('SELECT 1 FROM customer_users WHERE email = ?1').bind(email).first()
+    return member ? want : '/admin' // admin without a business: the console, never customer onboarding
+  } catch {
+    return want
+  }
 }

@@ -129,6 +129,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Every call to Google goes through `googleFetch()` (8 s timeout). Event creation uses our own event id so one
   retry is safe; on an unknown outcome the event is deleted before the slot is released.
 - Public and sign-in endpoints call `hitByIp()` / `hit()` from server/ratelimit.js; add a rule for new ones.
+- Sign-in routing (server/auth.js safeNext + api/auth/google/callback.js landing()): sign-in returns to an allowlisted
+  area only (/admin or /dashboard[/appointments|website|ads|settings]; anything else → /dashboard, never an open
+  redirect); errors return to where sign-in started. An admin account without a business lands on /admin from any
+  entry point, and /dashboard offers it the console instead of starting onboarding. Landing grants nothing: /admin
+  authorizes every request.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`. Admin views show counts, never lead/appointment contact details.
 - Never mark an email or text as sent unless the provider accepted it. Due messages without a provider are skipped
