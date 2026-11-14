@@ -2,6 +2,48 @@
 
 _Update at the end of every task. Newest first._
 
+## Released 2026-11-14: PRs #24–#28 + migrations 0015, 0016, 0017 (production deployment 1db27fd7, main abbbbfa)
+
+Preflight: reviewed heads matched (#24 66a1c5c, #25 1447980, #26 8d23a95, #27 3becc96, #28 cee7707), CI green on all;
+production 0020f305 (d426fef); D1 backup bookmark `000005d3-00000000-00005123-ecb17b374e9ab76be1589232b962c4e1`;
+safety switches read from the Pages project config (plain-text vars + secrets): ADS_LIVE_LAUNCH, MESSAGES_LIVE,
+STRIPE_LIVE_ENABLED, ACCOUNT_DELETION_ENABLED, RETENTION_SCHEDULE_ENABLED all unset (every one checks `=== 'true'`).
+Rollback test: main's code with 0015–0017 present passed 68/68 Playwright and 325/326 unit (the one failure is main's
+static migration-text check reading 0015's guard triggers; #25 updates that check; no runtime effect).
+
+| Step | Change | Deployment | Verified |
+| --- | --- | --- | --- |
+| 1 | Merge #24 → c114184 | a4302453 | smoke (pages, booking APIs 160/80 slots, signed-out 401s, PoolThru site), records unchanged |
+| 2 | Apply 0015 (audit_log, 3 indexes, 2 append-only triggers as reviewed); merge #25 → dafba35 | cbad8fcc | smoke; records unchanged; first audit checkpoint by cron (seq 1, chain ok) |
+| 3 | Apply 0016 (account_deletions); merge #26 → 865d2be | 002d9958 | smoke; records unchanged; /api/dashboard/account and /api/platform/deletion → 404 (deletion off); 0 jobs |
+| 4 | Merge #27 → bbc1329 | 298c0002 | smoke; records unchanged; first reconciliation (seq 2) |
+| 5 | Apply 0017 (conversation_control); merge #28 → abbbbfa | 1db27fd7 | smoke; records unchanged; /build.json commit abbbbfa, 17 migrations; platform.release (seq 3, no pending migrations); platform.config (seq 4) |
+
+Final read-only checks: production audit chain recomputed locally from the rows: ok, 4 entries, head 8231610029…;
+platform.config shows STRIPE_LIVE_ENABLED, MESSAGES_LIVE, ADS_LIVE_LAUNCH, ADS_AUTOMATION_ENABLED, ADS_CONVERSIONS_ENABLED,
+GHL_ENABLED, ACCOUNT_DELETION_ENABLED, RETENTION_SCHEDULE_ENABLED = false, ADS_ENABLED = true, Stripe key = test key;
+/admin/review 200, review/audit APIs 401 signed out. Record counts identical to the baseline throughout (3 businesses,
+6 leads, 4 appointments, 3 websites incl. PoolThru live v4, 3 subscriptions, 0 running campaigns, 21 messages).
+
+Findings (no incident): (1) first reconciliation reports 4 differences, all Stripe TEST-mode leftovers for businesses
+that don't exist in production (gsu-billing-test-a: 1 active test subscription + 1 invoice; gsu-billing-test-temp and
+gsu-sandbox-check-…: 1 paid test invoice each). The three real businesses match Stripe. No real money; cleanup = cancel
+that test subscription in Stripe test mode (owner action). (2) Cloudflare Web Analytics injects its beacon script into
+pages for some clients; business sites' CSP blocks it in browsers. Pre-existing; decide whether to turn Web Analytics
+off for the project.
+Founder signed-in checks (founder's own browser session, 2026-11-14 ~21:00 UTC): 9/9 pass — Audit log "Intact",
+reconciliation shows the 4 test-mode differences, Migrations 17 of 17, only ADS_ENABLED on, Stripe test key, no
+high-severity items, PoolThru drill-down: not billed, no ads hold, no deletion, no lead contact details.
+Orphaned credential cleanup (owner-approved): `google:poolthru` (from the pre-self-serve pilot invite flow; same Google
+account + OAuth client as PoolThru's live `google:poolthru-llc`, so it was deleted WITHOUT revoking) removed
+2026-11-14 21:41:53 UTC after a final check found no business, member, lead, appointment, pending message, open invite,
+ads/GHL connection or website for id `poolthru`. After: `google:poolthru-llc` present; PoolThru booking API 160 slots
+(live Google free/busy), website and booking page 200. Left in place (needs a separate decision): the archived copy
+`google-archive:poolthru:<timestamp>`.
+Pending (needs people): PoolThru owner dashboard check; live customer journey (needs a Google account that is neither
+the founder admin nor already a business member).
+Rollback target if needed: 0020f305 (pre-release) or any step's deployment above; never drop the new tables.
+
 ## Integration checkpoint (2026-11-14) — PRs #24–#28, all draft, CI green, NOT merged or deployed
 
 **Verified now:** production deployment 0020f305 (main d426fef); production has migrations through 0014 (0015–0017
@@ -573,3 +615,20 @@ Everything below is **local and tested**, not in production.
    login → connect Google Calendar → connection status → submit test lead → view availability → see bookings.
    First step: verify what GHL access actually exists before choosing CRM/SMS build-vs-reuse.
 2. Then: lead capture → qualification → booking → reminders → show-up tracking.
+
+## 2026-11-14: post-audit launch readiness
+
+See docs/LAUNCH_READINESS.md. Draft PRs: #30 (review accuracy, +unmark fix 60e7959), #31 (cancel appointments, noindex test sites, deep links). Next action: approve and deploy #30 and #31, then cancel the journey appointment and run the Stripe live activation checklist.
+
+## 2026-11-14: controlled launch-fix release (approved)
+
+- PR #30 merged at 60e7959 → main bd02edc → production deployment 8cfc8acb. Smoke 11/11; Business Review live, evidence
+  dated by real businesses only; one accurate incident: billing.reconcile (4 Stripe-sandbox differences: stripe-only 1,
+  payment not recorded 3).
+- PR #31 merged at 6a65fd5 (incl. cancel-atomicity fix found in final review) → main 1546ed1 → deployment 0be05d2b.
+  Smoke 11/11; deep link /dashboard/appointments opens directly after sign-in.
+- Cleanup: GSU Journey Test appointment ef6c825c… cancelled by the owner in the UI (200): status cancelled, one
+  appointment_changes row, audit seq 13 booking.cancel success; event gone from the connected Google Calendar; other
+  businesses' appointments unchanged; its 2 reminders stay 'scheduled' until send time, where skipReason returns
+  not_needed (and the business is test-only anyway).
+- No migrations, secrets or switches changed. Rollback target: 1db27fd7 (abbbbfa).
