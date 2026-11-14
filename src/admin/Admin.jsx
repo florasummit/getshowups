@@ -40,21 +40,26 @@ function Gate({ title, children }) {
 
 function Metrics({ m }) {
   const [more, setMore] = useState(false)
-  const b = m.billing
+  // Stripe test mode (live billing not switched on): subscriptions exist but none of it is revenue.
+  const testMode = m.billing?.mode === 'test'
+  const b = testMode ? null : m.billing
+  const noBilling = testMode ? 'Test mode' : '—'
+  // On-site businesses (the business visits the customer) are judged by completed jobs, not customer show-ups.
+  const outcome = m.showUpRate30 == null && m.completionRate30 != null ? ['Job completion', pct(m.completionRate30)] : ['Show-up rate', pct(m.showUpRate30)]
   const main = [
     ['Customers', m.customers.total],
     ['Activation', pct(m.activationRate)],
     ['Booking conversion', pct(m.bookingConversion30)],
-    ['Show-up rate', pct(m.showUpRate30)],
-    ['MRR', b ? money(b.mrrCents, b.currency) : 'No billing yet'],
+    outcome,
+    ['MRR', b ? money(b.mrrCents, b.currency) : testMode ? 'Test mode (no revenue)' : 'No billing yet'],
   ]
   const extra = [
-    ['ARR', b ? money(b.arrCents, b.currency) : '—'],
-    ['Paying customers', b ? b.payingCustomers : '—'],
-    ['Trialing', b ? b.trialing : '—'],
-    ['Revenue (30 days)', b ? money(b.revenue30Cents, b.currency) : '—'],
-    ['Revenue growth', b ? pct(b.revenueGrowth30) : '—'],
-    ['Churn (30 days)', b ? pct(b.churn30) : '—'],
+    ['ARR', b ? money(b.arrCents, b.currency) : noBilling],
+    ['Paying customers', b ? b.payingCustomers : noBilling],
+    ['Trialing', b ? b.trialing : noBilling],
+    ['Revenue (30 days)', b ? money(b.revenue30Cents, b.currency) : noBilling],
+    ['Revenue growth', b ? pct(b.revenueGrowth30) : noBilling],
+    ['Churn (30 days)', b ? pct(b.churn30) : noBilling],
     ['Retention (30 days)', pct(m.retention30)],
     ['First booking rate', pct(m.firstBookingRate)],
     ['Visit rate (on-site businesses)', pct(m.visitRate30)],
@@ -75,6 +80,11 @@ function Metrics({ m }) {
           </div>
         ))}
       </div>
+      {testMode && (
+        <p className="fine" data-billing-test-mode>
+          Billing is in Stripe test mode: {plural(m.billing.testSubscriptions, 'active test subscription')}, not counted as revenue.
+        </p>
+      )}
       <button type="button" className="link-btn more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
         {more ? 'Fewer metrics' : 'More metrics'}
       </button>

@@ -25,7 +25,7 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
   // The seeded Ads sandbox business pays $499/month but is marked as a TEST business, so it is left
   // out of MRR. (selfserve.spec may add a real $0 subscription in parallel, so don't expect an exact text.)
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|\$0\.00)$/)
+  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|Test mode \(no revenue\))$/) // e2e runs Stripe in test mode: never shown as revenue
   await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()

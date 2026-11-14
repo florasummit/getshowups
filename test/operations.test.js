@@ -526,8 +526,12 @@ test('test businesses: admin-only audited mark/unmark; tagged; excluded from cou
   assert.deepEqual(auditActions(), [])
 
   const metrics = async () => (await call(pOverview, 'GET', '/api/platform/overview', { cookie: ops })).json()
+  // Stripe test mode (live billing off, production today): subscriptions are counted as test, never as revenue.
   let o = await metrics()
-  assert.deepEqual([o.metrics.customers.total, o.metrics.billing.mrrCents, o.metrics.billing.payingCustomers], [2, 59800, 2])
+  assert.deepEqual(o.metrics.billing, { mode: 'test', testSubscriptions: 2, currency: 'usd', mrrCents: null, arrCents: null, payingCustomers: null, trialing: null, revenue30Cents: null, revenueGrowth30: null, churn30: null })
+  env.STRIPE_LIVE_ENABLED = 'true' // revenue figures only once live billing is on
+  o = await metrics()
+  assert.deepEqual([o.metrics.customers.total, o.metrics.billing.mode, o.metrics.billing.mrrCents, o.metrics.billing.payingCustomers], [2, 'live', 59800, 2])
 
   assert.deepEqual((await mark(ops, { customer: 'gsu-test', test: true, confirm: true })).json(), { customer: 'gsu-test', test: true, changed: true })
   assert.equal((await mark(ops, { customer: 'gsu-test', test: true, confirm: true })).json().changed, false, 'idempotent')
@@ -535,6 +539,7 @@ test('test businesses: admin-only audited mark/unmark; tagged; excluded from cou
   o = await metrics()
   assert.deepEqual([o.metrics.customers.total, o.metrics.billing.mrrCents, o.metrics.billing.payingCustomers], [1, 9900, 1], 'test business left out of counts and MRR')
   assert.deepEqual(Object.fromEntries(o.customers.map((c) => [c.id, c.testBusiness])), { 'poolthru-llc': false, 'gsu-test': true }, 'still listed, tagged')
+  delete env.STRIPE_LIVE_ENABLED
   const detail = (await call(pCustomer, 'GET', '/api/platform/customer?id=gsu-test', { cookie: ops })).json()
   assert.equal(detail.testBusiness, true)
 
@@ -600,7 +605,10 @@ test('metrics and events: real activity drives activation, conversion, show-up, 
 
   const types = db.sql.prepare('SELECT type FROM events ORDER BY at').all().map((r) => r.type)
   assert.ok(types.includes('lead_created') && types.includes('appointment_booked'))
+  assert.equal((await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing.mrrCents, null, 'test mode: no MRR')
+  env.STRIPE_LIVE_ENABLED = 'true'
   const m = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics
+  delete env.STRIPE_LIVE_ENABLED
   assert.equal(m.activationRate, 100)
   assert.equal(m.firstBookingRate, 100)
   assert.equal(m.bookingConversion30, 100)

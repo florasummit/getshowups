@@ -2,6 +2,7 @@
 // Test records (server/testdata.js) are excluded from every count.
 import { internalEmails, isTestLead } from './testdata.js'
 import { isTestBusinessSql } from './testbusiness.js'
+import { stripeLiveEnabled } from './stripe.js'
 
 // Real businesses only: test businesses are listed (tagged) but never counted.
 const REAL = (col) => `NOT ${isTestBusinessSql(col)}`
@@ -143,8 +144,11 @@ export async function growth(env, rows, now = Date.now()) {
     .all()
 
   const billing = subs.any_sub > 0
-  const rev30 = billing ? await revenue(since30, now) : null
-  const revPrior = billing ? await revenue(prior30, since30) : null
+  // Until live billing is switched on (STRIPE_LIVE_ENABLED, approval), every subscription and payment comes from
+  // Stripe test mode (the webhook refuses live-mode events), so none of it is revenue: no MRR/ARR/revenue figures.
+  const live = stripeLiveEnabled(env)
+  const rev30 = billing && live ? await revenue(since30, now) : null
+  const revPrior = billing && live ? await revenue(prior30, since30) : null
   return {
     customers: { total: customers.total || 0, active: customers.active || 0 },
     signupsByWeek: weekly.map((w) => ({ weekStart: new Date(w.week * 7 * DAY).toISOString().slice(0, 10), count: w.n })),
@@ -159,8 +163,12 @@ export async function growth(env, rows, now = Date.now()) {
     reportedBookingValue30Cents: outcomes.valued ? outcomes.value_cents || 0 : null,
     incrementalRevenue: null,
     retention30: pct(retained.active || 0, retained.cohort || 0),
-    billing: billing
-      ? {
+    billing: !billing
+      ? null
+      : !live
+        ? { mode: 'test', testSubscriptions: subs.paying || 0, currency: subs.currency, mrrCents: null, arrCents: null, payingCustomers: null, trialing: null, revenue30Cents: null, revenueGrowth30: null, churn30: null }
+        : {
+          mode: 'live',
           currency: subs.currency,
           mrrCents: subs.mrr || 0,
           arrCents: (subs.mrr || 0) * 12,
@@ -169,8 +177,7 @@ export async function growth(env, rows, now = Date.now()) {
           revenue30Cents: rev30,
           revenueGrowth30: revPrior > 0 ? pct(rev30 - revPrior, revPrior) : null,
           churn30: pct(canceled30.n || 0, (subs.paying || 0) + (canceled30.n || 0)),
-        }
-      : null,
+        },
     // Not computable without recorded costs; shown as unavailable rather than estimated.
     cac: null,
     ltv: null,

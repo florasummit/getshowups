@@ -139,6 +139,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
+- Revenue metrics (MRR/ARR/paying/revenue/churn) only when live billing is on (`stripeLiveEnabled`); in Stripe test mode
+  they are null with `billing.mode: 'test'` (a count of test subscriptions), never shown as revenue.
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. With Stripe configured, LIVE launch/resume also needs an active subscription;
   sandbox (verified Google Ads test account) does not, so never-billed pilots (PoolThru) can test.
