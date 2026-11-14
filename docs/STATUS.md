@@ -31,7 +31,17 @@ gsu-sandbox-check-…: 1 paid test invoice each). The three real businesses matc
 that test subscription in Stripe test mode (owner action). (2) Cloudflare Web Analytics injects its beacon script into
 pages for some clients; business sites' CSP blocks it in browsers. Pre-existing; decide whether to turn Web Analytics
 off for the project.
-Pending (needs people): founder signed-in check of /admin/review and the Overview; PoolThru owner dashboard check.
+Founder signed-in checks (founder's own browser session, 2026-11-14 ~21:00 UTC): 9/9 pass — Audit log "Intact",
+reconciliation shows the 4 test-mode differences, Migrations 17 of 17, only ADS_ENABLED on, Stripe test key, no
+high-severity items, PoolThru drill-down: not billed, no ads hold, no deletion, no lead contact details.
+Orphaned credential cleanup (owner-approved): `google:poolthru` (from the pre-self-serve pilot invite flow; same Google
+account + OAuth client as PoolThru's live `google:poolthru-llc`, so it was deleted WITHOUT revoking) removed
+2026-11-14 21:41:53 UTC after a final check found no business, member, lead, appointment, pending message, open invite,
+ads/GHL connection or website for id `poolthru`. After: `google:poolthru-llc` present; PoolThru booking API 160 slots
+(live Google free/busy), website and booking page 200. Left in place (needs a separate decision): the archived copy
+`google-archive:poolthru:<timestamp>`.
+Pending (needs people): PoolThru owner dashboard check; live customer journey (needs a Google account that is neither
+the founder admin nor already a business member).
 Rollback target if needed: 0020f305 (pre-release) or any step's deployment above; never drop the new tables.
 
 ## Integration checkpoint (2026-11-14) — PRs #24–#28, all draft, CI green, NOT merged or deployed
