@@ -479,11 +479,11 @@ test('live billing: the webhook records each subscription and payment as test or
   assert.equal((await signed({ id: 'evt_m4', type: 'invoice.paid', created: Math.floor(Date.now() / 1000), livemode: true, data: { object: { id: 'in_m2', customer: 'cus_2', amount_paid: 12000, currency: 'usd' } } })).status, 200)
   const m = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
   assert.deepEqual([m.mode, m.mrrCents, m.payingCustomers, m.testSubscriptions, m.revenue30Cents], ['live', 12000, 1, 1, 12000], 'only beta (live) counts; alpha stays a test subscription')
-  // Before migration 0013 is applied: webhooks still succeed and nothing counts as revenue (safe direction).
+  // Before migration 0013 is applied: webhooks still succeed; subscription figures are unavailable (null), never revenue.
   db.sql.exec('DROP TABLE subscription_modes')
   assert.equal((await signed({ ...subEvent('evt_m5', 'customer.subscription.updated', 130, { status: 'active', id: 'sub_2', customer: 'cus_2', metadata: { customer: 'beta' } }), livemode: true })).status, 200)
   const off = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
-  assert.deepEqual([off.mrrCents, off.payingCustomers], [0, 0])
+  assert.deepEqual([off.mrrCents, off.payingCustomers], [null, null])
   delete env.STRIPE_LIVE_ENABLED
   env.STRIPE_SECRET_KEY = 'sk_test_SECRET'
 })
@@ -644,4 +644,11 @@ test('metrics and events: real activity drives activation, conversion, show-up, 
   assert.equal(m.showUpRate30, 100)
   assert.deepEqual([m.billing.mrrCents, m.billing.arrCents, m.billing.payingCustomers], [9900, 118800, 1])
   assert.equal(m.billing.revenueGrowth30, null) // no prior-period revenue to compare against
+
+  // Live billing switched on before migration 0013: subscription figures are unavailable (null → "—"), never $0.
+  db.sql.exec('DROP TABLE subscription_modes')
+  env.STRIPE_LIVE_ENABLED = 'true'
+  const missing = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
+  delete env.STRIPE_LIVE_ENABLED
+  assert.deepEqual([missing.mode, missing.mrrCents, missing.arrCents, missing.payingCustomers, missing.churn30], ['live', null, null, null, null])
 })

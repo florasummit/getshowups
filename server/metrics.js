@@ -151,14 +151,15 @@ export async function growth(env, rows, now = Date.now()) {
   // Stripe test mode (the webhook refuses live-mode events), so none of it is revenue: no MRR/ARR/revenue figures.
   const live = stripeLiveEnabled(env)
   // Live billing: only subscriptions recorded as live mode (subscription_modes, migration 0013) count; unmarked
-  // ones are test mode. Missing table (migration not applied) → nothing counts as revenue (safe direction).
+  // ones are test mode. Missing table (migration not applied) or a storage error → the figures are unavailable
+  // (null, shown as "—"), never a misleading $0.
   const LIVE_SUB = 'JOIN subscription_modes m ON m.customer = s.customer AND m.livemode = 1'
   const liveOnly = async (sql, ...args) => {
     try {
       return await one(sql, ...args)
     } catch (err) {
       console.error('live billing metrics unavailable:', err?.message?.includes('no such table') ? 'table_missing' : 'storage_error')
-      return {}
+      return null
     }
   }
   const liveSubs = billing && live
@@ -190,14 +191,14 @@ export async function growth(env, rows, now = Date.now()) {
         : {
           mode: 'live',
           currency: subs.currency,
-          mrrCents: liveSubs.mrr || 0,
-          arrCents: (liveSubs.mrr || 0) * 12,
-          payingCustomers: liveSubs.paying || 0,
-          trialing: liveSubs.trialing || 0,
-          testSubscriptions: (subs.paying || 0) - (liveSubs.paying || 0), // active Stripe test-mode subscriptions, not revenue
+          mrrCents: liveSubs ? liveSubs.mrr || 0 : null,
+          arrCents: liveSubs ? (liveSubs.mrr || 0) * 12 : null,
+          payingCustomers: liveSubs ? liveSubs.paying || 0 : null,
+          trialing: liveSubs ? liveSubs.trialing || 0 : null,
+          testSubscriptions: liveSubs ? (subs.paying || 0) - (liveSubs.paying || 0) : null, // active Stripe test-mode subscriptions, not revenue
           revenue30Cents: rev30,
           revenueGrowth30: revPrior > 0 ? pct(rev30 - revPrior, revPrior) : null,
-          churn30: pct(canceled30.n || 0, (liveSubs.paying || 0) + (canceled30.n || 0)),
+          churn30: liveSubs && canceled30 ? pct(canceled30.n || 0, (liveSubs.paying || 0) + (canceled30.n || 0)) : null,
         },
     // Not computable without recorded costs; shown as unavailable rather than estimated.
     cac: null,
