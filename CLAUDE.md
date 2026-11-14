@@ -284,9 +284,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 
 ## Release state (verified 2026-11-14; details in docs/STATUS.md and docs/OPERATIONS.md)
 
-- Production: deployment 0020f305 (main d426fef), migrations through 0014. Draft stack #24 → #25 → #26 → #27 → #28 is
-  NOT merged. Release it as one set, in order: #24; apply 0015 then #25; apply 0016 then #26; #27; apply 0017 then
-  #28. Never apply a migration out of order or merge a PR before its migration. Rollback target: 0020f305.
+- Production: deployment 1db27fd7 (main abbbbfa), migrations 0001–0017 applied (2026-11-14 release of #24–#28; record in
+  docs/STATUS.md). Previous deployment 0020f305 is the pre-release rollback target. New migrations continue at 0018,
+  always applied before the merge that needs them.
 - Each system exists once: audit = server/auditlog.js (audit_log); ads safety stop = server/ads/holds.js; deletion =
   server/deletion.js; lifecycle/recovery = server/lifecycle.js; reconciliation = server/reconcile.js; scheduler =
   workers/scheduler → /api/cron/run. The other agent's business-review.patch was reviewed, not merged (see
