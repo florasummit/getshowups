@@ -404,6 +404,9 @@ test('opt-out: follow-up emails link to a read-only unsubscribe page; confirming
   const email = sentEmails().find((e) => /alpha Co/.test(e.from))
   const url = linkIn(email.text, /https:\/\/getshowups\.com\/api\/messages\/unsubscribe\?\S+/)
   assert.equal(url.searchParams.get('l'), a.leadId)
+  // One-click unsubscribe headers (RFC 8058) carry the same signed link.
+  assert.equal(email.headers['List-Unsubscribe'], `<${url.href}>`)
+  assert.equal(email.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click')
   const path = `${url.pathname}${url.search}`
 
   // GET (email scanners prefetch links) changes nothing.
@@ -440,6 +443,38 @@ test('opt-out: follow-up emails link to a read-only unsubscribe page; confirming
   const confirmation = sentEmails().slice(before).find((e) => /booked|confirm/i.test(e.subject))
   assert.ok(confirmation, 'booking confirmation still sent to an opted-out address')
   assert.doesNotMatch(confirmation.text, /unsubscribe/, 'confirmations carry no follow-up unsubscribe link')
+  assert.equal(confirmation.headers, undefined, 'no List-Unsubscribe on confirmations')
+})
+
+test('opt-out: a mail provider one-click POST (l/k in the URL) records the opt-out; forged links are refused', async () => {
+  await seed('alpha')
+  withEmail()
+  const t0 = Date.now()
+  await lead('alpha')
+  await processDueMessages(env, t0 + TIMING.lead_followup_1.after + MIN)
+  const header = sentEmails()[0].headers['List-Unsubscribe'].slice(1, -1)
+  const u = new URL(header)
+  const oneClick = (search) => call(unsubApi, 'POST', `/api/messages/unsubscribe${search}`, { raw: 'List-Unsubscribe=One-Click', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  assert.equal((await oneClick(`?l=${u.searchParams.get('l')}&k=${'C'.repeat(43)}`)).status, 404)
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM message_optouts').get().n, 0)
+  assert.equal((await oneClick(u.search)).status, 200)
+  assert.deepEqual(db.sql.prepare('SELECT customer, channel, source FROM message_optouts').all().map((r) => [r.customer, r.channel, r.source]), [['alpha', 'email', 'unsubscribe_link']])
+})
+
+test('opt-out: when the opt-out list cannot be read, the follow-up is skipped (fails closed), not sent', async () => {
+  await seed('alpha')
+  withEmail()
+  const t0 = Date.now()
+  await lead('alpha')
+  const prepare = env.ONBOARDING_DB.prepare.bind(env.ONBOARDING_DB)
+  env.ONBOARDING_DB.prepare = (sql) => (sql.includes('FROM message_optouts') ? { bind: () => ({ first: async () => { throw new Error('D1_ERROR: network') } }) } : prepare(sql))
+  try {
+    await processDueMessages(env, t0 + TIMING.lead_followup_1.after + MIN)
+  } finally {
+    env.ONBOARDING_DB.prepare = prepare
+  }
+  assert.equal(sentEmails().length, 0)
+  assert.deepEqual(msgs().filter((m) => m.kind === 'lead_followup_1').map((m) => [m.status, m.error]), [['skipped', 'optout_unknown']])
 })
 
 test('opt-out: a carrier STOP (Twilio 21610) is recorded and no further follow-up texts are attempted', async () => {

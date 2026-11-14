@@ -41,10 +41,12 @@ export async function enqueue(env, { id, to, customer = null, template, subject,
 // Sends one plain-text email through Resend. fromName/replyTo are optional (messages to a business's
 // leads go out as "<Business> via GetShowUps" with replies to the business owner).
 // Returns { ok, providerId } or { ok: false, error } with an allowlisted code.
-export async function sendEmail(env, { id, to, subject, text, fromName, replyTo, testOnly = false }) {
+// unsubscribeUrl (optional, https only): adds List-Unsubscribe + List-Unsubscribe-Post (RFC 8058 one-click).
+export async function sendEmail(env, { id, to, subject, text, fromName, replyTo, testOnly = false, unsubscribeUrl = null }) {
   if (!recipientAllowed(env, to, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
   const address = String(env.EMAIL_FROM).match(/<([^>]+)>/)?.[1] || String(env.EMAIL_FROM).trim()
   const name = fromName ? String(fromName).replace(/["<>\r\n\\]/g, '').slice(0, 70) : null
+  const unsub = typeof unsubscribeUrl === 'string' && /^https:\/\/[^\s<>]+$/.test(unsubscribeUrl) ? unsubscribeUrl : null
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -55,6 +57,7 @@ export async function sendEmail(env, { id, to, subject, text, fromName, replyTo,
         subject,
         text,
         ...(replyTo ? { reply_to: replyTo } : {}),
+        ...(unsub ? { headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } } : {}),
       }),
       signal: AbortSignal.timeout(8000),
     })

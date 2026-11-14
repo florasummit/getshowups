@@ -1,6 +1,7 @@
 // /api/messages/unsubscribe?l=<lead id>&k=<signed token> — the "no more follow-up emails" link in follow-ups.
 //   GET  shows the business name and a button (read-only: email scanners prefetch links).
-//   POST records the opt-out for that business (message_optouts; the address only as a hash).
+//   POST records the opt-out for that business (message_optouts; the address only as a hash). Also the RFC 8058
+//        one-click POST from mail providers (List-Unsubscribe header; l/k in the query string).
 // The signed token only works for its own lead. Booking confirmations and reminders are not affected.
 import { escapeHtml, page } from '../../../server/google-oauth.js'
 import { verifyLinkToken } from '../../../server/links.js'
@@ -55,5 +56,8 @@ export async function onRequestPost({ request, env }) {
   } catch {
     return invalid()
   }
-  return handle(request, env, form.get('l'), form.get('k'), true)
+  // Our confirm form sends l/k in the body; a mail provider's one-click POST (RFC 8058, body
+  // List-Unsubscribe=One-Click) sends them in the URL from the List-Unsubscribe header.
+  const q = new URL(request.url).searchParams
+  return handle(request, env, form.get('l') ?? q.get('l'), form.get('k') ?? q.get('k'), true)
 }

@@ -238,6 +238,9 @@ const DUE_SQL = `
    ORDER BY m.send_at LIMIT ?2`
 
 // Sends due messages. Safe to run concurrently (each row is claimed atomically before sending).
+// Fails closed: a follow-up whose opt-out status cannot be read is skipped, never sent unchecked.
+const optOutReason = (state) => (state === false ? null : state === null ? 'optout_unknown' : 'opted_out')
+
 export async function processDueMessages(env, now = Date.now(), limit = 20) {
   const db = env.ONBOARDING_DB
   const out = { sent: 0, failed: 0, skipped: 0, retry: 0 }
@@ -262,7 +265,7 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
-      (FOLLOW_UP_KINDS.includes(m.kind) && (await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) ? 'opted_out' : null)
+      (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null)
     if (reason) {
       await db.prepare("UPDATE messages SET status = 'skipped', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, reason, now).run()
       out.skipped++
@@ -279,7 +282,11 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       const content = await render(env, m)
       result =
         m.channel === 'email'
-          ? await sendEmail(env, { id: `msg:${m.id}`, to: m.lead_email, subject: content.subject, text: content.text, fromName: `${m.biz} via GetShowUps`, replyTo: m.owner, testOnly })
+          ? await sendEmail(env, {
+            id: `msg:${m.id}`, to: m.lead_email, subject: content.subject, text: content.text, fromName: `${m.biz} via GetShowUps`, replyTo: m.owner, testOnly,
+            // Follow-ups: one-click unsubscribe headers (RFC 8058) with the same signed link as the footer.
+            unsubscribeUrl: FOLLOW_UP_KINDS.includes(m.kind) ? await unsubscribeUrl(env, m.lead_id) : null,
+          })
           : await sendSms(env, { to: m.lead_phone, text: content.sms, testOnly })
     } catch (err) {
       console.error('messages: render/send error:', m.kind, err?.name)

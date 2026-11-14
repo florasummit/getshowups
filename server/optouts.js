@@ -15,6 +15,7 @@ export async function addressHash(channel, address) {
   return n ? sha256Hex(`${channel}:${n}`) : null
 }
 
+// true = opted out, false = not (or migration 0014 not applied yet), null = could not check (storage error).
 export async function isOptedOut(env, customer, channel, address) {
   const hash = await addressHash(channel, address)
   if (!hash) return false
@@ -23,9 +24,11 @@ export async function isOptedOut(env, customer, channel, address) {
       await env.ONBOARDING_DB.prepare('SELECT 1 FROM message_optouts WHERE customer = ?1 AND channel = ?2 AND address_hash = ?3').bind(customer, channel, hash).first(),
     )
   } catch (err) {
-    // Before migration 0014 no opt-out can have been recorded, so nothing is suppressed wrongly.
-    console.error('optouts: lookup failed:', err?.message?.includes('no such table') ? 'table_missing' : 'storage_error')
-    return false
+    // Before migration 0014 no opt-out can have been recorded, so nothing is suppressed wrongly (false).
+    // Any other storage error: unknown (null); the caller must not send a follow-up it cannot check.
+    const missing = Boolean(err?.message?.includes('no such table'))
+    console.error('optouts: lookup failed:', missing ? 'table_missing' : 'storage_error')
+    return missing ? false : null
   }
 }
 
