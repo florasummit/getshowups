@@ -85,7 +85,7 @@ beforeEach(() => {
     ADS_ENABLED: 'true',
     ADS_BUSINESSES: 'pools,salon', // per-business Ads flag (server/ads/access.js)
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
   }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')

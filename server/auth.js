@@ -9,7 +9,7 @@ export const LOGIN_TTL_SECONDS = 600
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 // Where a sign-in may return to: the admin console or a dashboard tab. Anything else → /dashboard (never an
 // arbitrary URL, so the destination can't be used as an open redirect).
-export const safeNext = (v) => (typeof v === 'string' && /^\/(admin|dashboard(\/(appointments|website|ads|settings))?)$/.test(v) ? v : '/dashboard')
+export const safeNext = (v) => (typeof v === 'string' && /^\/(admin(\/review)?|dashboard(\/(appointments|website|ads|settings))?)$/.test(v) ? v : '/dashboard')
 
 export const LOGIN_SCOPES = ['openid', 'email']
 export const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/

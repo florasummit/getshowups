@@ -1,17 +1,32 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
 // Test records (server/testdata.js) are excluded from every count.
-import { recoveryFor } from './lifecycle.js'
-import { runningOnHold } from './ads/holds.js'
+import { RECOVERY_MS } from './lifecycle.js'
 import { internalEmails, isTestLead } from './testdata.js'
 import { isTestBusinessSql } from './testbusiness.js'
-import { stripeLiveEnabled } from './stripe.js'
+import { stripeConfigured, stripeLiveEnabled } from './stripe.js'
 
 // Real businesses only: test businesses are listed (tagged) but never counted.
 const REAL = (col) => `NOT ${isTestBusinessSql(col)}`
 import { providerConfigured } from './domains.js'
 const DAY = 24 * 60 * 60 * 1000
 
-export async function customerRows(env, now = Date.now()) {
+// Which businesses have a stored Calendar connection: one KV list per 1,000 keys instead of one get per business
+// (Workers allow ~1,000 KV operations per request, which the per-business gets hit at ~1,000 businesses).
+async function connectedCalendars(env, only = null) {
+  if (only) return new Set((await env.GOOGLE_TOKENS.get(`google:${only}`)) ? [only] : [])
+  const out = new Set()
+  let cursor
+  for (let page = 0; page < 100; page++) {
+    const r = await env.GOOGLE_TOKENS.list({ prefix: 'google:', cursor })
+    for (const k of r.keys) out.add(k.name.slice('google:'.length))
+    if (r.list_complete || !r.cursor) break
+    cursor = r.cursor
+  }
+  return out
+}
+
+// only: one business id (Business Review drill-down) instead of all of them.
+export async function customerRows(env, now = Date.now(), { only = null } = {}) {
   const db = env.ONBOARDING_DB
   const since30 = now - 30 * DAY
   const { results } = await db
@@ -31,14 +46,21 @@ export async function customerRows(env, now = Date.now()) {
               s.status AS sub_status, s.plan_id, s.mrr_cents, s.cancel_at_period_end, coalesce(ss.appointment_mode, 'at_business') AS appointment_mode,
               (SELECT 1 FROM self_signups x WHERE x.customer = c.id) AS self_serve,
               (SELECT count(*) FROM ad_campaigns ac WHERE ac.customer = c.id AND ac.status = 'active') AS ads_active,
+              s.stripe_subscription_id AS sub_id, s.current_period_end AS period_end, s.last_event_at AS sub_seen,
+              (SELECT max(e.at) FROM events e WHERE e.customer = c.id AND e.type = 'subscription_canceled') AS canceled_at,
+              (SELECT max(e.at) FROM events e WHERE e.customer = c.id AND e.type = 'payment_failed') AS failed_at,
+              (SELECT max(e.at) FROM events e WHERE e.customer = c.id AND e.type IN ('revenue', 'payment_succeeded')) AS paid_at,
               ${isTestBusinessSql('c.id')} AS is_test
          FROM customers c LEFT JOIN subscriptions s ON s.customer = c.id LEFT JOIN service_settings ss ON ss.customer = c.id
+        WHERE ?5 IS NULL OR c.id = ?5
         ORDER BY c.created_at DESC`,
     )
-    .bind(since30, now, now - 7 * DAY, internalEmails(env))
+    .bind(since30, now, now - 7 * DAY, internalEmails(env), only)
     .all()
 
+  const calendars = await connectedCalendars(env, only)
   const deleted = await deletedIds(db)
+  const deletedRows = deleted
   const rows = []
   for (const r of results) {
     if (deleted.has(r.id)) {
@@ -49,7 +71,7 @@ export async function customerRows(env, now = Date.now()) {
       rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
       continue
     }
-    const calendar = Boolean(await env.GOOGLE_TOKENS.get(`google:${r.id}`))
+    const calendar = calendars.has(r.id)
     const hours = Boolean(r.hours_confirmed_at)
     const onboarding =
       r.status === 'suspended' ? 'suspended' : !r.owners ? 'invited' : !calendar ? 'calendar' : !hours ? 'hours' : 'live'
@@ -58,16 +80,20 @@ export async function customerRows(env, now = Date.now()) {
     if (r.sub_status === 'past_due') attention.push('past_due')
     if (r.sub_status === 'canceled') {
       attention.push('subscription_ended')
-      const rec = await recoveryFor(env, r.id, now)
-      if (rec?.expired) attention.push('recovery_ended')
-      else if (rec && rec.until - now < 14 * DAY) attention.push('recovery_ending')
+      // Same rule as lifecycle.recoveryFor(), from columns already loaded (no per-row queries).
+      const ended = Math.max(r.period_end || 0, r.canceled_at || 0)
+      if ((r.self_serve || r.sub_id) && ended) {
+        const until = ended + RECOVERY_MS
+        if (now >= until) attention.push('recovery_ended')
+        else if (until - now < 14 * DAY) attention.push('recovery_ending')
+      }
     }
     if (r.cancel_at_period_end && r.sub_status !== 'canceled') attention.push('cancel_scheduled')
     // Self-serve signup that never completed checkout within a day.
     if (r.self_serve && (!r.sub_status || r.sub_status === 'incomplete') && now - r.created_at > DAY) attention.push('checkout_abandoned')
     if (r.failures7 > 0) attention.push('booking_failures')
     // Escalation: a business on hold still has a running campaign (pause failed or GetShowUps can't reach it).
-    if (r.ads_active > 0 && (await runningOnHold(env, r.id))) attention.push('ads_running_on_hold')
+    if (r.ads_active > 0 && onHold(r, deletedRows, env)) attention.push('ads_running_on_hold')
     // Domains: ownership proven but hosting can't attach it yet, or a connected domain stopped working.
     if (r.domain_status === 'verifying' && (r.domain_detail === 'provider_error' || !providerConfigured(env))) attention.push('domain_activation')
     if (r.domain_status === 'needs_attention') attention.push('domain_problem')
@@ -109,6 +135,16 @@ async function deletedIds(db) {
     if (err?.message?.includes('no such table')) return new Map()
     throw err
   }
+}
+
+// The ads-hold rule of server/ads/holds.js adsHold(), evaluated on columns already loaded for the admin list.
+function onHold(r, deleted, env) {
+  if (deleted.has(r.id) || r.status === 'suspended') return true
+  if (!stripeConfigured(env) || !(r.self_serve || r.sub_id)) return false
+  if (!r.sub_status || r.sub_status === 'canceled' || r.sub_status === 'past_due') return true
+  const good = ['active', 'trialing'].includes(r.sub_status) ? r.sub_seen || 0 : 0
+  if (r.failed_at && r.failed_at > Math.max(r.paid_at || 0, good)) return true
+  return r.sub_status === 'incomplete' && Boolean(r.sub_id)
 }
 
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null)

@@ -1,10 +1,16 @@
 // /admin — platform console for GetShowUps staff. Access requires a Google sign-in whose email is in
 // PLATFORM_ADMIN_EMAILS (checked server-side on every request). Customer lead details are never shown.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
 import '../app.css'
+
+const Review = lazy(() => import('./Review.jsx'))
+const SECTIONS = [
+  ['overview', 'Overview', '/admin'],
+  ['review', 'Business Review', '/admin/review'],
+]
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -899,14 +905,49 @@ export default function Admin() {
     )
   }
   if (!me.data) return <Gate title="Admin unavailable">{null}</Gate>
+  return <Console me={me.data} />
+}
+
+function Console({ me }) {
+  const [section, setSection] = useState(() => (window.location.pathname.startsWith('/admin/review') ? 'review' : 'overview'))
+  const go = (id, href) => {
+    window.history.pushState(null, '', href)
+    setSection(id)
+  }
+  useEffect(() => {
+    const onPop = () => setSection(window.location.pathname.startsWith('/admin/review') ? 'review' : 'overview')
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   return (
-    <div className="app">
+    <div className={`app${section === 'review' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
-        <SignOut email={me.data.email} to="/admin" />
+        <SignOut email={me.email} to="/admin" />
       </header>
+      <nav className="tabs" aria-label="Admin">
+        {SECTIONS.map(([id, label, href]) => (
+          <a
+            key={id}
+            href={href}
+            aria-current={section === id ? 'page' : undefined}
+            onClick={(e) => {
+              e.preventDefault()
+              go(id, href)
+            }}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
       <main className="app-main">
-        <Overview me={me.data} />
+        {section === 'review' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Review />
+          </Suspense>
+        ) : (
+          <Overview me={me} />
+        )}
       </main>
     </div>
   )

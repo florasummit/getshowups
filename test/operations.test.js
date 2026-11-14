@@ -725,3 +725,19 @@ test('webhook idempotency: a duplicate delivery records nothing twice (no second
     waitUntil = undefined
   }
 })
+
+test('payment recovery email: one per owner per invoice through the outbox (launch gate applies); retried webhook adds nothing', async () => {
+  configureStripe()
+  seed('alpha')
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, last_event_at, updated_at) VALUES ('alpha', 'cus_1', 'sub_1', 'active', 0, 1)").run()
+  const ev = (id, inv) => ({ id, type: 'invoice.payment_failed', created: Math.floor(Date.now() / 1000), data: { object: { id: inv, customer: 'cus_1' } } })
+  assert.equal((await signed(ev('evt_r1', 'in_r1'))).status, 200)
+  assert.equal((await signed(ev('evt_r2', 'in_r1'))).status, 200) // Stripe retries the same invoice later (new event id)
+  const mails = db.sql.prepare("SELECT to_email, status, body FROM email_outbox WHERE template = 'billing_recovery'").all()
+  const owners = db.sql.prepare("SELECT count(*) n FROM customer_users WHERE customer = 'alpha'").get().n
+  assert.equal(mails.length, owners, 'one per owner for this invoice')
+  assert.ok(mails.every((m) => m.status === 'pending' && /update your payment details/i.test(m.body) && !/ad campaigns are paused/.test(m.body)))
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM audit_log WHERE action = 'billing.recovery_email'").get().n, 1)
+  assert.equal((await signed(ev('evt_r3', 'in_r2'))).status, 200)
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM email_outbox WHERE template = 'billing_recovery'").get().n, owners * 2, 'a new invoice → a new email')
+})

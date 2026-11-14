@@ -126,7 +126,7 @@ beforeEach(async () => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
     AD_ASSETS: { get: async (k) => (r2.has(k) ? { arrayBuffer: async () => r2.get(k).buffer } : null), put: async (k, v) => r2.set(k, v) },
     META_APP_ID: '123456',
     META_APP_SECRET: APP_SECRET,

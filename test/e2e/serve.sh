@@ -10,6 +10,7 @@ OUT=.wrangler/e2e-dist
 
 # Empty booking URL (even if .env.local sets one) so the default build is deterministic.
 VITE_GHL_BOOKING_URL= npx vite build --outDir "$OUT" --emptyOutDir --logLevel warn
+node scripts/build-info.mjs "$OUT" >/dev/null
 
 rm -rf "$STATE"
 for migration in migrations/*.sql; do

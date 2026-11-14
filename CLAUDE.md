@@ -267,6 +267,33 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Read-only toward Stripe; recorded in audit_log; never auto-fixes. "Resync from Stripe" (admin, confirm, audited) applies
   Stripe's current subscription like a webhook (refused for live mode while live billing is off).
 
+## Business Review and operational events (/admin/review)
+
+- Every feature registers a capability (server/ops/registry.js `registerCapability`, imported from server/ops/catalog.js):
+  id, name, journey step, dependsOn, external service, `state(env)` (live|sandbox|disabled|missing|unknown + note +
+  approval), optional read-only `verify(env, now)` (database evidence of real activity, no outside calls) and
+  `business(env, id)` (per-business status, no personal data), optional `blockers`. Business Review shows it with no UI
+  change. Statuses: live_verified (live + seen working recently), built_tested, sandbox, disabled, missing, unknown.
+- Consequential actions, failures and retry outcomes use `recordEvent` (server/auditlog.js) with capability, resource,
+  outcome and correlation id. A failure stays an open incident until a later success for the same capability +
+  resource. Never put free text or contact details in events (they are fingerprinted anyway).
+- Change history: dist/build.json (scripts/build-info.mjs, commit + migration tables) and cron `recordChanges`
+  (platform.release / platform.config: switch names and on/off only). docs/OPERATIONS.md.
+- Conversation providers (server/conversations/): adapters only propose actions (validateAction); GetShowUps executes
+  them. One controller per conversation (control.js, migration 0017): a person always wins; providers hold leases.
+
+## Release state (verified 2026-11-14; details in docs/STATUS.md and docs/OPERATIONS.md)
+
+- Production: deployment 0020f305 (main d426fef), migrations through 0014. Draft stack #24 → #25 → #26 → #27 → #28 is
+  NOT merged. Release it as one set, in order: #24; apply 0015 then #25; apply 0016 then #26; #27; apply 0017 then
+  #28. Never apply a migration out of order or merge a PR before its migration. Rollback target: 0020f305.
+- Each system exists once: audit = server/auditlog.js (audit_log); ads safety stop = server/ads/holds.js; deletion =
+  server/deletion.js; lifecycle/recovery = server/lifecycle.js; reconciliation = server/reconcile.js; scheduler =
+  workers/scheduler → /api/cron/run. The other agent's business-review.patch was reviewed, not merged (see
+  docs/OPERATIONS.md §7): never add audit_events, lifecycle_states, deletion_requests, ads/shutdown.js or a second 0015.
+- Cron batch sizes come from measurements (scripts/scale-bench.mjs): keep a cron run well under D1's ~1,000 queries
+  per request; admin views must not do per-business KV reads (Workers ~1,000 KV ops per request).
+
 ## GitHub automation (PRs and CI)
 
 All GitHub calls go through `scripts/gh.sh` (GitHub CLI + the credential git already uses, for one process).
