@@ -42,6 +42,8 @@ test('owner permanently deletes the account: typed confirmation; site, booking a
   await deleted.locator('.row--link').first().click()
   await expect(a.locator('[data-deletion="completed"]')).toContainText('Retained only: billing records, audit entries and this record')
   expect(errs).toEqual([])
+  await expect(a.locator('[data-stage="deleted"]')).toContainText('Deleted')
+  await expect(a.locator('[data-ads-hold="account_deleted"]')).toContainText('on hold: account deleted')
   const o = await (await a.request.get('/api/platform/overview')).json()
   expect(o.customers.find((c) => c.id === id).deleted).toBe(true)
   expect(o.metrics.customers.total).toBe(o.customers.filter((c) => !c.testBusiness && !c.deleted).length)

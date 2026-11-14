@@ -131,6 +131,16 @@ function BillingCard({ billing }) {
         </div>
       ) : (
         <div className="form">
+          {billing.recovery && (
+            <p className="notice-info" role="status" data-recovery={billing.recovery.expired ? 'ended' : 'open'}>
+              Your plan ended {shortDate(billing.recovery.endedAt)}.{' '}
+              {billing.recovery.expired
+                ? billing.recovery.deletesAfter
+                  ? 'The 90-day recovery period is over; this account is being deleted.'
+                  : 'The 90-day recovery period is over. Reactivate to keep using GetShowUps.'
+                : `Everything is kept until ${shortDate(billing.recovery.until)}. Reactivate before then and your website, bookings and settings come back as they were.${billing.recovery.deletesAfter ? ' After that date the account and its data are deleted.' : ''}`}
+            </p>
+          )}
           {billing.plans.map((p) => (
             <button key={p.id} type="button" className="btn btn-primary btn-block" disabled={state.busy} onClick={() => openBilling({ action: 'checkout', plan: p.id }, setState)}>
               {sub?.status === 'canceled' ? `Reactivate ${p.name}` : `Choose ${p.name}`}

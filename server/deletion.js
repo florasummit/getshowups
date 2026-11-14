@@ -57,13 +57,14 @@ export async function requestDeletion(env, customerId, actor, now = Date.now()) 
   const db = env.ONBOARDING_DB
   const exists = await db.prepare('SELECT id FROM customers WHERE id = ?1').bind(customerId).first()
   if (!exists) return { ok: false, error: 'not_found' }
-  const by = actor.type === 'owner' ? `owner:${await emailRef(actor.id)}` : actor.type === 'admin' ? String(actor.id).toLowerCase() : 'system'
+  const by = actor.type === 'owner' ? `owner:${await emailRef(actor.id)}` : actor.type === 'admin' ? String(actor.id).toLowerCase() : String(actor.id || 'system')
   const created = await db
     .prepare("INSERT OR IGNORE INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at) VALUES (?1, ?2, ?3, 'in_progress', 'lockout', ?2)")
     .bind(customerId, now, by)
     .run()
   if ((created?.meta?.changes ?? 0) > 0) {
-    await appendAudit(db, { actorType: actor.type === 'admin' ? 'admin' : 'owner', actor: actor.type === 'admin' ? actor.id : `owner:${actor.id}`, action: 'account.deletion_requested', customer: customerId, at: now })
+    const actorType = ['admin', 'owner'].includes(actor.type) ? actor.type : 'system'
+    await appendAudit(db, { actorType, actor: actorType === 'owner' ? `owner:${actor.id}` : actorType === 'admin' ? actor.id : by, action: 'account.deletion_requested', customer: customerId, at: now })
   }
   const r = await advanceDeletion(env, customerId, now)
   return { ok: true, ...r }

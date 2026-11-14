@@ -287,3 +287,60 @@ test('new business tables must be classified: every table with a customer column
   const unclassified = withCustomer.filter((t) => !ERASED_TABLES.includes(t) && !retained.has(t))
   assert.deepEqual(unclassified, [], 'add the table to ERASED_TABLES or document it as retained (docs/DATA_RETENTION.md)')
 })
+
+// ---------- cancellation without deletion: 90-day recovery (owner decision 2026-11-14) ----------
+const DAY = 86400000
+async function cancelAlpha(endedAt) {
+  db.sql.prepare("UPDATE subscriptions SET status = 'canceled', current_period_end = ? WHERE customer = 'alpha-co'").run(endedAt)
+  stripe.subs.sub_A = 'canceled'
+}
+
+test('recovery: a canceled billed account is kept and recoverable for 90 days; owner + founder see the date; pilots have none', async () => {
+  const { recoveryFor, lifecycle } = await import('../server/lifecycle.js')
+  const billing = await import('../functions/api/dashboard/billing.js')
+  const now = Date.now()
+  assert.equal(await recoveryFor(env, 'alpha-co', now), null, 'active: no recovery window')
+  assert.equal((await lifecycle(env, 'alpha-co', now)).stage, 'subscribed')
+  const ended = now - 10 * DAY
+  await cancelAlpha(ended)
+  const r = await recoveryFor(env, 'alpha-co', now)
+  assert.deepEqual(r, { endedAt: ended, until: ended + 90 * DAY, daysLeft: 80, expired: false, deletesAfter: true })
+  const l = await lifecycle(env, 'alpha-co', now)
+  assert.deepEqual([l.stage, l.hosting.status, l.adsHold], ['canceled_recoverable', 'grace', 'subscription_ended'])
+  db.sql.prepare("INSERT INTO plans (id, name, stripe_price_id, trial_days, entitlements, active, created_at) VALUES ('founding', 'Founding', 'price_X', 0, '{}', 1, 1)").run()
+  const view = await call(billing, 'GET', '/api/dashboard/billing', { cookie: await cookie(OWNER) })
+  assert.equal(view.json().recovery.until, ended + 90 * DAY)
+  // Nothing has been removed during the window.
+  for (const t of ['leads', 'websites', 'website_assets', 'customer_users', 'ad_campaigns']) assert.equal(count(t, 'alpha-co'), 1, t)
+  // Never-billed pilot (no signup, no Stripe subscription): no recovery window, never deleted this way.
+  db.sql.prepare("DELETE FROM self_signups WHERE customer = 'beta-co'").run()
+  db.sql.prepare("UPDATE subscriptions SET status = 'canceled', stripe_subscription_id = NULL, current_period_end = ? WHERE customer = 'beta-co'").run(now - 200 * DAY)
+  assert.equal(await recoveryFor(env, 'beta-co', now), null)
+  assert.equal((await lifecycle(env, 'beta-co', now)).stage, 'not_billed')
+  // Founder attention: ending within 14 days, then over.
+  const { customerRows } = await import('../server/metrics.js')
+  const rowsAt = async (t) => (await customerRows(env, t)).find((x) => x.id === 'alpha-co').attention
+  assert.ok((await rowsAt(ended + 80 * DAY)).includes('recovery_ending'))
+  delete env.ACCOUNT_DELETION_ENABLED
+  assert.ok((await rowsAt(ended + 91 * DAY)).includes('recovery_ended'))
+})
+
+test('recovery: when the 90 days are over the account enters deletion (only when enabled; never test businesses, never early)', async () => {
+  const { processRecoveryExpiries } = await import('../server/lifecycle.js')
+  const now = Date.now()
+  await cancelAlpha(now - 89 * DAY)
+  assert.deepEqual(await processRecoveryExpiries(env, { now }), { enabled: true, started: 0 }, 'not yet')
+  delete env.ACCOUNT_DELETION_ENABLED
+  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: false }, 'off → nothing, ever')
+  assert.equal(job('alpha-co'), undefined)
+  env.ACCOUNT_DELETION_ENABLED = 'true'
+  db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha-co', 1, 'founder@getshowups.example', 1)").run()
+  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: true, started: 0 }, 'test business: kept')
+  db.sql.prepare("UPDATE test_businesses SET is_test = 0, unmarked_at = 2 WHERE customer = 'alpha-co'").run()
+  assert.deepEqual(await processRecoveryExpiries(env, { now: now + 2 * DAY }), { enabled: true, started: 1 })
+  const j = job('alpha-co')
+  assert.deepEqual([j.status, j.requested_by], ['completed', 'system:recovery_expired'])
+  assert.equal(count('leads', 'alpha-co'), 0)
+  assert.equal(count('leads', 'beta-co'), 1)
+  assert.deepEqual({ ...db.sql.prepare("SELECT actor_type, actor FROM audit_log WHERE action = 'account.deletion_requested'").get() }, { actor_type: 'system', actor: 'system:recovery_expired' })
+})
