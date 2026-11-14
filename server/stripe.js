@@ -188,9 +188,24 @@ async function upsertSubscription(env, customer, event, sub) {
     )
     .bind(customer, sub.customer, sub.id, plan?.id ?? null, status, monthlyCents(sub), sub.currency || null, periodEnd ? periodEnd * 1000 : null, cancelScheduled ? 1 : 0, at, Date.now())
     .run()
+  await recordMode(db, customer, event)
   if (prior?.status !== status) {
     const type = status === 'canceled' ? 'subscription_canceled' : !prior || prior.status === 'incomplete' || prior.status === 'canceled' ? 'subscription_started' : 'subscription_status_changed'
     await track(env, type, { id: `stripe:${event.id}`, customer, props: { from: prior?.status ?? null, to: status, plan: plan?.id ?? null }, at })
+  }
+}
+
+// Records whether this business's subscription is Stripe live or test mode (revenue counts live only).
+// Best effort: before migration 0013 is applied the table is missing; the subscription itself is already
+// stored, and an unrecorded mode is treated as test (never counted as revenue), so the webhook still succeeds.
+async function recordMode(db, customer, event) {
+  try {
+    await db
+      .prepare('INSERT INTO subscription_modes (customer, livemode, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(customer) DO UPDATE SET livemode = ?2, updated_at = ?3')
+      .bind(customer, event.livemode === true ? 1 : 0, Date.now())
+      .run()
+  } catch (err) {
+    console.error('subscription mode not recorded:', err?.message?.includes('no such table') ? 'table_missing' : 'storage_error')
   }
 }
 
@@ -218,7 +233,7 @@ export async function handleEvent(env, event) {
       return { handled: Boolean(customer) }
     case 'invoice.paid':
       if (customer && obj.amount_paid > 0) {
-        await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency }, at: event.created * 1000 })
+        await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency, livemode: event.livemode === true }, at: event.created * 1000 })
       }
       return { handled: Boolean(customer) }
     case 'invoice.payment_failed':

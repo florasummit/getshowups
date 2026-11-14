@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Released 2026-11-14: PRs #17, #18, #19 (merge commits 90e9057, be8224a, feb34f1)
+
+Production deployment **14afca51** (feb34f1); intermediate a5b3c698 (#17), e5f794a1 (#18). Rollback target:
+f0e4ebad (dcc15f1) via Cloudflare dashboard → Deployments → Rollback, or `git revert -m 1` of the three merges.
+Before: combined suite 317/317 unit, 68/68 Playwright; main tree identical to the tested merge. After (read-only
+production smoke): cancelled sign-in from /admin → /admin, from /dashboard/ads → /dashboard, external `next` → /dashboard;
+/api/platform/me and /api/dashboard/me 401 signed out; PoolThru booking API 200 (160 slots, at_customer); homepage
+sections incl. simulation, controls, labels, no unsupported live claims, honest meta; /admin shows the login error;
+deployed admin code renders test-mode billing as "Test mode (no revenue)". Secret names unchanged; migration 0013 NOT
+applied; no live billing, messaging or ads switched on. Not verified live: the signed-in admin metrics view (needs the
+founder's Google sign-in).
+
 ## Launch readiness audit (2026-11-14) — branch feature/launch-readiness, NOT deployed
 
 Production = `main` dcc15f1. Open PRs: #17 (sign-in routing, CI green, reviewed safe to merge), #16 (journey runner).
@@ -26,7 +38,9 @@ and Ads connections stay as they are (they belong to the business, not the membe
 **Fixed on this branch:** platform metrics no longer report Stripe test-mode subscriptions as revenue. Until
 `STRIPE_LIVE_ENABLED=true` every subscription is test mode (the webhook refuses live events), so MRR/ARR/paying/revenue/
 churn are null with `billing.mode: 'test'` and a test-subscription count; the console says "Test mode (no revenue)".
-Before switching live billing on, record `livemode` per subscription so old test rows never count (follow-up).
+Live/test is now recorded per subscription and payment (branch feature/billing-livemode, stacked on this one: migration
+0013 `subscription_modes`, new table only; webhook stores `event.livemode`; live revenue counts live-marked records only;
+missing table → webhooks still succeed, nothing counts). Apply 0013 on production (approval) before STRIPE_LIVE_ENABLED.
 The main metrics row shows job completion instead of the always-empty show-up rate when only on-site data exists.
 
 **Verified already implemented (no change needed):** on-site outcomes (visit happened, job completed, self-reported
