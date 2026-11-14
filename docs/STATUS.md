@@ -2,6 +2,48 @@
 
 _Update at the end of every task. Newest first._
 
+## Integration checkpoint (2026-11-14) — PRs #24–#28, all draft, CI green, NOT merged or deployed
+
+**Verified now:** production deployment 0020f305 (main d426fef); production has migrations through 0014 (0015–0017
+absent). PR heads: #24 66a1c5c, #25 1447980, #26 8d23a95, #27 3becc96, #28 ab27c29: `verify` and Cloudflare Pages
+checks pass on each; no failures. Local on #28: 375 unit, 72 Playwright, lint, build, Functions compile.
+
+**business-review.patch (other agent):** not the source of #28 (both built independently; patch based on d426fef).
+Four ideas adopted in commit ab27c29: (1) health as a separate axis + 4 s check timeout (server/ops/review.js,
+src/admin/Review.jsx); (2) payment-recovery email, one per invoice per owner via the outbox/launch gate
+(server/billing-recovery.js, server/stripe.js); (3) per-capability event drill-down (functions/api/platform/audit.js
+`?capability=`, Review.jsx); (4) docs/DATA_REQUESTS.md note pointing business deletion at the workflow. Everything
+else in the patch duplicated existing systems or contradicted owner decisions and was not merged. A scan of #28 finds
+the patch's tables/modules (audit_events, lifecycle_states, deletion_requests, shutdownAdvertising, 0015_operations_core)
+only in docs/OPERATIONS.md §7. One module per system (see CLAUDE.md "Release state").
+
+**Migrations:** 0001–0017 unique and ordered. 0015–0017 applied twice to an exported copy of the production schema
+(schema only, read-only export): idempotent, integrity ok, 0 FK violations, audit_log UPDATE/DELETE blocked, no name
+clashes. Still to verify in production after applying: the two audit_log triggers exist and refuse a change.
+
+**Scalability (measured at 10/100/1,000 synthetic businesses):** admin list 2 D1 + 1 KV, Business Review 92 + 3,
+one business 43 + 2 (all independent of size after fixes; before: 472/918/513 queries and 1,000 KV reads each).
+Fairness fixes for the ads hold sweep and recovery expiry; cron batches 25 recovery / 2 deletions per run.
+
+**Release order (approval required for every step):** #24 → apply 0015 → #25 → apply 0016 → #26 → #27 → apply 0017 →
+#28, then read-only checks (docs/OPERATIONS.md §3). Ship as a set (the scalability fixes live in #28).
+**Rollback:** Cloudflare Pages → Rollback to 0020f305 (or `git revert -m 1` per merge); never drop the new tables or
+edit audit_log; switches off stops new work (deletion has no undo).
+
+**Decisions open (owner):** retention policy and deleting the Stripe customer (docs/DATA_RETENTION.md); retention
+schedule after day 90 (until then canceled accounts' data is kept indefinitely); enabling ACCOUNT_DELETION_ENABLED;
+privacy/FAQ wording; Google confirmation of the automatic pause (safety stop) before real spend; whether /admin should
+open on Business Review; optional off-Cloudflare anchoring of the audit head hash.
+**External blockers:** Google Ads API access (Cloud project at Test level), Google OAuth verification (sensitive scopes,
+under review), Twilio account + A2P 10DLC for texts, live Stripe keys/price/webhook (and STRIPE_LIVE_ENABLED approval),
+MESSAGES_LIVE approval, Cloudflare API token for own domains, Workers AI binding approval.
+**Production verification after release:** /admin/review loads and shows "Migrations: 17 of 17 applied", audit log
+intact, a reconciliation result (Stripe test mode, read-only), daily checkpoint appears within 24 h; PoolThru page and
+booking smoke as in the last release; no business with "Ads still running while on hold".
+**Not built (next, after release):** one-person data erasure (lead asks to be forgotten; manual today), incident
+acknowledgement/notifications in Business Review, first real conversation provider, splitting the cron if busy runs
+approach the D1 query limit, batching audit writes at high volume.
+
 ## Business Review + review fixes to #24–#27 (2026-11-14) — branch feature/business-review (stacked on #27), NOT deployed
 
 Review fixes pushed to each PR: #24 no budget increases on hold, disconnect-on-hold must pause first, unreachable
