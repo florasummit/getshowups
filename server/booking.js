@@ -3,7 +3,8 @@
 // slot atomically, (2) a fresh freeBusy check after reserving, and (3) rollback if Google fails.
 import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
 import { EMAIL_RE } from './auth.js'
-import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlot } from './calendar.js'
+import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlot, removeEvent } from './calendar.js'
+import { recordEvent } from './auditlog.js'
 import { track } from './events.js'
 import { verifyLinkToken } from './links.js'
 import { scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
@@ -412,4 +413,32 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     recent: recent.map(appt),
     followUp: followUp.map((r) => ({ id: r.id, leadId: r.id, test: Boolean(r.is_test), name: r.name, phone: r.phone, email: r.email, need: r.need, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
   }
+}
+
+// Owner cancels an upcoming appointment. Order matters: the Google Calendar event (ours, by its id) is removed
+// first, with Google's cancellation notice to the attendee; only then is the booking marked cancelled (slot freed,
+// reminders stop at send time). If Google can't be reached, nothing changes and the owner can retry, so the calendar
+// and GetShowUps never disagree. Past appointments get an outcome instead (setOutcome).
+export async function cancelAppointment(env, customer, id, { by = 'owner' } = {}, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) return fail(400, 'invalid_request')
+  const appt = await db.prepare("SELECT id, status, start_at, google_event_id FROM appointments WHERE id = ?1 AND customer = ?2").bind(id, customer.id).first()
+  if (!appt) return fail(404, 'not_found')
+  if (appt.status === 'cancelled') return { ok: true, status: 'cancelled', already: true }
+  if (appt.status !== 'booked' || appt.start_at <= now) return fail(409, 'not_cancellable')
+  if (appt.google_event_id) {
+    const conn = await connect(env, customer.id)
+    if (!conn.ok) return fail(502, 'calendar_unavailable')
+    const r = await removeEvent(env, conn.accessToken, appt.google_event_id)
+    if (!r.ok) {
+      await recordEvent(db, { type: 'booking.cancel', actor: `owner:${by}`, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'failure', details: { error: r.error }, at: now })
+      return fail(502, r.error)
+    }
+  }
+  const row = await db.prepare("UPDATE appointments SET status = 'cancelled', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'booked' RETURNING id").bind(id, customer.id, now).first()
+  if (!row) return fail(409, 'changed')
+  await db.prepare('INSERT INTO appointment_changes (appointment_id, customer, from_status, to_status, work, changed_by, changed_at) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)').bind(id, customer.id, 'booked', 'cancelled', by, now).run()
+  await track(env, 'appointment_cancelled', { id: `cancelled:${id}`, customer: customer.id, at: now })
+  await recordEvent(db, { type: 'booking.cancel', actor: `owner:${by}`, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'success', details: { calendarEvent: Boolean(appt.google_event_id) }, at: now })
+  return { ok: true, status: 'cancelled' }
 }

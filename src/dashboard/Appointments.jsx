@@ -199,6 +199,44 @@ export function OutcomeList({ items, tz, visit, onDone, simple = false }) {
   )
 }
 
+// An upcoming appointment the owner can cancel (Google tells the customer; reminders stop).
+const CANCEL_ERRORS = { calendar_unavailable: 'Couldn’t reach Google Calendar. Nothing was changed; please try again.', calendar_access: 'Reconnect Google Calendar in Settings, then try again.', not_cancellable: 'This appointment can no longer be cancelled.' }
+function Upcoming({ a, tz, onDone }) {
+  const [state, setState] = useState({})
+  const cancel = async () => {
+    setState({ busy: true })
+    const { status, data } = await api('/api/dashboard/appointment-cancel', { method: 'POST', body: { id: a.id, confirm: true } })
+    if (status === 200) return onDone()
+    setState({ error: CANCEL_ERRORS[data.error] || 'Couldn’t cancel. Please try again.' })
+  }
+  return (
+    <Appointment a={a} tz={tz}>
+      <div className="row-actions" data-cancel={a.id}>
+        {state.confirm ? (
+          <>
+            <button type="button" className="btn btn-sm btn-quiet" disabled={state.busy} onClick={() => setState({})}>
+              Keep
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" disabled={state.busy} onClick={cancel}>
+              Confirm: cancel
+            </button>
+          </>
+        ) : (
+          <button type="button" className="link-btn" onClick={() => setState({ confirm: true })}>
+            Cancel…
+          </button>
+        )}
+        {state.confirm && !state.error && <p className="fine">Removes it from your Google Calendar; Google lets the customer know.</p>}
+        {state.error && (
+          <p className="form-error" role="alert">
+            {state.error}
+          </p>
+        )}
+      </div>
+    </Appointment>
+  )
+}
+
 export default function Appointments({ me, data, reload }) {
   const tz = me.customer.timezone
   const visit = me.customer.appointmentMode === 'at_customer'
@@ -217,7 +255,7 @@ export default function Appointments({ me, data, reload }) {
         {data.upcoming.length ? (
           <ul className="rows">
             {data.upcoming.map((a) => (
-              <Appointment key={a.id} a={a} tz={tz} />
+              <Upcoming key={a.id} a={a} tz={tz} onDone={reload} />
             ))}
           </ul>
         ) : (

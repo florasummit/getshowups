@@ -18,6 +18,7 @@ import * as calendar from '../functions/api/dashboard/calendar.js'
 import * as connectLink from '../functions/api/dashboard/connect-link.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as outcome from '../functions/api/dashboard/outcome.js'
+import * as cancelAppt from '../functions/api/dashboard/appointment-cancel.js'
 import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
@@ -616,4 +617,44 @@ test('results: outcomes only on past appointments; show rate and follow-up list'
   assert.equal((await post(outcome, '/api/dashboard/outcome', { id: ids[1], outcome: 'showed' }, { cookie })).status, 200)
   ov = (await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie })).json()
   assert.deepEqual(ov.followUp.map((l) => l.name), ['Casey Unbooked'])
+})
+
+// ---------- owner cancels an appointment ----------
+
+test('cancel appointment: Google event removed first (attendee notified), then cancelled; slot freed; isolated; Google down → nothing changes', async () => {
+  const a = await newLead('alpha')
+  const slot = (await book.info('alpha')).json().slots[0]
+  assert.equal((await book.appt('alpha', { leadId: a.leadId, leadToken: a.leadToken, start: slot })).status, 201)
+  const appt = db.sql.prepare("SELECT id, google_event_id FROM appointments WHERE customer = 'alpha'").get()
+  assert.ok(events.some((e) => e.id === appt.google_event_id), 'event on the calendar')
+  assert.ok(!(await book.info('alpha')).json().slots.includes(slot), 'slot taken')
+  const alpha = await sessionFor('owner@alpha.example')
+  const bravo = await sessionFor('boss@bravo.example')
+  // Another business can't cancel it; confirmation required; same-origin only.
+  assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: bravo })).status, 404)
+  assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id }, { cookie: alpha })).json().error, 'confirmation_required')
+  assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha, origin: 'https://evil.example' })).status, 403)
+  // Google unreachable → the booking stays booked (calendar and GetShowUps never disagree).
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init = {}) => (String(url).includes('/events/') && init.method === 'DELETE' ? new Response('{}', { status: 503 }) : realFetch(url, init))
+  const down = await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })
+  globalThis.fetch = realFetch
+  assert.deepEqual([down.status, down.json().error], [502, 'calendar_unavailable'])
+  assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(appt.id).status, 'booked')
+  // Works: event deleted with notifications, booking cancelled, change recorded, slot open again.
+  const ok = await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })
+  assert.deepEqual([ok.status, ok.json().status], [200, 'cancelled'])
+  assert.ok(!events.some((e) => e.id === appt.google_event_id), 'removed from Google Calendar')
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.includes(encodeURIComponent(appt.google_event_id)) && c.url.endsWith('sendUpdates=all')), 'attendee notified by Google')
+  assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(appt.id).status, 'cancelled')
+  assert.deepEqual({ ...db.sql.prepare("SELECT from_status, to_status FROM appointment_changes WHERE appointment_id = ?").get(appt.id) }, { from_status: 'booked', to_status: 'cancelled' })
+  assert.ok((await book.info('alpha')).json().slots.includes(slot), 'slot open again')
+  // Idempotent; past appointments can't be cancelled (they get an outcome instead).
+  assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })).json().status, 'cancelled')
+  const b = await newLead('alpha', { email: 'other@example.net' })
+  const slot2 = (await book.info('alpha')).json().slots[1]
+  await book.appt('alpha', { leadId: b.leadId, leadToken: b.leadToken, start: slot2 })
+  const past = db.sql.prepare("SELECT id FROM appointments WHERE customer = 'alpha' AND status = 'booked'").get().id
+  db.sql.prepare('UPDATE appointments SET start_at = ? WHERE id = ?').run(Date.now() - HOUR, past)
+  assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: past, confirm: true }, { cookie: alpha })).json().error, 'not_cancellable')
 })

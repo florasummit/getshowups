@@ -228,3 +228,14 @@ test('render: neighbouring sections never share a background (closing section fl
     for (let i = 1; i < t.length; i++) assert.notEqual(t[i], t[i - 1], `${design.sections.join(',')}: ${t.join(' → ')}`)
   }
 })
+
+test('render: designed sites carry noindex only when asked (test businesses); canonical stays', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const biz = { id: 'p', name: 'P', phone: '', appointmentMode: 'at_business' }
+  const d = { name: 'X', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', about: 'text', shape: 'sharp', sections: ['about'], heroImage: 'stock:pool-loungers', aboutImage: null }
+  const c = { headline: 'H', intro: 'I', about: 'A', services: [], area: '', highlights: [], photos: [], design: d }
+  const real = renderDesigned(biz, c, { canonical: 'https://x.example/', bookUrl: '/b' })
+  const test = renderDesigned(biz, c, { canonical: 'https://x.example/', bookUrl: '/b', noindex: true })
+  assert.ok(!real.includes('name="robots"'))
+  assert.ok(test.includes('<meta name="robots" content="noindex">') && test.includes('<link rel="canonical" href="https://x.example/">'))
+})

@@ -180,7 +180,7 @@ a[aria-disabled]{cursor:default}
 const ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'
 const PHONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>'
 
-export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/privacy', preview = false, year = new Date().getUTCFullYear() } = {}) {
+export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = {}) {
   const d = c.design
   const p = PALETTES[d.palette]
   const f = FONTS[d.fonts]
@@ -276,7 +276,7 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="${esc(description)}">
-${preview ? '<meta name="robots" content="noindex">' : canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
+${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
 ${canonical ? `<meta property="og:url" content="${esc(canonical)}">` : ''}${heroIm && canonical ? `<meta property="og:image" content="${esc(new URL(heroIm.src, canonical).href)}">` : ''}
 <meta name="theme-color" content="${p.bg}">${p.dark ? '<meta name="color-scheme" content="dark">' : ''}

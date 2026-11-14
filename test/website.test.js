@@ -188,6 +188,15 @@ test('save → preview (owner only) → publish (confirmed) → public; unpublis
   assert.ok(!site.text.includes('owner@pools.example'))
   assert.match(site.headers.get('Content-Security-Policy'), /default-src 'none'/)
   assert.ok(!/<script(?![^>]*application\/ld\+json)/.test(site.text), 'no executable scripts on business sites')
+  // A real business is indexable; once marked as a test business its site is never indexed (meta + header).
+  assert.ok(!site.text.includes('name="robots"') && !site.headers.get('X-Robots-Tag'), 'real business: indexable')
+  db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('pools', 1, 'founder@getshowups.example', ?)").run(Date.now())
+  const testSite = await call(publicSite, 'GET', { params: { customer: 'pools' } })
+  assert.equal(testSite.status, 200)
+  assert.ok(testSite.text.includes('<meta name="robots" content="noindex">'))
+  assert.equal(testSite.headers.get('X-Robots-Tag'), 'noindex')
+  assert.ok(testSite.text.includes('<link rel="canonical"'), 'canonical kept')
+  db.sql.prepare("DELETE FROM test_businesses WHERE customer = 'pools'").run()
 
   await call(website, 'POST', { cookie: c, body: { action: 'unpublish' } })
   assert.equal((await call(publicSite, 'GET', { params: { customer: 'pools' } })).status, 404)

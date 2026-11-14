@@ -145,7 +145,14 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(list.locator('.checklist-item--ok', { hasText: 'Founding plan' })).toBeVisible()
   await expect(list.locator('.checklist-item--ok', { hasText: 'Website' })).toBeVisible()
   await expect(list.getByText('Activating soon', { exact: false })).toBeVisible()
-  await page.getByRole('button', { name: 'Go to my dashboard' }).click()
+  if (!mobile) {
+    // Deep link with only the final screen left (found in the live audit): opens the page asked for.
+    await page.goto('/dashboard/appointments')
+    await expect(page.getByRole('heading', { level: 1, name: 'Appointments' })).toBeVisible()
+    await page.goto('/dashboard')
+  } else {
+    await page.getByRole('button', { name: 'Go to my dashboard' }).click()
+  }
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
   await expect(page.getByText('Live and taking bookings')).toBeVisible()
   await expect(page.getByText(mobile ? 'Share your booking link to get your first booking' : 'Finish connecting your domain')).toBeVisible()
@@ -168,6 +175,16 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('heading', { name: /booked/i })).toBeVisible()
   const events = await (await page.request.get(`${mock}/__events`)).json()
   expect(events.some((e) => e.attendees?.[0]?.email === lead)).toBe(true)
+
+  // The owner cancels it (found missing in the live audit): removed from the calendar, gone from Upcoming.
+  await page.goto('/dashboard/appointments')
+  const row = page.locator('li.row', { hasText: 'Casey Customer' })
+  await row.getByRole('button', { name: 'Cancel…' }).click()
+  await expect(row).toContainText('Google lets the customer know')
+  await row.getByRole('button', { name: 'Confirm: cancel' }).click()
+  await expect(page.locator('li.row', { hasText: 'Casey Customer' })).toHaveCount(0)
+  const after = await (await page.request.get(`${mock}/__events`)).json()
+  expect(after.some((e) => e.attendees?.[0]?.email === lead)).toBe(false)
 
   // Owner manages billing: schedule cancellation in the portal; the dashboard reflects it.
   await page.goto('/dashboard')
