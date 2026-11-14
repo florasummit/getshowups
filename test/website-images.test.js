@@ -158,3 +158,57 @@ test('revise: an existing draft\'s off-industry photo is dropped, not kept; draf
   await generateWebsite(env, customer('poolthru-llc'))
   assert.deepEqual({ ...db.sql.prepare("SELECT draft, live_version FROM websites WHERE customer = 'poolthru-llc'").get() }, { ...before }, 'stored draft and live version untouched')
 })
+
+// ---------- the logo is never used as a photo ----------
+const LOGO = 'a'.repeat(32)
+const PHOTO = 'b'.repeat(32)
+const addAsset = (id, customerId) =>
+  db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, ?, 'image/png', x'00', 1, ?)").run(id, customerId, Date.now())
+
+test('generate: the business logo is never offered or placed as a hero/About photo (as happened on PoolThru)', async () => {
+  addAsset(LOGO, 'poolthru-llc')
+  // The model tries to place the logo asset as the hero in every design.
+  reply = () => ({
+    headline: 'Pool service in Charleston', intro: 'Pick a time online.', about: 'We help.', services: [], seoTitle: 'Pool service', seoDescription: 'Book online.',
+    designs: Array.from({ length: 3 }, () => ({ name: 'X', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'round', sections: ['services', 'about'], heroImage: `asset:${LOGO}`, aboutImage: `asset:${LOGO}` })),
+  })
+  let prompt = ''
+  env.AI = { run: async (_m, input) => ((prompt = JSON.stringify(input)), { response: reply(), usage: {} }) }
+  const g = (await generateWebsite(env, customer('poolthru-llc'), { logo: LOGO })).generation
+  const refs = g.designs.flatMap((d) => [d.heroImage, d.aboutImage])
+  assert.ok(!refs.includes(`asset:${LOGO}`), refs.join(', '))
+  assert.ok(!prompt.includes(LOGO), 'the logo is not offered to the model as an image')
+  // A real owner photo is still used first.
+  addAsset(PHOTO, 'poolthru-llc')
+  const g2 = (await generateWebsite(env, customer('poolthru-llc'), { logo: LOGO, draftPhotos: [PHOTO] })).generation
+  assert.ok(!g2.designs.flatMap((d) => [d.heroImage, d.aboutImage]).includes(`asset:${LOGO}`))
+})
+
+test('render: a saved design that placed the logo as the hero shows the design\'s other photo; the logo stays in the header', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const biz = { id: 'poolthru-llc', name: 'Poolthru LLC', phone: '', appointmentMode: 'at_customer' }
+  const content = {
+    headline: 'Pool service in Charleston', intro: 'Book online.', about: 'We help.', services: [], area: 'Charleston', highlights: [], photos: [], logo: LOGO,
+    design: { name: 'Clear Water', palette: 'lagoon', fonts: 'modern', hero: 'split', services: 'cards', about: 'split', shape: 'sharp', sections: ['services', 'about'], heroImage: `asset:${LOGO}`, aboutImage: 'stock:pool-backyard' },
+  }
+  const html = renderDesigned(biz, content, { canonical: 'https://x.example/', bookUrl: '/book/poolthru-llc' })
+  assert.equal(html.split(`/site-assets/${LOGO}`).length - 1, 1, 'logo only once (header)')
+  assert.match(html, /<a class="brand"[^>]*><img src="\/site-assets\/a{32}"/)
+  assert.ok(html.includes('/site-stock/pool-backyard'), 'hero falls back to the design\'s other photo')
+  // Unaffected: a real photo as hero still renders.
+  const normal = renderDesigned(biz, { ...content, design: { ...content.design, heroImage: 'stock:pool-water' } }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  assert.ok(normal.includes('/site-stock/pool-water') && normal.includes('/site-stock/pool-backyard'))
+})
+
+test('render: the statement layout sets only a short lead in display type; long text continues as body (same words)', async () => {
+  const { renderDesigned } = await import('../server/site-designed.js')
+  const about = 'We understand that maintaining a pool can be time-consuming. We handle the upkeep so you can focus on enjoying your outdoor space. Our process is simple: you pick a time online.'
+  const biz = { id: 'p', name: 'P', phone: '', appointmentMode: 'at_customer' }
+  const d = { name: 'Deep End', palette: 'midnight', fonts: 'strong', hero: 'immersive', services: 'rows', about: 'statement', shape: 'sharp', sections: ['about'], heroImage: 'stock:pool-loungers', aboutImage: null }
+  const html = renderDesigned(biz, { headline: 'H', intro: 'I', about, services: [], area: '', highlights: [], photos: [], design: d }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  const at = html.indexOf('class="wrap ab-statement"')
+  const block = html.slice(at, html.indexOf('</section>', at))
+  assert.match(block, /<p>We understand that maintaining a pool can be time-consuming\.<\/p>\s*<p>We handle the upkeep/)
+  const short = renderDesigned(biz, { headline: 'H', intro: 'I', about: 'Family-run since day one.', services: [], area: '', highlights: [], photos: [], design: d }, { canonical: 'https://x.example/', bookUrl: '/b' })
+  assert.match(short, /<p>Family-run since day one\.<\/p>/)
+})

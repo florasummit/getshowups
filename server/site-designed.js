@@ -5,6 +5,13 @@
 import { FONTS, PALETTES, stockById } from './site-design.js'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+// Statement layout: only a short lead is set in display type. A long first paragraph keeps its first sentence as the
+// statement and continues as body text (same words, just split), so it never becomes a wall of large type.
+const statementText = (about) => {
+  const [first, ...rest] = String(about || '').split(/\n{2,}/)
+  const m = first.length > 160 && first.match(/^(.{20,200}?[.!?])\s+(\S[\s\S]*)$/)
+  return m ? [m[1], m[2], ...rest].join('\n\n') : String(about || '')
+}
 const para = (s) =>
   String(s || '')
     .split(/\n{2,}/)
@@ -123,7 +130,7 @@ section.s.alt{background:var(--surface)}
 .ab-text p+p{margin-top:16px}.ab-text p{color:var(--muted);font-size:1.08rem}
 .ab-statement{padding:20px 0}
 .ab-statement p{font-family:var(--head);font-weight:var(--hw);letter-spacing:var(--track);font-size:clamp(1.7rem,3.6vw,2.9rem);line-height:1.18;max-width:24em}
-.ab-statement p+p{font-family:var(--body);font-weight:400;letter-spacing:0;font-size:1.1rem;color:var(--muted);margin-top:24px;max-width:40em}
+.ab-statement p+p{font-family:var(--body);font-weight:400;letter-spacing:0;font-size:1.1rem;line-height:1.6;color:var(--muted);margin-top:24px;max-width:40em}
 .band{background:var(--accent);color:var(--on-accent)}
 .band .ab-statement p+p{color:inherit;opacity:.85}
 .facts-list{list-style:none;padding:0;margin:28px 0 0;display:grid;gap:12px}
@@ -186,8 +193,14 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   const description = c.seoDescription || c.intro.slice(0, 160)
   // The owner's own main photo always wins over a chosen stock photo. With a no-photo hero it moves to About.
   const own = c.hero ? `asset:${c.hero}` : null
-  const heroIm = imageFor(own && d.hero !== 'typographic' ? own : d.heroImage)
-  const aboutIm = imageFor(own && d.hero === 'typographic' ? own : d.aboutImage)
+  // The logo is shown in the header, never as a photo: a design that placed it as the hero or About image (older
+  // generations could) falls back to the design's other photo for the hero, so the page still leads with an image.
+  const logoRef = c.logo ? `asset:${c.logo}` : null
+  const photo = (ref) => (ref && ref !== logoRef ? ref : null)
+  const heroRef = photo(d.heroImage) ?? (d.heroImage && d.hero !== 'typographic' ? photo(d.aboutImage) : null)
+  const aboutRef = photo(d.aboutImage) === heroRef && !photo(d.heroImage) ? null : photo(d.aboutImage)
+  const heroIm = imageFor(own && d.hero !== 'typographic' ? own : heroRef)
+  const aboutIm = imageFor(own && d.hero === 'typographic' ? own : aboutRef)
   const ownPhotos = (c.photos || []).map((id) => imageFor(`asset:${id}`))
   const industryLine = [c.services[0]?.name, c.area].filter(Boolean).join(' · ')
   const buttons = (alt = 'btn-line') =>
@@ -223,7 +236,7 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
         : '',
     about: (alt) => {
       if (!c.about && !facts) return ''
-      if (d.about === 'statement') return `<section class="s band" id="about" aria-labelledby="h-about"><div class="wrap ab-statement"><h2 id="h-about" class="eyebrow" style="color:inherit;opacity:.8;margin-bottom:24px">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></section>`
+      if (d.about === 'statement') return `<section class="s band" id="about" aria-labelledby="h-about"><div class="wrap ab-statement"><h2 id="h-about" class="eyebrow" style="color:inherit;opacity:.8;margin-bottom:24px">About ${esc(biz.name)}</h2>${para(statementText(c.about))}${facts}</div></section>`
       if (d.about === 'split' && aboutIm) return `<section class="s${alt}" id="about" aria-labelledby="h-about"><div class="wrap ab-split">${imgTag(aboutIm, { sizes: '(max-width:900px) 100vw, 50vw' })}<div class="ab-text"><h2 id="h-about">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></div></section>`
       return `<section class="s${alt}" id="about" aria-labelledby="h-about"><div class="wrap"><div class="ab-text" style="max-width:760px"><h2 id="h-about">About ${esc(biz.name)}</h2>${para(c.about)}${facts}</div></div></section>`
     },
