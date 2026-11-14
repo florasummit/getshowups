@@ -338,6 +338,11 @@ export async function setCampaignBudget(env, customer, id, dailyCents, actor, no
   if (!['paused', 'active'].includes(row.status)) return { ok: false, error: 'invalid_status' }
   if (!(await currentApproval(db, customer.id))) return { ok: false, error: 'budget_approval_required' }
   if (dailyCents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
+  // On hold: only reductions (a lower budget never adds spend).
+  if (dailyCents > row.daily_budget_cents) {
+    const hold = await adsHold(env, customer.id)
+    if (hold) return { ok: false, error: 'ads_on_hold', hold: hold.reason }
+  }
   const a = await adapter(row.platform)
   if (!(await serveMode(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
   const r = await a.setDailyBudget(env, customer.id, row, dailyCents)
@@ -443,6 +448,29 @@ export async function enforceApproval(env, customerId, actor, now = Date.now()) 
     }
   }
   return { lowered, paused, failed: results.length - lowered - paused }
+}
+
+// A campaign GetShowUps can no longer reach (Ads disconnected, another ad account chosen, or sign-in expired) can't be
+// paused by us. Only the advertiser can, inside Google Ads. This records their (or a platform admin's) explicit
+// confirmation that it is paused there, so holds and deletions can proceed. Never used for reachable campaigns.
+export const UNREACHABLE = ['not_connected', 'account_changed', 'needs_account', 'reconnect_required', 'not_launched']
+export async function confirmPausedExternally(env, customerId, id, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customerId, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  if (row.status !== 'active') return { ok: false, error: 'invalid_status' }
+  const a = await adapter(row.platform)
+  const probe = a ? await a.setStatus(env, customerId, row, PLATFORM_STATUS[row.platform].paused).catch(() => ({ ok: false, error: 'transient' })) : { ok: false, error: 'platform_unavailable' }
+  if (probe.ok) {
+    // Reachable after all: it is now paused by us; no attestation needed.
+    await db.prepare("UPDATE ad_campaigns SET status = 'paused', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(id, customerId, now).run()
+    await logAction(db, { customer: customerId, campaignId: id, actor, kind: 'pause', reason: 'Paused' }, now)
+    return { ok: true, pausedByUs: true }
+  }
+  if (!UNREACHABLE.includes(probe.error)) return { ok: false, error: 'still_reachable_retry' }
+  await db.prepare("UPDATE ad_campaigns SET status = 'paused', last_error = 'paused_outside_getshowups', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(id, customerId, now).run()
+  await logAction(db, { customer: customerId, campaignId: id, actor, kind: 'pause', reason: `Confirmed paused in ${row.platform === 'google' ? 'Google Ads' : 'Meta'} by ${actor.split(':')[0]} (GetShowUps has no access: ${probe.error})`, details: { attested: true, unreachable: probe.error } }, now)
+  return { ok: true, attested: true }
 }
 
 // Optimizer pause hook (cron).

@@ -34,6 +34,8 @@ const ERRORS = {
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
   ads_on_hold: 'Ads are paused while there’s a problem with this account (see the notice at the top). Fix it, then press Start.',
+  ads_on_hold_pause_first: 'Your account is on hold: pause the running campaigns first, then disconnect.',
+  still_reachable_retry: 'GetShowUps can still reach this campaign; it will be paused automatically. Try again in a few minutes.',
   draft_exists: 'You already have a draft. Edit it below, or remove it to start over.',
   account_changed: 'This campaign is in a different Google Ads account than the one connected now. Switch back to manage it, or manage it in Google Ads.',
   removed_on_google: 'This campaign was removed in Google Ads.',
@@ -689,7 +691,7 @@ function Verification({ v }) {
   )
 }
 
-function CampaignEditor({ c, capabilities, budget, onChange }) {
+function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
   const [saved, setSaved] = useState(c.spec)
   const [spec, setSpec] = useState(c.spec)
   const [state, setState] = useState({})
@@ -948,6 +950,11 @@ function CampaignEditor({ c, capabilities, budget, onChange }) {
                 Pause
               </button>
             )}
+            {c.status === 'active' && hold?.unreachable && (
+              <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => act('confirm_paused_externally', { confirm: true })}>
+                I paused it in Google Ads
+              </button>
+            )}
             {editable && (
               <button type="button" className="link-btn" disabled={busy} onClick={() => setConfirm('remove')}>
                 Remove draft
@@ -1110,6 +1117,13 @@ export default function Ads() {
           Nothing starts again by itself: once it’s fixed, press Start on each campaign you want running.
         </p>
       )}
+      {d.hold?.stillRunning > 0 && (
+        <p className="form-error" role="alert" data-ads-still-running>
+          {d.hold.unreachable
+            ? `${d.hold.stillRunning} campaign${d.hold.stillRunning === 1 ? ' is' : 's are'} still running and GetShowUps can no longer reach ${d.hold.stillRunning === 1 ? 'it' : 'them'}. Pause ${d.hold.stillRunning === 1 ? 'it' : 'them'} in Google Ads now, then confirm below.`
+            : `We couldn’t pause ${d.hold.stillRunning} campaign${d.hold.stillRunning === 1 ? '' : 's'} yet; we keep retrying every few minutes. To stop spend right away, pause ${d.hold.stillRunning === 1 ? 'it' : 'them'} in Google Ads.`}
+        </p>
+      )}
       {anyLaunched && <Results r={d.results} />}
 
       <section className="card">
@@ -1151,7 +1165,7 @@ export default function Ads() {
       {d.campaigns.length > 0 && (
         <section aria-label="Campaigns" className="stack">
           {d.campaigns.map((c) => (
-            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budget={d.budget} onChange={load} />
+            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budget={d.budget} onChange={load} hold={d.hold} />
           ))}
         </section>
       )}

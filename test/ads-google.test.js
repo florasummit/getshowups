@@ -1300,7 +1300,7 @@ test('ads hold: the FIRST failed payment pauses running campaigns on Google at o
   const { C, H, g, pools, stripe, rowStatus, pauses } = await holdSetup()
   // invoice.payment_failed arrives before Stripe's subscription update (still 'active' locally).
   const [r] = await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' })
-  assert.deepEqual(r, { hold: 'payment_failed', paused: 1, verified: 1, failed: 0 })
+  assert.deepEqual(r, { hold: 'payment_failed', paused: 1, verified: 1, failed: 0, unreachable: 0 })
   assert.equal(g.status, 'PAUSED', 'paused on Google')
   assert.equal(rowStatus(), 'paused')
   const [p] = pauses().filter((x) => x.actor === 'system:billing')
@@ -1337,9 +1337,9 @@ test('ads hold: subscription ended → paused; a failed pause on Google is recor
   assert.equal(pauses().at(-1).status, 'failed')
   // Next cron run: Google answers again → paused and read back.
   g.failPause = false
-  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 1, held: 1, paused: 1, failed: 0 })
+  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 1, held: 1, paused: 1, failed: 0, unreachable: 0 })
   assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'])
-  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 0, held: 0, paused: 0, failed: 0 }, 'nothing left running')
+  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 0, held: 0, paused: 0, failed: 0, unreachable: 0 }, 'nothing left running')
   // If Google later shows it running again (changed inside Google Ads), the daily read-back marks it active and the sweep pauses it.
   g.status = 'ENABLED'
   const C = await import('../server/ads/campaigns.js')
@@ -1379,4 +1379,54 @@ test('ads hold: never-billed pilot (PoolThru-like) is never held for billing; su
   delete env.STRIPE_SECRET_KEY
   db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'pools'").run()
   assert.equal(await H.adsHold(env, 'pools'), null)
+})
+
+test('ads hold: no budget increases while on hold (campaign budget or monthly ceiling); reductions still allowed', async () => {
+  const { C, H, g, pools, stripe } = await holdSetup()
+  await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' })
+  assert.equal(g.status, 'PAUSED')
+  assert.deepEqual(await C.setCampaignBudget(env, pools, 'cmp_abc123', 3000, 'owner:owner@pools.example'), { ok: false, error: 'ads_on_hold', hold: 'payment_failed' })
+  assert.equal((await C.setCampaignBudget(env, pools, 'cmp_abc123', 2000, 'owner:owner@pools.example')).ok, true, 'lowering is fine')
+  const budgetRoute = await import('../functions/api/dashboard/ads/budget.js')
+  const cookie = await session('owner@pools.example')
+  const up = await call(budgetRoute, 'POST', '/api/dashboard/ads/budget', { cookie, body: { monthlyCents: 500000, confirm: true } })
+  assert.deepEqual([up.status, up.json().error], [409, 'ads_on_hold'])
+  const down = await call(budgetRoute, 'POST', '/api/dashboard/ads/budget', { cookie, body: { monthlyCents: 100000, confirm: true } })
+  assert.equal(down.status, 200)
+  assert.equal((await H.adsHold(env, 'pools')).reason, 'payment_failed')
+})
+
+test('ads hold: disconnect on hold must pause first (leaving a campaign running would orphan it)', async () => {
+  const { g, stripe } = await holdSetup()
+  g.failPause = true
+  await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' }) // pause failed: still running on Google
+  const cookie = await session('owner@pools.example')
+  const leave = await call(disconnect, 'POST', '/api/ads/google/disconnect', { cookie, body: { confirm: true, leaveRunning: true } })
+  assert.deepEqual([leave.status, leave.json().error], [409, 'ads_on_hold_pause_first'])
+  assert.ok(await getConnection(env, 'pools', 'google'), 'still connected')
+  g.failPause = false
+  const ok = await call(disconnect, 'POST', '/api/ads/google/disconnect', { cookie, body: { confirm: true, pauseRunning: true } })
+  assert.deepEqual([ok.status, ok.json().paused, g.status], [200, 1, 'PAUSED'])
+})
+
+test('ads hold: an unreachable (orphaned) running campaign is escalated, never reported paused, cleared only by an audited confirmation', async () => {
+  const { H, stripe, rowStatus } = await holdSetup()
+  await connected('pools', { accountId: ACCT2 }) // owner switched to another ad account: the campaign lives in the old one
+  const [r] = await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' })
+  assert.deepEqual([r.paused, r.failed, r.unreachable], [0, 1, 1])
+  assert.equal(rowStatus(), 'active', 'not claimed as paused')
+  assert.deepEqual(await H.runningOnHold(env, 'pools'), { hold: 'payment_failed', running: 1, unreachable: true, lastError: 'account_changed' })
+  const { customerRows } = await import('../server/metrics.js')
+  assert.ok((await customerRows(env)).find((x) => x.id === 'pools').attention.includes('ads_running_on_hold'), 'founder sees it')
+  // Owner/admin confirm it was paused inside Google Ads (GetShowUps has no access): audited, then the escalation clears.
+  env.PLATFORM_ADMIN_EMAILS = 'founder@getshowups.example'
+  const route = await import('../functions/api/platform/campaign-pause.js')
+  const cookie = await session('founder@getshowups.example')
+  assert.equal((await call(route, 'POST', '/api/platform/campaign-pause', { cookie, body: { customer: 'pools', campaign: 'cmp_abc123' } })).status, 400)
+  const ok = await call(route, 'POST', '/api/platform/campaign-pause', { cookie, body: { customer: 'pools', campaign: 'cmp_abc123', confirm: true } })
+  assert.deepEqual(ok.json(), { ok: true, attested: true })
+  assert.equal(rowStatus(), 'paused')
+  assert.equal(await H.runningOnHold(env, 'pools'), null)
+  assert.equal(db.sql.prepare("SELECT action FROM admin_audit ORDER BY id DESC LIMIT 1").get().action, 'ads.confirm_paused_externally')
+  assert.match(db.sql.prepare("SELECT reason FROM ad_actions WHERE kind = 'pause' AND status = 'applied' ORDER BY at DESC LIMIT 1").get().reason, /Confirmed paused in Google Ads by admin \(GetShowUps has no access: account_changed\)/)
 })

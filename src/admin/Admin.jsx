@@ -10,6 +10,7 @@ const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'S
 const ATTENTION = {
   suspended: 'Suspended',
   past_due: 'Payment failed',
+  ads_running_on_hold: 'Ads still running while on hold',
   booking_failures: 'Booking failures',
   calendar_disconnected: 'Calendar disconnected',
   setup_stalled: 'Setup stalled',
