@@ -461,6 +461,33 @@ test('live billing guard: live keys are not configured and live-mode events are 
   delete env.STRIPE_LIVE_ENABLED
 })
 
+test('live billing: the webhook records each subscription and payment as test or live; revenue counts live only', async () => {
+  configureStripe()
+  seed('alpha')
+  seed('beta')
+  await addPlan(await admin())
+  const mode = (c) => db.sql.prepare('SELECT livemode FROM subscription_modes WHERE customer = ?').get(c)?.livemode
+  // Stripe test mode (today): recorded as test.
+  assert.equal((await signed(subEvent('evt_m1', 'customer.subscription.created', 100, { status: 'active' }))).status, 200)
+  assert.equal(mode('alpha'), 0)
+  assert.equal((await signed({ id: 'evt_m2', type: 'invoice.paid', created: 110, data: { object: { id: 'in_m1', customer: 'cus_1', amount_paid: 12000, currency: 'usd' } } })).status, 200)
+  // Live billing switched on: beta subscribes for real.
+  Object.assign(env, { STRIPE_LIVE_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_live_SECRET' })
+  const liveSub = { ...subEvent('evt_m3', 'customer.subscription.created', 120, { status: 'active', id: 'sub_2', customer: 'cus_2', metadata: { customer: 'beta' } }), livemode: true }
+  assert.equal((await signed(liveSub)).status, 200)
+  assert.equal(mode('beta'), 1)
+  assert.equal((await signed({ id: 'evt_m4', type: 'invoice.paid', created: Math.floor(Date.now() / 1000), livemode: true, data: { object: { id: 'in_m2', customer: 'cus_2', amount_paid: 12000, currency: 'usd' } } })).status, 200)
+  const m = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
+  assert.deepEqual([m.mode, m.mrrCents, m.payingCustomers, m.testSubscriptions, m.revenue30Cents], ['live', 12000, 1, 1, 12000], 'only beta (live) counts; alpha stays a test subscription')
+  // Before migration 0013 is applied: webhooks still succeed and nothing counts as revenue (safe direction).
+  db.sql.exec('DROP TABLE subscription_modes')
+  assert.equal((await signed({ ...subEvent('evt_m5', 'customer.subscription.updated', 130, { status: 'active', id: 'sub_2', customer: 'cus_2', metadata: { customer: 'beta' } }), livemode: true })).status, 200)
+  const off = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics.billing
+  assert.deepEqual([off.mrrCents, off.payingCustomers], [0, 0])
+  delete env.STRIPE_LIVE_ENABLED
+  env.STRIPE_SECRET_KEY = 'sk_test_SECRET'
+})
+
 test('webhook: current API shapes (2025-03-31+): period end on items, invoice metadata under parent', async () => {
   configureStripe()
   seed('alpha')
@@ -513,6 +540,7 @@ test('test businesses: admin-only audited mark/unmark; tagged; excluded from cou
   await connectKv('poolthru-llc')
   await connectKv('gsu-test')
   db.sql.prepare("INSERT INTO subscriptions (customer, status, mrr_cents, currency, updated_at) VALUES ('poolthru-llc', 'active', 9900, 'usd', 1), ('gsu-test', 'active', 49900, 'usd', 1)").run()
+  db.sql.prepare("INSERT INTO subscription_modes (customer, livemode, updated_at) VALUES ('poolthru-llc', 1, 1), ('gsu-test', 1, 1)").run()
   const mark = (cookie, body, origin) => call(pTest, 'POST', '/api/platform/test-business', { cookie, body, origin })
   const ops = await admin()
 
@@ -602,6 +630,7 @@ test('metrics and events: real activity drives activation, conversion, show-up, 
   db.sql.prepare("INSERT INTO events (id, type, customer, at) VALUES ('setup_completed:alpha', 'setup_completed', 'alpha', ?)").run(Date.now())
   db.sql.exec("UPDATE appointments SET status = 'showed', start_at = start_at - 172800000")
   db.sql.prepare("INSERT INTO subscriptions (customer, status, mrr_cents, currency, updated_at) VALUES ('alpha', 'active', 9900, 'usd', 1)").run()
+  db.sql.prepare("INSERT INTO subscription_modes (customer, livemode, updated_at) VALUES ('alpha', 1, 1)").run()
 
   const types = db.sql.prepare('SELECT type FROM events ORDER BY at').all().map((r) => r.type)
   assert.ok(types.includes('lead_created') && types.includes('appointment_booked'))

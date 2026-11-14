@@ -133,10 +133,13 @@ export async function growth(env, rows, now = Date.now()) {
   const subs = await one(
     `SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions s WHERE ${REAL('s.customer')}`,
   )
-  const canceled30 = await one(`SELECT count(DISTINCT customer) AS n FROM events e WHERE type = 'subscription_canceled' AND at >= ?1 AND ${REAL('e.customer')}`, since30)
   const revenue = async (from, to) => {
     const { results } = await db.prepare(`SELECT props FROM events e WHERE type = 'revenue' AND at >= ?1 AND at < ?2 AND ${REAL('e.customer')}`).bind(from, to).all()
-    return results.reduce((sum, r) => sum + (JSON.parse(r.props).amountCents || 0), 0)
+    // Only live-mode payments are revenue (payments recorded before the mode was stored are Stripe test mode).
+    return results.reduce((sum, r) => {
+      const p = JSON.parse(r.props)
+      return sum + (p.livemode === true ? p.amountCents || 0 : 0)
+    }, 0)
   }
   const { results: weekly } = await db
     .prepare(`SELECT (at / 604800000) AS week, count(*) AS n FROM events e WHERE type = 'business_created' AND at >= ?1 AND ${REAL('e.customer')} GROUP BY week ORDER BY week`)
@@ -147,6 +150,23 @@ export async function growth(env, rows, now = Date.now()) {
   // Until live billing is switched on (STRIPE_LIVE_ENABLED, approval), every subscription and payment comes from
   // Stripe test mode (the webhook refuses live-mode events), so none of it is revenue: no MRR/ARR/revenue figures.
   const live = stripeLiveEnabled(env)
+  // Live billing: only subscriptions recorded as live mode (subscription_modes, migration 0013) count; unmarked
+  // ones are test mode. Missing table (migration not applied) → nothing counts as revenue (safe direction).
+  const LIVE_SUB = 'JOIN subscription_modes m ON m.customer = s.customer AND m.livemode = 1'
+  const liveOnly = async (sql, ...args) => {
+    try {
+      return await one(sql, ...args)
+    } catch (err) {
+      console.error('live billing metrics unavailable:', err?.message?.includes('no such table') ? 'table_missing' : 'storage_error')
+      return {}
+    }
+  }
+  const liveSubs = billing && live
+    ? await liveOnly(`SELECT sum(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN s.status = 'active' THEN s.mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN s.status = 'trialing' THEN 1 ELSE 0 END) AS trialing FROM subscriptions s ${LIVE_SUB} WHERE ${REAL('s.customer')}`)
+    : {}
+  const canceled30 = billing && live
+    ? await liveOnly(`SELECT count(DISTINCT e.customer) AS n FROM events e JOIN subscription_modes m ON m.customer = e.customer AND m.livemode = 1 WHERE e.type = 'subscription_canceled' AND e.at >= ?1 AND ${REAL('e.customer')}`, since30)
+    : {}
   const rev30 = billing && live ? await revenue(since30, now) : null
   const revPrior = billing && live ? await revenue(prior30, since30) : null
   return {
@@ -170,13 +190,14 @@ export async function growth(env, rows, now = Date.now()) {
         : {
           mode: 'live',
           currency: subs.currency,
-          mrrCents: subs.mrr || 0,
-          arrCents: (subs.mrr || 0) * 12,
-          payingCustomers: subs.paying || 0,
-          trialing: subs.trialing || 0,
+          mrrCents: liveSubs.mrr || 0,
+          arrCents: (liveSubs.mrr || 0) * 12,
+          payingCustomers: liveSubs.paying || 0,
+          trialing: liveSubs.trialing || 0,
+          testSubscriptions: (subs.paying || 0) - (liveSubs.paying || 0), // active Stripe test-mode subscriptions, not revenue
           revenue30Cents: rev30,
           revenueGrowth30: revPrior > 0 ? pct(rev30 - revPrior, revPrior) : null,
-          churn30: pct(canceled30.n || 0, (subs.paying || 0) + (canceled30.n || 0)),
+          churn30: pct(canceled30.n || 0, (liveSubs.paying || 0) + (canceled30.n || 0)),
         },
     // Not computable without recorded costs; shown as unavailable rather than estimated.
     cac: null,
