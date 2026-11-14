@@ -267,6 +267,21 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Read-only toward Stripe; recorded in audit_log; never auto-fixes. "Resync from Stripe" (admin, confirm, audited) applies
   Stripe's current subscription like a webhook (refused for live mode while live billing is off).
 
+## Business Review and operational events (/admin/review)
+
+- Every feature registers a capability (server/ops/registry.js `registerCapability`, imported from server/ops/catalog.js):
+  id, name, journey step, dependsOn, external service, `state(env)` (live|sandbox|disabled|missing|unknown + note +
+  approval), optional read-only `verify(env, now)` (database evidence of real activity, no outside calls) and
+  `business(env, id)` (per-business status, no personal data), optional `blockers`. Business Review shows it with no UI
+  change. Statuses: live_verified (live + seen working recently), built_tested, sandbox, disabled, missing, unknown.
+- Consequential actions, failures and retry outcomes use `recordEvent` (server/auditlog.js) with capability, resource,
+  outcome and correlation id. A failure stays an open incident until a later success for the same capability +
+  resource. Never put free text or contact details in events (they are fingerprinted anyway).
+- Change history: dist/build.json (scripts/build-info.mjs, commit + migration tables) and cron `recordChanges`
+  (platform.release / platform.config: switch names and on/off only). docs/OPERATIONS.md.
+- Conversation providers (server/conversations/): adapters only propose actions (validateAction); GetShowUps executes
+  them. One controller per conversation (control.js, migration 0017): a person always wins; providers hold leases.
+
 ## GitHub automation (PRs and CI)
 
 All GitHub calls go through `scripts/gh.sh` (GitHub CLI + the credential git already uses, for one process).

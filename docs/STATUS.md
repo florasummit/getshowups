@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Business Review + review fixes to #24–#27 (2026-11-14) — branch feature/business-review (stacked on #27), NOT deployed
+
+Review fixes pushed to each PR: #24 no budget increases on hold, disconnect-on-hold must pause first, unreachable
+(orphaned) campaigns escalated + cleared only by audited confirmation; #25 standard events (capability, resource,
+outcome, correlation id; free text fingerprinted; docs/AUDIT.md limits); #26 unpublish at lockout, unreachable ads block
+deletion until confirmed, stuck escalation, staff-log free text erased; #27 day 90 records expiry only, separate
+retention schedule switch, retention policy rewritten (draft), webhook idempotency test.
+Business Review (/admin/review): capability registry + catalog (server/ops), generic engine (statuses from config +
+production evidence, dependencies, open failures, incidents, approvals, change history from dist/build.json + cron),
+Platform and Business views. Conversation providers extension point + control lock (migration 0017). docs/OPERATIONS.md.
+Tests: 369 unit, 72 Playwright (incl. a never-seen capability rendering from data alone; 320/390 px no overflow).
+
 ## Lifecycle, 90-day recovery, billing reconciliation (2026-11-14) — branch feature/lifecycle-reconcile (stacked on #26), NOT deployed
 
 server/lifecycle.js (stage view; admin "Lifecycle" card), 90-day recovery for canceled billed accounts (owner Billing card
