@@ -287,6 +287,11 @@ test('accuracy: test-business activity is never evidence; "never triggered" is n
   await cookie('founder@getshowups.example')
   r = await platformReview(env, Date.now())
   assert.equal(r.capabilities.find((c) => c.id === 'platform.admin').status, 'live_verified')
+  // Unmarking never promotes sandbox-era activity to real evidence (rows up to unmarked_at stay sandboxed).
+  db.sql.prepare("UPDATE test_businesses SET is_test = 0, unmarked_at = ?1 WHERE customer = 'alpha'").run(Date.now())
+  r = await platformReview(env, Date.now())
+  assert.equal(r.capabilities.find((c) => c.id === 'calendar.google').status, 'built_tested')
+  assert.equal(r.capabilities.find((c) => c.id === 'lead.capture').status, 'built_tested')
 })
 
 test('orphaned credentials are found across KV list pages (1,000 keys per page)', async () => {

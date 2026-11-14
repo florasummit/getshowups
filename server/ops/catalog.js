@@ -32,8 +32,10 @@ const seen = (label, windowDays, sql, ...args) => async (env, now) => {
 }
 // Evidence counts only real businesses' activity (never test-marked leads or test businesses): a test business working is
 // not proof that customers' traffic works, and must never make a capability look live-verified.
-const NOT_TEST_BIZ = (col) => `NOT EXISTS (SELECT 1 FROM test_businesses tb WHERE tb.customer = ${col} AND tb.is_test = 1)`
-const REAL_LEAD = `NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id AND t.is_test = 1) AND ${NOT_TEST_BIZ('l.customer')}`
+// Not a test business, and (if it was one and got unmarked) the row is not from its sandbox era: anything created up to
+// unmarked_at stays sandboxed (server/testbusiness.js), so it can never establish real-world evidence.
+const NOT_TEST_BIZ = (col, at) => `NOT EXISTS (SELECT 1 FROM test_businesses tb WHERE tb.customer = ${col} AND (tb.is_test = 1 OR (tb.unmarked_at IS NOT NULL AND ${at} <= tb.unmarked_at)))`
+const REAL_LEAD = `NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id AND t.is_test = 1) AND ${NOT_TEST_BIZ('l.customer', 'l.created_at')}`
 
 // ---------- platform ----------
 registerCapability({
@@ -110,7 +112,7 @@ registerCapability({
   external: 'Google',
   dependsOn: ['platform.database'],
   state: () => ({ mode: 'live', note: 'openid + email only' }),
-  verify: seen('sign-in by a real business member', 30, `SELECT max(s.created_at) AS at FROM sessions s JOIN customer_users u ON u.email = s.email WHERE ${NOT_TEST_BIZ('u.customer')}`),
+  verify: seen('sign-in by a real business member', 30, `SELECT max(s.created_at) AS at FROM sessions s JOIN customer_users u ON u.email = s.email WHERE ${NOT_TEST_BIZ('u.customer', 's.created_at')}`),
 })
 registerCapability({
   id: 'billing.stripe',
@@ -164,7 +166,7 @@ registerCapability({
   journey: 'onboarding',
   dependsOn: ['auth.google_signin', 'billing.stripe', 'calendar.google', 'website.hosting'],
   state: () => ({ mode: 'live' }),
-  verify: seen('real business finished setup', 60, `SELECT max(at) AS at FROM events e WHERE type = 'setup_completed' AND ${NOT_TEST_BIZ('e.customer')}`),
+  verify: seen('real business finished setup', 60, `SELECT max(at) AS at FROM events e WHERE type = 'setup_completed' AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })
 
 // ---------- website ----------
@@ -174,7 +176,7 @@ registerCapability({
   journey: 'website',
   dependsOn: ['platform.database'],
   state: () => ({ mode: 'live' }),
-  verify: seen('real business website published', 60, `SELECT max(published_at) AS at FROM websites w WHERE live_version IS NOT NULL AND ${NOT_TEST_BIZ('w.customer')}`),
+  verify: seen('real business website published', 60, `SELECT max(published_at) AS at FROM websites w WHERE live_version IS NOT NULL AND ${NOT_TEST_BIZ('w.customer', 'w.published_at')}`),
   business: async (env, id) => {
     const w = await env.ONBOARDING_DB.prepare('SELECT live_version FROM websites WHERE customer = ?1').bind(id).first()
     return w?.live_version ? { status: 'ok', summary: `Published (version ${w.live_version})` } : { status: 'off', summary: 'Not published' }
@@ -187,7 +189,7 @@ registerCapability({
   external: 'Cloudflare Workers AI',
   dependsOn: ['website.hosting'],
   state: (env) => (aiConfigured(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Template fallback only', approval: 'AI binding on the Pages project' }),
-  verify: seen('AI generation for a real business', 30, `SELECT max(created_at) AS at FROM website_generations g WHERE source = 'ai' AND ${NOT_TEST_BIZ('g.customer')}`),
+  verify: seen('AI generation for a real business', 30, `SELECT max(created_at) AS at FROM website_generations g WHERE source = 'ai' AND ${NOT_TEST_BIZ('g.customer', 'g.created_at')}`),
 })
 registerCapability({
   id: 'website.domains',
@@ -297,7 +299,7 @@ registerCapability({
       : messagesLive(env)
         ? { mode: 'live' }
         : { mode: 'sandbox', note: 'Sent to test recipients only', approval: 'MESSAGES_LIVE=true' },
-  verify: seen('email accepted by Resend for a real business', 30, `SELECT max(updated_at) AS at FROM messages m WHERE status = 'sent' AND channel = 'email' AND ${NOT_TEST_BIZ('m.customer')}`),
+  verify: seen('email accepted by Resend for a real business', 30, `SELECT max(updated_at) AS at FROM messages m WHERE status = 'sent' AND channel = 'email' AND ${NOT_TEST_BIZ('m.customer', 'm.created_at')}`),
 })
 registerCapability({
   id: 'messaging.sms',
