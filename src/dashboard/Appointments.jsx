@@ -200,7 +200,7 @@ export function OutcomeList({ items, tz, visit, onDone, simple = false }) {
 }
 
 // An upcoming appointment the owner can cancel (Google tells the customer; reminders stop).
-const CANCEL_ERRORS = { calendar_unavailable: 'Couldn’t reach Google Calendar. Nothing was changed; please try again.', calendar_access: 'Reconnect Google Calendar in Settings, then try again.', not_cancellable: 'This appointment can no longer be cancelled.' }
+const CANCEL_ERRORS = { calendar_unavailable: 'Couldn’t reach Google Calendar. Nothing was changed; please try again.', calendar_access: 'Reconnect Google Calendar in Settings, then try again.', not_cancellable: 'This appointment can no longer be cancelled.', cancel_incomplete: 'It was removed from Google Calendar but not saved here. Press Cancel again to finish.' }
 function Upcoming({ a, tz, onDone }) {
   const [state, setState] = useState({})
   const cancel = async () => {

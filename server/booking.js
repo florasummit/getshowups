@@ -435,9 +435,24 @@ export async function cancelAppointment(env, customer, id, { by = 'owner' } = {}
       return fail(502, r.error)
     }
   }
-  const row = await db.prepare("UPDATE appointments SET status = 'cancelled', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'booked' RETURNING id").bind(id, customer.id, now).first()
-  if (!row) return fail(409, 'changed')
-  await db.prepare('INSERT INTO appointment_changes (appointment_id, customer, from_status, to_status, work, changed_by, changed_at) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)').bind(id, customer.id, 'booked', 'cancelled', by, now).run()
+  // One transaction: the booking is cancelled together with its change row (the row only when this request changed it).
+  // If saving fails after Google removed the event, the booking is still 'booked' (reminders could go): that is
+  // recorded as an open failure (Business Review) and the owner is told to press Cancel again; a retry finds the event
+  // already gone and completes.
+  try {
+    await db.batch([
+      db.prepare("UPDATE appointments SET status = 'cancelled', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'booked'").bind(id, customer.id, now),
+      db
+        .prepare("INSERT INTO appointment_changes (appointment_id, customer, from_status, to_status, work, changed_by, changed_at) SELECT ?1, ?2, 'booked', 'cancelled', NULL, ?3, ?4 WHERE changes() = 1")
+        .bind(id, customer.id, by, now),
+    ])
+  } catch (err) {
+    console.error('appointment cancel: save failed:', err?.name)
+    await recordEvent(db, { type: 'booking.cancel', actor: `owner:${by}`, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'failure', details: { error: 'cancel_incomplete', calendarEventRemoved: Boolean(appt.google_event_id) }, at: now })
+    return fail(503, 'cancel_incomplete')
+  }
+  const after = await db.prepare('SELECT status FROM appointments WHERE id = ?1 AND customer = ?2').bind(id, customer.id).first()
+  if (after?.status !== 'cancelled') return fail(409, 'changed')
   await track(env, 'appointment_cancelled', { id: `cancelled:${id}`, customer: customer.id, at: now })
   await recordEvent(db, { type: 'booking.cancel', actor: `owner:${by}`, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'success', details: { calendarEvent: Boolean(appt.google_event_id) }, at: now })
   return { ok: true, status: 'cancelled' }

@@ -19,6 +19,7 @@ import * as connectLink from '../functions/api/dashboard/connect-link.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as outcome from '../functions/api/dashboard/outcome.js'
 import * as cancelAppt from '../functions/api/dashboard/appointment-cancel.js'
+import { skipReason } from '../server/messages.js'
 import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
@@ -657,4 +658,34 @@ test('cancel appointment: Google event removed first (attendee notified), then c
   const past = db.sql.prepare("SELECT id FROM appointments WHERE customer = 'alpha' AND status = 'booked'").get().id
   db.sql.prepare('UPDATE appointments SET start_at = ? WHERE id = ?').run(Date.now() - HOUR, past)
   assert.equal((await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: past, confirm: true }, { cookie: alpha })).json().error, 'not_cancellable')
+})
+
+test('cancel appointment: Google removed but saving fails → still booked, open failure recorded, owner told to retry; retry completes once', async () => {
+  const a = await newLead('alpha')
+  const slot = (await book.info('alpha')).json().slots[0]
+  await book.appt('alpha', { leadId: a.leadId, leadToken: a.leadToken, start: slot })
+  const appt = db.sql.prepare("SELECT id, google_event_id, start_at FROM appointments WHERE customer = 'alpha'").get()
+  const alpha = await sessionFor('owner@alpha.example')
+  const realBatch = db.batch
+  db.batch = async () => { throw new Error('D1 unavailable') }
+  const partial = await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })
+  db.batch = realBatch
+  assert.deepEqual([partial.status, partial.json().error], [503, 'cancel_incomplete'])
+  assert.ok(!events.some((e) => e.id === appt.google_event_id), 'event already removed from Google')
+  assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(appt.id).status, 'booked')
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM appointment_changes WHERE appointment_id = ?').get(appt.id).n, 0, 'nothing half-written')
+  const failure = db.sql.prepare("SELECT outcome, details FROM audit_log WHERE action = 'booking.cancel' ORDER BY seq DESC LIMIT 1").get()
+  assert.equal(failure.outcome, 'failure')
+  assert.match(failure.details, /cancel_incomplete/)
+  // Retry: Google says the event is gone (404 = done), the booking is cancelled, exactly one change row, success recorded.
+  const ok = await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })
+  assert.deepEqual([ok.status, ok.json().status], [200, 'cancelled'])
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM appointment_changes WHERE appointment_id = ?').get(appt.id).n, 1)
+  assert.equal(db.sql.prepare("SELECT outcome FROM audit_log WHERE action = 'booking.cancel' ORDER BY seq DESC LIMIT 1").get().outcome, 'success')
+  await post(cancelAppt, '/api/dashboard/appointment-cancel', { id: appt.id, confirm: true }, { cookie: alpha })
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM appointment_changes WHERE appointment_id = ?').get(appt.id).n, 1, 'idempotent: no second change row')
+  // Reminders re-check at send time: a cancelled booking never gets one.
+  for (const kind of ['confirmation', 'reminder_24h', 'reminder_2h']) {
+    assert.equal(skipReason({ kind, cstatus: 'active', automations: 1, appt_status: 'cancelled', start_at: appt.start_at }, Date.now()), 'not_needed', kind)
+  }
 })
