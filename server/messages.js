@@ -10,6 +10,7 @@
 // provider a due message is marked skipped/no_provider (never sent later in a burst); before launch
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
+import { FOLLOW_UP_KINDS, isOptedOut, recordOptOut, unsubscribeUrl } from './optouts.js'
 import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
 import { sendSms, smsConfigured } from './sms.js'
 import { smsHandledByGhl } from './ghl.js'
@@ -147,7 +148,9 @@ const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need
 export async function render(env, m) {
   const biz = m.biz
   const hi = `Hi ${firstName(m.lead_name)},`
-  const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you requested an appointment on their booking page. Reply to this email to reach ${biz}.`
+  // Follow-ups (not confirmations/reminders) carry a one-click unsubscribe link for this business.
+  const unsub = FOLLOW_UP_KINDS.includes(m.kind) ? `\n\nNo more follow-up emails from ${biz}: ${await unsubscribeUrl(env, m.lead_id)}` : ''
+  const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you requested an appointment on their booking page. Reply to this email to reach ${biz}.${unsub}`
   const confirmed = Boolean(m.confirmed_at)
   const visit = m.appointment_mode === 'at_customer'
   const place = m.street ? ` at ${m.street}` : ''
@@ -258,7 +261,8 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       skipReason(m, now) ??
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
-      (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode')
+      (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
+      (FOLLOW_UP_KINDS.includes(m.kind) && (await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) ? 'opted_out' : null)
     if (reason) {
       await db.prepare("UPDATE messages SET status = 'skipped', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, reason, now).run()
       out.skipped++
@@ -292,6 +296,8 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       out.sent++
     } else if (result.permanent || attempts >= MAX_ATTEMPTS) {
       console.error('messages: send failed:', m.kind, m.channel, result.error)
+      // The carrier reports this number replied STOP: record it so no further follow-up texts are attempted.
+      if (m.channel === 'sms' && result.error === 'twilio_21610') await recordOptOut(env, m.customer, 'sms', m.lead_phone, 'carrier_stop', now).catch(() => {})
       await db.prepare("UPDATE messages SET status = 'failed', attempts = ?2, error = ?3, updated_at = ?4 WHERE id = ?1").bind(m.id, attempts, result.error, now).run()
       out.failed++
     } else {

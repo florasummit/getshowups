@@ -19,6 +19,7 @@ import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as automationsApi from '../functions/api/dashboard/automations.js'
 import * as confirmApi from '../functions/api/appointment/confirm.js'
 import * as cronApi from '../functions/api/cron/run.js'
+import * as unsubApi from '../functions/api/messages/unsubscribe.js'
 
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -390,6 +391,75 @@ test('SMS: offered only when configured; sent only with consent (recorded), in E
   assert.equal(toE164('1 (843) 555-0142'), '+18435550142')
   assert.equal(toE164('+44 20 7946 0958'), '+442079460958')
   assert.equal(toE164('555-0142'), null)
+})
+
+test('opt-out: follow-up emails link to a read-only unsubscribe page; confirming stops follow-ups for that business only; confirmations still go out', async () => {
+  await seed('alpha')
+  await seed('beta')
+  withEmail()
+  const t0 = Date.now()
+  const a = (await lead('alpha')).json()
+  await lead('beta') // same person, another business
+  assert.equal((await processDueMessages(env, t0 + TIMING.lead_followup_1.after + MIN)).sent, 2)
+  const email = sentEmails().find((e) => /alpha Co/.test(e.from))
+  const url = linkIn(email.text, /https:\/\/getshowups\.com\/api\/messages\/unsubscribe\?\S+/)
+  assert.equal(url.searchParams.get('l'), a.leadId)
+  const path = `${url.pathname}${url.search}`
+
+  // GET (email scanners prefetch links) changes nothing.
+  const view = await call(unsubApi, 'GET', path)
+  assert.equal(view.status, 200)
+  assert.match(view.text, /Stop follow-up emails from alpha Co/)
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM message_optouts').get().n, 0)
+  // Wrong or foreign tokens are refused.
+  assert.equal((await call(unsubApi, 'GET', `/api/messages/unsubscribe?l=${a.leadId}&k=${'A'.repeat(43)}`)).status, 404)
+  const form = (l, k) => call(unsubApi, 'POST', '/api/messages/unsubscribe', { raw: new URLSearchParams({ l, k }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  assert.equal((await form(a.leadId, 'B'.repeat(43))).status, 404)
+
+  // POST records it once (hash only, no address stored).
+  const ok = await form(a.leadId, url.searchParams.get('k'))
+  assert.equal(ok.status, 200)
+  assert.match(ok.text, /You won’t get more follow-up emails from alpha Co/)
+  assert.equal((await form(a.leadId, url.searchParams.get('k'))).status, 200, 'idempotent')
+  const rows = db.sql.prepare('SELECT customer, channel, source, address_hash FROM message_optouts').all()
+  assert.deepEqual(rows.map((r) => [r.customer, r.channel, r.source]), [['alpha', 'email', 'unsubscribe_link']])
+  assert.ok(!JSON.stringify(rows).includes('jamie'), 'no address stored')
+
+  // The second follow-up: skipped for alpha (opted out), still sent for beta (another business).
+  await processDueMessages(env, t0 + TIMING.lead_followup_2.after + MIN)
+  const second = msgs().filter((m) => m.kind === 'lead_followup_2')
+  assert.deepEqual(second.map((m) => m.status).sort(), ['sent', 'skipped'])
+  assert.equal(second.find((m) => m.status === 'skipped').error, 'opted_out')
+
+  // A new request from the same address to alpha is not chased either; if they book, the confirmation still goes out.
+  const again = (await lead('alpha', { name: 'Jamie R.' })).json()
+  const start = await slotAfter('alpha', 3 * DAY)
+  assert.equal((await book('alpha', again.leadId, again.leadToken, start)).status, 201)
+  const before = sentEmails().length
+  await processDueMessages(env, Date.now() + MIN)
+  const confirmation = sentEmails().slice(before).find((e) => /booked|confirm/i.test(e.subject))
+  assert.ok(confirmation, 'booking confirmation still sent to an opted-out address')
+  assert.doesNotMatch(confirmation.text, /unsubscribe/, 'confirmations carry no follow-up unsubscribe link')
+})
+
+test('opt-out: a carrier STOP (Twilio 21610) is recorded and no further follow-up texts are attempted', async () => {
+  await seed('alpha')
+  withSms()
+  withEmail()
+  const t0 = Date.now()
+  const l = (await lead('alpha', { smsConsent: true })).json()
+  twilio = () => [400, { code: 21610, message: 'Attempt to send to unsubscribed recipient' }]
+  await processDueMessages(env, t0 + TIMING.lead_followup_1.after + MIN)
+  assert.deepEqual(
+    db.sql.prepare('SELECT customer, channel, source FROM message_optouts').all().map((r) => [r.customer, r.channel, r.source]),
+    [['alpha', 'sms', 'carrier_stop']],
+  )
+  const attemptsBefore = fetches.filter((f) => f.url.includes('twilio')).length
+  twilio = () => [201, { sid: 'SM2' }]
+  await processDueMessages(env, t0 + TIMING.lead_followup_2.after + MIN)
+  const m = msgs().find((x) => x.id === `lead_followup_2:sms:${l.leadId}`)
+  assert.deepEqual([m.status, m.error], ['skipped', 'opted_out'])
+  assert.equal(fetches.filter((f) => f.url.includes('twilio')).length, attemptsBefore, 'no further text attempted')
 })
 
 // ---------- settings, isolation, scheduler ----------
