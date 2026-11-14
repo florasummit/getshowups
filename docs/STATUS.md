@@ -2,6 +2,46 @@
 
 _Update at the end of every task. Newest first._
 
+## Launch readiness audit (2026-11-14) — branch feature/launch-readiness, NOT deployed
+
+Production = `main` dcc15f1. Open PRs: #17 (sign-in routing, CI green, reviewed safe to merge), #16 (journey runner).
+Read-only production checks only (business ids, email domains, counts, key presence; no customer data printed).
+
+**Accounts and tenants (verified from production records):**
+
+| Identity / tenant | Intended role | Actual today |
+| --- | --- | --- |
+| Developer account (Flora Summit domain) | GitHub, Claude Code, infrastructure only | Also the only member of the test business `gsu-stripe-test-pools`. No code dependency (only the GitHub repo name). |
+| Founder account (getshowups.com) | Platform admin (`PLATFORM_ADMIN_EMAILS`) | Admin; member of no business. Also the Google account behind the test business's Calendar and Ads connections (chosen on Google's screen during the OAuth video). |
+| `poolthru-llc` | First real tenant | Owner on the poolthru.com domain; not test-marked; on-site (`at_customer`); Calendar + Google Ads connected; 1 paused + 4 removed campaigns; never billed (a stale `incomplete` placeholder row from 2026-11-10, no Stripe subscription). |
+| `gsu-stripe-test-pools` | Test tenant | Test-marked; Calendar + Ads connected; 1 paused test-account campaign; Stripe test subscription. |
+| `toys-for-us` | ? | Self-serve, gmail.com owner, **not** test-marked, Stripe test-mode "active" subscription, Calendar connected. Owner to confirm whether it is a test (then mark it as test in /admin). |
+
+**Developer account off the test tenant (safest path, needs approval):** keep the business and its history; owner
+picks a dedicated demo Google identity (not the founder or developer account); admin invites it to
+`gsu-stripe-test-pools` from /admin (existing audited invite-to-existing-business); after it signs in, remove the
+developer membership with one approved D1 statement (no remove-member feature exists; deliberately not built). Calendar
+and Ads connections stay as they are (they belong to the business, not the member) until the owner chooses to reconnect.
+
+**Fixed on this branch:** platform metrics no longer report Stripe test-mode subscriptions as revenue. Until
+`STRIPE_LIVE_ENABLED=true` every subscription is test mode (the webhook refuses live events), so MRR/ARR/paying/revenue/
+churn are null with `billing.mode: 'test'` and a test-subscription count; the console says "Test mode (no revenue)".
+Before switching live billing on, record `livemode` per subscription so old test rows never count (follow-up).
+The main metrics row shows job completion instead of the always-empty show-up rate when only on-site data exists.
+
+**Verified already implemented (no change needed):** on-site outcomes (visit happened, job completed, self-reported
+value), paused-only campaign creation + read-back + budget ceiling + no automatic increases, idempotent checkout (no
+duplicate subscriptions), pilots never billed, messages gated to test recipients unless `MESSAGES_LIVE`, scopes match
+the OAuth submission (docs/GOOGLE_OAUTH_VERIFICATION.md).
+
+**Readiness:** sign-in/admin routing — ready after PR #17 deploy; self-serve signup + Stripe — ready in test mode,
+live billing blocked on approval; Calendar booking — live for PoolThru; on-site outcomes — ready; Google Ads — sandbox
+only (Explorer access; live launch switch off; PoolThru live ads would also need a billing decision); messaging — test
+recipients only (MESSAGES_LIVE off; SMS not configured); founder console — ready for a pilot (metrics now honest).
+
+**Next actions:** approve PR #17 merge/deploy; this branch's PR; decide toys-for-us test mark; pick demo identity for
+the test tenant; live billing plan (livemode column first); wait for Google OAuth verification.
+
 ## Current state (2026-11-08)
 
 - Marketing site live at getshowups.com; Book a Demo embeds Google Calendar appointment schedule.

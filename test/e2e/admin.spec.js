@@ -109,14 +109,12 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   await page.goto('/admin')
   await expect(page.getByRole('heading', { name: 'Platform' })).toBeVisible()
   await expect(page.locator('.stat', { hasText: 'Customers' })).toBeVisible()
-  // The seeded Ads sandbox business pays $499/month but is marked as a TEST business, so it is left
-  // out of MRR. (selfserve.spec may add a real $0 subscription in parallel, so don't expect an exact text.)
-  // Other spec files may add real subscriptions in parallel, so check the invariant in one snapshot: MRR is the sum of
-  // the NON-test businesses' active subscriptions, so the test business's $499 is never counted.
+  // One snapshot: the test business is tagged and its $499 never counts; e2e runs Stripe in test mode, so no revenue
+  // figure is shown at all (PR #18: test-mode billing is never revenue).
   const o = await (await page.request.get('/api/platform/overview')).json()
-  const realMrr = o.customers.filter((c) => !c.testBusiness && c.subscription?.status === 'active').reduce((n, c) => n + (c.subscription.mrrCents || 0), 0)
   expect(o.customers.find((c) => c.name === 'E2E Ads Pools')).toMatchObject({ testBusiness: true, subscription: { status: 'active', mrrCents: 49900 } })
-  expect(o.metrics.billing?.mrrCents ?? 0).toBe(realMrr)
+  expect(o.metrics.billing?.mrrCents ?? null).toBe(null)
+  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|Test mode \(no revenue\))$/)
   await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()
