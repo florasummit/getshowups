@@ -4,27 +4,27 @@
 export const stageNotes = {
   capture: {
     what: 'A new lead arrives. The clock starts now — the first reply goes out before anyone on your team has to touch it.',
-    live: 'GHL trigger: “Form submitted” or “Call status: missed” starts the workflow.',
+    today: 'Website and booking-page requests arrive as leads in your dashboard. Instant text replies, including after a missed call, are coming soon.',
   },
   qualify: {
     what: 'The assistant asks only the screening questions you approved and records the answers on the contact.',
-    live: 'GHL Conversation AI with your approved prompts; answers saved to custom fields.',
+    today: 'Every lead is checked against the ZIP codes you serve before it can book. Screening questions by text are coming soon.',
   },
   book: {
     what: 'Good-fit leads are offered real open times. Once they choose, the appointment lands on your calendar.',
-    live: 'GHL calendar availability; booking creates the appointment and updates the pipeline stage.',
+    today: 'Live: leads pick a real open time from your Google Calendar, and the visit is added to your calendar.',
   },
   remind: {
     what: 'Reminders go out on your schedule, with an easy way to confirm or reschedule instead of silently not showing.',
-    live: 'GHL workflow wait steps keyed off the appointment time, via SMS and email.',
+    today: 'Email confirmation and reminders with a one-tap “I’ll be there”. Text reminders are coming soon.',
   },
   show: {
     what: 'Your team marks the outcome, so show-up tracking reflects what actually happened.',
-    live: 'Appointment status set to Showed or No-show in GHL.',
+    today: 'Live: mark each appointment as showed or no-show (or visit done and job completed) in your dashboard.',
   },
   follow: {
     what: 'The next step depends on the outcome: rebook no-shows, nurture completed visits.',
-    live: 'GHL workflow branches on appointment status.',
+    today: 'Leads who don’t book get an email follow-up, and no-shows get an easy way to pick a new time. Texts are coming soon.',
   },
 }
 

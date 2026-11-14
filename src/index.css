@@ -900,12 +900,11 @@ svg {
   color: var(--ink-300);
 }
 
-.sim-explain-live {
+.sim-explain-today {
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--ink-900);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
 }
 
 .sim-cta {

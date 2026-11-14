@@ -146,8 +146,8 @@ export default function Simulation() {
               </p>
               <h3>What’s happening</h3>
               <p>{note.what}</p>
-              <h3>Planned GHL implementation</h3>
-              <p className="sim-explain-live">{note.live}</p>
+              <h3>In GetShowUps today</h3>
+              <p className="sim-explain-today">{note.today}</p>
               {done && (
                 <a href="#book-demo" className="btn btn-primary btn-block sim-cta">
                   See it with your business: book a call

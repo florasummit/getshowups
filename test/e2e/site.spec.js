@@ -89,8 +89,10 @@ test('SMS simulation: on the homepage, labelled, Next/Play/Pause/Reset, scenario
   await expect(sim.getByRole('link', { name: /book a call/ })).toHaveAttribute('href', '#book-demo')
   await expect(sim.getByRole('button', { name: 'Replay' })).toBeVisible()
 
-  // Every scenario plays from its first step; switching scenarios resets the thread.
+  // Every scenario plays from its first step; switching scenarios resets the thread. The side panel explains each
+  // stage for customers ("In GetShowUps today": what is live vs coming soon), never internal implementation notes.
   const choices = sim.getByRole('group', { name: 'Choose a scenario' }).getByRole('button')
+  const panel = sim.getByRole('complementary', { name: 'What is happening' })
   const n = await choices.count()
   expect(n).toBeGreaterThanOrEqual(2)
   for (let i = 0; i < n; i++) {
@@ -98,6 +100,13 @@ test('SMS simulation: on the homepage, labelled, Next/Play/Pause/Reset, scenario
     await expect(choices.nth(i)).toHaveAttribute('aria-pressed', 'true')
     await expect(progress).toHaveText(/^Step 1 of \d+$/)
     await expect(log.locator('li')).toHaveCount(1)
+    for (let step = 1; ; step++) {
+      await expect(panel.getByRole('heading', { name: 'In GetShowUps today' })).toBeVisible()
+      await expect(panel.locator('.sim-explain-today')).not.toBeEmpty()
+      expect(await panel.innerText()).not.toMatch(/GHL|GoHighLevel|workflow branches|custom fields|pipeline stage/i)
+      if (!(await next.isEnabled())) break
+      await next.click()
+    }
   }
 })
 
