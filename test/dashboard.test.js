@@ -176,9 +176,9 @@ async function sessionFor(email, { expiresIn = HOUR } = {}) {
   return `__Host-gsu_session=${token}`
 }
 
-async function signIn(email) {
+async function signIn(email, next) {
   google.login = () => [200, { id_token: idToken({ email }) }]
-  const start = await call(loginStart, 'GET', '/api/auth/google/start')
+  const start = await call(loginStart, 'GET', `/api/auth/google/start${next === undefined ? '' : `?next=${encodeURIComponent(next)}`}`)
   const loc = new URL(start.res.headers.get('Location'))
   const loginCookie = start.res.headers.get('Set-Cookie').split(';')[0]
   const cb = await call(loginCallback, 'GET', `/api/auth/google/callback?code=C&state=${loc.searchParams.get('state')}`, { cookie: loginCookie })
@@ -247,6 +247,61 @@ test('login: openid+email only; any verified Google account gets a session (self
   assert.deepEqual(legacy(body.progress), { business: false, calendar: false, hours: false, complete: false })
   const row = db.sql.prepare("SELECT token_hash FROM sessions WHERE email = 'new.owner@example.org'").get()
   assert.equal(row.token_hash, await sha256Hex(cookie.split('=')[1]))
+})
+
+test('login: a platform admin with no business lands on /admin (never the create-a-business form); owners and others unchanged', async () => {
+  env.PLATFORM_ADMIN_EMAILS = 'staff@getshowups.example, owner@alpha.example'
+  // Sign-in started from /dashboard (no next): admin without a business → console. No business is created.
+  const before = db.sql.prepare('SELECT count(*) c FROM customers').get().c
+  const staff = await signIn('staff@getshowups.example')
+  assert.equal(staff.cb.res.headers.get('Location'), '/admin')
+  assert.ok(staff.cookie)
+  assert.equal(db.sql.prepare('SELECT count(*) c FROM customers').get().c, before)
+  assert.equal(db.sql.prepare("SELECT count(*) c FROM customer_users WHERE email = 'staff@getshowups.example'").get().c, 0)
+  // An admin who also owns a business keeps the dashboard landing; a non-admin always gets /dashboard.
+  assert.equal((await signIn('owner@alpha.example')).cb.res.headers.get('Location'), '/dashboard')
+  assert.equal((await signIn('stranger@example.org')).cb.res.headers.get('Location'), '/dashboard')
+  // The landing grants nothing: a non-admin can't reach /admin by asking for it, and access is still per request.
+  delete env.PLATFORM_ADMIN_EMAILS
+  assert.equal((await signIn('staff@getshowups.example')).cb.res.headers.get('Location'), '/dashboard')
+  // Storage failure: ordinary landing, sign-in still works.
+  env.PLATFORM_ADMIN_EMAILS = 'staff@getshowups.example'
+  const prepare = db.prepare
+  db.prepare = (q) => (q.includes('customer_users') ? { bind: () => ({ first: async () => { throw new Error('down') } }) } : prepare.call(db, q))
+  const down = await signIn('staff@getshowups.example')
+  db.prepare = prepare
+  assert.equal(down.cb.res.headers.get('Location'), '/dashboard')
+  assert.ok(down.cookie)
+})
+
+test('login landing matrix: admin-only, customer-only, dual-role, unauthorized; deep links kept; never an open redirect', async () => {
+  // staff = admin without a business; owner@alpha = admin AND business owner; boss@bravo = customer only.
+  env.PLATFORM_ADMIN_EMAILS = 'staff@getshowups.example, owner@alpha.example'
+  const land = async (email, next) => (await signIn(email, next)).cb.res.headers.get('Location')
+  // Admin-only: always the console (from the homepage/dashboard, /admin, or a dashboard deep link).
+  for (const next of [undefined, '/dashboard', '/admin', '/dashboard/ads']) assert.equal(await land('staff@getshowups.example', next), '/admin', `staff ${next}`)
+  // Dual role: the area they started from, including dashboard deep links.
+  assert.deepEqual([await land('owner@alpha.example'), await land('owner@alpha.example', '/admin'), await land('owner@alpha.example', '/dashboard/ads')], ['/dashboard', '/admin', '/dashboard/ads'])
+  // Customer only: their start (the console then says "No platform access" with a link back to the dashboard).
+  assert.deepEqual([await land('boss@bravo.example'), await land('boss@bravo.example', '/dashboard/appointments'), await land('boss@bravo.example', '/admin')], ['/dashboard', '/dashboard/appointments', '/admin'])
+  // Unauthorized (no business, not an admin): the dashboard, where new businesses are created.
+  assert.equal(await land('new.person@example.org'), '/dashboard')
+  // Only known areas are honored: anything else falls back to /dashboard (no open redirect).
+  for (const bad of ['https://evil.example', '//evil.example', '/dashboard/../admin', '/admin?x=1', '/dashboard/unknown', '/api/platform/overview', 'javascript:alert(1)'])
+    assert.equal(await land('boss@bravo.example', bad), '/dashboard', bad)
+})
+
+test('login errors return to where sign-in started (admin console or dashboard)', async () => {
+  const startAt = async (next) => {
+    const start = await call(loginStart, 'GET', `/api/auth/google/start${next ? `?next=${next}` : ''}`)
+    return start.res.headers.get('Set-Cookie').split(';')[0]
+  }
+  const cb = async (q, cookie) => (await call(loginCallback, 'GET', `/api/auth/google/callback?${q}`, { cookie })).res.headers.get('Location')
+  assert.equal(await cb('error=access_denied', await startAt('/admin')), '/admin?login_error=cancelled')
+  assert.equal(await cb('error=access_denied', await startAt('/dashboard/ads')), '/dashboard?login_error=cancelled')
+  assert.equal(await cb('code=C&state=WRONG', await startAt('/admin')), '/admin?login_error=expired')
+  assert.equal(await cb('error=access_denied'), '/dashboard?login_error=cancelled', 'no login cookie → dashboard')
+  assert.equal(await cb('error=access_denied', '__Host-gsu_login=tampered'), '/dashboard?login_error=cancelled', 'unreadable cookie → dashboard')
 })
 
 test('login: unverified, wrong-audience, wrong-issuer, or missing email get no session', async () => {

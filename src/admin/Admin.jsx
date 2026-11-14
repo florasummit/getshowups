@@ -578,8 +578,20 @@ function Overview({ me }) {
   )
 }
 
+const LOGIN_ERRORS = {
+  expired: 'That sign-in expired. Please try again.',
+  cancelled: 'Sign-in was cancelled.',
+  failed: 'We couldn’t sign you in. Please try again.',
+  rate_limited: 'Too many sign-in attempts. Please wait a few minutes.',
+}
+
 export default function Admin() {
   const [me, setMe] = useState({ loading: true })
+  const [loginError] = useState(() => new URLSearchParams(window.location.search).get('login_error'))
+  useEffect(() => {
+    // Drop ?login_error= so a reload doesn't repeat the message.
+    if (loginError) window.history.replaceState(null, '', window.location.pathname)
+  }, [loginError])
   useEffect(() => {
     document.title = 'Admin · GetShowUps'
     const cleanup = noIndex()
@@ -591,6 +603,11 @@ export default function Admin() {
   if (me.status === 401) {
     return (
       <Gate title="Platform sign-in">
+        {LOGIN_ERRORS[loginError] && (
+          <p className="form-error" role="alert">
+            {LOGIN_ERRORS[loginError]}
+          </p>
+        )}
         <a className="btn btn-primary btn-lg btn-block" href="/api/auth/google/start?next=/admin">
           Continue with Google
         </a>
@@ -601,7 +618,10 @@ export default function Admin() {
     return (
       <Gate title="No platform access">
         <p className="lede">This account isn’t a GetShowUps admin.</p>
-        <SignOut email="" label="Sign out" />
+        <a className="btn btn-primary btn-block" href="/dashboard">
+          Go to your dashboard
+        </a>
+        <SignOut email="" label="Sign out" to="/admin" />
       </Gate>
     )
   }
@@ -610,7 +630,7 @@ export default function Admin() {
     <div className="app">
       <header className="app-header">
         <Logo href="/" />
-        <SignOut email={me.data.email} />
+        <SignOut email={me.data.email} to="/admin" />
       </header>
       <main className="app-main">
         <Overview me={me.data} />

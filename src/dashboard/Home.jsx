@@ -12,10 +12,10 @@ const Ads = lazy(() => import('./Ads.jsx'))
 const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
 const WebsiteTab = lazy(() => import('./WebsiteTab.jsx'))
 
-export function SignOut({ email, label = 'Sign out' }) {
+export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
   const signOut = async () => {
     await api('/api/auth/logout', { method: 'POST' })
-    location.replace('/dashboard')
+    location.replace(to)
   }
   return (
     <div className="header-user">

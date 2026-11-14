@@ -142,7 +142,11 @@ inspect, build only what's missing, test, safe preview, report blockers, stop fo
   Real-API check of the discovery code against the sandbox is pending an owner sign-in (read-only script prepared).
 - Test-business isolation: DEPLOYED 2026-11-13 (8ac2392, deployment 482358a5; migration 0012 applied before deploy,
   integrity ok, PoolThru identical). gsu-stripe-test-pools NOT yet marked (needs the admin signed in to /admin).
-- Ads review UX (2026-11-13, branch feature/ads-review-ux): one owner step "Approve and create (paused)" when the account
+- Sign-in routing fix (2026-11-14, PR #17, NOT deployed): admins were sent to /dashboard customer onboarding unless
+  they started at /admin; errors and deep links lost their destination. Now: admin-only → /admin from anywhere,
+  /dashboard shows an admin notice, errors return to the starting area, dashboard deep links survive, "No platform
+  access" links to the dashboard. Allowlisted destinations only.
+- Ads review UX: DEPLOYED 2026-11-13 (dcc15f1, deployment f0e4ebad): one owner step "Approve and create (paused)" when the account
   is connected (Start stays separate); "Where: people in ZIP …"; every result tile says where its number comes from.
 - Google Ads conversion feedback: DEPLOYED OFF 2026-11-13 (9565e99, deployment 6281da42): conversion actions via the
   Google Ads API at campaign creation; Data Manager events:ingest uploader (lead/booked/completed, deduped, retries);
