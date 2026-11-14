@@ -288,3 +288,25 @@ test('accuracy: test-business activity is never evidence; "never triggered" is n
   r = await platformReview(env, Date.now())
   assert.equal(r.capabilities.find((c) => c.id === 'platform.admin').status, 'live_verified')
 })
+
+test('orphaned credentials are found across KV list pages (1,000 keys per page)', async () => {
+  const m = new Map()
+  for (let i = 0; i < 1500; i++) m.set(`google:biz${String(i).padStart(4, '0')}`, '{}')
+  m.set('google:zz-orphan', '{}')
+  env.GOOGLE_TOKENS = {
+    get: async (k) => m.get(k) ?? null,
+    list: async ({ prefix = '', cursor } = {}) => {
+      const all = [...m.keys()].filter((k) => k.startsWith(prefix)).sort()
+      const start = Number(cursor || 0)
+      return start + 1000 < all.length ? { keys: all.slice(start, start + 1000).map((name) => ({ name })), list_complete: false, cursor: String(start + 1000) } : { keys: all.slice(start).map((name) => ({ name })), list_complete: true }
+    },
+  }
+  const ins = db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, created_at, updated_at) VALUES (?, ?, 'UTC', '', '09:00', '17:00', '1', 1, 1)")
+  db.sql.exec('BEGIN')
+  for (let i = 0; i < 1500; i++) ins.run(`biz${String(i).padStart(4, '0')}`, 'x')
+  db.sql.exec('COMMIT')
+  const r = await platformReview(env)
+  const t = r.capabilities.find((c) => c.id === 'platform.tokens')
+  assert.equal(t.verification.problem, true)
+  assert.match(t.verification.evidence, /^1 Calendar credential stored for a business that doesn't exist \(zz-orphan\); 1500 in use$/)
+})

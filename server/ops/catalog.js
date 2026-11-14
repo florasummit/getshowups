@@ -54,8 +54,14 @@ registerCapability({
   external: 'Cloudflare',
   state: (env) => ({ mode: env.TOKEN_ENCRYPTION_KEY ? 'live' : 'disabled', note: env.TOKEN_ENCRYPTION_KEY ? null : 'TOKEN_ENCRYPTION_KEY missing' }),
   verify: async (env) => {
-    const r = await env.GOOGLE_TOKENS.list({ prefix: 'google:', limit: 1000 })
-    const ids = r.keys.map((k) => k.name.slice('google:'.length))
+    const ids = []
+    let cursor
+    for (let page = 0; page < 100; page++) {
+      const r = await env.GOOGLE_TOKENS.list({ prefix: 'google:', cursor })
+      ids.push(...r.keys.map((k) => k.name.slice('google:'.length)))
+      if (r.list_complete || !r.cursor) break
+      cursor = r.cursor
+    }
     const { results } = await env.ONBOARDING_DB.prepare('SELECT id FROM customers').all()
     const known = new Set(results.map((x) => x.id))
     const orphans = ids.filter((id) => !known.has(id))
