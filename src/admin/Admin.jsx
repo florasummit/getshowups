@@ -11,6 +11,7 @@ const ATTENTION = {
   suspended: 'Suspended',
   past_due: 'Payment failed',
   ads_running_on_hold: 'Ads still running while on hold',
+  deletion_stuck: 'Deletion stuck (needs a look)',
   booking_failures: 'Booking failures',
   calendar_disconnected: 'Calendar disconnected',
   setup_stalled: 'Setup stalled',

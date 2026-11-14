@@ -42,7 +42,10 @@ export async function customerRows(env, now = Date.now()) {
   for (const r of results) {
     if (deleted.has(r.id)) {
       // Deleted account (tombstone): listed for the record, never in metrics, nothing to act on.
-      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: [] })
+      const job = deleted.get(r.id)
+      // A deletion that keeps failing needs a person (e.g. an unreachable ad campaign to confirm, Stripe down for long).
+      const stuck = job.status === 'in_progress' && job.last_error && job.attempts >= 3
+      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
       continue
     }
     const calendar = Boolean(await env.GOOGLE_TOKENS.get(`google:${r.id}`))
@@ -95,9 +98,9 @@ export async function customerRows(env, now = Date.now()) {
 // Businesses with a deletion requested or completed (migration 0016). Missing table → none.
 async function deletedIds(db) {
   try {
-    return new Set((await db.prepare('SELECT customer FROM account_deletions').all()).results.map((r) => r.customer))
+    return new Map((await db.prepare('SELECT customer, status, last_error, attempts FROM account_deletions').all()).results.map((r) => [r.customer, r]))
   } catch (err) {
-    if (err?.message?.includes('no such table')) return new Set()
+    if (err?.message?.includes('no such table')) return new Map()
     throw err
   }
 }

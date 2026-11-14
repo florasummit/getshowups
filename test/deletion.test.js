@@ -243,16 +243,47 @@ test('retries: Stripe down → services already off, step retried with backoff b
   assert.ok(auditActions('alpha-co').includes('account.deletion_step_failed'))
 })
 
-test('ads: a campaign that cannot be paused blocks the deletion (retried), never skipped; launch/Start refused meanwhile', async () => {
-  db.sql.prepare("UPDATE ad_campaigns SET status = 'active' WHERE customer = 'alpha-co'").run() // running, no ad connection → pause fails
-  const r = await requestDeletion(env, 'alpha-co', { type: 'owner', id: OWNER })
-  assert.deepEqual([r.step, r.error], ['ads', 'ads_not_paused'])
+test('ads: an unreachable running campaign blocks the deletion (never skipped, credentials kept) until an admin confirms it is paused; stuck → escalated', async () => {
+  db.sql.prepare("UPDATE ad_campaigns SET status = 'active' WHERE customer = 'alpha-co'").run() // running, no ad connection → unreachable
+  const t0 = Date.now()
+  const r = await requestDeletion(env, 'alpha-co', { type: 'owner', id: OWNER }, t0)
+  assert.deepEqual([r.step, r.error], ['ads', 'ads_unreachable_confirm_paused'])
   const H = await import('../server/ads/holds.js')
   assert.deepEqual(await H.adsHold(env, 'alpha-co'), { reason: 'account_deleted' })
   assert.equal(stripe.subs.sub_A, 'active', 'later steps wait')
-  db.sql.prepare("UPDATE ad_campaigns SET status = 'paused' WHERE customer = 'alpha-co'").run() // e.g. paused once Google answers
-  const done = await processDeletions(env, { now: job('alpha-co').next_attempt_at })
-  assert.equal(done.completed, 1)
+  assert.equal(kv.m.has('ads:google:alpha-co'), true, 'ad credentials not removed while a campaign may still run')
+  // Retries keep failing → after 3 attempts the founder sees it.
+  let next = job('alpha-co').next_attempt_at
+  for (let i = 0; i < 2; i++) {
+    await processDeletions(env, { now: next })
+    next = job('alpha-co').next_attempt_at
+  }
+  const { customerRows } = await import('../server/metrics.js')
+  assert.deepEqual((await customerRows(env)).find((x) => x.id === 'alpha-co').attention, ['deletion_stuck'])
+  // The founder records the advertiser's confirmation (audited); the deletion then completes.
+  const route = await import('../functions/api/platform/campaign-pause.js')
+  const c = await cookie('founder@getshowups.example')
+  const ok = await call(route, 'POST', '/api/platform/campaign-pause', { cookie: c, body: { customer: 'alpha-co', campaign: 'cmp_A0000001', confirm: true } })
+  assert.deepEqual(ok.json(), { ok: true, attested: true })
+  assert.equal((await processDeletions(env, { now: next })).completed, 1)
+  assert.equal(job('alpha-co').status, 'completed')
+  assert.equal(kv.m.has('ads:google:alpha-co'), false)
+  const failures = db.sql.prepare("SELECT outcome, correlation_id FROM audit_log WHERE action = 'account.deletion_step_failed'").all()
+  assert.equal(failures.length, 3)
+  assert.ok(failures.every((f) => f.outcome === 'failure' && f.correlation_id === 'deletion:alpha-co'))
+})
+
+test('lockout unpublishes the website at once; staff log keeps entries but loses emails and free text', async () => {
+  db.sql.prepare("UPDATE admin_audit SET details = ? WHERE customer = 'alpha-co'").run(JSON.stringify({ email: 'partner.A@example.net', reason: 'Owner Jamie asked by phone', code: 'policy_review' }))
+  stripe.fail = 503 // stop after lockout + ads, before data erasure
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: OWNER })
+  assert.equal(db.sql.prepare("SELECT live_version FROM websites WHERE customer = 'alpha-co'").get().live_version, null, 'unpublished immediately')
+  assert.equal(db.sql.prepare("SELECT live_version FROM websites WHERE customer = 'beta-co'").get().live_version, 1)
+  stripe.fail = null
+  await processDeletions(env, { now: job('alpha-co').next_attempt_at })
+  const d = JSON.parse(db.sql.prepare("SELECT details FROM admin_audit WHERE customer = 'alpha-co'").get().details)
+  assert.match(d.email, /^ref:/)
+  assert.deepEqual([d.reason, d.code], ['[erased]', 'policy_review'])
 })
 
 test('platform admin: typed confirmation, audited, retry now; customer detail shows the status', async () => {
