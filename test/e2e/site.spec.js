@@ -39,7 +39,10 @@ test('no unsupported claims: no AI texting or missed-call promises outside the l
     return body.innerText
   })
   for (const claim of [/AI assistant/i, /qualifies them by text/i, /missed[- ]call text/i, /instant SMS/i]) expect(text).not.toMatch(claim)
-  await expect(page.getByText('Text messaging and ad management are coming soon', { exact: false })).toBeVisible()
+  // Email messages to real customers are off in production (MESSAGES_LIVE unset: test recipients only), so the page
+  // must not present email confirmations, reminders or follow-ups as working today.
+  for (const claim of [/email confirmations/i, /reminds (them|customers)/i, /reminder emails/i, /get a follow-up/i]) expect(text).not.toMatch(claim)
+  await expect(page.getByText('Text messaging, email reminders and ad management are coming soon', { exact: false })).toBeVisible()
 })
 
 // Regression guard: the interactive SMS simulation is a product demonstration that must stay on the homepage,
@@ -50,7 +53,7 @@ test('SMS simulation: on the homepage, labelled, Next/Play/Pause/Reset, scenario
   await expect(sim.getByRole('heading', { name: 'Watch one lead go from inquiry to appointment' })).toBeVisible()
   const note = sim.getByRole('note')
   await expect(note).toContainText('Simulation only.')
-  await expect(note).toContainText('Text messaging is coming soon')
+  await expect(note).toContainText('Text messaging and automatic reminders are coming soon')
   const progress = sim.locator('.sim-progress')
   const log = sim.getByRole('list', { name: 'Simulated conversation' })
   await expect(log).toHaveAttribute('aria-live', 'polite')

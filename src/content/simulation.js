@@ -4,27 +4,27 @@
 export const stageNotes = {
   capture: {
     what: 'A new lead arrives. The clock starts now — the first reply goes out before anyone on your team has to touch it.',
-    today: 'Website and booking-page requests arrive as leads in your dashboard. Instant text replies, including after a missed call, are coming soon.',
+    today: 'Live: details entered on your booking page are saved as a lead in your dashboard, even before a time is picked. Instant text replies, including after a missed call, are coming soon.',
   },
   qualify: {
     what: 'The assistant asks only the screening questions you approved and records the answers on the contact.',
-    today: 'Every lead is checked against the ZIP codes you serve before it can book. Screening questions by text are coming soon.',
+    today: 'Live: every lead is checked against the ZIP codes you serve, and leads outside your area can’t book. Screening questions by text are coming soon.',
   },
   book: {
     what: 'Good-fit leads are offered real open times. Once they choose, the appointment lands on your calendar.',
-    today: 'Live: leads pick a real open time from your Google Calendar, and the visit is added to your calendar.',
+    today: 'Live: leads pick a real open time from your Google Calendar; the visit is added to your calendar and Google sends the customer an invitation.',
   },
   remind: {
     what: 'Reminders go out on your schedule, with an easy way to confirm or reschedule instead of silently not showing.',
-    today: 'Email confirmation and reminders with a one-tap “I’ll be there”. Text reminders are coming soon.',
+    today: 'Live: the Google Calendar invitation confirms the time. Email reminders with a one-tap “I’ll be there” and text reminders are coming soon.',
   },
   show: {
     what: 'Your team marks the outcome, so show-up tracking reflects what actually happened.',
-    today: 'Live: mark each appointment as showed or no-show (or visit done and job completed) in your dashboard.',
+    today: 'Live: mark each appointment as showed or no-show (for on-site visits: whether the visit happened and the job was completed) in your dashboard.',
   },
   follow: {
     what: 'The next step depends on the outcome: rebook no-shows, nurture completed visits.',
-    today: 'Leads who don’t book get an email follow-up, and no-shows get an easy way to pick a new time. Texts are coming soon.',
+    today: 'Live: leads who haven’t booked and no-shows are listed in your dashboard so you can follow up. Automatic email and text follow-ups are coming soon.',
   },
 }
 

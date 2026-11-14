@@ -64,8 +64,8 @@ export default function Simulation() {
 
         <p className="sim-disclaimer" role="note">
           <strong>Simulation only.</strong> Fictional business, scripted messages, sample data. Nothing here is sent,
-          stored, or connected to a live system. Text messaging is coming soon; today GetShowUps handles booking,
-          calendar, email reminders and show-up tracking.
+          stored, or connected to a live system. Text messaging and automatic reminders are coming soon; today
+          GetShowUps handles lead capture, service-area screening, calendar booking and show-up tracking.
         </p>
 
         <div className="sim">

@@ -36,7 +36,7 @@ export const steps = [
     id: 'remind',
     title: 'Remind',
     icon: 'bell',
-    body: 'Confirmation and reminder emails with a one-tap “I’ll be there”. Text reminders are coming soon.',
+    body: 'Every booking sends the customer a Google Calendar invitation. Email and text reminders are coming soon.',
   },
   {
     id: 'show',
@@ -48,7 +48,7 @@ export const steps = [
     id: 'follow',
     title: 'Follow Up',
     icon: 'refresh',
-    body: 'Leads who don’t book get a follow-up, and no-shows get an easy way to pick a new time.',
+    body: 'Leads who haven’t booked and no-shows are listed for you to follow up. Automatic follow-ups are coming soon.',
   },
 ]
 
@@ -71,12 +71,12 @@ export const features = [
   {
     icon: 'bell',
     title: 'Confirmations & reminders',
-    body: 'Email confirmations, reminders and follow-ups that stop as soon as a lead books. Text messages are coming soon.',
+    body: 'Every booking sends the customer a Google Calendar invitation. Email reminders and follow-ups, and text messages, are coming soon.',
   },
   {
     icon: 'chart',
     title: 'Show-up tracking',
-    body: 'See leads, bookings, confirmations, show-ups and no-shows in one simple dashboard.',
+    body: 'See leads, bookings, show-ups and no-shows (or completed jobs for on-site visits) in one simple dashboard.',
   },
   {
     icon: 'phoneMissed',
@@ -96,17 +96,17 @@ export const pricing = {
     'Use your GetShowUps address or connect your own domain',
     'Online booking straight into your Google Calendar',
     'Service-area screening for every lead',
-    'Email confirmations, reminders and follow-ups',
+    'Google Calendar invitations for every booking',
     'Show-up and no-show tracking',
     'Direct help from the founding team',
   ],
-  excludes: 'Advertising spend is separate and paid directly to Google or Meta. Text messaging and ad management are coming soon for founding customers.',
+  excludes: 'Advertising spend is separate and paid directly to Google or Meta. Text messaging, email reminders and ad management are coming soon for founding customers.',
 }
 
 export const faqs = [
   {
     q: 'What is GetShowUps?',
-    a: 'GetShowUps is an appointment conversion platform for service businesses. It responds to new leads, qualifies them, books them onto your calendar, reminds them, and tracks whether they actually showed up — then follows up either way.',
+    a: 'GetShowUps is an appointment conversion platform for service businesses. It gives you a website that captures leads, checks they are in your service area, books them onto your Google Calendar, and tracks whether they actually showed up. Automatic reminders and follow-ups are coming soon.',
   },
   {
     q: 'Who is it for?',
@@ -130,6 +130,6 @@ export const faqs = [
   },
   {
     q: 'When will text messages work?',
-    a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, confirmations and reminders go by email.',
+    a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, every booking is confirmed with a Google Calendar invitation.',
   },
 ]
