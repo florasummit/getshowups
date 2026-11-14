@@ -57,7 +57,7 @@ export async function adsHold(env, customerId) {
 
 // Pauses every running campaign of one business on its platform, then reads each Google campaign back to
 // confirm it is paused. Failures are recorded and retried by the cron sweep. Never resumes anything.
-export async function enforceAdsHold(env, customerId, { actor = 'system:hold', hold = undefined, now = Date.now() } = {}) {
+export async function enforceAdsHold(env, customerId, { actor = 'system:hold', hold = undefined, now = Date.now(), correlationId = null } = {}) {
   const db = env.ONBOARDING_DB
   const h = hold === undefined ? await adsHold(env, customerId) : hold
   if (!h) return { hold: null, paused: 0, verified: 0, failed: 0, unreachable: 0 }
@@ -85,6 +85,8 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
           campaignId: row.id,
           actor,
           kind: 'pause',
+          platform: row.platform,
+          correlationId,
           status: 'failed',
           reason: lost ? `Can't reach this campaign (${r.error}): it must be paused in ${where} by the advertiser` : `Couldn't pause on ${where} (${r.error}); retrying every few minutes`,
           details: { hold: h.reason, error: r.error, unreachable: lost },
@@ -94,7 +96,7 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
       continue
     }
     await db.prepare("UPDATE ad_campaigns SET status = 'paused', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(row.id, customerId, now).run()
-    await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', reason: why, details: { hold: h.reason } }, now)
+    await logAction(db, { customer: customerId, campaignId: row.id, actor, kind: 'pause', reason: why, details: { hold: h.reason }, platform: row.platform, correlationId }, now)
     paused++
     if (row.platform === 'google') {
       // Read back: Google's state wins (verifyAndRecord reconciles). If Google still shows it running, the row

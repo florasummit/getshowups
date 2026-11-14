@@ -9,7 +9,7 @@ import { sandboxed, testStatus } from '../testbusiness.js'
 import { normalizeWebsiteUrl } from '../url.js'
 import { conversionsEnabled } from './conversions.js'
 import { adsHold } from './holds.js'
-import { appendAudit } from '../auditlog.js'
+import { recordEvent } from '../auditlog.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -119,19 +119,23 @@ const getRow = (db, customer, id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{
 // Changes to what runs or spends are also appended to the permanent audit log (reads/checks are not).
 const AUDITED_KINDS = ['approve', 'launch', 'resume', 'pause', 'budget', 'budget_approve', 'approval_reset', 'remove', 'disconnect', 'reconcile']
 const actorTypeOf = (actor) => (/^owner:/.test(actor) ? 'owner' : /^admin:/.test(actor) ? 'admin' : 'system')
-async function logAction(db, { customer, campaignId, actor, kind, status = 'applied', reason, details = {}, id = randomToken(12) }, now = Date.now()) {
+async function logAction(db, { customer, campaignId, actor, kind, status = 'applied', reason, details = {}, id = randomToken(12), platform = 'google', correlationId = null }, now = Date.now()) {
   await db
     .prepare('INSERT OR IGNORE INTO ad_actions (id, customer, campaign_id, actor, kind, status, reason, details, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)')
     .bind(id, customer, campaignId, actor, kind, status, reason, JSON.stringify(details), now)
     .run()
   if (AUDITED_KINDS.includes(kind)) {
     const type = actorTypeOf(String(actor))
-    await appendAudit(db, {
+    await recordEvent(db, {
+      type: `ads.${kind}`,
       actorType: type,
       actor: type === 'admin' ? String(actor).slice('admin:'.length) : String(actor),
-      action: `ads.${kind}`,
       customer,
-      details: { campaignId, status, ...(details?.hold ? { hold: details.hold } : {}) },
+      capability: `ads.${platform}`,
+      resource: campaignId ? { type: 'campaign', id: campaignId } : { type: 'customer', id: customer },
+      outcome: status === 'failed' ? 'failure' : 'success',
+      correlationId,
+      details: { ...(details?.hold ? { hold: details.hold } : {}), ...(details?.error ? { error: details.error } : {}), ...(details?.unreachable ? { unreachable: true } : {}), ...(details?.attested ? { attested: true } : {}) },
       at: now,
     })
   }
