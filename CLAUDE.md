@@ -136,6 +136,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   authorizes every request.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`. Admin views show counts, never lead/appointment contact details.
+- Opt-outs (server/optouts.js, migration 0014): every follow-up email (unbooked-lead, no-show) has a signed unsubscribe
+  link (GET read-only, POST records); a Twilio 21610 records a text opt-out. Opted-out addresses get no follow-ups from that
+  business; confirmations/reminders still go. Stored as hashes only. Before 0014 is applied, nothing is suppressed wrongly.
 - Never mark an email or text as sent unless the provider accepted it. Due messages without a provider are skipped
   (`no_provider`), never sent later in a burst. Texts only with recorded consent (sms_consents); consent is offered only
   when SMS is configured. Messages to leads re-check relevance at send time (`skipReason()`).

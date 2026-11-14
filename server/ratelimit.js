@@ -14,6 +14,7 @@ export const RULES = {
   pageView: { limit: 120, windowSec: 600 }, //       GET /api/page/:id (per IP; public landing page)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
   confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
+  unsubscribe: { limit: 30, windowSec: 600 }, //     GET/POST /api/messages/unsubscribe (per IP)
   adsConnect: { limit: 20, windowSec: 600 }, //     GET /api/ads/{google,meta}/start (per IP)
   adsCallback: { limit: 30, windowSec: 600 }, //    GET /api/ads/{google,meta}/callback (per IP)
   metaWebhook: { limit: 600, windowSec: 600 }, //   POST /api/ads/meta/webhook (per IP, before signature check)
