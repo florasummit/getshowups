@@ -30,7 +30,10 @@ const seen = (label, windowDays, sql, ...args) => async (env, now) => {
   if (!at) return { ok: false, at: null, evidence: `No ${label} recorded yet` }
   return { ok: now - at <= windowDays * DAY, at, evidence: `Last ${label} ${ago(at, now)}` }
 }
-const REAL_LEAD = "NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id AND t.is_test = 1)"
+// Evidence counts only real businesses' activity (never test-marked leads or test businesses): a test business working is
+// not proof that customers' traffic works, and must never make a capability look live-verified.
+const NOT_TEST_BIZ = (col) => `NOT EXISTS (SELECT 1 FROM test_businesses tb WHERE tb.customer = ${col} AND tb.is_test = 1)`
+const REAL_LEAD = `NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id AND t.is_test = 1) AND ${NOT_TEST_BIZ('l.customer')}`
 
 // ---------- platform ----------
 registerCapability({
@@ -51,8 +54,13 @@ registerCapability({
   external: 'Cloudflare',
   state: (env) => ({ mode: env.TOKEN_ENCRYPTION_KEY ? 'live' : 'disabled', note: env.TOKEN_ENCRYPTION_KEY ? null : 'TOKEN_ENCRYPTION_KEY missing' }),
   verify: async (env) => {
-    const r = await env.GOOGLE_TOKENS.list({ prefix: 'google:', limit: 100 })
-    return { ok: true, at: Date.now(), evidence: `Reachable, ${r.keys.length} calendar connection${r.keys.length === 1 ? '' : 's'} stored` }
+    const r = await env.GOOGLE_TOKENS.list({ prefix: 'google:', limit: 1000 })
+    const ids = r.keys.map((k) => k.name.slice('google:'.length))
+    const { results } = await env.ONBOARDING_DB.prepare('SELECT id FROM customers').all()
+    const known = new Set(results.map((x) => x.id))
+    const orphans = ids.filter((id) => !known.has(id))
+    if (orphans.length) return { ok: false, problem: true, at: Date.now(), evidence: `${orphans.length} Calendar credential${orphans.length === 1 ? '' : 's'} stored for a business that doesn't exist (${orphans.join(', ')}); ${ids.length - orphans.length} in use` }
+    return { ok: true, at: Date.now(), evidence: `Reachable, ${ids.length} calendar connection${ids.length === 1 ? '' : 's'} stored, all belonging to a business` }
   },
 })
 registerCapability({
@@ -80,6 +88,12 @@ registerCapability({
   journey: 'platform',
   dependsOn: ['auth.google_signin', 'platform.audit'],
   state: (env) => ({ mode: String(env.PLATFORM_ADMIN_EMAILS || '').includes('@') ? 'live' : 'disabled', note: 'Access from PLATFORM_ADMIN_EMAILS only' }),
+  verify: async (env, now) => {
+    const admins = String(env.PLATFORM_ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+    if (!admins.length) return { ok: false, at: null, evidence: 'No admin configured' }
+    const r = await env.ONBOARDING_DB.prepare(`SELECT max(created_at) AS at FROM sessions WHERE lower(email) IN (${admins.map((_, i) => `?${i + 1}`).join(',')})`).bind(...admins).first()
+    return r?.at ? { ok: now - r.at <= 30 * DAY, at: r.at, evidence: `Last founder sign-in ${ago(r.at, now)}` } : { ok: false, at: null, evidence: 'No founder sign-in recorded yet' }
+  },
 })
 
 // ---------- sign up / billing / onboarding ----------
@@ -90,7 +104,7 @@ registerCapability({
   external: 'Google',
   dependsOn: ['platform.database'],
   state: () => ({ mode: 'live', note: 'openid + email only' }),
-  verify: seen('sign-in', 30, 'SELECT max(created_at) AS at FROM sessions'),
+  verify: seen('sign-in by a real business member', 30, `SELECT max(s.created_at) AS at FROM sessions s JOIN customer_users u ON u.email = s.email WHERE ${NOT_TEST_BIZ('u.customer')}`),
 })
 registerCapability({
   id: 'billing.stripe',
@@ -122,7 +136,8 @@ registerCapability({
     const r = await env.ONBOARDING_DB.prepare("SELECT at, details FROM audit_log WHERE action = 'billing.reconciliation' ORDER BY seq DESC LIMIT 1").first()
     if (!r) return { ok: false, at: null, evidence: 'Not run yet' }
     const d = JSON.parse(r.details)
-    return { ok: d.issues === 0 && now - r.at < 2 * DAY, at: r.at, evidence: d.issues ? `${d.issues} difference(s) found ${ago(r.at, now)}` : `Clean ${ago(r.at, now)}` }
+    if (d.issues) return { ok: false, problem: true, at: r.at, evidence: `${d.issues} difference(s) between Stripe and our records (${Object.entries(d.byType || {}).map(([k, n]) => `${k.replace(/_/g, ' ')} ${n}`).join(', ')}), checked ${ago(r.at, now)}` }
+    return { ok: now - r.at < 2 * DAY, at: r.at, evidence: `Clean ${ago(r.at, now)}` }
   },
 })
 registerCapability({
@@ -143,7 +158,7 @@ registerCapability({
   journey: 'onboarding',
   dependsOn: ['auth.google_signin', 'billing.stripe', 'calendar.google', 'website.hosting'],
   state: () => ({ mode: 'live' }),
-  verify: seen('business finished setup', 60, "SELECT max(at) AS at FROM events WHERE type = 'setup_completed'"),
+  verify: seen('real business finished setup', 60, `SELECT max(at) AS at FROM events e WHERE type = 'setup_completed' AND ${NOT_TEST_BIZ('e.customer')}`),
 })
 
 // ---------- website ----------
@@ -153,7 +168,7 @@ registerCapability({
   journey: 'website',
   dependsOn: ['platform.database'],
   state: () => ({ mode: 'live' }),
-  verify: seen('website publish', 60, 'SELECT max(published_at) AS at FROM websites WHERE live_version IS NOT NULL'),
+  verify: seen('real business website published', 60, `SELECT max(published_at) AS at FROM websites w WHERE live_version IS NOT NULL AND ${NOT_TEST_BIZ('w.customer')}`),
   business: async (env, id) => {
     const w = await env.ONBOARDING_DB.prepare('SELECT live_version FROM websites WHERE customer = ?1').bind(id).first()
     return w?.live_version ? { status: 'ok', summary: `Published (version ${w.live_version})` } : { status: 'off', summary: 'Not published' }
@@ -166,7 +181,7 @@ registerCapability({
   external: 'Cloudflare Workers AI',
   dependsOn: ['website.hosting'],
   state: (env) => (aiConfigured(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Template fallback only', approval: 'AI binding on the Pages project' }),
-  verify: seen('AI generation', 30, "SELECT max(created_at) AS at FROM website_generations WHERE source = 'ai'"),
+  verify: seen('AI generation for a real business', 30, `SELECT max(created_at) AS at FROM website_generations g WHERE source = 'ai' AND ${NOT_TEST_BIZ('g.customer')}`),
 })
 registerCapability({
   id: 'website.domains',
@@ -220,7 +235,9 @@ registerCapability({
     // Healthy = no business on hold with a campaign still running (one query for all businesses).
     const stuck = (await customerRows(env, now)).filter((b) => b.attention.includes('ads_running_on_hold')).length
     const last = await env.ONBOARDING_DB.prepare("SELECT max(at) AS at FROM audit_log WHERE action = 'ads.pause' AND actor LIKE 'system:%' AND outcome = 'success'").first()
-    return { ok: stuck === 0, at: last?.at ?? null, evidence: stuck ? `${stuck} business(es) on hold with campaigns still running` : last?.at ? `Last automatic pause ${ago(last.at, now)}; none running on hold` : 'Never triggered in production; none running on hold' }
+    if (stuck) return { ok: false, problem: true, at: now, evidence: `${stuck} business(es) on hold with campaigns still running` }
+    // Never triggered = no evidence it works in production yet (not a success).
+    return last?.at ? { ok: true, at: last.at, evidence: `Last automatic pause ${ago(last.at, now)}; none running on hold` } : { ok: false, at: null, evidence: 'Never triggered in production yet; none running on hold' }
   },
   business: async (env, id) => {
     const h = await adsHold(env, id).catch(() => null)
@@ -259,7 +276,7 @@ registerCapability({
   external: 'Google Calendar',
   dependsOn: ['platform.tokens', 'auth.google_signin'],
   state: () => ({ mode: 'live', note: 'free/busy + own events only' }),
-  verify: seen('booking placed on Google Calendar', 30, `SELECT max(a.created_at) AS at FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.google_event_id IS NOT NULL AND ${REAL_LEAD}`),
+  verify: seen('real booking placed on Google Calendar', 30, `SELECT max(a.created_at) AS at FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.google_event_id IS NOT NULL AND ${REAL_LEAD}`),
   business: async (env, id) => ((await env.GOOGLE_TOKENS.get(`google:${id}`)) ? { status: 'ok', summary: 'Connected' } : { status: 'attention', summary: 'Not connected' }),
 })
 registerCapability({
@@ -274,7 +291,7 @@ registerCapability({
       : messagesLive(env)
         ? { mode: 'live' }
         : { mode: 'sandbox', note: 'Sent to test recipients only', approval: 'MESSAGES_LIVE=true' },
-  verify: seen('email accepted by Resend', 30, "SELECT max(updated_at) AS at FROM messages WHERE status = 'sent' AND channel = 'email'"),
+  verify: seen('email accepted by Resend for a real business', 30, `SELECT max(updated_at) AS at FROM messages m WHERE status = 'sent' AND channel = 'email' AND ${NOT_TEST_BIZ('m.customer')}`),
 })
 registerCapability({
   id: 'messaging.sms',
@@ -298,7 +315,7 @@ registerCapability({
   journey: 'showup',
   dependsOn: ['calendar.google'],
   state: () => ({ mode: 'live' }),
-  verify: seen('attendance recorded', 30, "SELECT max(updated_at) AS at FROM appointments WHERE status IN ('showed', 'no_show')"),
+  verify: seen('attendance recorded for a real booking', 30, `SELECT max(a.updated_at) AS at FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.status IN ('showed', 'no_show') AND ${REAL_LEAD}`),
 })
 registerCapability({
   id: 'results.attribution',
@@ -306,7 +323,7 @@ registerCapability({
   journey: 'results',
   dependsOn: ['lead.capture', 'ads.google'],
   state: () => ({ mode: 'live' }),
-  verify: seen('attributed lead', 30, 'SELECT max(created_at) AS at FROM lead_attribution'),
+  verify: seen('attributed real lead', 30, `SELECT max(la.created_at) AS at FROM lead_attribution la JOIN leads l ON l.id = la.lead_id WHERE ${REAL_LEAD}`),
 })
 
 // ---------- account lifecycle ----------

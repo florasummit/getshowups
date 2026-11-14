@@ -72,7 +72,7 @@ async function openFailures(db, { capability = null, customer = null, since }) {
 //   not_applicable  not switched on (off / not built)
 function healthOf(state, check, open) {
   if (!state || ['disabled', 'missing'].includes(state.mode)) return 'not_applicable'
-  if (open.length) return 'failing'
+  if (open.length || check?.problem) return 'failing'
   if (check?.ok) return 'healthy'
   if (check?.at) return 'degraded'
   return 'unknown'
@@ -113,7 +113,7 @@ export async function capabilityStatuses(env, now = Date.now()) {
       note: state?.note ?? null,
       approval: state?.approval ?? null,
       blockers: c.blockers,
-      verification: check ? { ok: Boolean(check.ok), at: check.at ?? null, evidence: check.evidence ?? null } : null,
+      verification: check ? { ok: Boolean(check.ok), at: check.at ?? null, evidence: check.evidence ?? null, problem: Boolean(check.problem) } : null,
       events,
       openFailures: open,
     })
@@ -145,6 +145,8 @@ export async function platformReview(env, now = Date.now()) {
   const incidents = []
   for (const c of capabilities) {
     for (const f of c.openFailures) incidents.push({ kind: 'failure', severity: 'high', capability: c.id, customer: f.customer, at: f.at, title: `${f.action} failed`, detail: f.details?.code || f.details?.error || null, resource: f.resource })
+    // A check that ran and found something wrong (reconciliation differences, orphaned credentials, ads running on hold).
+    if (c.verification?.problem) incidents.push({ kind: 'check_problem', severity: 'medium', capability: c.id, at: c.verification.at, title: `${c.name}: needs a look`, detail: c.verification.evidence })
     // Seen working before, quiet now: a possible regression. (Never seen yet is not an incident; it shows as Built + tested.)
     if (c.status === 'built_tested' && c.verification && !c.verification.ok && c.verification.at && c.mode === 'live') incidents.push({ kind: 'not_verified', severity: 'medium', capability: c.id, at: c.verification.at, title: `${c.name}: not seen working recently`, detail: c.verification.evidence })
     if (c.status === 'unknown') incidents.push({ kind: 'unknown', severity: 'medium', capability: c.id, title: `${c.name}: status unknown`, detail: c.note })

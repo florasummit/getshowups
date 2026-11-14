@@ -93,7 +93,7 @@ test('platform view: statuses come from configuration + real activity (evidence)
   assert.equal(cap('account.deletion').status, 'disabled')
   assert.equal(cap('lead.qualify').status, 'missing')
   assert.equal(cap('calendar.google').status, 'live_verified', 'a real booking on Google Calendar yesterday')
-  assert.match(cap('calendar.google').verification.evidence, /Last booking placed on Google Calendar/)
+  assert.match(cap('calendar.google').verification.evidence, /Last real booking placed on Google Calendar/)
   assert.equal(cap('website.hosting').status, 'built_tested', 'live but nothing published yet → not verified')
   assert.equal(cap('messaging.email').status, 'disabled', 'Resend not configured here')
   // Dependencies resolved both ways; a dependency that is off is flagged.
@@ -154,7 +154,7 @@ test('a failing check never breaks the review: that capability shows "unknown"/u
     const r = await platformReview(env)
     const c = r.capabilities.find((x) => x.id === 'example.broken')
     assert.equal(c.status, 'unknown')
-    assert.deepEqual(c.verification, { ok: false, at: null, evidence: 'Check failed or timed out' })
+    assert.deepEqual(c.verification, { ok: false, at: null, evidence: 'Check failed or timed out', problem: false })
     assert.ok(r.capabilities.length > 20)
   } finally {
     unregisterCapability('example.broken')
@@ -260,4 +260,31 @@ test('a hanging check is cut off after the timeout; health is a separate axis (f
     unregisterCapability('example.slow')
     unregisterCapability('example.quiet')
   }
+})
+
+test('accuracy: test-business activity is never evidence; "never triggered" is not success; problems found by checks are incidents', async () => {
+  const now = Date.now()
+  // Only a TEST business has activity → nothing it does makes a capability live-verified.
+  db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha', 1, 'founder@getshowups.example', 1)").run()
+  let r = await platformReview(env, now)
+  const cap = (id) => r.capabilities.find((c) => c.id === id)
+  assert.equal(cap('calendar.google').status, 'built_tested')
+  assert.equal(cap('lead.capture').status, 'built_tested')
+  assert.match(cap('calendar.google').verification.evidence, /No real booking placed on Google Calendar recorded yet/)
+  // The ads safety stop has never triggered: no evidence, not "live-verified".
+  assert.deepEqual([cap('ads.safety_stop').status, cap('ads.safety_stop').health], ['built_tested', 'unknown'])
+  // Reconciliation differences and orphaned credentials are surfaced under Needs attention.
+  await recordEvent(db, { type: 'billing.reconciliation', actor: 'system:reconcile', capability: 'billing.reconcile', outcome: 'info', details: { issues: 2, byType: { stripe_only: 1, payment_not_recorded: 1 } }, at: now })
+  await env.GOOGLE_TOKENS.put('google:ghost-business', '{}')
+  await env.GOOGLE_TOKENS.put('google:beta', '{}')
+  r = await platformReview(env, now)
+  const titles = r.incidents.filter((i) => i.kind === 'check_problem').map((i) => `${i.capability}: ${i.detail}`)
+  assert.ok(titles.some((t) => /^billing\.reconcile: 2 difference\(s\) between Stripe and our records \(stripe only 1, payment not recorded 1\)/.test(t)), titles.join(' | '))
+  assert.ok(titles.some((t) => /^platform\.tokens: 1 Calendar credential stored for a business that doesn't exist \(ghost-business\); 1 in use/.test(t)), titles.join(' | '))
+  assert.equal(r.capabilities.find((c) => c.id === 'platform.tokens').health, 'failing')
+  // Founder console: evidence is a founder sign-in.
+  assert.equal(r.capabilities.find((c) => c.id === 'platform.admin').status, 'built_tested')
+  await cookie('founder@getshowups.example')
+  r = await platformReview(env, Date.now())
+  assert.equal(r.capabilities.find((c) => c.id === 'platform.admin').status, 'live_verified')
 })
