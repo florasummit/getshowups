@@ -241,6 +241,13 @@ test('admin suspends and reactivates an account (audited); booking page pauses m
   const exp = await page.request.get('/api/platform/audit?format=export')
   expect(exp.headers()['content-disposition']).toMatch(/^attachment;/)
   expect((await exp.json()).chain.ok).toBe(true)
+  // Billing reconciliation (Stripe stand-in, read-only): run on demand; the result is shown and recorded.
+  const rec = page.locator('.card', { has: page.getByRole('heading', { name: 'Billing reconciliation' }) })
+  await rec.getByRole('button', { name: 'Run now' }).click()
+  await expect(rec.locator('[data-reconcile="clean"], [data-reconcile="issues"]')).toBeVisible()
+  const last = (await (await page.request.get('/api/platform/reconcile')).json()).last
+  expect(last.checked.records).toBeGreaterThan(0)
+  expect(Object.keys(last.byType).every((t) => !['billing_after_deletion', 'stripe_only'].includes(t))).toBe(true)
 })
 
 test('admin-assisted setup: invite → owner signs in with Google → joins → connects own calendar step', async ({ page, context, browser }) => {

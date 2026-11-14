@@ -2,6 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
+## Lifecycle, 90-day recovery, billing reconciliation (2026-11-14) — branch feature/lifecycle-reconcile (stacked on #26), NOT deployed
+
+server/lifecycle.js (stage view; admin "Lifecycle" card), 90-day recovery for canceled billed accounts (owner Billing card
+shows the date; admin attention recovery_ending/ended; after it the cron starts deletion only when deletion is enabled;
+never pilots/test businesses). server/reconcile.js: Stripe ↔ records daily + on demand, read-only, all difference types,
+audited runs, admin resync (audited; live mode refused). No migration. Tests: 354 unit, 70 Playwright. In production the
+daily reconciliation would read Stripe test mode (2 subscriptions) once deployed.
+
 ## Account deletion workflow (2026-11-14) — branch feature/account-deletion (stacked on #25), NOT deployed, OFF
 
 Owner policy 2026-11-14: permanent, no undo window, no founder approval; durable/retryable/audited; retained records

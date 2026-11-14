@@ -8,6 +8,7 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../server/auth.js'
 import { createCheckout, createPortal, getSubscription, listPlans, stripeConfigured } from '../../../server/stripe.js'
 import { getSignup } from '../../../server/onboarding.js'
+import { recoveryFor } from '../../../server/lifecycle.js'
 
 const isBilled = async (db, customerId, sub) => Boolean(sub?.stripeSubscriptionId) || Boolean(await getSignup(db, customerId))
 
@@ -22,6 +23,7 @@ export async function onRequestGet({ request, env }) {
     billed: await isBilled(env.ONBOARDING_DB, session.customer.id, sub),
     plans,
     subscription: sub && { status: sub.status, planId: sub.planId, currentPeriodEnd: sub.currentPeriodEnd, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, manageable: Boolean(sub.stripeCustomerId) },
+    recovery: await recoveryFor(env, session.customer.id),
   })
 }
 

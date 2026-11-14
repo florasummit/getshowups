@@ -18,6 +18,8 @@ const ATTENTION = {
   checkout_abandoned: 'Signed up, didn’t pay',
   cancel_scheduled: 'Cancellation scheduled',
   subscription_ended: 'Subscription ended',
+  recovery_ending: 'Recovery period ends within 14 days',
+  recovery_ended: 'Recovery period over',
   invite_pending: 'Invite not accepted',
   no_owner: 'No owner',
   no_recent_bookings: 'No bookings in 14 days',
@@ -347,6 +349,8 @@ function CustomerDetail({ id, onBack, onChanged }) {
         )}
       </section>
 
+      {d.lifecycle && <Lifecycle l={d.lifecycle} />}
+
       {d.deletion?.enabled && <Deletion id={d.id} deletion={d.deletion} onDone={() => (load(), onChanged())} />}
 
       <section className="card" aria-label="Test business">
@@ -456,6 +460,59 @@ function Plans() {
 }
 
 // One row per business in the platform lists (Customers, Test businesses).
+// Where the business stands in its lifecycle: billing, hosting, ads hold, recovery window, deletion.
+const STAGES = {
+  subscribed: 'Subscribed',
+  not_billed: 'Not billed (pilot / invited)',
+  payment_problem: 'Payment problem',
+  cancel_scheduled: 'Cancellation scheduled',
+  canceled_recoverable: 'Canceled — recoverable',
+  recovery_ended: 'Canceled — recovery period over',
+  deleting: 'Being deleted',
+  deleted: 'Deleted',
+}
+const HOLDS = { suspended: 'suspended by GetShowUps', payment_failed: 'payment failed', subscription_ended: 'subscription ended', account_deleted: 'account deleted' }
+function Lifecycle({ l }) {
+  return (
+    <section className="card" aria-labelledby="lifecycle-title">
+      <h2 className="card-title" id="lifecycle-title">
+        Lifecycle
+      </h2>
+      <dl className="kv" data-stage={l.stage}>
+        <div>
+          <dt>Stage</dt>
+          <dd>{STAGES[l.stage] || l.stage}</dd>
+        </div>
+        <div>
+          <dt>Subscription</dt>
+          <dd>
+            {l.subscription
+              ? `${l.subscription.status}${l.subscription.currentPeriodEnd ? ` · ${l.subscription.cancelAtPeriodEnd ? 'ends' : 'period ends'} ${date(l.subscription.currentPeriodEnd)}` : ''}`
+              : 'none'}
+          </dd>
+        </div>
+        <div>
+          <dt>Website hosting</dt>
+          <dd>{l.hosting.exempt ? 'active (not billed)' : l.hosting.status === 'grace' ? `grace until ${date(l.hosting.until)}` : l.hosting.status}</dd>
+        </div>
+        <div>
+          <dt>Ads</dt>
+          <dd data-ads-hold={l.adsHold || 'none'}>{l.adsHold ? `on hold: ${HOLDS[l.adsHold] || l.adsHold}` : 'no hold'}</dd>
+        </div>
+        {l.recovery && (
+          <div>
+            <dt>Recovery</dt>
+            <dd>
+              {l.recovery.expired ? `over since ${date(l.recovery.until)}` : `until ${date(l.recovery.until)} (${l.recovery.daysLeft} days)`}
+              {l.recovery.retentionScheduled ? ' · then removed (retention schedule on)' : ' · no retention schedule yet (decision pending)'}
+            </dd>
+          </div>
+        )}
+      </dl>
+    </section>
+  )
+}
+
 // Permanent account deletion (on a verified request) and the status of a running one.
 const DELETION_STEPS = { lockout: 'Turning services off', ads: 'Pausing ads', billing: 'Ending billing', integrations: 'Disconnecting integrations', data: 'Erasing data', verify: 'Verifying', done: 'Done' }
 function Deletion({ id, deletion, onDone }) {
@@ -511,6 +568,79 @@ function Deletion({ id, deletion, onDone }) {
         <p className="form-error" role="alert">
           {error}
         </p>
+      )}
+    </section>
+  )
+}
+
+// Billing reconciliation: Stripe vs our records (daily + on demand). Report only; resync one business on request.
+function Reconciliation() {
+  const [r, setR] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState(null)
+  useEffect(() => {
+    api('/api/platform/reconcile').then(({ status, data }) => setR(status === 200 ? data : { error: true }))
+  }, [])
+  const run = async () => {
+    setBusy(true)
+    const { status, data } = await api('/api/platform/reconcile', { method: 'POST', body: { action: 'run' } })
+    setBusy(false)
+    if (status === 200) setR(data)
+    else setNote(`Couldn’t run it (${data.error || status}).`)
+  }
+  const resync = async (customer) => {
+    const { status, data } = await api('/api/platform/reconcile', { method: 'POST', body: { action: 'resync', customer, confirm: true } })
+    setNote(status === 200 ? `${customer}: updated from Stripe (${data.status}).` : `${customer}: couldn’t resync (${data.error || status}).`)
+  }
+  const last = r?.last
+  return (
+    <section className="card" aria-labelledby="reconcile-title">
+      <h2 className="card-title" id="reconcile-title">
+        Billing reconciliation
+      </h2>
+      {!r ? (
+        <p className="fine">Loading…</p>
+      ) : r.error ? (
+        <p className="empty">Not available.</p>
+      ) : (
+        <>
+          <p className={last?.issues ? 'form-error' : 'fine'} role="status" data-reconcile={last ? (last.issues ? 'issues' : 'clean') : 'never'}>
+            {!last
+              ? 'Not run yet (it runs daily).'
+              : last.issues
+                ? `${last.issues} difference${last.issues === 1 ? '' : 's'} between Stripe and our records (checked ${date(last.at)}).`
+                : `Stripe and our records match: ${last.checked.subscriptions} subscriptions, ${last.checked.invoices} paid invoices in ${last.checked.windowDays} days (checked ${date(last.at)}).`}
+          </p>
+          {last?.list?.length > 0 && (
+            <ul className="rows">
+              {last.list.map((i, n) => (
+                <li key={n} className="row">
+                  <div className="row-main">
+                    <p className="row-title">{r.labels[i.type] || i.type}</p>
+                    <p className="row-sub">
+                      {i.customer || 'unknown business'} · {i.subscription || i.invoice}
+                      {i.ours !== undefined ? ` · ours ${String(i.ours)}` : ''}
+                      {i.stripe !== undefined ? ` · Stripe ${String(i.stripe)}` : ''}
+                    </p>
+                  </div>
+                  {i.customer && ['status_mismatch', 'amount_mismatch', 'cancel_mismatch'].includes(i.type) && (
+                    <button type="button" className="btn btn-sm btn-quiet" onClick={() => resync(i.customer)}>
+                      Resync from Stripe
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <button type="button" className="btn btn-sm btn-quiet" disabled={busy} onClick={run}>
+            {busy ? 'Checking…' : 'Run now'}
+          </button>
+          {note && (
+            <p className="fine" role="status">
+              {note}
+            </p>
+          )}
+        </>
       )}
     </section>
   )
@@ -690,6 +820,8 @@ function Overview({ me }) {
       )}
 
       {me.billingConfigured && <Plans />}
+
+      {me.billingConfigured && <Reconciliation />}
 
       <AuditLog />
 

@@ -1,5 +1,6 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
 // Test records (server/testdata.js) are excluded from every count.
+import { recoveryFor } from './lifecycle.js'
 import { runningOnHold } from './ads/holds.js'
 import { internalEmails, isTestLead } from './testdata.js'
 import { isTestBusinessSql } from './testbusiness.js'
@@ -55,7 +56,12 @@ export async function customerRows(env, now = Date.now()) {
     const attention = []
     if (r.status === 'suspended') attention.push('suspended')
     if (r.sub_status === 'past_due') attention.push('past_due')
-    if (r.sub_status === 'canceled') attention.push('subscription_ended')
+    if (r.sub_status === 'canceled') {
+      attention.push('subscription_ended')
+      const rec = await recoveryFor(env, r.id, now)
+      if (rec?.expired) attention.push('recovery_ended')
+      else if (rec && rec.until - now < 14 * DAY) attention.push('recovery_ending')
+    }
     if (r.cancel_at_period_end && r.sub_status !== 'canceled') attention.push('cancel_scheduled')
     // Self-serve signup that never completed checkout within a day.
     if (r.self_serve && (!r.sub_status || r.sub_status === 'incomplete') && now - r.created_at > DAY) attention.push('checkout_abandoned')

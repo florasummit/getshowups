@@ -309,3 +309,21 @@ export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscr
   }
   return { ok: true, canceled, customerDeleted }
 }
+
+// ---------- reconciliation (read-only) ----------
+// Lists every subscription (all statuses) and the paid invoices since a time, following Stripe's pagination.
+async function listAll(env, path, params, cap = 1000) {
+  const out = []
+  let after
+  for (;;) {
+    const r = await stripePost(env, path, { ...params, limit: 100, starting_after: after }, { method: 'GET' })
+    if (!r.ok) return r
+    out.push(...(r.body.data || []))
+    if (!r.body.has_more || out.length >= cap || !out.length) return { ok: true, data: out }
+    after = out.at(-1).id
+  }
+}
+export const listStripeSubscriptions = (env) => listAll(env, '/subscriptions', { status: 'all' })
+export const listPaidInvoices = (env, sinceSec) => listAll(env, '/invoices', { status: 'paid', created: { gte: sinceSec } })
+export const fetchStripeSubscription = (env, id) => stripePost(env, `/subscriptions/${encodeURIComponent(id)}`, {}, { method: 'GET' })
+export const stripeStatus = (s) => (s === 'deleted' ? 'canceled' : STATUS[s] || 'incomplete')

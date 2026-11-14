@@ -9,7 +9,7 @@ import { createHmac } from 'node:crypto'
 // Stripe-format events to the app's webhook, signed with the e2e webhook secret (t=…,v1=HMAC-SHA256).
 const APP = `http://127.0.0.1:${process.env.E2E_PORT || 8788}`
 const WHSEC = process.env.E2E_STRIPE_WEBHOOK_SECRET || ''
-const stripe = { customers: new Map(), sessions: new Map(), subs: new Map(), n: 0 }
+const stripe = { customers: new Map(), sessions: new Map(), subs: new Map(), invoices: [], n: 0 }
 // MOCK: the account-deletion business's subscription (seeded in D1 by serve.sh with the same ids).
 stripe.customers.set('cus_E2EDEL', { id: 'cus_E2EDEL', metadata: { customer: 'e2e-delete' } })
 stripe.subs.set('sub_E2EDEL', { id: 'sub_E2EDEL', customer: 'cus_E2EDEL', status: 'active', metadata: { customer: 'e2e-delete', plan: 'founding' }, price: 'price_e2e' })
@@ -65,7 +65,11 @@ async function stripeMock(req, res, url, raw) {
     return send(res, 200, { id: cus[1], object: 'customer', deleted: true })
   }
   if (p === '/v1/subscriptions' && req.method === 'GET') {
-    return send(res, 200, { data: [...stripe.subs.values()].filter((s) => s.customer === url.searchParams.get('customer')).map(subObject) })
+    const cus = url.searchParams.get('customer')
+    return send(res, 200, { data: [...stripe.subs.values()].filter((s) => !cus || s.customer === cus).map(subObject), has_more: false })
+  }
+  if (p === '/v1/invoices' && req.method === 'GET') {
+    return send(res, 200, { data: stripe.invoices.filter((i) => i.created >= Number(url.searchParams.get('created[gte]') || 0)), has_more: false })
   }
   if (p === '/v1/checkout/sessions' && req.method === 'GET') {
     const open = [...stripe.sessions.values()].filter((s) => s.customer === url.searchParams.get('customer') && s.status === 'open')
@@ -102,7 +106,9 @@ async function stripeMock(req, res, url, raw) {
     stripe.subs.set(sub.id, sub)
     await sendEvent('checkout.session.completed', { id: s.id, object: 'checkout.session', customer: s.customer, subscription: sub.id, client_reference_id: s.client_reference_id, metadata: s.metadata, mode: 'subscription' })
     await sendEvent('customer.subscription.created', subObject(sub), { times: 2 }) // duplicate delivery on purpose
-    await sendEvent('invoice.paid', { id: nextId('in'), object: 'invoice', customer: s.customer, amount_paid: 49900, currency: 'usd', parent: { type: 'subscription_details', subscription_details: { subscription: sub.id, metadata: sub.metadata } } })
+    const invoice = { id: nextId('in'), object: 'invoice', status: 'paid', created: Math.floor(Date.now() / 1000), customer: s.customer, amount_paid: 49900, currency: 'usd', parent: { type: 'subscription_details', subscription_details: { subscription: sub.id, metadata: sub.metadata } } }
+    stripe.invoices.push(invoice)
+    await sendEvent('invoice.paid', invoice)
     res.writeHead(303, { Location: s.success_url })
     return res.end()
   }
