@@ -26,7 +26,9 @@ and Ads connections stay as they are (they belong to the business, not the membe
 **Fixed on this branch:** platform metrics no longer report Stripe test-mode subscriptions as revenue. Until
 `STRIPE_LIVE_ENABLED=true` every subscription is test mode (the webhook refuses live events), so MRR/ARR/paying/revenue/
 churn are null with `billing.mode: 'test'` and a test-subscription count; the console says "Test mode (no revenue)".
-Before switching live billing on, record `livemode` per subscription so old test rows never count (follow-up).
+Live/test is now recorded per subscription and payment (branch feature/billing-livemode, stacked on this one: migration
+0013 `subscription_modes`, new table only; webhook stores `event.livemode`; live revenue counts live-marked records only;
+missing table → webhooks still succeed, nothing counts). Apply 0013 on production (approval) before STRIPE_LIVE_ENABLED.
 The main metrics row shows job completion instead of the always-empty show-up rate when only on-site data exists.
 
 **Verified already implemented (no change needed):** on-site outcomes (visit happened, job completed, self-reported
