@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Ads safety stop (2026-11-14) — branch feature/ads-billing-hold, NOT deployed
+
+Defect: running campaigns kept running after a failed payment, an ended subscription, or an admin suspension (only
+launch/resume checked billing). Fix (owner decision 2026-11-14): server/ads/holds.js derives a hold from records and
+pauses every running campaign on its platform, then reads it back from Google; launch/Start refused (`ads_on_hold`).
+Triggers: Stripe webhook (waitUntil after the receipt), admin suspend (inline; counts in audit + admin UI), cron sweep
+every 5 min (retries). Billing holds only for billed businesses (PoolThru exempt). No migration. Tests: 333 unit
+(+7), 69 Playwright (+1: admin suspension pauses a running test-account campaign; owner notice; Start refused;
+reactivation restarts nothing). All Google calls mocked; no production Ads change. Compliance doc: open item 4 (confirm
+the pause-only safety stop with Google before real spend).
+Next: permanent audit log → deletion workflow (gated) → 90-day cancellation recovery → reconciliation → admin views.
+
 ## Released 2026-11-14: PRs #17, #18, #19 (merge commits 90e9057, be8224a, feb34f1)
 
 Production deployment **14afca51** (feb34f1); intermediate a5b3c698 (#17), e5f794a1 (#18). Rollback target:

@@ -138,7 +138,7 @@ async function session(email) {
   db.sql.prepare('INSERT OR IGNORE INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)').run(await sha256Hex(token), email, Date.now(), Date.now() + DAY)
   return `__Host-gsu_session=${token}`
 }
-async function call(mod, method, path, { cookie, origin = ORIGIN, body, headers = {}, params, raw } = {}) {
+async function call(mod, method, path, { cookie, origin = ORIGIN, body, headers = {}, params, raw, waitUntil } = {}) {
   const h = { 'CF-Connecting-IP': '203.0.113.5', ...headers }
   if (cookie) h.Cookie = cookie
   if (method === 'POST') h.Origin = origin
@@ -146,6 +146,7 @@ async function call(mod, method, path, { cookie, origin = ORIGIN, body, headers 
     request: new Request(ORIGIN + path, { method, headers: h, body: raw ?? (body === undefined ? undefined : JSON.stringify(body)) }),
     env,
     params,
+    waitUntil,
   })
   const text = await res.clone().text()
   responses.push(text)
@@ -391,9 +392,29 @@ async function signed(event, { secret = WHSEC, t = Math.floor(Date.now() / 1000)
   const raw = JSON.stringify({ livemode: false, ...event }) // real Stripe events always carry livemode
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const sig = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${raw}`))), (b) => b.toString(16).padStart(2, '0')).join('')
-  return call(webhook, 'POST', '/api/stripe/webhook', { raw, headers: { 'Stripe-Signature': `t=${t},v1=${sig}` } })
+  return call(webhook, 'POST', '/api/stripe/webhook', { raw, headers: { 'Stripe-Signature': `t=${t},v1=${sig}` }, waitUntil })
 }
+let waitUntil // set by a test to see the webhook hand follow-up work (ads holds) to the runtime
 const subEvent = (id, type, created, sub) => ({ id, type, created, data: { object: { id: 'sub_1', customer: 'cus_1', metadata: { customer: 'alpha' }, currency: 'usd', current_period_end: 1900000000, cancel_at_period_end: false, items: { data: [{ quantity: 1, price: { id: 'price_TEST123', unit_amount: 12000, recurring: { interval: 'month', interval_count: 1 } } }] }, ...sub } } })
+
+test('webhook: billing follow-up (ads hold check) runs after the receipt via waitUntil; payments recorded for holds', async () => {
+  configureStripe()
+  seed('alpha')
+  const pending = []
+  waitUntil = (p) => pending.push(p)
+  try {
+    const r = await signed(subEvent('evt_w1', 'customer.subscription.updated', Math.floor(Date.now() / 1000), { status: 'past_due' }))
+    assert.equal(r.status, 200)
+    assert.equal(pending.length, 1, 'handed to the runtime, not awaited before responding')
+    await Promise.all(pending)
+    const paid = await signed({ id: 'evt_w2', type: 'invoice.paid', created: Math.floor(Date.now() / 1000), data: { object: { id: 'in_w', customer: 'cus_1', amount_paid: 0, currency: 'usd', metadata: { customer: 'alpha' } } } })
+    assert.equal(paid.status, 200)
+    assert.ok(db.sql.prepare("SELECT 1 FROM events WHERE type = 'payment_succeeded' AND customer = 'alpha'").get(), '$0 payments count as paid for holds')
+    assert.equal(db.sql.prepare("SELECT count(*) n FROM events WHERE type = 'revenue'").get().n, 0, 'but are not revenue')
+  } finally {
+    waitUntil = undefined
+  }
+})
 
 test('webhook: signature required, stale timestamps rejected', async () => {
   configureStripe()

@@ -1252,3 +1252,131 @@ test('read route + campaign actions: owner-only, same-origin, tenant isolated, a
   assert.deepEqual([(await post(owner, { action: 'resume', id: 'cmp_abc123' })).status], [409])
   assert.equal(db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status, 'paused')
 })
+
+// ---------- ads holds: the safety stop (owner decision 2026-11-14) ----------
+// MOCK Google Ads with state: campaigns:mutate status updates change what the read-back returns.
+async function holdSetup() {
+  const C = await import('../server/ads/campaigns.js')
+  const S = await import('../server/stripe.js')
+  const H = await import('../server/ads/holds.js')
+  Object.assign(env, { STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_WEBHOOK_SECRET: 'whsec_fake' }) // billing configured (test mode)
+  const now = Date.now()
+  // A billed self-serve business with an active subscription.
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at, onboarded_at) VALUES ('pools', 'founding', ?, ?)").run(now, now)
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, last_event_at, updated_at) VALUES ('pools', 'cus_P', 'sub_P', 'active', ?, ?)").run(now - 60000, now)
+  await connected()
+  db.sql.prepare("INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('b1', 'pools', 300000, 'owner@pools.example', ?)").run(now)
+  const spec = { ...campaign().spec, finalUrl: 'https://pools.example/book' }
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, approved_by, approved_at, created_at, updated_at) VALUES ('cmp_abc123', 'pools', 'google', 'approved', ?, 2500, 'owner@pools.example', ?, ?, ?)").run(JSON.stringify(spec), now, now, now)
+  const g = { status: 'PAUSED', failPause: false }
+  ads = (path, body, h) => {
+    if (/campaigns:mutate$/.test(path)) {
+      const st = body.operations[0].update.status
+      if (st === 'PAUSED' && g.failPause) return reply(503, { error: { code: 503, status: 'UNAVAILABLE', message: LEAK } })
+      if (st) g.status = st
+    }
+    return verifyMock(spec, { status: g.status })(path, body, h)
+  }
+  const pools = { id: 'pools' }
+  assert.equal((await C.launch(env, pools, 'cmp_abc123', 'owner@pools.example', { live: true })).ok, true)
+  assert.deepEqual(await C.setCampaignStatus(env, pools, 'cmp_abc123', 'active', 'owner:owner@pools.example'), { ok: true, status: 'active' })
+  assert.equal(g.status, 'ENABLED', 'running on Google (test account)')
+  let t = Math.floor(now / 1000) + 10
+  // Delivers one Stripe event the way the webhook does: store, then run the follow-up work.
+  const stripe = async (type, object) => {
+    const after = []
+    await S.handleEvent(env, { id: `evt_${t}`, type, created: t++, livemode: false, data: { object } }, { after: (fn) => after.push(fn) })
+    const out = []
+    for (const fn of after) out.push(await fn())
+    return out
+  }
+  const sub = (status) => ({ id: 'sub_P', customer: 'cus_P', status, metadata: { customer: 'pools' }, items: { data: [] } })
+  const rowStatus = () => db.sql.prepare("SELECT status FROM ad_campaigns WHERE id = 'cmp_abc123'").get().status
+  const pauses = () => db.sql.prepare("SELECT actor, status, reason, details FROM ad_actions WHERE kind = 'pause' ORDER BY at, rowid").all()
+  return { C, S, H, g, pools, stripe, sub, rowStatus, pauses }
+}
+
+test('ads hold: the FIRST failed payment pauses running campaigns on Google at once and reads them back; Start is refused', async () => {
+  const { C, H, g, pools, stripe, rowStatus, pauses } = await holdSetup()
+  // invoice.payment_failed arrives before Stripe's subscription update (still 'active' locally).
+  const [r] = await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' })
+  assert.deepEqual(r, { hold: 'payment_failed', paused: 1, verified: 1, failed: 0 })
+  assert.equal(g.status, 'PAUSED', 'paused on Google')
+  assert.equal(rowStatus(), 'paused')
+  const [p] = pauses().filter((x) => x.actor === 'system:billing')
+  assert.match(p.reason, /Paused automatically: a subscription payment failed/)
+  assert.equal(JSON.parse(p.details).hold, 'payment_failed')
+  assert.ok(db.sql.prepare("SELECT 1 FROM ad_actions WHERE kind = 'verify' AND status = 'applied'").get(), 'read back from Google')
+  // Nothing may start while the payment problem lasts (owner Start, launch of another campaign).
+  assert.deepEqual(await C.setCampaignStatus(env, pools, 'cmp_abc123', 'active', 'owner:owner@pools.example'), { ok: false, error: 'ads_on_hold', hold: 'payment_failed' })
+  assert.equal(g.status, 'PAUSED')
+  assert.deepEqual(await H.adsHold(env, 'salon'), null, 'other businesses unaffected')
+})
+
+test('ads hold: payment fixed → hold lifts but nothing restarts by itself; the owner starts it again', async () => {
+  const { C, H, g, pools, stripe, sub, rowStatus } = await holdSetup()
+  await stripe('invoice.payment_failed', { id: 'in_1', customer: 'cus_P' })
+  await stripe('customer.subscription.updated', sub('past_due'))
+  assert.equal((await H.adsHold(env, 'pools')).reason, 'payment_failed')
+  // Stripe's retry succeeds.
+  await stripe('invoice.paid', { id: 'in_1', customer: 'cus_P', amount_paid: 49900, currency: 'usd' })
+  const [after] = await stripe('customer.subscription.updated', sub('active'))
+  assert.equal(after.hold, null)
+  assert.equal(await H.adsHold(env, 'pools'), null)
+  assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'], 'never resumed automatically')
+  assert.deepEqual(await C.setCampaignStatus(env, pools, 'cmp_abc123', 'active', 'owner:owner@pools.example'), { ok: true, status: 'active' })
+  assert.equal(g.status, 'ENABLED')
+})
+
+test('ads hold: subscription ended → paused; a failed pause on Google is recorded and retried by the cron sweep', async () => {
+  const { H, g, stripe, sub, rowStatus, pauses } = await holdSetup()
+  g.failPause = true
+  const [r] = await stripe('customer.subscription.deleted', sub('canceled'))
+  assert.deepEqual([r.hold, r.paused, r.failed], ['subscription_ended', 0, 1])
+  assert.deepEqual([rowStatus(), g.status], ['active', 'ENABLED'], 'still running: not claimed as paused')
+  assert.equal(pauses().at(-1).status, 'failed')
+  // Next cron run: Google answers again → paused and read back.
+  g.failPause = false
+  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 1, held: 1, paused: 1, failed: 0 })
+  assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'])
+  assert.deepEqual(await H.enforceAdsHolds(env), { checked: 0, held: 0, paused: 0, failed: 0 }, 'nothing left running')
+  // If Google later shows it running again (changed inside Google Ads), the daily read-back marks it active and the sweep pauses it.
+  g.status = 'ENABLED'
+  const C = await import('../server/ads/campaigns.js')
+  await C.verifyLaunched(env, { now: Date.now() + 2 * 86400000 })
+  assert.equal(rowStatus(), 'active')
+  assert.equal((await H.enforceAdsHolds(env)).paused, 1)
+  assert.equal(g.status, 'PAUSED')
+})
+
+test('ads hold: platform admin suspension pauses running campaigns immediately (audited); reactivation restarts nothing', async () => {
+  const { g, rowStatus } = await holdSetup()
+  const statusRoute = await import('../functions/api/platform/status.js')
+  env.PLATFORM_ADMIN_EMAILS = 'founder@getshowups.example'
+  const cookie = await session('founder@getshowups.example')
+  const res = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'suspended', reason: 'policy review' } })
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.json().ads, { paused: 1, verified: 1, failed: 0 })
+  assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'])
+  const audit = db.sql.prepare("SELECT action, details FROM admin_audit WHERE customer = 'pools'").get()
+  assert.equal(audit.action, 'customer.suspend')
+  assert.deepEqual(JSON.parse(audit.details), { reason: 'policy review', adsPaused: 1, adsVerified: 1, adsFailed: 0 })
+  assert.equal(db.sql.prepare("SELECT actor FROM ad_actions WHERE kind = 'pause'").get().actor, 'admin:founder@getshowups.example')
+  const back = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'active' } })
+  assert.equal(back.status, 200)
+  assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'], 'reactivation never restarts ads')
+})
+
+test('ads hold: never-billed pilot (PoolThru-like) is never held for billing; suspension still applies to it', async () => {
+  const H = await import('../server/ads/holds.js')
+  Object.assign(env, { STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_WEBHOOK_SECRET: 'whsec_fake' })
+  db.sql.prepare("INSERT INTO subscriptions (customer, status, updated_at) VALUES ('pools', 'incomplete', 1)").run() // stale placeholder, no Stripe subscription
+  db.sql.prepare("INSERT INTO events (id, type, customer, at, props) VALUES ('stripe:evt_x', 'payment_failed', 'pools', ?, '{}')").run(Date.now())
+  assert.equal(await H.adsHold(env, 'pools'), null)
+  db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'pools'").run()
+  assert.deepEqual(await H.adsHold(env, 'pools'), { reason: 'suspended' })
+  // Billing not configured at all: only suspension can hold.
+  delete env.STRIPE_SECRET_KEY
+  db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'pools'").run()
+  assert.equal(await H.adsHold(env, 'pools'), null)
+})

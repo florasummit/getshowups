@@ -2,6 +2,7 @@
 // downgrades, cancellation and reactivation, and signed webhooks to mirror subscription state.
 // Configured only when STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are set. No card data is stored;
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
+import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
 import { testStatus } from './testbusiness.js'
@@ -210,7 +211,10 @@ async function recordMode(db, customer, event) {
 }
 
 // Applies one verified event. Throws on storage errors so the caller can let Stripe retry.
-export async function handleEvent(env, event) {
+// after(fn): work that must follow the stored change but must not fail or delay the receipt (ads holds:
+// pausing campaigns on Google). The webhook runs it after responding; the cron sweep retries any failure.
+export async function handleEvent(env, event, { after = null } = {}) {
+  const holdCheck = (customer) => after?.(() => enforceAdsHold(env, customer, { actor: 'system:billing' }))
   const db = env.ONBOARDING_DB
   const obj = event.data?.object || {}
   const customer = await customerFor(db, obj)
@@ -229,15 +233,23 @@ export async function handleEvent(env, event) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
-      if (customer) await upsertSubscription(env, customer, event, obj)
+      if (customer) {
+        await upsertSubscription(env, customer, event, obj)
+        holdCheck(customer)
+      }
       return { handled: Boolean(customer) }
     case 'invoice.paid':
+      // Any successful payment (including $0) closes an earlier payment failure for ads holds.
+      if (customer) await track(env, 'payment_succeeded', { id: `paid:${obj.id}`, customer, at: event.created * 1000 })
       if (customer && obj.amount_paid > 0) {
         await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency, livemode: event.livemode === true }, at: event.created * 1000 })
       }
       return { handled: Boolean(customer) }
     case 'invoice.payment_failed':
-      if (customer) await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
+      if (customer) {
+        await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
+        holdCheck(customer) // owner decision: ads pause on the first failed payment
+      }
       return { handled: Boolean(customer) }
     default:
       return { handled: false }

@@ -190,6 +190,7 @@ function CustomerDetail({ id, onBack, onChanged }) {
   const [d, setD] = useState(null)
   const [health, setHealth] = useState(null)
   const [confirming, setConfirming] = useState(false)
+  const [statusResult, setStatusResult] = useState(null)
   const [linkResult, setLinkResult] = useState(null)
   const load = useCallback(() => api(`/api/platform/customer?id=${id}`).then(({ status, data }) => setD(status === 200 ? data : { error: true })), [id])
   useEffect(() => {
@@ -209,7 +210,8 @@ function CustomerDetail({ id, onBack, onChanged }) {
     onChanged()
   }
   const setStatus = async (status) => {
-    await api('/api/platform/status', { method: 'POST', body: { customer: id, status } })
+    const { data } = await api('/api/platform/status', { method: 'POST', body: { customer: id, status } })
+    setStatusResult(data?.ads ?? null)
     setConfirming(false)
     load()
     onChanged()
@@ -311,13 +313,16 @@ function CustomerDetail({ id, onBack, onChanged }) {
         <h2 className="card-title">Account</h2>
         {d.status === 'active' ? (
           confirming ? (
-            <div className="row-actions">
-              <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirming(false)}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn-sm btn-danger" onClick={() => setStatus('suspended')}>
-                Confirm: pause booking page
-              </button>
+            <div className="stack">
+              <p className="fine">Pauses the booking page and, right away, every running ad campaign (checked on Google). Reactivating never restarts ads; the owner does that.</p>
+              <div className="row-actions">
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirming(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-sm btn-danger" onClick={() => setStatus('suspended')}>
+                  Confirm: pause booking page and ads
+                </button>
+              </div>
             </div>
           ) : (
             <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirming(true)}>
@@ -325,9 +330,18 @@ function CustomerDetail({ id, onBack, onChanged }) {
             </button>
           )
         ) : (
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => setStatus('active')}>
-            Reactivate account
-          </button>
+          <>
+            {statusResult && (
+              <p className={statusResult.failed ? 'form-error' : 'fine'} role="status" data-ads-paused={statusResult.paused}>
+                Ads: {statusResult.paused} campaign{statusResult.paused === 1 ? '' : 's'} paused
+                {statusResult.verified ? ` (${statusResult.verified} confirmed on Google)` : ''}
+                {statusResult.failed ? `; ${statusResult.failed > 0 ? statusResult.failed : 'some'} couldn’t be paused yet, retrying every few minutes` : ''}.
+              </p>
+            )}
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setStatus('active')}>
+              Reactivate account
+            </button>
+          </>
         )}
       </section>
 

@@ -8,6 +8,7 @@ import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
+import { enforceAdsHolds } from '../../../server/ads/holds.js'
 import { runOptimizer } from '../../../server/ads/optimizer.js'
 import { pollVideos } from '../../../server/ads/creative.js'
 import { checkDueDomains } from '../../../server/domains.js'
@@ -34,6 +35,9 @@ export async function onRequestPost({ request, env }) {
     const onboardingQueued = await queueFollowUps(env)
     const outbox = await flushOutbox(env)
     const ads = {
+      // First: the safety stop. Businesses on hold (failed payment, ended subscription, suspension) get any
+      // still-running campaign paused (retries failed webhook-time pauses). Owner-approved; decrease-only.
+      holds: await adsStep('holds', () => enforceAdsHolds(env)),
       metrics: await adsStep('metrics', () => syncMetrics(env)),
       verify: await adsStep('verify', () => verifyLaunched(env)),
       clickIds: await adsStep('click ids', () => purgeClickIds(env)),

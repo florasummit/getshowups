@@ -617,3 +617,15 @@ test('release switch: without ADS_ENABLED every ads dashboard route is 404 and m
   const me = await import('../functions/api/dashboard/me.js')
   assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false })
 })
+
+test('ads hold: the Ads screen says why ads are paused (suspended / failed payment), per business only', async () => {
+  const owners = { pools: await cookieFor('owner@pools.example'), salon: await cookieFor('owner@salon.example') }
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold, null)
+  db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'pools'").run()
+  assert.deepEqual((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold, { reason: 'suspended', text: 'GetShowUps paused this business' })
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.salon })).json.hold, null, 'isolated')
+  db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'pools'").run()
+  Object.assign(env, { STRIPE_SECRET_KEY: 'sk_test_fake', STRIPE_WEBHOOK_SECRET: 'whsec_fake' })
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, last_event_at, updated_at) VALUES ('pools', 'cus_P', 'sub_P', 'past_due', 1, 1)").run()
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: owners.pools })).json.hold.reason, 'payment_failed')
+})

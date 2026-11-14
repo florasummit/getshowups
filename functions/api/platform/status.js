@@ -1,10 +1,12 @@
 // POST /api/platform/status — { customer, status: "active" | "suspended", reason? }.
-// Manual only (there is no automatic suspension). Suspension pauses the public booking page; the
-// owner keeps dashboard, billing, and reactivation access.
+// Manual only (there is no automatic suspension). Suspension pauses the public booking page and,
+// immediately, every running ad campaign (server/ads/holds.js; read back from Google). The owner keeps
+// dashboard, billing, and reactivation access. Reactivation never restarts ads: the owner does that.
 import { json } from '../../../server/google-oauth.js'
 import { audit, requirePlatformAdmin } from '../../../server/platform.js'
 import { CUSTOMER_RE } from '../../../server/invites.js'
 import { track } from '../../../server/events.js'
+import { enforceAdsHold } from '../../../server/ads/holds.js'
 
 export async function onRequestPost({ request, env }) {
   const { admin, response } = await requirePlatformAdmin(request, env, { write: true })
@@ -18,7 +20,14 @@ export async function onRequestPost({ request, env }) {
     .first()
   if (!row) return json(404, { error: 'not_found' })
   const reason = String(body?.reason || '').slice(0, 200)
-  await audit(env, admin.email, `customer.${status === 'suspended' ? 'suspend' : 'reactivate'}`, customer, { reason })
+  let ads = null
+  if (status === 'suspended') {
+    ads = await enforceAdsHold(env, customer, { actor: `admin:${admin.email}` }).catch((err) => {
+      console.error('suspend: ads pause failed:', err?.name)
+      return { hold: 'suspended', paused: 0, verified: 0, failed: -1 } // the cron sweep retries
+    })
+  }
+  await audit(env, admin.email, `customer.${status === 'suspended' ? 'suspend' : 'reactivate'}`, customer, { reason, ...(ads ? { adsPaused: ads.paused, adsVerified: ads.verified, adsFailed: ads.failed } : {}) })
   await track(env, status === 'suspended' ? 'account_suspended' : 'account_reactivated', { customer })
-  return json(200, { customer, status })
+  return json(200, { customer, status, ...(ads ? { ads: { paused: ads.paused, verified: ads.verified, failed: ads.failed } } : {}) })
 }

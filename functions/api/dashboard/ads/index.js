@@ -2,6 +2,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { getProfile, listCampaigns, adResults, liveFor } from '../../../../server/ads/campaigns.js'
+import { adsHold, HOLD_REASONS } from '../../../../server/ads/holds.js'
 import { currentApproval, remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
@@ -26,9 +27,11 @@ export async function onRequestGet({ request, env }) {
       db.prepare("SELECT id, kind, status, prompt, error, created_at FROM ad_creatives WHERE customer = ?1 AND status <> 'rejected' ORDER BY created_at DESC LIMIT 24").bind(id).all(),
     ])
     const live = await liveFor(env, id) // false for a test business, whatever ADS_LIVE_LAUNCH says
+    const hold = await adsHold(env, id)
     const connections = Object.fromEntries(conns.results.map((c) => [c.platform, { accountId: c.account_id, accountName: c.account_name, currency: c.currency, status: c.status, testAccount: JSON.parse(c.extra || '{}').testAccount === true }]))
     return json(200, {
       profile,
+      hold: hold ? { reason: hold.reason, text: HOLD_REASONS[hold.reason] } : null,
       campaigns,
       results,
       budget: approval ? { monthlyCents: approval.monthly_cents, dailyCeilingCents: dailyCeilingCents(approval.monthly_cents), remainingDailyCents: remaining, approvedAt: approval.approved_at } : null,

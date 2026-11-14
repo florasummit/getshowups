@@ -33,6 +33,7 @@ const ERRORS = {
   ai_declined: 'The planner couldn’t write this plan. Try changing the services.',
   rate_limited: 'Too many tries. Please wait a few minutes.',
   subscription_required: 'Ads need an active GetShowUps subscription. Open Settings → Billing.',
+  ads_on_hold: 'Ads are paused while there’s a problem with this account (see the notice at the top). Fix it, then press Start.',
   draft_exists: 'You already have a draft. Edit it below, or remove it to start over.',
   account_changed: 'This campaign is in a different Google Ads account than the one connected now. Switch back to manage it, or manage it in Google Ads.',
   removed_on_google: 'This campaign was removed in Google Ads.',
@@ -1096,6 +1097,17 @@ export default function Ads() {
         <p className="mode-note" data-testing-mode>
           <span className="badge badge--test">Test mode</span>
           <span>Only Google Ads test accounts. Test campaigns never show ads, and nothing is ever charged.</span>
+        </p>
+      )}
+      {d.hold && (
+        <p className="form-error" role="alert" data-ads-hold={d.hold.reason}>
+          Your ads are paused because {d.hold.text}.{' '}
+          {d.hold.reason === 'suspended'
+            ? 'Contact GetShowUps to restore the account.'
+            : d.hold.reason === 'account_deleted'
+              ? ''
+              : 'Update your payment in Settings → Billing.'}{' '}
+          Nothing starts again by itself: once it’s fixed, press Start on each campaign you want running.
         </p>
       )}
       {anyLaunched && <Results r={d.results} />}

@@ -8,6 +8,7 @@ import { stripeConfigured, getSubscription } from '../stripe.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 import { normalizeWebsiteUrl } from '../url.js'
 import { conversionsEnabled } from './conversions.js'
+import { adsHold } from './holds.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -239,6 +240,8 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
   }
   const mode = await serveMode(env, row.platform, customer.id, a, row)
   if (!mode) return { ok: false, error: 'live_launch_disabled' }
+  const hold = await adsHold(env, customer.id)
+  if (hold) return { ok: false, error: 'ads_on_hold', hold: hold.reason }
   if (mode === 'live' && !(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
   if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
   // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
@@ -289,6 +292,9 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
     const mode = await serveMode(env, row.platform, customer.id, a, row)
     if (!mode) return { ok: false, error: 'live_launch_disabled' }
     if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
+    // Ads holds (failed payment, ended subscription, suspension): nothing may start until the cause is fixed.
+    const hold = await adsHold(env, customer.id)
+    if (hold) return { ok: false, error: 'ads_on_hold', hold: hold.reason }
     if (mode === 'live' && !(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
     const approval = await currentApproval(db, customer.id)
     if (!approval) return { ok: false, error: 'budget_approval_required' }
