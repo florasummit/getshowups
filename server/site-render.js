@@ -89,7 +89,7 @@ a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offse
 export function renderSite(biz, content, opts = {}) {
   // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
   if (content.design) return renderDesigned(biz, content, opts)
-  const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, year = new Date().getUTCFullYear() } = opts
+  const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = opts
   const c = content
   const accent = COLORS[c.color] || COLORS.ocean
   const visit = biz.appointmentMode === 'at_customer'
@@ -129,7 +129,7 @@ export function renderSite(biz, content, opts = {}) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="${esc(description)}">
-${preview ? '<meta name="robots" content="noindex">' : canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
+${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
 ${canonical ? `<meta property="og:url" content="${esc(canonical)}">` : ''}${c.hero && canonical ? `<meta property="og:image" content="${esc(new URL(img(c.hero), canonical).href)}">` : ''}
 <meta name="theme-color" content="${accent}">
@@ -165,7 +165,8 @@ export function renderNotice(title, text) {
 }
 
 // Strict headers: no scripts at all on business sites, images only from this origin.
-export function htmlResponse(status, html, { preview = false, cache = 'public, max-age=60' } = {}) {
+// noindex: test businesses' public sites must never be indexed by search engines.
+export function htmlResponse(status, html, { preview = false, noindex = false, cache = 'public, max-age=60' } = {}) {
   return new Response(html, {
     status,
     headers: {
@@ -174,7 +175,7 @@ export function htmlResponse(status, html, { preview = false, cache = 'public, m
       'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors ${preview ? "'self'" : "'none'"}`,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
-      ...(preview && { 'X-Robots-Tag': 'noindex' }),
+      ...((preview || noindex) && { 'X-Robots-Tag': 'noindex' }),
     },
   })
 }

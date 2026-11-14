@@ -147,6 +147,22 @@ export async function deleteEvent(env, accessToken, eventId) {
   }
 }
 
+// Owner cancellation: removes our own event and tells the attendee (Google's cancellation notice). Unlike
+// deleteEvent (best-effort cleanup), the caller needs to know: { ok: true } when deleted or already gone (404/410),
+// otherwise { ok: false, error } so the booking is NOT marked cancelled while the event still exists.
+export async function removeEvent(env, accessToken, eventId) {
+  try {
+    const res = await googleFetch(env, `${googleApi(env).calendar}/calendars/primary/events/${encodeURIComponent(eventId)}?sendUpdates=all`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (res.ok || res.status === 404 || res.status === 410) return { ok: true, gone: res.status !== 204 && !res.ok }
+    return { ok: false, error: res.status === 401 || res.status === 403 ? 'calendar_access' : 'calendar_unavailable' }
+  } catch {
+    return { ok: false, error: 'calendar_unavailable' }
+  }
+}
+
 // ---------- availability math (pure, no I/O) ----------
 
 const partsIn = (ts, timeZone) => {

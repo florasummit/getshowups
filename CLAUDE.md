@@ -249,6 +249,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
+- Owner cancellation (POST /api/dashboard/appointment-cancel, server/booking.js cancelAppointment): upcoming bookings only;
+  the Google event (ours, by id) is removed FIRST with sendUpdates=all, and only on success (or already gone) is the
+  booking marked cancelled (slot freed, reminders stop via skipReason). Google unreachable → nothing changes, retry.
+  Cancel + its appointment_changes row are one batch; a save failure after Google removed the event returns
+  cancel_incomplete and records an open failure (retry finds the event gone and completes).
+- Test businesses' public sites always send noindex (meta + X-Robots-Tag; testStatus fails closed).
 - Account deletion (server/deletion.js, migration 0016, docs/DATA_RETENTION.md; owner decision 2026-11-14): permanent, no undo
   window, no founder approval. Owner (Settings, typed business name) or platform admin (typed id, on a verified request).
   Steps lockout → ads (pause + read back; never skipped) → billing (Stripe canceled now + confirmed; customer deleted) →

@@ -1,6 +1,7 @@
 // Serves a business's public website (getshowups.com/p/:id or a connected domain). A site is shown
 // only when it is published, the business is active and bookable, and hosting is included in its plan.
 // Anything else gets the same "not available" page as an unknown address (no information leaks).
+import { testStatus } from './testbusiness.js'
 import { CUSTOMER_RE } from './invites.js'
 import { customerFromRow, siteOrigin } from './auth.js'
 import { getCustomer } from './customers.js'
@@ -38,7 +39,9 @@ export async function serveSite(env, request, id) {
     // Booking always happens on the GetShowUps address (same-origin checks, one sign-in domain).
     const origin = siteOrigin(env)
     const bookUrl = `${origin}/book/${customer.id}${carryQuery(request.url)}`
-    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy` }))
+    // Test businesses (admin-marked) are published for checks only: never indexed (fails closed via testStatus).
+    const noindex = (await testStatus(env, customer.id)).test
+    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex }), { noindex })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })

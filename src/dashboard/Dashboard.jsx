@@ -151,6 +151,15 @@ export default function Dashboard() {
     [resolve],
   )
 
+  // Deep link (e.g. /dashboard/appointments) when only the final "launch" screen is left: record the finish and show
+  // the page asked for, instead of holding the owner on the celebration screen. Plain /dashboard keeps it.
+  const steps = me.data?.progress?.steps
+  const onlyLaunchLeft = Boolean(steps && !me.data.progress.complete && steps.filter((s) => !s.done).map((s) => s.id).join() === 'launch')
+  const deepLink = window.location.pathname.replace(/\/+$/, '') !== '/dashboard'
+  useEffect(() => {
+    if (onlyLaunchLeft && deepLink) api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'finish' } }).then(({ status }) => status === 200 && load())
+  }, [onlyLaunchLeft, deepLink, load])
+
   const noBusiness = Boolean(me.data && !me.data.customer)
   useEffect(() => {
     if (noBusiness) api('/api/platform/me').then(({ status }) => setAdmin(status === 200))
