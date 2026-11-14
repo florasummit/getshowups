@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Released 2026-11-14: PRs #17, #18, #19 (merge commits 90e9057, be8224a, feb34f1)
+
+Production deployment **14afca51** (feb34f1); intermediate a5b3c698 (#17), e5f794a1 (#18). Rollback target:
+f0e4ebad (dcc15f1) via Cloudflare dashboard → Deployments → Rollback, or `git revert -m 1` of the three merges.
+Before: combined suite 317/317 unit, 68/68 Playwright; main tree identical to the tested merge. After (read-only
+production smoke): cancelled sign-in from /admin → /admin, from /dashboard/ads → /dashboard, external `next` → /dashboard;
+/api/platform/me and /api/dashboard/me 401 signed out; PoolThru booking API 200 (160 slots, at_customer); homepage
+sections incl. simulation, controls, labels, no unsupported live claims, honest meta; /admin shows the login error;
+deployed admin code renders test-mode billing as "Test mode (no revenue)". Secret names unchanged; migration 0013 NOT
+applied; no live billing, messaging or ads switched on. Not verified live: the signed-in admin metrics view (needs the
+founder's Google sign-in).
+
 ## Launch readiness audit (2026-11-14) — branch feature/launch-readiness, NOT deployed
 
 Production = `main` dcc15f1. Open PRs: #17 (sign-in routing, CI green, reviewed safe to merge), #16 (journey runner).
