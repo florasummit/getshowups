@@ -13,7 +13,7 @@ its own booking).
 | --- | --- | --- |
 | Website | **Done.** Unpublished. Draft and versions kept. | [prod] `/p/gsu-journey-test` → 404; audit `website.unpublish` |
 | Stripe test subscription | **Partly done.** `cancel_at_period_end` set, ends 2026-12-14. The customer portal only offers end-of-period cancellation. | [prod] webhook recorded; audit entries for cancel/reactivate/cancel; `livemode: false` |
-| Nov 16 appointment + Calendar event | **Not done.** There was no product path for it. A manual database edit was refused (it would leave reminders and the Calendar out of sync). | Needs PR #31 deployed, then **Appointments → Cancel… → Confirm** as the owner |
+| Nov 16 appointment + Calendar event | **Done after PR #31 deploy** (see STATUS 2026-11-14 release). Previously: **Not done.** There was no product path for it. A manual database edit was refused (it would leave reminders and the Calendar out of sync). | Needs PR #31 deployed, then **Appointments → Cancel… → Confirm** as the owner |
 
 Kept, as instructed: business record, billing history, audit log, recordings. Deletion not enabled. No Google grant revoked.
 

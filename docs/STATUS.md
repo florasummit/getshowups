@@ -619,3 +619,16 @@ Everything below is **local and tested**, not in production.
 ## 2026-11-14: post-audit launch readiness
 
 See docs/LAUNCH_READINESS.md. Draft PRs: #30 (review accuracy, +unmark fix 60e7959), #31 (cancel appointments, noindex test sites, deep links). Next action: approve and deploy #30 and #31, then cancel the journey appointment and run the Stripe live activation checklist.
+
+## 2026-11-14: controlled launch-fix release (approved)
+
+- PR #30 merged at 60e7959 → main bd02edc → production deployment 8cfc8acb. Smoke 11/11; Business Review live, evidence
+  dated by real businesses only; one accurate incident: billing.reconcile (4 Stripe-sandbox differences: stripe-only 1,
+  payment not recorded 3).
+- PR #31 merged at 6a65fd5 (incl. cancel-atomicity fix found in final review) → main 1546ed1 → deployment 0be05d2b.
+  Smoke 11/11; deep link /dashboard/appointments opens directly after sign-in.
+- Cleanup: GSU Journey Test appointment ef6c825c… cancelled by the owner in the UI (200): status cancelled, one
+  appointment_changes row, audit seq 13 booking.cancel success; event gone from the connected Google Calendar; other
+  businesses' appointments unchanged; its 2 reminders stay 'scheduled' until send time, where skipReason returns
+  not_needed (and the business is test-only anyway).
+- No migrations, secrets or switches changed. Rollback target: 1db27fd7 (abbbbfa).
