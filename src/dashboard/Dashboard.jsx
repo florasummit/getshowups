@@ -14,6 +14,9 @@ const LOGIN_ERRORS = {
   rate_limited: 'Too many sign-in attempts. Please wait a few minutes.',
 }
 
+// A deep dashboard link (e.g. /dashboard/ads) is where sign-in returns; the server allowlists it.
+const returnTo = () => (/^\/dashboard\/(appointments|website|ads|settings)$/.test(window.location.pathname) ? `?next=${encodeURIComponent(window.location.pathname)}` : '')
+
 // An invitation token arrives as ?invite=… and is kept for this tab until sign-in completes.
 const INVITE_KEY = 'gsu_invite'
 function pendingInvite() {
@@ -68,7 +71,7 @@ function SignIn({ invite, plan }) {
             {message}
           </p>
         )}
-        <a className="btn btn-primary btn-lg btn-block" href="/api/auth/google/start">
+        <a className="btn btn-primary btn-lg btn-block" href={`/api/auth/google/start${returnTo()}`}>
           Continue with Google
         </a>
         <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage.</p>
@@ -120,6 +123,8 @@ export default function Dashboard() {
   const [plan] = useState(pendingPlan)
   const [invitePreview, setInvitePreview] = useState(null)
   const [inviteError, setInviteError] = useState(null)
+  const [admin, setAdmin] = useState(null) // signed in without a business: is this a GetShowUps admin account?
+  const [setupChosen, setSetupChosen] = useState(false)
 
   // Resolves the account, accepting a pending invitation first when the user has no business yet.
   const resolve = useCallback(async () => {
@@ -146,6 +151,11 @@ export default function Dashboard() {
     [resolve],
   )
 
+  const noBusiness = Boolean(me.data && !me.data.customer)
+  useEffect(() => {
+    if (noBusiness) api('/api/platform/me').then(({ status }) => setAdmin(status === 200))
+  }, [noBusiness])
+
   useEffect(() => {
     document.title = 'GetShowUps'
     const cleanup = noIndex()
@@ -169,5 +179,26 @@ export default function Dashboard() {
     )
   }
   if (inviteError && !me.data.customer) return <InviteProblem {...inviteError} email={me.data.email} />
+  if (!me.data.customer && !invite && !plan && admin === null) return <main className="center-page" aria-busy="true" />
+  // A GetShowUps admin account without a business: point to the console instead of silently starting customer
+  // onboarding (setting up a business stays possible).
+  if (!me.data.customer && admin && !setupChosen && !invite && !plan)
+    return (
+      <main className="center-page">
+        <div className="panel panel--narrow enter" data-admin-account>
+          <Logo href="/" />
+          <h1 className="title">You’re signed in with an admin account</h1>
+          <p className="lede">This Google account manages GetShowUps and doesn’t belong to a business.</p>
+          <a className="btn btn-primary btn-lg btn-block" href="/admin">
+            Open the admin console
+          </a>
+          <p className="fine">
+            <button type="button" className="link-btn" onClick={() => setSetupChosen(true)}>
+              Set up a business with this account instead
+            </button>
+          </p>
+        </div>
+      </main>
+    )
   return me.data.progress.complete ? <Home me={me.data} reload={load} /> : <Setup me={me.data} reload={load} />
 }
