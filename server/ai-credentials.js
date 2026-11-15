@@ -4,28 +4,11 @@
 //     fails to decrypt.
 //   - The raw key never leaves the server: views show the provider and the last 4 characters only. Never logged.
 //   - Validated with a read-only provider call before it is stored; invalid keys are never saved.
-import Anthropic from '@anthropic-ai/sdk'
 
 export const PROVIDERS = {
   anthropic: { label: 'Claude (Anthropic)', keyRe: /^sk-ant-[A-Za-z0-9_-]{20,200}$/ },
   openai: { label: 'OpenAI', keyRe: /^sk-[A-Za-z0-9_-]{20,200}$/ },
 }
-// Models a business can choose (first = default). Only models we've built for: structured JSON output, and for Claude the
-// request shape in ai-providers.js / ai-designer.js. Anything else is refused.
-export const MODELS = {
-  anthropic: [
-    { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 · best design quality' },
-    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 · faster, lower cost' },
-    { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 · fastest, lowest cost' },
-  ],
-  openai: [
-    { id: 'gpt-4o-mini', label: 'GPT-4o mini · fastest, lowest cost' },
-    { id: 'gpt-4o', label: 'GPT-4o' },
-    { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
-    { id: 'gpt-4.1', label: 'GPT-4.1' },
-  ],
-}
-export const modelFor = (provider, model) => (MODELS[provider]?.some((m) => m.id === model) ? model : MODELS[provider]?.[0]?.id)
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d{2,5}$/
 export const providerMock = (env) => (typeof env.AI_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.AI_API_MOCK_ORIGIN) ? env.AI_API_MOCK_ORIGIN : null)
 
@@ -50,54 +33,42 @@ export async function openKey(env, customer, provider, sealed) {
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv), additionalData: aad(customer, provider) }, await derivedKey(env), unb64(ct)))
 }
 
-// Read-only check that the key works. Returns { ok } or { ok: false, error } (allowlisted codes).
-export async function validateKey(env, provider, apiKey) {
-  const mock = providerMock(env)
-  if (provider === 'anthropic') {
-    const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 15000, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
-    try {
-      await client.models.list({ limit: 1 })
-      return { ok: true }
-    } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return { ok: false, error: 'invalid_key' }
-      if (err instanceof Anthropic.RateLimitError) return { ok: false, error: 'provider_rate_limited' }
-      return { ok: false, error: 'provider_unavailable' }
-    }
-  }
-  try {
-    const res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) })
-    if (res.ok) return { ok: true }
-    if (res.status === 401 || res.status === 403) return { ok: false, error: 'invalid_key' }
-    if (res.status === 429) return { ok: false, error: 'provider_rate_limited' }
-    return { ok: false, error: 'provider_unavailable' }
-  } catch {
-    return { ok: false, error: 'provider_unavailable' }
-  }
-}
-
 export async function saveCredential(env, customer, provider, apiKey, now = Date.now(), model = null) {
   const key = String(apiKey ?? '').trim()
   if (!PROVIDERS[provider]) return { ok: false, httpStatus: 400, error: 'invalid_provider' }
   if (!PROVIDERS[provider].keyRe.test(key)) return { ok: false, httpStatus: 400, error: 'invalid_key_format' }
-  if (model != null && modelFor(provider, model) !== model) return { ok: false, httpStatus: 400, error: 'invalid_model' }
-  const v = await validateKey(env, provider, key)
-  if (!v.ok) return { ok: false, httpStatus: v.error === 'invalid_key' ? 400 : 503, error: v.error }
+  // The model list doubles as the key check (read-only, free) and gives this account's catalog.
+  const { discoverModels, registry, choices } = await import('./ai-models.js')
+  const d = await discoverModels(env, provider, key)
+  if (!d.ok) return { ok: false, httpStatus: d.error === 'invalid_key' ? 400 : 503, error: d.error }
+  const selectable = choices(d.models, await registry(env.ONBOARDING_DB, provider)).filter((c) => c.selectable)
+  if (model != null && model !== 'auto' && !selectable.some((c) => c.id === model)) return { ok: false, httpStatus: 400, error: 'invalid_model' }
   await env.ONBOARDING_DB.prepare(
-    `INSERT INTO ai_credentials (customer, provider, sealed, hint, model, status, validated_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?6, 'ok', ?5, ?5, ?5)
-     ON CONFLICT(customer) DO UPDATE SET provider = ?2, sealed = ?3, hint = ?4, model = ?6, status = 'ok', validated_at = ?5, updated_at = ?5`,
+    `INSERT INTO ai_credentials (customer, provider, sealed, hint, model, auto_model, catalog, catalog_at, monthly_budget_cents, status, validated_at, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?6, NULL, ?7, ?5, ?8, 'ok', ?5, ?5, ?5)
+     ON CONFLICT(customer) DO UPDATE SET provider = ?2, sealed = ?3, hint = ?4, model = ?6, auto_model = NULL, catalog = ?7, catalog_at = ?5, status = 'ok', validated_at = ?5, updated_at = ?5`,
   )
-    .bind(customer, provider, await sealKey(env, customer, provider, key), key.slice(-4), now, modelFor(provider, model))
+    .bind(customer, provider, await sealKey(env, customer, provider, key), key.slice(-4), now, model || 'auto', JSON.stringify(d.models), (await import('./ai-models.js')).DEFAULT_BUDGET_CENTS)
     .run()
   return { ok: true }
 }
 
-// Changes the model for the connected provider (allowlist only).
+// 'auto' or a model this account offers that is compatible and priced. A manual choice is never changed by us.
 export async function setModel(env, customer, model, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT provider FROM ai_credentials WHERE customer = ?1').bind(customer).first()
+  const r = await env.ONBOARDING_DB.prepare('SELECT provider, catalog FROM ai_credentials WHERE customer = ?1').bind(customer).first()
   if (!r) return { ok: false, httpStatus: 404, error: 'not_found' }
-  if (modelFor(r.provider, model) !== model) return { ok: false, httpStatus: 400, error: 'invalid_model' }
+  const { registry, choices } = await import('./ai-models.js')
+  if (model !== 'auto' && !choices(JSON.parse(r.catalog || '[]'), await registry(env.ONBOARDING_DB, r.provider)).some((c) => c.selectable && c.id === model)) return { ok: false, httpStatus: 400, error: 'invalid_model' }
   await env.ONBOARDING_DB.prepare('UPDATE ai_credentials SET model = ?2, updated_at = ?3 WHERE customer = ?1').bind(customer, model, now).run()
   return { ok: true }
+}
+
+// The owner's monthly limit for AI website work on this key ($1–$1,000). Requests whose worst case would cross it are refused.
+export async function setBudget(env, customer, cents, now = Date.now()) {
+  const c = Number(cents)
+  if (!Number.isInteger(c) || c < 100 || c > 100_000) return { ok: false, httpStatus: 400, error: 'invalid_budget' }
+  const r = await env.ONBOARDING_DB.prepare('UPDATE ai_credentials SET monthly_budget_cents = ?2, updated_at = ?3 WHERE customer = ?1 RETURNING customer').bind(customer, c, now).first()
+  return r ? { ok: true } : { ok: false, httpStatus: 404, error: 'not_found' }
 }
 
 export async function removeCredential(env, customer) {
@@ -105,18 +76,36 @@ export async function removeCredential(env, customer) {
   return { ok: true }
 }
 
-// What the owner sees (no secret material).
-export async function credentialView(env, customer) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT provider, hint, model, status, validated_at FROM ai_credentials WHERE customer = ?1').bind(customer).first()
-  return r ? { provider: r.provider, label: PROVIDERS[r.provider]?.label ?? r.provider, hint: r.hint, model: modelFor(r.provider, r.model), models: MODELS[r.provider], status: r.status, validatedAt: r.validated_at } : null
+// What the owner sees (no secret material): provider, last 4, model choice, Auto's pick, budget, spend, catalog choices.
+export async function credentialView(env, customer, now = Date.now()) {
+  const r = await env.ONBOARDING_DB.prepare('SELECT provider, hint, model, auto_model, catalog, catalog_at, monthly_budget_cents, status, validated_at FROM ai_credentials WHERE customer = ?1').bind(customer).first()
+  if (!r) return null
+  const { registry, choices, monthSpend, DEFAULT_BUDGET_CENTS } = await import('./ai-models.js')
+  const list = choices(JSON.parse(r.catalog || '[]'), await registry(env.ONBOARDING_DB, r.provider))
+  const model = r.model || 'auto'
+  return {
+    provider: r.provider,
+    label: PROVIDERS[r.provider]?.label ?? r.provider,
+    hint: r.hint,
+    status: r.status,
+    validatedAt: r.validated_at,
+    model,
+    autoModel: r.auto_model,
+    // A chosen model the account no longer offers is reported, never silently replaced.
+    modelUnavailable: model !== 'auto' && !list.some((c) => c.selectable && c.id === model),
+    choices: list,
+    catalogAt: r.catalog_at,
+    budgetCents: r.monthly_budget_cents ?? DEFAULT_BUDGET_CENTS,
+    spentUsd: Math.round((await monthSpend(env.ONBOARDING_DB, customer, r.provider, now)) * 100) / 100,
+  }
 }
 
 // For a generation: { provider, apiKey } or null. A key that fails later is marked so the owner sees it.
 export async function credentialFor(env, customer) {
-  const r = await env.ONBOARDING_DB.prepare("SELECT provider, sealed, model FROM ai_credentials WHERE customer = ?1 AND status = 'ok'").bind(customer).first()
+  const r = await env.ONBOARDING_DB.prepare("SELECT provider, sealed FROM ai_credentials WHERE customer = ?1 AND status = 'ok'").bind(customer).first()
   if (!r) return null
   try {
-    return { provider: r.provider, model: modelFor(r.provider, r.model), apiKey: await openKey(env, customer, r.provider, r.sealed) }
+    return { provider: r.provider, apiKey: await openKey(env, customer, r.provider, r.sealed) }
   } catch {
     return null
   }

@@ -8,6 +8,7 @@
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
 import { credentialFor, markCredential } from './ai-credentials.js'
 import { runWithOwnKey } from './ai-providers.js'
+import { resolveModel } from './ai-models.js'
 import { brandName, generateContent, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
@@ -185,11 +186,14 @@ async function runModel(env, msgs, schema) {
 
 // Own-key errors that mean the key itself is unusable: shown to the owner, and the key is marked so it isn't retried.
 const KEY_ERRORS = new Set(['invalid_key'])
-const OWN_KEY_HTTP = { invalid_key: 400, provider_rejected: 402, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
+const OWN_KEY_HTTP = { model_unavailable: 409, no_tested_model: 409, budget_reached: 402, invalid_key: 400, provider_rejected: 402, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
 async function ownKey(env, customer, msgs, schema, now) {
   const cred = await credentialFor(env, customer.id)
   if (!cred) return null
-  const r = await runWithOwnKey(env, cred, msgs, schema)
+  // The owner's chosen model (or Auto's pick) from their account's catalog, within their monthly limit.
+  const m = await resolveModel(env, customer.id, cred, 'writer', now)
+  if (!m.ok) return { ok: false, error: m.error }
+  const r = await runWithOwnKey(env, { ...cred, model: m.model }, msgs, schema)
   if (!r.ok && KEY_ERRORS.has(r.error)) await markCredential(env, customer.id, 'invalid', now)
   return r
 }

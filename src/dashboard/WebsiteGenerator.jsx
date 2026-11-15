@@ -15,6 +15,9 @@ const OWN_KEY = {
   ai_declined: 'The AI declined this request. Try describing the change differently.',
   ai_invalid_output: 'The AI’s answer couldn’t be used. Please try again.',
   provider_unavailable: 'Your AI provider isn’t responding right now. Please try again in a minute.',
+  model_unavailable: 'Your chosen AI model is no longer offered on your account. Choose another under “Your own AI key”.',
+  no_tested_model: 'Auto has no tested model on your account yet. Choose a model under “Your own AI key”.',
+  budget_reached: 'This would go over your monthly AI limit. Raise the limit under “Your own AI key”, or edit by hand.',
 }
 
 const resetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })

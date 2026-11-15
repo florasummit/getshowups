@@ -7,6 +7,7 @@ import { api } from '../lib/api.js'
 const ERRORS = {
   invalid_key_format: 'That doesn’t look like an API key. Copy it again from your provider’s API keys page.',
   invalid_model: 'That model isn’t available here. Choose one from the list.',
+  invalid_budget: 'Enter a monthly limit between $1 and $1,000.',
   invalid_key: 'The provider didn’t accept that key. Check it and try again.',
   provider_rate_limited: 'The provider is busy. Please try again in a minute.',
   provider_unavailable: 'We couldn’t reach the provider. Please try again in a minute.',
@@ -40,18 +41,47 @@ export default function AiKeySettings({ onChange }) {
           <span className="status-dot" aria-hidden="true" />
           {key.label} key ending {key.hint} · {key.status === 'ok' ? 'in use for your website' : 'not working, replace it'}
         </p>
-        {key.models?.length > 1 && (
-          <label className="field">
-            <span>Model</span>
-            <select value={key.model} disabled={state.busy} onChange={(e) => post({ action: 'model', model: e.target.value })}>
-              {key.models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        {key.modelUnavailable && (
+          <p className="notice-bad" role="alert">
+            {key.model} is no longer offered on your account. Choose another model (we never switch it for you).
+          </p>
         )}
+        <label className="field">
+          <span>Model</span>
+          <select value={key.model} disabled={state.busy} onChange={(e) => post({ action: 'model', model: e.target.value })}>
+            <option value="auto">Auto · best tested model within your limit{key.model === 'auto' && key.autoModel ? ` (now ${key.autoModel})` : ''}</option>
+            {key.modelUnavailable && <option value={key.model}>{key.model} (no longer available)</option>}
+            {key.choices.map((c) => (
+              <option key={c.id} value={c.id} disabled={!c.selectable}>
+                {c.label}
+                {c.selectable ? ` · $${c.inputPerM}/$${c.outputPerM} per 1M tokens${c.status === 'tested' ? ' · tested' : ''}` : ' · not yet supported'}
+                {c.retiresAt ? ` · retires ${c.retiresAt}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="fine">
+          From your {key.label} account{key.catalogAt ? `, checked ${new Date(key.catalogAt).toLocaleDateString()}` : ''}.{' '}
+          <button type="button" className="link-btn" disabled={state.busy} onClick={() => post({ action: 'refresh' })}>
+            Check for new models
+          </button>
+        </p>
+        <form
+          className="budget-row"
+          onSubmit={(e) => {
+            e.preventDefault()
+            post({ action: 'budget', cents: Math.round(Number(new FormData(e.currentTarget).get('budget')) * 100) })
+          }}
+        >
+          <label className="field">
+            <span>Monthly limit for AI design (USD)</span>
+            <input name="budget" type="number" min="1" max="1000" step="1" defaultValue={key.budgetCents / 100} />
+          </label>
+          <button className="btn btn-quiet btn-sm" disabled={state.busy}>
+            Save limit
+          </button>
+          <p className="fine">${key.spentUsd.toFixed(2)} used this month (estimated from your provider’s published prices). We stop before a request could go over your limit.</p>
+        </form>
         {state.saved && (
           <p className="fine" role="status">
             Connected. New designs and changes now use your own API account.
