@@ -184,6 +184,15 @@ test('own-key errors are explained, the dead key is marked, and nothing falls ba
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'x' } })).json.error, 'provider_rejected')
 })
 
+test('start from a design never uses the own key (no provider call)', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })
+  const before = calls.length
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'template' } })
+  assert.deepEqual([r.status, r.json.generation.source], [200, 'template'])
+  assert.equal(calls.length, before)
+})
+
 test('strictSchema closes every object and lists every property as required', () => {
   const s = strictSchema({ type: 'object', properties: { a: { type: 'string', maxLength: 3 }, b: { type: 'array', items: { type: 'object', properties: { c: { type: 'string' } } } } } })
   assert.deepEqual(s, { type: 'object', properties: { a: { type: 'string' }, b: { type: 'array', items: { type: 'object', properties: { c: { type: 'string' } }, additionalProperties: false, required: ['c'] } } }, additionalProperties: false, required: ['a', 'b'] })

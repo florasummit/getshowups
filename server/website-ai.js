@@ -259,7 +259,8 @@ const imageChoices = (assetIds, industry, photos = []) => [...[...new Set([...ph
 // Generates copy + three designs for a business and stores them (website_generations). Never touches the
 // draft or the live site. Returns { ok, generation: { id, content, designs, source } }.
 // `allowAi: false` (usage policy: monthly cost ceiling reached) uses the standard layouts without a model call.
-export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], logo = null, allowAi = true, draftText = null } = {}) {
+// `useAi: false`: the professional templates only, no model call of any kind (own key included): "start from a design".
+export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], logo = null, allowAi = true, draftText = null, useAi = true } = {}) {
   const ctx = await context(env, customer)
   const { db, base, profile, claims, industry, allowedStock } = ctx
   const assetIds = withoutLogo(ctx.assetIds, logo) // the logo is never placed as a photo
@@ -276,7 +277,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
   let rejected = []
   let model = null
   // The business's own API key first (its own account and limits); else the included model within our allowance.
-  const own = await ownKey(env, customer, messages(facts, images), schemaFor(images), now)
+  const own = useAi ? await ownKey(env, customer, messages(facts, images), schemaFor(images), now) : null
   if (own && !own.ok) return { ok: false, httpStatus: OWN_KEY_HTTP[own.error] || 503, error: own.error }
   if (own?.ok) {
     const merged = mergeGenerated(base, own.raw, facts, claims, { requireBrand: true })
@@ -287,7 +288,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
     source = 'ai'
     usage = usageOf(own)
     model = own.model
-  } else if (aiConfigured(env) && allowAi) {
+  } else if (useAi && aiConfigured(env) && allowAi) {
     const t0 = Date.now()
     try {
       const r = await runModel(env, messages(facts, images), schemaFor(images))
