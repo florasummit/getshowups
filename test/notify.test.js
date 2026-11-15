@@ -112,3 +112,16 @@ test('flush delivers through Resend once and clears the stored lead details', as
   assert.ok(outbox().every((x) => x.status === 'sent' && x.body === ''), 'body cleared after delivery')
   assert.equal((await flushOutbox(env, NOW + MIN)).sent, 0)
 })
+
+test('overlapping cron runs never queue a notice twice; flushes reuse the outbox id as the Resend idempotency key', async () => {
+  lead('L1', 'alpha', NOW - 3 * MIN, 'booked'); appt('A1', 'alpha', 'L1', NOW - 2 * MIN)
+  const [a, b] = await Promise.all([queueOwnerNotices(env, NOW), queueOwnerNotices(env, NOW)])
+  assert.equal(a.queued + b.queued, 2)
+  assert.equal(outbox().length, 2)
+  globalThis.fetch = async (url, init) => { sent.push({ url: String(url), key: init.headers['Idempotency-Key'] }); return new Response('{"id":"re_1"}', { status: 200 }) }
+  await Promise.all([flushOutbox(env, NOW), flushOutbox(env, NOW)])
+  // Both runs may attempt a pending row; Resend deduplicates on the key (the outbox id), so the owner gets one email.
+  const keys = sent.map((s) => s.key)
+  assert.ok(keys.every((k) => /^owner_booking:A1:[0-9a-f]{16}$/.test(k)))
+  assert.equal(new Set(keys).size, 2)
+})

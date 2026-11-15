@@ -23,6 +23,7 @@ async function load(env, a, k) {
   if (!ID_RE.test(String(a)) || !(await verifyLinkToken(env, 'confirm', a, k))) return null
   return env.ONBOARDING_DB.prepare(
     `SELECT ap.id, ap.customer, ap.lead_id, ap.start_at, ap.status, c.name, c.timezone,
+            (SELECT l.status FROM leads l WHERE l.id = ap.lead_id AND l.customer = ap.customer) AS lead_status,
             (SELECT ss.appointment_mode FROM service_settings ss WHERE ss.customer = ap.customer) AS appointment_mode,
             (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = ap.id) AS confirmed_at
        FROM appointments ap JOIN customers c ON c.id = ap.customer WHERE ap.id = ?1`,
@@ -53,10 +54,17 @@ async function cancel(env, row, a, k, confirm) {
   }
   const r = await cancelAppointment(env, { id: row.customer }, row.id, { by: 'customer' })
   if (!r.ok) return page(r.httpStatus === 409 ? 410 : 503, 'Not cancelled yet', CANCEL_FAIL[r.error] || `This ${what(row)} can no longer be cancelled online. Please contact ${row.name} directly.`, HEADERS, '', false)
-  return cancelled(env, row)
+  return cancelled(env, row, true)
 }
-const cancelled = async (env, row) =>
-  page(200, `Your ${what(row)} is cancelled`, `${row.name} has been told. Want another time?`, HEADERS, `<p><a href="${escapeHtml(await resumeUrl(env, row.customer, row.lead_id))}">Pick a new time</a></p>`, false)
+// justNow: this request cancelled it (the business is told by an owner notice). Earlier cancellations: if the customer
+// cancelled, their lead is open again and the signed link rebooks it; if the business cancelled, the lead is not reopened,
+// so offer the normal booking page instead of a link that would be refused.
+const cancelled = async (env, row, justNow = false) => {
+  const reopened = justNow || row.lead_status === 'new'
+  const link = reopened ? await resumeUrl(env, row.customer, row.lead_id) : `/book/${encodeURIComponent(row.customer)}`
+  const message = justNow ? `${row.name} has been told. Want another time?` : `This ${what(row)} has been cancelled. Want another time?`
+  return page(200, `Your ${what(row)} is cancelled`, message, HEADERS, `<p><a href="${escapeHtml(link)}">Pick a new time</a></p>`, false)
+}
 
 async function handle(request, env, a, k, confirm, action = null) {
   const rl = await hitByIp(env, 'confirm', request)
