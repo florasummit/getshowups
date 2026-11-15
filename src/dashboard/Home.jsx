@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
-import { BusinessForm, HoursForm, ProfileForm } from './forms.jsx'
+import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
@@ -456,6 +456,10 @@ function Settings({ me, reload, billing }) {
       <section className="card">
         <h2 className="card-title">Details on your website</h2>
         <ProfileForm />
+      </section>
+      <section className="card">
+        <h2 className="card-title">What customers should know</h2>
+        <PoliciesForm />
       </section>
       <section className="card">
         <h2 className="card-title">Booking hours</h2>

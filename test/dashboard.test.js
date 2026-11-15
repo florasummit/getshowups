@@ -488,7 +488,7 @@ test('booking page: only fully set-up businesses are bookable', async () => {
 
 test('booking page: real open slots exclude Google busy time and booked appointments; no private data', async () => {
   const first = (await book.info('alpha')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['appointmentMode', 'askZip', 'name', 'offerSms', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.deepEqual(Object.keys(first).sort(), ['appointmentMode', 'askZip', 'name', 'offerSms', 'policies', 'slotMinutes', 'slots', 'status', 'timezone'])
   assert.equal(first.offerSms, false, 'no SMS provider configured → no SMS consent offered')
   assert.equal(first.status, 'ok')
   const [s0, s1] = first.slots

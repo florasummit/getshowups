@@ -5,13 +5,14 @@ import { bookableCustomer } from '../../../../server/public.js'
 import { openSlots } from '../../../../server/booking.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { smsConfigured } from '../../../../server/sms.js'
+import { policiesOrEmpty } from '../../../../server/policies.js'
 
 export async function onRequestGet({ request, env, params }) {
   const { customer, response } = await bookableCustomer(env, params)
   if (response) return response
   const rl = await hitByIp(env, 'bookView', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)
-  const result = await openSlots(env, customer)
+  const [result, policies] = await Promise.all([openSlots(env, customer), policiesOrEmpty(env.ONBOARDING_DB, customer.id)])
   return json(200, {
     name: customer.name,
     timezone: customer.timezone,
@@ -21,6 +22,8 @@ export async function onRequestGet({ request, env, params }) {
     askZip: customer.appointmentMode !== 'at_customer' && customer.serviceZips.length > 0,
     // Text reminders are offered only when they can actually be sent.
     offerSms: customer.automations && smsConfigured(env),
+    // What customers should know, written by the owner (empty notes are left out).
+    policies,
     status: result.ok ? 'ok' : 'unavailable',
     slots: result.ok ? result.slots.map((s) => new Date(s.start).toISOString()) : [],
   })
