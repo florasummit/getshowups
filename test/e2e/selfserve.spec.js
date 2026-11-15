@@ -93,6 +93,11 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('button', { name: 'Skip the website for now' })).toBeVisible()
   await page.getByLabel(/Bring my current website/).check()
   await expect(page.getByLabel('Your current website')).toBeVisible()
+  // Start from a design: the professional layouts with the business details, no AI.
+  await page.getByLabel(/Start from a design/).check()
+  await page.getByRole('button', { name: 'Show me the designs' }).click()
+  await expect(page.getByText('Choose a design.')).toBeVisible()
+  await expect(page.getByText('Designed from your details using our standard layouts.')).toBeVisible()
   await page.getByLabel(/Create a new website/).check()
   await page.getByRole('button', { name: 'Create my website' }).click()
   await expect(page.getByText('Choose a design.')).toBeVisible()

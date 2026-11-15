@@ -29,12 +29,12 @@ const failText = (status, data, noun) =>
         ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
         : FAIL[status]
 
-export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage }) {
+export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false }) {
   const [gen, setGen] = useState(null)
   const [state, setState] = useState({})
   const generate = async () => {
     setState({ busy: 'writing' })
-    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'generate' } })
+    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: templates ? 'template' : 'generate' } })
     if (data?.aiUsage) onUsage?.(data.aiUsage)
     if (status === 200) {
       setGen(data.generation)
@@ -57,9 +57,9 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
         {intro && <p className="lede">{intro}</p>}
         {hasDraft && <p className="fine">This creates three new designs to choose from. Your current draft stays until you pick one, and your live website doesn’t change until you publish.</p>}
         <button type="button" className="btn btn-primary btn-lg" disabled={Boolean(state.busy)} onClick={generate}>
-          {state.busy ? 'Designing your website…' : hasDraft ? 'Design it again' : 'Create my website'}
+          {state.busy ? 'Designing your website…' : templates ? 'Show me the designs' : hasDraft ? 'Design it again' : 'Create my website'}
         </button>
-        {state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
+        {templates ? null : state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}

@@ -136,6 +136,7 @@ export default function WebsiteTab() {
         {w.generated || rewrite ? (
           <WebsiteGenerator
             hasDraft={!w.generated}
+            templates={rewrite === 'templates'}
             usage={data.aiUsage}
             onUsage={setUsage}
             intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
@@ -167,6 +168,16 @@ export default function WebsiteTab() {
               }}
             >
               Start over with three new designs
+            </button>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                setPending(null)
+                setRewrite('templates')
+              }}
+            >
+              Choose one of our standard designs (no AI)
             </button>
           </>
         )}

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
-import { crawlSite, extractPage, parseRobots, robotsAllows, suggestContent } from '../server/site-import.js'
+import { applyFixes, contentFixes, crawlSite, extractPage, parseRobots, robotsAllows, suggestContent } from '../server/site-import.js'
 import { LIMITS } from '../server/website.js'
 import * as importApi from '../functions/api/dashboard/website/import.js'
 import * as website from '../functions/api/dashboard/website/index.js'
@@ -179,4 +179,33 @@ test('API: failures are explained, recorded, and rate-limited per business', asy
   assert.deepEqual([r.status, r.json.error, r.json.import.status], [422, 'unsafe_url', 'failed'])
   for (let i = 0; i < 5; i++) await call(importApi, 'POST', { cookie: c, body: { action: 'start', url: 'localhost', confirm: true } })
   assert.equal((await call(importApi, 'POST', { cookie: c, body: { action: 'start', url: 'www.oldsite.example', confirm: true } })).status, 429)
+})
+
+test("content fixes: typos only towards the site's own spelling; template text about house cleaning or another trade is offered for removal, never rewritten", () => {
+  const page = (texts, title = 'Pools') => ({ title, headings: [], text: texts.map((t) => ({ tag: 'p', text: t })), images: [], prices: [] })
+  const result = { pages: [page(['Pool Cleaning & Maintenance in Charleston, SC', 'Professional pool cleaning for homes', 'Pool Cleanign & Maintenance'])] }
+  const content = {
+    headline: 'Pool Cleanign & Maintenance in Charleston, SC',
+    about: 'Professional Pool Cleaning for every pool in town.',
+    services: [
+      { name: 'One Time Service', price: '$150+', description: 'Experience the joy of coming home to a spotless sanctuary. Our friendly cleaning experts bring freshness and comfort to every corner of your house.' },
+      { name: 'Weekly Pool Care', price: '$280+', description: 'Discover the convenience of our comprehensive cleaning packages, designed to fit your specific needs and lifestyle.' },
+      { name: 'Pool Winterization', price: '$350+', description: 'Keep your pool safe all winter with our expert closing service.' },
+    ],
+  }
+  const fixes = contentFixes(content, result)
+  assert.deepEqual(fixes.map((f) => [f.kind, f.field, f.from ?? f.reason]), [
+    ['possible_typo', 'headline', 'Cleanign'],
+    ['unrelated_copy', 'services.0.description', 'indoor_cleaning'],
+    ['unrelated_copy', 'services.1.description', 'off_topic'],
+  ], 'the correct word "Cleaning" is never "corrected" into the typo; the pool winterization text is fine')
+  assert.equal(fixes[0].to, 'Cleaning')
+  const fixed = applyFixes(content, fixes, [0, 1])
+  assert.equal(fixed.headline, 'Pool Cleaning & Maintenance in Charleston, SC')
+  assert.equal(fixed.services[0].description, '', 'left out, not rewritten')
+  assert.equal(fixed.services[1].description, content.services[1].description, 'unticked fix not applied')
+  assert.equal(content.headline, 'Pool Cleanign & Maintenance in Charleston, SC', 'the original is untouched')
+  // A cleaning business talking about houses is fine; no site spelling → no typo suggestion.
+  const cleaning = { pages: [page(['House cleaning and maid service', 'We clean every room'], 'Sparkle Maids')] }
+  assert.deepEqual(contentFixes({ headline: 'Spotless homes', services: [{ name: 'Deep clean', description: 'Every corner of your house, top to bottom, with eco-friendly products.' }] }, cleaning), [])
 })
