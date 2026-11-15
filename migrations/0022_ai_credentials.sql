@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS ai_credentials (
   provider     TEXT NOT NULL CHECK (provider IN ('anthropic', 'openai')),
   sealed       TEXT NOT NULL,
   hint         TEXT NOT NULL,
+  model        TEXT,            -- chosen model from the allowlist (server/ai-credentials.js MODELS); NULL = provider default
   status       TEXT NOT NULL CHECK (status IN ('ok', 'invalid')),
   validated_at INTEGER,
   created_at   INTEGER NOT NULL,

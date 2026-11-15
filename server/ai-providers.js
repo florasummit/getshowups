@@ -7,7 +7,9 @@ import Anthropic from '@anthropic-ai/sdk'
 import { providerMock } from './ai-credentials.js'
 
 export const CLAUDE_MODEL = 'claude-opus-5-5'
-export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini' // configurable: OPENAI_WEBSITE_MODEL
+export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini'
+// Server-side refusal fallback exists for Opus and Sonnet, not Haiku (sending it there is an error).
+export const claudeFallback = (model) => (/^claude-(opus|sonnet)-/.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {})
 const TIMEOUT = 120000
 
 // Both providers' structured-output modes want closed objects with every property listed as required.
@@ -23,16 +25,15 @@ export function strictSchema(s) {
   return out
 }
 
-async function runClaude(env, apiKey, msgs, schema) {
+async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL) {
   const mock = providerMock(env)
   const client = new Anthropic({ apiKey, maxRetries: 1, timeout: TIMEOUT, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
   let response
   try {
     response = await client.beta.messages.create({
-      model: CLAUDE_MODEL,
+      model,
       max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      ...claudeFallback(model),
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: strictSchema(schema) } },
       system: msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
       messages: msgs.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
@@ -48,15 +49,14 @@ async function runClaude(env, apiKey, msgs, schema) {
   if (response.stop_reason === 'max_tokens') return { ok: false, error: 'ai_invalid_output', usage }
   const text = (response.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
   try {
-    return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${response.model || CLAUDE_MODEL}` }
+    return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${response.model || model}` }
   } catch {
     return { ok: false, error: 'ai_invalid_output', usage }
   }
 }
 
-async function runOpenAI(env, apiKey, msgs, schema) {
+async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL) {
   const mock = providerMock(env)
-  const model = typeof env.OPENAI_WEBSITE_MODEL === 'string' && /^[a-z0-9.:-]{3,60}$/i.test(env.OPENAI_WEBSITE_MODEL) ? env.OPENAI_WEBSITE_MODEL : OPENAI_DEFAULT_MODEL
   let res
   try {
     res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/chat/completions`, {
@@ -86,4 +86,4 @@ async function runOpenAI(env, apiKey, msgs, schema) {
   }
 }
 
-export const runWithOwnKey = (env, cred, msgs, schema) => (cred.provider === 'anthropic' ? runClaude(env, cred.apiKey, msgs, schema) : runOpenAI(env, cred.apiKey, msgs, schema))
+export const runWithOwnKey = (env, cred, msgs, schema) => (cred.provider === 'anthropic' ? runClaude(env, cred.apiKey, msgs, schema, cred.model) : runOpenAI(env, cred.apiKey, msgs, schema, cred.model))

@@ -116,7 +116,7 @@ test('API: validated before storing, never returned, owner-only, isolated, remov
 
   const ok = await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })
   assert.equal(ok.status, 200)
-  assert.deepEqual({ ...ok.json.key, validatedAt: 0 }, { provider: 'anthropic', label: 'Claude (Anthropic)', hint: 'WXYZ', status: 'ok', validatedAt: 0 })
+  assert.deepEqual({ ...ok.json.key, validatedAt: 0, models: ok.json.key.models.length }, { provider: 'anthropic', label: 'Claude (Anthropic)', hint: 'WXYZ', model: 'claude-opus-5-5', models: 3, status: 'ok', validatedAt: 0 })
   assert.ok(calls.some((x) => x.host === 'api.anthropic.com' && x.path === '/v1/models' && (x.headers['x-api-key'] || x.headers.authorization) === (x.headers['x-api-key'] ? CLAUDE_KEY : `Bearer ${CLAUDE_KEY}`)), 'validated with a read-only call')
   const row = db.sql.prepare('SELECT * FROM ai_credentials').get()
   assert.ok(!JSON.stringify(row).includes(CLAUDE_KEY.slice(0, 20)), 'not stored in plain text')
@@ -191,6 +191,29 @@ test('start from a design never uses the own key (no provider call)', async () =
   const r = await call(website, 'POST', { cookie: c, body: { action: 'template' } })
   assert.deepEqual([r.status, r.json.generation.source], [200, 'template'])
   assert.equal(calls.length, before)
+})
+
+test('model choice: allowlisted per provider, saved with the key, used for every request; Haiku gets no refusal fallback', async () => {
+  const c = await cookieFor('owner@pools.example')
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-9000' } })).json, { error: 'invalid_model' })
+  const saved = (await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-sonnet-5-5' } })).json.key
+  assert.equal(saved.model, 'claude-sonnet-5-5')
+  assert.deepEqual(saved.models.map((m) => m.id), ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'])
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  let req = calls.findLast((x) => x.path === '/v1/messages')
+  assert.deepEqual([req.body.model, req.body.fallbacks], ['claude-sonnet-5-5', 'default'])
+  assert.equal((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'claude-haiku-5-5' } })).json.key.model, 'claude-haiku-5-5')
+  await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'simpler' } })
+  req = calls.findLast((x) => x.path === '/v1/messages')
+  assert.equal(req.body.model, 'claude-haiku-5-5')
+  assert.ok(!('fallbacks' in req.body), 'no server-side fallback for Haiku')
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'gpt-4.1' } })).json, { error: 'invalid_model' }, 'not a Claude model')
+  // OpenAI: default and a chosen model.
+  assert.equal((await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'openai', key: OPENAI_KEY } })).json.key.model, 'gpt-4o-mini')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'gpt-4.1' } })
+  await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'bolder' } })
+  assert.equal(calls.findLast((x) => x.path === '/v1/chat/completions').body.model, 'gpt-4.1')
+  assert.equal((await call(aiKey, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'model', model: 'gpt-4o' } })).status, 404, 'isolated: no key, nothing to change')
 })
 
 test('strictSchema closes every object and lists every property as required', () => {
