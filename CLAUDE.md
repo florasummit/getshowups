@@ -236,6 +236,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
   the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
   at a doubled name is never accepted as proof.
+- Domain re-claims (claimDomain, one atomic upsert): the same business re-claiming a hostname it removed ≤30 days ago keeps
+  its verify_token (verified_at/attached_at always reset: ownership re-proven by DNS); any other business, or after 30 days,
+  gets a new random token. A business never holds two active domains; an active claim is never changed.
 - Domains: never attach a hostname before its TXT proof; never claim "connected" without DNS pointing at us AND hosting reporting the domain active with a validated
   certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN

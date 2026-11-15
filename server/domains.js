@@ -144,6 +144,11 @@ export async function connectedHost(db, customerId) {
   return r?.hostname || null
 }
 
+// A business that disconnects and reconnects the same hostname keeps its verification value for this long, so the TXT
+// record it already added keeps working. Ownership itself is never carried over: verified_at/attached_at are reset and
+// the record must be found again. Another business always gets a new random value (an old record proves nothing for it).
+export const TOKEN_REUSE_MS = 30 * DAY
+
 export async function claimDomain(env, customerId, input, now = Date.now()) {
   const [error, parsed] = normalizeHostname(input)
   if (error) return { ok: false, error }
@@ -153,18 +158,28 @@ export async function claimDomain(env, customerId, input, now = Date.now()) {
   if (mine && mine.hostname !== parsed.hostname) return { ok: false, error: 'already_has_domain' }
   if (mine) return { ok: true, domain: await domainFor(env, customerId) }
   const token = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
-  // Insert, or take over a removed row; an active claim by another business is never changed.
+  // One atomic statement: insert, or take over a removed row. An active claim (any business) is never changed, and a
+  // business never ends up with two active domains even when requests race.
   const row = await db
     .prepare(
-      `INSERT INTO website_domains (hostname, customer, verify_token, status, created_at, updated_at) VALUES (?1, ?2, ?3, 'pending', ?4, ?4)
-       ON CONFLICT(hostname) DO UPDATE SET customer = ?2, verify_token = ?3, status = 'pending', detail = NULL, verified_at = NULL,
+      `INSERT INTO website_domains (hostname, customer, verify_token, status, created_at, updated_at)
+         SELECT ?1, ?2, ?3, 'pending', ?4, ?4
+          WHERE NOT EXISTS (SELECT 1 FROM website_domains o WHERE o.customer = ?2 AND o.status <> 'removed' AND o.hostname <> ?1)
+       ON CONFLICT(hostname) DO UPDATE SET
+         verify_token = CASE WHEN website_domains.customer = ?2 AND website_domains.updated_at >= ?5 THEN website_domains.verify_token ELSE ?3 END,
+         customer = ?2, status = 'pending', detail = NULL, verified_at = NULL,
          attached_at = NULL, connected_at = NULL, checked_at = NULL, created_at = ?4, updated_at = ?4
        WHERE website_domains.status = 'removed'
        RETURNING hostname`,
     )
-    .bind(parsed.hostname, customerId, token, now)
+    .bind(parsed.hostname, customerId, token, now, now - TOKEN_REUSE_MS)
     .first()
-  if (!row) return { ok: false, error: 'domain_in_use' }
+  if (!row) {
+    // Lost a race or refused: say why, from what is stored now.
+    const cur = await db.prepare("SELECT hostname, customer FROM website_domains WHERE (hostname = ?1 OR customer = ?2) AND status <> 'removed'").bind(parsed.hostname, customerId).all()
+    if (cur.results.some((r) => r.hostname === parsed.hostname && r.customer === customerId)) return { ok: true, domain: await domainFor(env, customerId) }
+    return { ok: false, error: cur.results.some((r) => r.customer === customerId) ? 'already_has_domain' : 'domain_in_use' }
+  }
   return { ok: true, domain: await domainFor(env, customerId) }
 }
 
