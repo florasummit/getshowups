@@ -6,6 +6,7 @@ import { missingConfig } from '../server/google-oauth.js'
 import { siteOrigin } from '../server/auth.js'
 import { customerForHost } from '../server/domains.js'
 import { serveSite } from '../server/site-serve.js'
+import { liveContent } from '../server/website.js'
 import { htmlResponse, renderNotice } from '../server/site-render.js'
 
 export function isOwnHost(host, env) {
@@ -43,5 +44,9 @@ export async function onRequest(context) {
   if (p === '/sitemap.xml') return text(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://${host}/</loc></url></urlset>\n`, 'application/xml')
   if (p === '/favicon.svg' || p === '/favicon.ico') return next()
   if (p.startsWith('/dashboard') || p.startsWith('/book/')) return Response.redirect(`${siteOrigin(env)}${p}${url.search}`, 302)
+  // An address from the business's previous website: send it to the matching place (published redirects only).
+  const live = await liveContent(env.ONBOARDING_DB, site.customer).catch(() => null)
+  const r = (live?.content?.redirects || []).find((x) => x.from === p.toLowerCase().replace(/\/+$/, ''))
+  if (r) return Response.redirect(r.to === 'book' ? `${siteOrigin(env)}/book/${site.customer}` : `https://${host}${r.to}`, 301)
   return Response.redirect(`https://${host}/`, 301)
 }

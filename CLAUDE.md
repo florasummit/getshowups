@@ -248,6 +248,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
   the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
   at a doubled name is never accepted as proof.
+- Old-site redirects: content.redirects [{from: path, to: '/' | '/#services' | '/#about' | '/#contact' | 'book'}] (≤30, fixed
+  targets, suggested by the import), applied by functions/_middleware.js on a connected domain from the LIVE version only.
+  www is the connected hostname; the bare domain stays with the owner's provider (UI tells them to forward it).
 - Domain re-claims (claimDomain, one atomic upsert): the same business re-claiming a hostname it removed ≤30 days ago keeps
   its verify_token (verified_at/attached_at always reset: ownership re-proven by DNS); any other business, or after 30 days,
   gets a new random token. A business never holds two active domains; an active claim is never changed.

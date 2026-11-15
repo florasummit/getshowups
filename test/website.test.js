@@ -551,6 +551,30 @@ test('hostname routing: a connected domain serves only its own business; unknown
   assert.equal((await run('https://www.salonco.com/')).status, 404)
 })
 
+test('old-site addresses: published redirects send /services, /about and /contact to the right place on the connected domain; drafts never redirect', async () => {
+  withProvider()
+  const c = await cookieFor('owner@pools.example')
+  const redirects = [{ from: '/services', to: '/#services' }, { from: '/About/', to: '/#about' }, { from: '/request-service', to: 'book' }, { from: '/careers', to: '/' }]
+  await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content({ redirects }), confirm: true } })
+  const d = (await call(domain, 'POST', { cookie: c, body: { action: 'connect', hostname: 'www.poolsco.com' } })).json.domain
+  dns.TXT['_getshowups.www.poolsco.com'] = [d.records[0].value]
+  await checkDomain(env, 'www.poolsco.com', { probe: probeFail })
+  const loc = async (url) => (await middleware.onRequest({ request: new Request(url), env, next: async () => new Response('static') })).headers.get('Location')
+  assert.equal(await loc('https://www.poolsco.com/services'), 'https://www.poolsco.com/#services')
+  assert.equal(await loc('https://www.poolsco.com/about'), 'https://www.poolsco.com/#about', 'stored lower-case without trailing slash')
+  assert.equal(await loc('https://www.poolsco.com/Services/'), 'https://www.poolsco.com/#services')
+  assert.equal(await loc('https://www.poolsco.com/request-service'), 'https://getshowups.com/book/pools')
+  assert.equal(await loc('https://www.poolsco.com/anything-else'), 'https://www.poolsco.com/')
+  // A redirect only in the private draft does nothing until published.
+  await call(website, 'POST', { cookie: c, body: { action: 'save', content: content({ redirects: [...redirects, { from: '/gallery', to: '/#about' }] }) } })
+  assert.equal(await loc('https://www.poolsco.com/gallery'), 'https://www.poolsco.com/')
+  // Targets are fixed choices; sources are paths only.
+  for (const bad of [[{ from: '/x', to: 'https://evil.example' }], [{ from: 'https://evil.example/x', to: '/' }], [{ from: '/x', to: '/' }, { from: '/x/', to: '/#about' }], [{ from: '/x', to: 'javascript:alert(1)' }]]) {
+    assert.deepEqual(validateContent(content({ redirects: bad }))[0], ['redirects'], JSON.stringify(bad))
+  }
+  assert.equal('redirects' in validateContent(content())[1], false, 'no empty list added to older content')
+})
+
 test('cron domain checks are bounded and pick up due domains', async () => {
   const c = await cookieFor('owner@pools.example')
   const d = (await call(domain, 'POST', { cookie: c, body: { action: 'connect', hostname: 'www.poolsco.com' } })).json.domain

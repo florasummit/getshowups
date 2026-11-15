@@ -373,6 +373,15 @@ export function suggestContent(result, LIMITS) {
     .filter((i) => !/logo|icon|favicon/i.test(i.url + ' ' + i.alt) && (!i.width || i.width >= 500))
     .sort((a, b) => (b.width || 0) * (b.height || 0) - (a.width || 0) * (a.height || 0))
     .slice(0, 12)
+  // Old page addresses → the matching place on the new site, so links and search results keep working after the domain moves.
+  out.redirects = pages
+    .filter((p) => p.path !== '/')
+    .map((p) => p.path.toLowerCase().replace(/\/+$/, ''))
+    .filter((from, i, all) => from && /^\/[a-z0-9][a-z0-9._~/-]{0,119}$/.test(from) && all.indexOf(from) === i)
+    .map((from) => ({ from, to: /servic|pricing|price|rates|packages|what-we-do/.test(from) ? '/#services' : /about|team|who-we|story/.test(from) ? '/#about' : /contact|quote|request|book|schedule|appointment|estimate/.test(from) ? 'book' : '/' }))
+    .concat(result.skipped.filter((x) => x.reason === 'duplicate').map((x) => ({ from: new URL(x.url).pathname.toLowerCase().replace(/\/+$/, ''), to: '/' })))
+    .filter((r, i, all) => r.from && all.findIndex((x) => x.from === r.from) === i)
+    .slice(0, 30)
   return { content: out, photos }
 }
 

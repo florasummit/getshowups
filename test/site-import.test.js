@@ -135,6 +135,11 @@ test('suggestion: services with their stated prices and descriptions; nothing in
     { name: 'Green Pool Cleanup', price: '$400+ chemicals extra', description: 'We bring cloudy or green water back to clear, usually within a few visits.' },
   ])
   assert.deepEqual(s.photos.map((p) => p.url), ['https://images.cdn.example/hero.jpg', 'https://images.cdn.example/clean.jpg'], 'largest first; the logo is not offered as a photo')
+  assert.deepEqual(s.content.redirects, [
+    { from: '/services', to: '/#services' },
+    { from: '/about', to: '/#about' },
+    { from: '/home', to: '/' },
+  ])
   const x = extractPage('<p>Tom &amp; Jerry&#39;s &#x2014; done</p>', 'https://a.example/')
   assert.equal(x.text[0].text, "Tom & Jerry's — done")
 })

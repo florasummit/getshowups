@@ -115,13 +115,16 @@ function Finding({ d }) {
 function Steps({ d }) {
   if (d.status === 'connected') {
     return (
-      <p>
-        Your website is live at{' '}
-        <a href={d.url} target="_blank" rel="noreferrer">
-          {d.hostname}
-        </a>
-        .
-      </p>
+      <>
+        <p>
+          Your website is live at{' '}
+          <a href={d.url} target="_blank" rel="noreferrer">
+            {d.hostname}
+          </a>
+          .
+        </p>
+        <BareDomain d={d} />
+      </>
     )
   }
   if (d.step === 'verify') {
@@ -158,7 +161,19 @@ function Steps({ d }) {
       ))}
       {d.status === 'securing' && d.detail === 'certificate_pending' ? <p className="fine">Record found. We’re setting up a secure connection (https). This can take up to an hour.</p> : <Finding d={d} />}
       {d.detail === 'dns_changed' && <p className="notice-soft">The record for {d.hostname} no longer points to your website. Add it back to reconnect.</p>}
+      <BareDomain d={d} />
     </>
+  )
+}
+
+// www.example.com is connected; example.com (without www) is separate and stays where it is unless the owner forwards it.
+function BareDomain({ d }) {
+  if (!d.hostname.startsWith('www.')) return null
+  const apex = d.hostname.slice(4)
+  return (
+    <p className="fine">
+      Visitors who type <code>{apex}</code> (without www) still reach whatever it shows today. To send them here too, set up forwarding from <code>{apex}</code> to <code>https://{d.hostname}</code> at your domain provider. Your email isn’t affected.
+    </p>
   )
 }
 

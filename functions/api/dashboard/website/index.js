@@ -107,7 +107,7 @@ export async function onRequestPost({ request, env }) {
       if (g.designs.length && !g.designs[option]) return json(400, { error: 'invalid_request' })
       // The owner's logo, photos and confirmed facts stay; the chosen design is applied. Only the private draft changes.
       const [errors, content] = validateContent(
-        { ...g.content, highlights: current.highlights?.length ? current.highlights : g.content.highlights, template: body.template ?? g.content.template, design: g.designs[option] ?? g.content.design ?? null, logo: current.logo, hero: current.hero, photos: current.photos },
+        { ...g.content, highlights: current.highlights?.length ? current.highlights : g.content.highlights, template: body.template ?? g.content.template, design: g.designs[option] ?? g.content.design ?? null, logo: current.logo, hero: current.hero, photos: current.photos, redirects: current.redirects || [] },
         await approvedClaimsFor(db, customer.id),
         await assetIdsFor(db, customer.id),
       )

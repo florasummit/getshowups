@@ -6,7 +6,7 @@ import { approvedClaimsFor } from './landing.js'
 import { MAX_ASSETS, saveAsset } from './assets.js'
 import { recordEvent } from './auditlog.js'
 
-export const IMPORT_FIELDS = ['headline', 'intro', 'about', 'services', 'area', 'seoTitle', 'seoDescription']
+export const IMPORT_FIELDS = ['headline', 'intro', 'about', 'services', 'area', 'seoTitle', 'seoDescription', 'redirects']
 const ID_RE = /^[a-f0-9]{32}$/
 const newId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
 

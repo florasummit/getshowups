@@ -26,9 +26,21 @@ const FIELDS = [
   ['area', 'Service area'],
   ['seoTitle', 'Search title'],
   ['seoDescription', 'Search description'],
+  ['redirects', 'Old page addresses'],
 ]
 
 function Preview({ field, value }) {
+  if (field === 'redirects')
+    return (
+      <ul className="import-services">
+        {value.map((r) => (
+          <li key={r.from}>
+            {r.from} → {r.to === 'book' ? 'booking page' : r.to === '/' ? 'home page' : `${r.to.slice(2)} section`}
+          </li>
+        ))}
+        <li className="fine">Once your domain points here, these old links keep working.</li>
+      </ul>
+    )
   if (field === 'services')
     return (
       <ul className="import-services">
