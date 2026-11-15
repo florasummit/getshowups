@@ -1932,6 +1932,10 @@
   top: 6px;
   left: 6px;
 }
+.budget-row {
+  display: grid;
+  gap: 8px;
+}
 
 /* AI designer */
 .designer > * + * {

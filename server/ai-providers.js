@@ -5,11 +5,10 @@
 // Returns { ok: true, raw, usage: { input, output }, model } or { ok: false, error } with an allowlisted error code.
 import Anthropic from '@anthropic-ai/sdk'
 import { providerMock } from './ai-credentials.js'
+import { claudeFallbackFor } from './ai-models.js'
 
 export const CLAUDE_MODEL = 'claude-opus-5-5'
 export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini'
-// Server-side refusal fallback exists for Opus and Sonnet, not Haiku (sending it there is an error).
-export const claudeFallback = (model) => (/^claude-(opus|sonnet)-/.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {})
 const TIMEOUT = 120000
 
 // Both providers' structured-output modes want closed objects with every property listed as required.
@@ -33,7 +32,7 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL) {
     response = await client.beta.messages.create({
       model,
       max_tokens: 16000,
-      ...claudeFallback(model),
+      ...claudeFallbackFor(model),
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: strictSchema(schema) } },
       system: msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
       messages: msgs.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
