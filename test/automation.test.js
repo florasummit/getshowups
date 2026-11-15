@@ -794,3 +794,33 @@ test('cancel link expires with the appointment: after the start time it cancels 
   assert.equal(db.sql.prepare('SELECT status FROM appointments').get().status, 'booked')
   assert.ok(!fetches.some((f) => f.init.method === 'DELETE'), 'Google untouched')
 })
+
+test('safeguard: while a cancellation is incomplete (Google event removed, save failed) no confirmation or reminder goes out', async () => {
+  await seed('alpha')
+  withEmail()
+  const l = (await lead('alpha')).json()
+  await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))
+  const appt = db.sql.prepare('SELECT id, start_at FROM appointments').get()
+  const { cancelAppointment } = await import('../server/booking.js')
+  const real = db.batch
+  db.batch = async () => { throw new Error('D1 down') }
+  const r = await cancelAppointment(env, { id: 'alpha' }, appt.id, { by: 'customer' })
+  db.batch = real
+  assert.deepEqual([r.ok, r.error], [false, 'cancel_incomplete'])
+  assert.equal(db.sql.prepare('SELECT status FROM appointments').get().status, 'booked', 'still reads booked')
+  const before = sentEmails().length
+  await processDueMessages(env, Date.now())
+  await processDueMessages(env, appt.start_at - DAY + MIN)
+  await processDueMessages(env, appt.start_at - 2 * HOUR + MIN)
+  assert.equal(sentEmails().length, before, 'nothing sent for an appointment whose event is gone')
+  const rows = msgs().filter((m) => ['confirmation', 'reminder_24h', 'reminder_2h'].includes(m.kind))
+  assert.ok(rows.length >= 3 && rows.every((m) => m.status === 'skipped' && m.error === 'cancel_incomplete'), JSON.stringify(rows))
+  // Other appointments of the same business are unaffected.
+  const l2 = (await lead('alpha', { email: 'other@example.net' })).json()
+  await book('alpha', l2.leadId, l2.leadToken, await slotAfter('alpha', 3 * DAY))
+  await processDueMessages(env, Date.now())
+  assert.ok(sentEmails().length > before, 'the other booking is confirmed normally')
+  // A retry completes the cancellation.
+  assert.equal((await cancelAppointment(env, { id: 'alpha' }, appt.id, { by: 'customer' })).ok, true)
+  assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(appt.id).status, 'cancelled')
+})
