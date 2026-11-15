@@ -128,6 +128,7 @@ export function skipReason(m, now) {
     case 'confirmation':
     case 'reminder_24h':
     case 'reminder_2h':
+      if (m.cancel_incomplete) return 'cancel_incomplete'
       return m.appt_status === 'booked' && m.start_at > now ? null : 'not_needed'
     case 'no_show_rebook':
       return m.appt_status === 'no_show' && m.lead_status === 'new' ? null : 'not_needed'
@@ -229,7 +230,12 @@ const DUE_SQL = `
          (SELECT 1 FROM sms_consents sc WHERE sc.lead_id = m.lead_id AND sc.customer = m.customer) AS sms_consent,
          a.start_at, a.status AS appt_status,
          (SELECT ac.confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = m.appointment_id) AS confirmed_at,
-         (SELECT min(u.email) FROM customer_users u WHERE u.customer = m.customer) AS owner
+         (SELECT min(u.email) FROM customer_users u WHERE u.customer = m.customer) AS owner,
+         -- A cancellation that removed the Google event but couldn't be saved (cancel_incomplete): the booking still
+         -- reads 'booked', but the event is gone, so no confirmation/reminder may go out for it. A later successful
+         -- cancel sets status 'cancelled', which retires these messages anyway.
+         (SELECT 1 FROM audit_log al WHERE al.customer = m.customer AND al.action = 'booking.cancel' AND al.outcome = 'failure'
+             AND al.resource_type = 'appointment' AND al.resource_id = m.appointment_id AND al.details LIKE '%"cancel_incomplete"%' LIMIT 1) AS cancel_incomplete
     FROM messages m
     JOIN customers c ON c.id = m.customer
     JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer
