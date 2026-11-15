@@ -16,7 +16,8 @@ const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32
 const DAY = 864e5
 const CLAUDE_KEY = 'sk-ant-api03-' + 'A'.repeat(40) + 'WXYZ'
 const OPENAI_KEY = 'sk-proj-' + 'B'.repeat(40) + 'QRST'
-let env, db, kv, calls, providerReply, origFetch
+let env, db, kv, calls, providerReply, origFetch, accounts
+const testedModels = (ids) => db.sql.prepare(`UPDATE ai_model_registry SET status = 'tested' WHERE model IN (${ids.map(() => '?').join(',')})`).run(...ids)
 
 function d1() {
   const sql = new DatabaseSync(':memory:')
@@ -60,6 +61,13 @@ beforeEach(() => {
   kv = new Map()
   calls = []
   providerReply = null
+  // What each provider account offers (tests change it to simulate new or retired models).
+  accounts = {
+    anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-legacy-2'],
+    openai: ['gpt-4o-mini', 'gpt-4o-mini-2024-07-18', 'gpt-4.1', 'gpt-5-mini', 'gpt-4o-realtime-preview', 'text-embedding-3-small', 'dall-e-3', 'gpt-7-nova'],
+  }
+  // GetShowUps has tested these end to end (the registry is editable without a deployment).
+  testedModels(['claude-opus-5-5', 'claude-haiku-5-5', 'gpt-4o-mini'])
   env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')
@@ -74,15 +82,15 @@ beforeEach(() => {
     const bad = auth.includes('BAD')
     if (u.hostname === 'api.anthropic.com') {
       if (bad) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }, { status: 401 })
-      if (u.pathname === '/v1/models') return Response.json({ data: [{ id: 'claude-opus-5-5', type: 'model' }], has_more: false, first_id: 'a', last_id: 'a' })
+      if (u.pathname === '/v1/models') return Response.json({ data: accounts.anthropic.map((id) => ({ id, type: 'model', display_name: id, max_tokens: 128000, capabilities: { structured_outputs: { supported: !id.includes('legacy') }, effort: { supported: true } } })), has_more: false, first_id: 'a', last_id: 'a' })
       if (u.pathname === '/v1/messages') {
         if (providerReply?.status) return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'credit' } }, { status: providerReply.status })
-        return Response.json({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: providerReply?.stop || 'end_turn', content: [{ type: 'text', text: JSON.stringify(providerReply?.raw || generated()) }], usage: { input_tokens: 1200, output_tokens: 900 } })
+        return Response.json({ id: 'msg_1', type: 'message', role: 'assistant', model: body?.model, stop_reason: providerReply?.stop || 'end_turn', content: [{ type: 'text', text: JSON.stringify(providerReply?.raw || generated()) }], usage: { input_tokens: 1200, output_tokens: 900 } })
       }
     }
     if (u.hostname === 'api.openai.com') {
       if (bad) return Response.json({ error: { code: 'invalid_api_key' } }, { status: 401 })
-      if (u.pathname === '/v1/models') return Response.json({ data: [] })
+      if (u.pathname === '/v1/models') return Response.json({ data: accounts.openai.map((id) => ({ id, object: 'model', owned_by: 'openai' })) })
       if (u.pathname === '/v1/chat/completions') {
         if (providerReply?.status) return Response.json({ error: { code: providerReply.code } }, { status: providerReply.status })
         return Response.json({ model: 'gpt-4o-mini', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(providerReply?.raw || generated()) } }], usage: { prompt_tokens: 1000, completion_tokens: 800 } })
@@ -116,7 +124,8 @@ test('API: validated before storing, never returned, owner-only, isolated, remov
 
   const ok = await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })
   assert.equal(ok.status, 200)
-  assert.deepEqual({ ...ok.json.key, validatedAt: 0, models: ok.json.key.models.length }, { provider: 'anthropic', label: 'Claude (Anthropic)', hint: 'WXYZ', model: 'claude-opus-5-5', models: 3, status: 'ok', validatedAt: 0 })
+  const k = ok.json.key
+  assert.deepEqual([k.provider, k.label, k.hint, k.status, k.model, k.budgetCents, k.spentUsd], ['anthropic', 'Claude (Anthropic)', 'WXYZ', 'ok', 'auto', 1000, 0])
   assert.ok(calls.some((x) => x.host === 'api.anthropic.com' && x.path === '/v1/models' && (x.headers['x-api-key'] || x.headers.authorization) === (x.headers['x-api-key'] ? CLAUDE_KEY : `Bearer ${CLAUDE_KEY}`)), 'validated with a read-only call')
   const row = db.sql.prepare('SELECT * FROM ai_credentials').get()
   assert.ok(!JSON.stringify(row).includes(CLAUDE_KEY.slice(0, 20)), 'not stored in plain text')
@@ -193,27 +202,80 @@ test('start from a design never uses the own key (no provider call)', async () =
   assert.equal(calls.length, before)
 })
 
-test('model choice: allowlisted per provider, saved with the key, used for every request; Haiku gets no refusal fallback', async () => {
+test('models are discovered from the customer’s account and filtered for compatibility; new ones appear without a deployment', async () => {
   const c = await cookieFor('owner@pools.example')
-  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-9000' } })).json, { error: 'invalid_model' })
-  const saved = (await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-sonnet-5-5' } })).json.key
-  assert.equal(saved.model, 'claude-sonnet-5-5')
-  assert.deepEqual(saved.models.map((m) => m.id), ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'])
+  let k = (await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'openai', key: OPENAI_KEY } })).json.key
+  const ids = (key) => key.choices.map((x) => `${x.id}:${x.status}`)
+  assert.deepEqual(ids(k), ['gpt-5-mini:supported', 'gpt-4.1:supported', 'gpt-4o-mini:tested', 'gpt-7-nova:unpriced'], 'best first, cheaper first at equal quality; audio/embedding/image models and dated snapshots filtered out; an unpriced new model is shown, not selectable')
+  assert.equal(k.choices.find((x) => x.id === 'gpt-7-nova').selectable, false)
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'gpt-7-nova' } })).json, { error: 'invalid_model' }, 'unpriced → spend could not be bounded')
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'text-embedding-3-small' } })).json, { error: 'invalid_model' })
+  // The provider releases a new model and GetShowUps prices it (registry row, no deployment): it becomes selectable after a refresh.
+  accounts.openai.push('gpt-5.4-mini')
+  db.sql.prepare("INSERT INTO ai_model_registry (provider, model, status, quality, input_per_m, output_per_m, updated_at) VALUES ('openai', 'gpt-7-nova', 'supported', 3, 1.0, 5.0, 1)").run()
+  k = (await call(aiKey, 'POST', { cookie: c, body: { action: 'refresh' } })).json.key
+  assert.ok(k.choices.some((x) => x.id === 'gpt-5.4-mini' && x.selectable))
+  assert.ok(k.choices.some((x) => x.id === 'gpt-7-nova' && x.selectable))
+  // A stale catalog refreshes on its own (older than a day) when the owner opens settings.
+  accounts.openai.push('gpt-5-nano')
+  db.sql.prepare('UPDATE ai_credentials SET catalog_at = ?').run(Date.now() - 2 * DAY)
+  assert.ok((await call(aiKey, 'GET', { cookie: c })).json.key.choices.some((x) => x.id === 'gpt-5-nano'))
+  // Anthropic: compatibility from the Models API capabilities.
+  k = (await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })).json.key
+  assert.ok(!k.choices.some((x) => x.id === 'claude-legacy-2'), 'no structured outputs → not offered')
+  assert.equal(k.choices[0].id, 'claude-opus-5-5')
+  assert.equal((await call(aiKey, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'model', model: 'gpt-4o' } })).status, 404, 'isolated: no key, nothing to change')
+})
+
+test('the chosen model is used and kept; Auto picks only tested models within the limit and never moves to a pricier one; retired models are not silently replaced', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-sonnet-5-5' } })
   await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   let req = calls.findLast((x) => x.path === '/v1/messages')
-  assert.deepEqual([req.body.model, req.body.fallbacks], ['claude-sonnet-5-5', 'default'])
-  assert.equal((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'claude-haiku-5-5' } })).json.key.model, 'claude-haiku-5-5')
-  await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'simpler' } })
+  assert.deepEqual([req.body.model, req.body.fallbacks], ['claude-sonnet-5-5', 'default'], 'manual choice (untested but supported) is honoured')
+  // Retired at the provider: reported and refused, never swapped.
+  accounts.anthropic = accounts.anthropic.filter((id) => id !== 'claude-sonnet-5-5')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'refresh' } })
+  const k = (await call(aiKey, 'GET', { cookie: c })).json.key
+  assert.deepEqual([k.model, k.modelUnavailable], ['claude-sonnet-5-5', true])
+  const before = calls.filter((x) => x.path === '/v1/messages').length
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'x' } })).json.error, 'model_unavailable')
+  assert.equal(calls.filter((x) => x.path === '/v1/messages').length, before, 'no request sent')
+  // Auto: tested models only; best quality within the limit.
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'auto' } })
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   req = calls.findLast((x) => x.path === '/v1/messages')
-  assert.equal(req.body.model, 'claude-haiku-5-5')
-  assert.ok(!('fallbacks' in req.body), 'no server-side fallback for Haiku')
-  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'gpt-4.1' } })).json, { error: 'invalid_model' }, 'not a Claude model')
-  // OpenAI: default and a chosen model.
-  assert.equal((await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'openai', key: OPENAI_KEY } })).json.key.model, 'gpt-4o-mini')
-  await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'gpt-4.1' } })
-  await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'bolder' } })
-  assert.equal(calls.findLast((x) => x.path === '/v1/chat/completions').body.model, 'gpt-4.1')
-  assert.equal((await call(aiKey, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'model', model: 'gpt-4o' } })).status, 404, 'isolated: no key, nothing to change')
+  assert.equal(req.body.model, 'claude-opus-5-5', 'tested, best quality, worst case fits $10')
+  assert.equal(db.sql.prepare('SELECT auto_model FROM ai_credentials').get().auto_model, 'claude-opus-5-5')
+  // A tighter limit with $0.66 already spent: Opus' worst case ($0.37) no longer fits $1, Haiku's does → Auto steps DOWN.
+  db.sql.prepare("UPDATE website_generations SET input_tokens = 15000, output_tokens = 30000 WHERE model = 'anthropic:claude-opus-5-5'").run()
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-haiku-5-5')
+  // Opus gets cheaper? No: a more expensive model than the current pick is never chosen automatically, even with room.
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 5000 } })
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-haiku-5-5', 'stays on the cheaper pick')
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.fallbacks, undefined, 'no refusal fallback for Haiku')
+  // Untested models are never Auto picks.
+  db.sql.prepare("UPDATE ai_model_registry SET status = 'supported'").run()
+  db.sql.prepare("UPDATE ai_credentials SET auto_model = NULL").run()
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.error, 'no_tested_model')
+})
+
+test('hard spending limit: a request whose worst case would cross the monthly limit is refused before it is sent', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-opus-5-5' } })
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 50 } })).json, { error: 'invalid_budget' })
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
+  // Opus writer worst case: 12k in × $4 + 16k out × $20 per M = $0.368 → fits $1 twice, not three times.
+  for (let i = 0; i < 2; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
+  db.sql.prepare('UPDATE website_generations SET input_tokens = 12000, output_tokens = 16000').run()
+  const sent = calls.filter((x) => x.path === '/v1/messages').length
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.deepEqual([r.status, r.json.error], [402, 'budget_reached'])
+  assert.equal(calls.filter((x) => x.path === '/v1/messages').length, sent, 'refused before sending')
+  assert.equal((await call(aiKey, 'GET', { cookie: c })).json.key.spentUsd, 0.74)
 })
 
 test('strictSchema closes every object and lists every property as required', () => {

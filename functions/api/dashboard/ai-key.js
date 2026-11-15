@@ -1,18 +1,25 @@
 // /api/dashboard/ai-key — the business's own Claude or OpenAI API key for website generation (optional).
 //   GET  → { key: { provider, label, hint, status } | null }   (never the key itself)
 //   POST { action: 'save', provider: 'anthropic' | 'openai', key }   validated with the provider, then stored encrypted
-//        { action: 'model', model }   choose one of the allowlisted models (server/ai-credentials.js MODELS)
+//        { action: 'model', model }   'auto' or a model this account offers that's compatible and priced
+//        { action: 'budget', cents }  monthly limit for AI website work on this key
+//        { action: 'refresh' }        re-read the account's model list now
 //        { action: 'remove' }
 import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { recordEvent } from '../../../server/auditlog.js'
-import { credentialView, removeCredential, saveCredential, setModel } from '../../../server/ai-credentials.js'
+import { credentialFor, credentialView, removeCredential, saveCredential, setBudget, setModel } from '../../../server/ai-credentials.js'
+import { refreshCatalog } from '../../../server/ai-models.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  return json(200, { key: await credentialView(env, session.customer.id).catch(() => null) })
+  const id = session.customer.id
+  // New models appear without a deployment: a catalog older than a day is re-read from the provider.
+  const cred = await credentialFor(env, id).catch(() => null)
+  if (cred) await refreshCatalog(env, id, cred).catch(() => null)
+  return json(200, { key: await credentialView(env, id).catch(() => null) })
 }
 
 export async function onRequestPost({ request, env }) {
@@ -32,6 +39,17 @@ export async function onRequestPost({ request, env }) {
     if (body?.action === 'model') {
       const r = await setModel(env, id, body.model)
       if (!r.ok) return json(r.httpStatus, { error: r.error })
+      return json(200, { key: await credentialView(env, id) })
+    }
+    if (body?.action === 'budget') {
+      const r = await setBudget(env, id, body.cents)
+      if (!r.ok) return json(r.httpStatus, { error: r.error })
+      return json(200, { key: await credentialView(env, id) })
+    }
+    if (body?.action === 'refresh') {
+      const cred = await credentialFor(env, id)
+      if (!cred) return json(404, { error: 'not_found' })
+      await refreshCatalog(env, id, cred, { force: true })
       return json(200, { key: await credentialView(env, id) })
     }
     if (body?.action === 'remove') {
