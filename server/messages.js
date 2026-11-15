@@ -128,6 +128,7 @@ export function skipReason(m, now) {
     case 'confirmation':
     case 'reminder_24h':
     case 'reminder_2h':
+      if (m.cancel_incomplete) return 'cancel_incomplete'
       return m.appt_status === 'booked' && m.start_at > now ? null : 'not_needed'
     case 'no_show_rebook':
       return m.appt_status === 'no_show' && m.lead_status === 'new' ? null : 'not_needed'
@@ -138,9 +139,9 @@ export function skipReason(m, now) {
 
 const firstName = (name) => String(name).trim().split(/\s+/)[0]
 const whenText = (ts, timeZone, opts) => new Intl.DateTimeFormat('en-US', { timeZone, ...opts }).format(new Date(ts))
-const longWhen = (ts, tz) => whenText(ts, tz, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+export const longWhen = (ts, tz) => whenText(ts, tz, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 const timeOnly = (ts, tz) => whenText(ts, tz, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need)
+export const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need)
 
 // Returns { subject, text, sms } for one message row (joined with its business, lead, appointment).
 // 'at_customer' businesses visit the lead, so their messages talk about a visit to the service
@@ -171,13 +172,13 @@ export async function render(env, m) {
       if (visit) {
         return {
           subject: `${biz} visit booked: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
+          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
           sms: `${biz}: visit booked${place} for ${when}. Confirm access: ${url} Reply STOP to opt out.`,
         }
       }
       return {
         subject: `You're booked with ${biz}: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
+        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
         sms: `${biz}: you're booked for ${when}. Confirm you'll be there: ${url} Reply STOP to opt out.`,
       }
     }
@@ -190,14 +191,14 @@ export async function render(env, m) {
         const access = confirmed ? 'Thanks for confirming.' : `Please confirm ${biz} can access the property:\n${url}`
         return {
           subject: `Reminder: ${biz} visit ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nNeed to change the time? Reply to this email.${footer}`,
+          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
           sms: `${biz}: reminder of your visit${place} ${when}.${confirmed ? '' : ` Confirm access: ${url}`} Reply STOP to opt out.`,
         }
       }
       const ask = confirmed ? 'See you then!' : `Please confirm you'll be there:\n${url}`
       return {
         subject: `Reminder: ${biz} ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nNeed to change the time? Reply to this email.${footer}`,
+        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
         sms: `${biz}: reminder of your appointment ${when}.${confirmed ? '' : ` Confirm: ${url}`} Reply STOP to opt out.`,
       }
     }
@@ -229,7 +230,12 @@ const DUE_SQL = `
          (SELECT 1 FROM sms_consents sc WHERE sc.lead_id = m.lead_id AND sc.customer = m.customer) AS sms_consent,
          a.start_at, a.status AS appt_status,
          (SELECT ac.confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = m.appointment_id) AS confirmed_at,
-         (SELECT min(u.email) FROM customer_users u WHERE u.customer = m.customer) AS owner
+         (SELECT min(u.email) FROM customer_users u WHERE u.customer = m.customer) AS owner,
+         -- A cancellation that removed the Google event but couldn't be saved (cancel_incomplete): the booking still
+         -- reads 'booked', but the event is gone, so no confirmation/reminder may go out for it. A later successful
+         -- cancel sets status 'cancelled', which retires these messages anyway.
+         (SELECT 1 FROM audit_log al WHERE al.customer = m.customer AND al.action = 'booking.cancel' AND al.outcome = 'failure'
+             AND al.resource_type = 'appointment' AND al.resource_id = m.appointment_id AND al.details LIKE '%"cancel_incomplete"%' LIMIT 1) AS cancel_incomplete
     FROM messages m
     JOIN customers c ON c.id = m.customer
     JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer

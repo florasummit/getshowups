@@ -302,6 +302,21 @@ registerCapability({
   verify: seen('email accepted by Resend for a real business', 30, `SELECT max(updated_at) AS at FROM messages m WHERE status = 'sent' AND channel = 'email' AND ${NOT_TEST_BIZ('m.customer', 'm.created_at')}`),
 })
 registerCapability({
+  id: 'messaging.owner_notices',
+  name: 'Owner notices (new bookings and unbooked leads)',
+  journey: 'lead',
+  description: 'Emails the business members about each new booking, and about a qualified lead not booked after 10 minutes.',
+  external: 'Resend',
+  dependsOn: ['messaging.email', 'platform.cron'],
+  state: (env) =>
+    !emailConfigured(env)
+      ? { mode: 'disabled', note: 'Resend not configured' }
+      : messagesLive(env)
+        ? { mode: 'live' }
+        : { mode: 'sandbox', note: 'Sent to test recipients only', approval: 'MESSAGES_LIVE=true' },
+  verify: seen('owner notice sent for a real business', 30, `SELECT max(sent_at) AS at FROM email_outbox o WHERE status = 'sent' AND template IN ('owner_booking', 'owner_lead', 'owner_cancel') AND ${NOT_TEST_BIZ('o.customer', 'o.created_at')}`),
+})
+registerCapability({
   id: 'messaging.sms',
   name: 'Text messages',
   journey: 'booking',

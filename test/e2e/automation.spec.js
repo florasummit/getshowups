@@ -43,6 +43,26 @@ test('confirm link: shows the appointment, changes nothing until tapped, then co
   expect((await request.get(`/api/appointment/confirm?a=${APPT}&k=${'x'.repeat(43)}`)).status()).toBe(404)
 })
 
+test("can't make it: the customer cancels from their email link (nothing changes until they confirm) and picks a new time", async ({ page, request }) => {
+  const A = 'fedcba9876543210fedcba9876543210'
+  const k = await linkToken(env, 'confirm', A)
+  await page.goto(`/api/appointment/confirm?a=${A}&k=${k}`)
+  await page.getByRole('link', { name: 'Can’t make it? Cancel or pick a new time' }).click()
+  await expect(page.getByRole('heading', { name: 'Cancel your appointment?' })).toBeVisible()
+  await expect(page.getByText('E2E Auto Co')).toBeVisible()
+  await expect(page.getByText('Corey')).toHaveCount(0)
+  // Opening the cancel page (e.g. an email scanner) does not cancel.
+  expect(await (await request.get(`/api/appointment/confirm?a=${A}&k=${k}`)).text()).toContain('Confirm your appointment')
+  await page.getByRole('button', { name: 'Yes, cancel my appointment' }).click()
+  await expect(page.getByRole('heading', { name: 'Your appointment is cancelled' })).toBeVisible()
+  await expect(page.getByText('E2E Auto Co has been told.')).toBeVisible()
+  await page.getByRole('link', { name: 'Pick a new time' }).click()
+  await expect(page.getByRole('heading', { name: 'Pick a time' })).toBeVisible()
+  await page.locator('.slot').last().click() // the follow-up test books the first slot of this business
+  await page.getByRole('button', { name: /^Book / }).click()
+  await expect(page.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
+})
+
 test('pick-a-time link from a follow-up books for the existing lead without re-entering details', async ({ page }) => {
   const k = await linkToken(env, 'lead', 'seed-lead-resume')
   await page.goto(`/book/${fixtures.E2E_AUTO_CUSTOMER}?lead=seed-lead-resume&k=${k}`)

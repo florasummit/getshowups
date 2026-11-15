@@ -40,7 +40,8 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
                      invite-action, status, plans, test-business. Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
-  api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records)
+  api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records); &do=cancel: customer cancels
+                     (same cancelAppointment; lead reopened; "Pick a new time" via the signed lead link)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
@@ -66,6 +67,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   accounts.js        Account invitations (issue/peek/accept/resend/revoke) + onboarding follow-ups
   email.js           Email outbox + sendEmail(); delivers only via configured Resend (RESEND_API_KEY, EMAIL_FROM)
   messages.js        Lead follow-ups, confirmation, reminders, no-show rebook: schedule rows, re-check at send time
+  notify.js          Owner notices (cron scan): new booking / customer cancellation / lead unbooked after 10 min → each member, once
   sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
   ai-usage.js        AI website allowances per business/UTC day (tiers; AI_TESTING_BUSINESSES), 30-day cost ceiling
@@ -249,11 +251,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
+- Owner notices (server/notify.js): only items from the last 2 h; queued only when recipientAllowed() would deliver now
+  (nothing waits in the outbox to go out late); one per item + member (outbox id); body cleared once sent.
 - Owner cancellation (POST /api/dashboard/appointment-cancel, server/booking.js cancelAppointment): upcoming bookings only;
   the Google event (ours, by id) is removed FIRST with sendUpdates=all, and only on success (or already gone) is the
   booking marked cancelled (slot freed, reminders stop via skipReason). Google unreachable → nothing changes, retry.
   Cancel + its appointment_changes row are one batch; a save failure after Google removed the event returns
   cancel_incomplete and records an open failure (retry finds the event gone and completes).
+  Customers cancel from the link in their confirmation/reminder emails (GET never cancels; POST does, by: 'customer',
+  audit actor type customer); the owner gets an owner_cancel notice.
 - Test businesses' public sites always send noindex (meta + X-Robots-Tag; testStatus fails closed).
 - Account deletion (server/deletion.js, migration 0016, docs/DATA_RETENTION.md; owner decision 2026-11-14): permanent, no undo
   window, no founder approval. Owner (Settings, typed business name) or platform admin (typed id, on a verified request).
