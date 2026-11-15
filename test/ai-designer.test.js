@@ -263,7 +263,7 @@ test('OpenAI key: the same designer end to end (design → revision → publish)
   let req = requests[0]
   assert.ok(req.auth.includes(OPENAI_KEY))
   assert.equal(req.body.model, 'gpt-4o-mini')
-  assert.equal(req.body.max_completion_tokens, 32000, 'output cap the budget check assumes')
+  assert.equal(req.body.max_completion_tokens, 16384, 'GPT-4o mini ceiling (more is a 400); the budget check uses the same cap')
   assert.deepEqual([req.body.response_format.type, req.body.response_format.json_schema.strict], ['json_schema', true])
   assert.equal(req.body.messages[0].role, 'system')
   nextDesign = { reply: 'Darker.', site: DESIGN({ name: 'Midnight Pool' }) }

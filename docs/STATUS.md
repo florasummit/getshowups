@@ -2,6 +2,25 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
+
+- Both providers end to end, tested with mocks: connect key → model list from the customer's account → design → revision
+  → publish (Claude streaming + OpenAI strict json_schema). No real provider call made yet.
+- Models: discovered with the customer's key (free `GET /v1/models`); Anthropic filtered by
+  `capabilities.structured_outputs`, OpenAI by text-model family rules (no audio/image/embedding/realtime/dated snapshots).
+  Catalog stored per key, refreshed when older than a day or on "Check for new models". `ai_model_registry` (0022, editable
+  without deploying) holds verified prices (2026-11-15), quality rank, status tested/supported/blocked and the model's own
+  output ceiling. Unpriced new models are shown but not selectable (spend must be boundable).
+- Selection kept; a model the account stops offering is reported and refused, never swapped. Auto (default) uses only
+  `tested` models, best quality within the limit, never moves to a more expensive model. **No model is `tested` yet**:
+  until the approved real demo marks some, owners pick a model by hand.
+- Hard monthly limit per key (default $10, owner $1–$1,000): month-to-date spend from `ai_key_usage` (every own-key call,
+  failed ones too; tokens only) + this request's worst case (measured prompt, the output cap actually sent) must fit, else
+  refused before sending. SDK retries off for own-key calls.
+- Fixed: GPT-4o / GPT-4o mini output ceiling 16,384 (asking for more would have been a 400).
+- Next: approval for the real two-provider PoolThru demo (estimate in the PR thread / summary), then mark the demoed
+  models `tested` in the registry.
+
 ## Integration checkpoint (2026-11-14) — PRs #24–#28, all draft, CI green, NOT merged or deployed
 
 **Verified now:** production deployment 0020f305 (main d426fef); production has migrations through 0014 (0015–0017

@@ -176,13 +176,13 @@ const userPrompt = (ctx, history, current, message) =>
     .join('\n\n')
 
 // maxRetries 0: a retry would be a second billed request the budget check didn't account for.
-async function callClaude(env, apiKey, model, prompt, { effort, onProgress }) {
+async function callClaude(env, apiKey, model, prompt, { effort, onProgress, maxOutput = MAX_OUTPUT.designer }) {
   const mock = providerMock(env)
   const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 600000, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
   try {
     const stream = client.beta.messages.stream({
       model,
-      max_tokens: MAX_OUTPUT.designer,
+      max_tokens: maxOutput,
       ...claudeFallbackFor(model),
       output_config: { effort, format: { type: 'json_schema', schema: DESIGN_SCHEMA } },
       system: SYSTEM,
@@ -211,14 +211,14 @@ async function callClaude(env, apiKey, model, prompt, { effort, onProgress }) {
   }
 }
 
-async function callOpenAI(env, apiKey, model, prompt, { onProgress }) {
+async function callOpenAI(env, apiKey, model, prompt, { onProgress, maxOutput = MAX_OUTPUT.designer }) {
   const mock = providerMock(env)
   const tick = setInterval(() => onProgress?.(0), 5000)
   try {
     const res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, max_completion_tokens: MAX_OUTPUT.designer, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }], response_format: { type: 'json_schema', json_schema: { name: 'website_design', strict: true, schema: DESIGN_SCHEMA } } }),
+      body: JSON.stringify({ model, max_completion_tokens: maxOutput, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }], response_format: { type: 'json_schema', json_schema: { name: 'website_design', strict: true, schema: DESIGN_SCHEMA } } }),
       signal: AbortSignal.timeout(600000),
     })
     const body = await res.json().catch(() => ({}))
@@ -260,7 +260,7 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   if (!m.ok) return { ok: false, httpStatus: { budget_reached: 402 }[m.error] || 409, error: m.error }
   const t0 = Date.now()
   const call = cred.provider === 'anthropic' ? callClaude : callOpenAI
-  const r = await call(env, cred.apiKey, m.model, prompt, { effort: current ? 'medium' : 'high', onProgress })
+  const r = await call(env, cred.apiKey, m.model, prompt, { effort: current ? 'medium' : 'high', onProgress, maxOutput: m.maxOutput })
   if (r.usage) await recordUsage(ctx.db, customer.id, cred.provider, r.model || m.model, 'designer', r.usage, r.ok, now)
   if (!r.ok) {
     if (r.error === 'invalid_key') await markCredential(env, customer.id, 'invalid', now)
