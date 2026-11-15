@@ -354,7 +354,7 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
   assert.deepEqual(provider.calls[0], ['POST', '/client/v4/accounts/acc/pages/projects/getshowups/domains', 'Bearer cf_SECRET_TOKEN'])
   const pointing = (await call(domain, 'GET', { cookie: c })).json.domain
-  assert.deepEqual([pointing.step, pointing.records[0]], ['point', { type: 'CNAME', name: 'www.poolsco.com', value: 'getshowups.pages.dev' }])
+  assert.deepEqual([pointing.step, pointing.records[0]], ['point', { type: 'CNAME', name: 'www.poolsco.com', host: 'www', zone: 'poolsco.com', value: 'getshowups.pages.dev' }])
   // CNAME added and the provider is active, but HTTPS doesn't serve us yet: still securing.
   dns.CNAME['www.poolsco.com'] = ['getshowups.pages.dev']
   provider.domains.get('www.poolsco.com').status = 'active'
@@ -374,6 +374,42 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   dns.CNAME['www.poolsco.com'] = ['elsewhere.example']
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'needs_attention')
   assert.equal((await call(domain, 'GET', { cookie: c })).json.domain.detail, 'dns_changed')
+})
+
+test('domain: provider-relative Host shown; a record the provider doubled (Host typed as the full name) or a wrong value is reported, not "waiting"', async () => {
+  withProvider()
+  const c = await cookieFor('owner@pools.example')
+  const d = (await call(domain, 'POST', { cookie: c, body: { action: 'connect', hostname: 'www.poolsco.com' } })).json.domain
+  assert.deepEqual(d.records[0], { type: 'TXT', name: '_getshowups.www.poolsco.com', host: '_getshowups.www', zone: 'poolsco.com', value: d.records[0].value })
+  // Nothing anywhere: plain waiting, with the time of the check.
+  assert.equal(await checkDomain(env, 'www.poolsco.com'), 'pending')
+  let v = (await call(domain, 'GET', { cookie: c })).json.domain
+  assert.equal(v.detail, 'waiting_for_record')
+  assert.ok(v.checkedAt > 0)
+  // The exact production failure: Squarespace appended the zone to the full name typed into Host.
+  dns.TXT['_getshowups.www.poolsco.com.poolsco.com'] = [d.records[0].value]
+  assert.equal(await checkDomain(env, 'www.poolsco.com'), 'pending')
+  v = (await call(domain, 'GET', { cookie: c })).json.domain
+  assert.deepEqual([v.status, v.detail, v.verifiedAt], ['pending', 'record_doubled', null])
+  assert.equal(provider.calls.length, 0, 'a doubled record never counts as proof')
+  // Appended the hostname instead of the zone: also recognised.
+  delete dns.TXT['_getshowups.www.poolsco.com.poolsco.com']
+  dns.TXT['_getshowups.www.poolsco.com.www.poolsco.com'] = [d.records[0].value]
+  await checkDomain(env, 'www.poolsco.com')
+  assert.equal((await call(domain, 'GET', { cookie: c })).json.domain.detail, 'record_doubled')
+  // A different verification value at the right name.
+  dns.TXT['_getshowups.www.poolsco.com'] = ['gsu-verify=someoneelse']
+  await checkDomain(env, 'www.poolsco.com')
+  assert.equal((await call(domain, 'GET', { cookie: c })).json.domain.detail, 'wrong_value')
+  // Corrected: verified and attached.
+  dns.TXT['_getshowups.www.poolsco.com'] = [d.records[0].value]
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
+  v = (await call(domain, 'GET', { cookie: c })).json.domain
+  assert.deepEqual([v.step, v.records[0].host, v.records[0].name], ['point', 'www', 'www.poolsco.com'])
+  // Step 2 with the same mistake: CNAME at www.poolsco.com.poolsco.com.
+  dns.CNAME['www.poolsco.com.poolsco.com'] = ['getshowups.pages.dev']
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
+  assert.equal((await call(domain, 'GET', { cookie: c })).json.domain.detail, 'cname_doubled')
 })
 
 test('domain: without hosting-provider credentials a verified domain waits (admin is alerted), never claims to be connected', async () => {

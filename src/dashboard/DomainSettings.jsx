@@ -41,27 +41,75 @@ function Copy({ value }) {
 }
 
 function Record({ r }) {
-  // Most DNS providers want only the part before your domain in the "Name" / "Host" field.
+  // DNS providers (Squarespace, GoDaddy, Namecheap…) add ".<your domain>" to the Host themselves, so we show only the
+  // part before it. Typing the full name there is the most common reason a record is never found.
   return (
-    <dl className="record">
-      <div>
-        <dt>Type</dt>
-        <dd>{r.type}</dd>
-      </div>
-      <div>
-        <dt>Name / Host</dt>
-        <dd>
-          <code>{r.name}</code> <Copy value={r.name} />
-        </dd>
-      </div>
-      <div>
-        <dt>Value / Points to</dt>
-        <dd>
-          <code>{r.value}</code> <Copy value={r.value} />
-        </dd>
-      </div>
-    </dl>
+    <>
+      <dl className="record">
+        <div>
+          <dt>Type</dt>
+          <dd>{r.type}</dd>
+        </div>
+        <div>
+          <dt>Host / Name</dt>
+          <dd>
+            <code>{r.host}</code> <Copy value={r.host} />
+          </dd>
+        </div>
+        <div>
+          <dt>Value / Points to</dt>
+          <dd>
+            <code>{r.value}</code> <Copy value={r.value} />
+          </dd>
+        </div>
+      </dl>
+      {r.host !== r.name && (
+        <p className="fine">
+          Enter just <code>{r.host}</code> as the Host: your provider adds <code>.{r.zone}</code> itself. Only if it asks for the full name, use <code>{r.name}</code>.
+        </p>
+      )}
+    </>
   )
+}
+
+const ago = (ts) => {
+  if (!ts) return null
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000))
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`
+}
+
+// What the last check found, in words the owner can act on.
+function Finding({ d }) {
+  const r = d.records[0]
+  const checked = ago(d.checkedAt)
+  const msg = {
+    record_doubled: r && (
+      <>
+        We found your record, but at <code>{r.name}.{r.zone}</code>: your DNS provider added <code>{r.zone}</code> a second time. Edit that record and change its Host to <code>{r.host}</code> (keep the value), then press Check now.
+      </>
+    ),
+    cname_doubled: r && (
+      <>
+        We found your record, but at <code>{r.name}.{r.zone}</code>: your DNS provider added <code>{r.zone}</code> a second time. Edit that record and change its Host to <code>{r.host}</code>, then press Check now.
+      </>
+    ),
+    wrong_value: r && (
+      <>
+        We found a verification record for <code>{r.host}</code>, but its value is different. Change the value to <code>{r.value}</code>.
+      </>
+    ),
+    not_verified: <>We still can’t find the record after two weeks. Check the Host and Value above, or disconnect and start again.</>,
+    dns_unreachable: <>We couldn’t reach DNS to check just now. We’ll try again automatically.</>,
+  }[d.detail]
+  if (msg) return <p className={d.detail === 'dns_unreachable' ? 'fine' : 'notice-bad'} role="status">{msg}</p>
+  if (d.detail === 'waiting_for_record' || d.detail === 'waiting_for_cname') {
+    return (
+      <p className="fine" role="status">
+        Not found yet{checked ? ` (last checked ${checked})` : ''}. New records usually show up within an hour; we keep checking every 10 minutes.
+      </p>
+    )
+  }
+  return checked ? <p className="fine">Last checked {checked}.</p> : null
 }
 
 function Steps({ d }) {
@@ -85,12 +133,20 @@ function Steps({ d }) {
         {d.records.map((r) => (
           <Record key={r.type} r={r} />
         ))}
-        <p className="fine">Changes can take a few minutes to an hour to show up. We check automatically.</p>
+        <Finding d={d} />
       </>
     )
   }
   if (d.step === 'activate') {
-    return <p>Ownership verified. We’re preparing hosting for {d.hostname}. We’ll show the last step here as soon as it’s ready, usually within a day.</p>
+    return d.detail === 'activation_pending' ? (
+      <p>
+        <strong>Ownership verified.</strong> Our team has been alerted to finish setting up hosting for {d.hostname}; the last step will appear here when it’s ready. There’s nothing for you to do right now.
+      </p>
+    ) : (
+      <p>
+        <strong>Ownership verified.</strong> We’re preparing hosting for {d.hostname}{d.detail === 'provider_error' ? ' (a step on our side failed and is being retried automatically)' : ''}. We’ll show the last step here as soon as it’s ready.
+      </p>
+    )
   }
   return (
     <>
@@ -100,11 +156,13 @@ function Steps({ d }) {
       {d.records.map((r) => (
         <Record key={r.type} r={r} />
       ))}
-      <p className="fine">{d.status === 'securing' && d.detail === 'certificate_pending' ? 'Record found. We’re setting up a secure connection (https). This can take up to an hour.' : 'We check automatically and switch to “Connected” when it works.'}</p>
+      {d.status === 'securing' && d.detail === 'certificate_pending' ? <p className="fine">Record found. We’re setting up a secure connection (https). This can take up to an hour.</p> : <Finding d={d} />}
       {d.detail === 'dns_changed' && <p className="notice-soft">The record for {d.hostname} no longer points to your website. Add it back to reconnect.</p>}
     </>
   )
 }
+
+const NEEDS_FIX = ['record_doubled', 'cname_doubled', 'wrong_value', 'not_verified']
 
 export default function DomainSettings({ siteUrl, compact = false, onChange }) {
   const [data, setData] = useState(null)
@@ -129,7 +187,7 @@ export default function DomainSettings({ siteUrl, compact = false, onChange }) {
     } else setState({ error: ERRORS[d.error] || 'Something went wrong. Please try again.', suggestion: d.suggestion })
   }
   const d = data.domain
-  const [label, tone] = d ? STATUS[d.status] || ['Checking', 'pending'] : []
+  const [label, tone] = d ? (NEEDS_FIX.includes(d.detail) ? ['Record needs a fix', 'bad'] : STATUS[d.status] || ['Checking', 'pending']) : []
 
   if (d) {
     return (

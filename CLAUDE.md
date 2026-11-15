@@ -233,6 +233,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Websites: one renderer, no scripts on business sites, every text through the claims filter, drafts private until
   an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content
   (only exception: permanent account deletion, server/deletion.js).
+- Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
+  the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
+  at a doubled name is never accepted as proof.
 - Domains: never attach a hostname before its TXT proof; never claim "connected" without DNS pointing at us AND hosting reporting the domain active with a validated
   certificate (plus the HTTPS check where reachable); never touch
   a customer's DNS/MX. CF_API_TOKEN/CF_ACCOUNT_ID/CF_PAGES_PROJECT are production secrets (approval). DNS_API_MOCK_ORIGIN

@@ -1141,6 +1141,14 @@
   background: var(--orange-50);
   color: var(--ink-900);
 }
+.notice-bad {
+  padding: 12px 14px;
+  border: 1px solid var(--orange-500);
+  border-radius: var(--radius-sm);
+  background: var(--orange-50);
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
 .spinner {
   width: 28px;
   height: 28px;
