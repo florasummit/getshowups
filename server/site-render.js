@@ -3,6 +3,7 @@
 // owner's private preview). Every value is escaped; images come only from this business's uploads.
 import { COLORS } from './website.js'
 import { renderDesigned } from './site-designed.js'
+import { renderV2 } from './site-render-v2.js'
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -88,6 +89,8 @@ a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offse
 // biz: { id, name, appointmentMode, phone }  content: website content  opts: { canonical, bookUrl, preview, year }
 export function renderSite(biz, content, opts = {}) {
   // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
+  // AI-designed sites (v2 spec). Names and prices come from this content's services; towns/phone from records.
+  if (content.site) return renderV2({ ...biz, services: content.services || [] }, content.site, opts)
   if (content.design) return renderDesigned(biz, content, opts)
   const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = opts
   const c = content

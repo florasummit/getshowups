@@ -6,6 +6,7 @@ import { unapprovedClaims } from './ads/spec.js'
 import { approvedClaimsFor } from './landing.js'
 import { getSubscription } from './stripe.js'
 import { validateDesign } from './site-design.js'
+import { validateSpec } from './site-spec.js'
 
 export const TEMPLATES = ['clean', 'bold', 'warm']
 // Accent colours, each dark enough for white button text (WCAG AA).
@@ -136,6 +137,9 @@ export function validateContent(body, approvedClaims = [], assetIds = null) {
   if (c.seoDescription.length > LIMITS.seoDescription) errors.push('seoDescription')
   if (!c.redirects.length) delete c.redirects // older content has none: keep drafts and live versions comparable
   else if (c.redirects.length > MAX_REDIRECTS || c.redirects.some((r) => !REDIRECT_FROM.test(r.from) || !REDIRECT_TARGETS.includes(r.to)) || new Set(c.redirects.map((r) => r.from)).size !== c.redirects.length) errors.push('redirects')
+  // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
+  // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
+  if (b.site != null) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, claims: approvedClaims }).spec
   // Optional AI-chosen design (layout, palette, type, images) from the safe design system.
   if (b.design != null) {
     const [designErrors, design] = validateDesign(b.design, assetIds)

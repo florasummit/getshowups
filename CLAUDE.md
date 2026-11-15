@@ -95,6 +95,13 @@ server/              Shared backend modules imported by functions/ (bundled by P
   ai-providers.js    Own-key website writer: Claude (SDK, claude-opus-5-5, output_config json_schema, fallbacks default)
                      or OpenAI (strict json_schema); same mergeGenerated/claims/number/design-repair pipeline; own-key
                      errors are reported (never a silent fallback); cost recorded as 0 (billed to the owner's account)
+  site-spec.js       AI-designed sites, spec v2 (content.site): pages, composed sections, theme tokens. validateSpec() is the
+                     security boundary: enums/clamps, AA contrast repair, own-or-stock images, links only book/page/section,
+                     services/prices/towns/phone from records, claims + invented-number filter, limits. site-render-v2.js
+                     renders it (escaped, no scripts but JSON-LD, CSS-only motion, multi-page: /p/<id>/<page>, domain /<page>)
+  ai-designer.js     Conversational designer on the owner's own key: one turn = one model call → { reply, site } →
+                     validateSpec → PRIVATE draft (undo keeps the previous design); imported text given as quoted data;
+                     turns in website_design_turns (0023). Route streams NDJSON progress (designer.js)
   site-design.js     The design system the AI chooses from: 8 palettes (AA-checked), 5 font pairings, 4 hero / 3
                      services / 3 about layouts, shapes, section order, image refs (asset:<id> | stock:<id>).
                      validateDesign(), presetDesigns(), diversify() (3 designs never share hero/palette/fonts)

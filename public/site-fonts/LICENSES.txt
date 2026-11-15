@@ -1,0 +1,9 @@
+Fonts self-hosted for business websites. All are licensed under the SIL Open Font License 1.1 (OFL-1.1),
+https://openfontlicense.org. Latin subsets, variable weight, from the @fontsource-variable packages (v5.3.0).
+
+archivo, dm-sans, fraunces, inter, playfair-display, space-grotesk (existing)
+manrope             Manrope              (c) The Manrope Project Authors
+bricolage-grotesque Bricolage Grotesque  (c) The Bricolage Grotesque Project Authors
+cormorant-garamond  Cormorant Garamond   (c) The Cormorant Project Authors (also the italic file)
+outfit              Outfit               (c) The Outfit Project Authors
+syne                Syne                 (c) The Syne Project Authors

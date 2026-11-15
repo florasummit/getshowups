@@ -268,6 +268,19 @@ createServer(async (req, res) => {
     const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
     return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
   }
+  // AI designer (Claude, streamed): a first design, or a darker revision when the prompt carries CURRENT_SITE.
+  if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST') {
+    const prompt = JSON.parse(raw).messages?.[0]?.content || ''
+    const revise = prompt.includes('CURRENT_SITE')
+    const theme = revise
+      ? { colors: { bg: '#0b1620', surface: '#13232f', ink: '#eef6f8', muted: '#a3b8c2', accent: '#5fd4d0', onAccent: '#062023', line: '#223746' }, headingFont: 'cormorant-garamond', bodyFont: 'manrope', headingWeight: 600, headingCase: 'none', headingTracking: -0.01, baseSize: 17, scale: 1.3, lineHeight: 1.6, radius: 4, density: 'airy', maxWidth: 1200, buttons: 'outline', motion: 'subtle' }
+      : { colors: { bg: '#f4f8f7', surface: '#e3eeec', ink: '#10292b', muted: '#4b6466', accent: '#0f5c63', onAccent: '#ffffff', line: '#cfdedb' }, headingFont: 'syne', bodyFont: 'manrope', headingWeight: 700, headingCase: 'none', headingTracking: -0.03, baseSize: 17, scale: 1.3, lineHeight: 1.6, radius: 18, density: 'comfortable', maxWidth: 1200, buttons: 'pill', motion: 'subtle' }
+    const site = { name: revise ? 'Midnight' : 'Lowcountry', theme, nav: { layout: 'left', sticky: true, showBook: true }, footer: { layout: 'simple', text: null }, pages: [{ slug: '', navLabel: 'Home', seoTitle: 'Pools', seoDescription: 'Pools', sections: [{ type: 'hero', id: 'top', layout: 'split', heading: revise ? 'Quietly perfect pools.' : 'Clear water, every week.', text: 'Pool care, booked online.', image: 'stock:pool-water', primaryCta: { label: 'Book a visit', target: 'book' } }, { type: 'area', id: 'area', heading: 'Where we work' }] }] }
+    const text = JSON.stringify({ reply: revise ? 'Darker and more premium, with a serif headline.' : 'A fresh coastal design with booking up front.', site })
+    const ev = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    return res.end(ev('message_start', { message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } }) + ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }) + ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } }) + ev('content_block_stop', { index: 0 }) + ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 900 } }) + ev('message_stop', {}))
+  }
   // Own-key AI providers (AI_API_MOCK_ORIGIN): key check only; a key containing BAD is refused.
   if (url.pathname === '/anthropic/v1/models' || url.pathname === '/openai/v1/models') {
     const auth = req.headers['x-api-key'] || String(req.headers.authorization || '')

@@ -1932,3 +1932,64 @@
   top: 6px;
   left: 6px;
 }
+
+/* AI designer */
+.designer > * + * {
+  margin-top: 14px;
+}
+.chat {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.chat li {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  max-width: 88%;
+}
+.chat li p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.chat-owner {
+  justify-self: end;
+  background: var(--ink-900);
+  color: var(--white);
+}
+.chat-designer {
+  justify-self: start;
+  background: var(--ink-50);
+  border: 1px solid var(--border);
+}
+.chat-who {
+  font-size: 0.78rem;
+  font-weight: 650;
+  opacity: 0.75;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text);
+  cursor: pointer;
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.designer-input {
+  display: grid;
+  gap: 10px;
+}

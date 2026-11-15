@@ -20,11 +20,19 @@ export async function businessForSite(env, id) {
 }
 
 export async function siteBusinessInfo(db, customer) {
-  const phone = (await db.prepare('SELECT phone FROM business_profiles WHERE customer = ?1').bind(customer.id).first())?.phone || ''
-  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone }
+  const p = await db.prepare('SELECT phone, cities FROM business_profiles WHERE customer = ?1').bind(customer.id).first()
+  const cities = (() => {
+    try {
+      return JSON.parse(p?.cities || '[]')
+    } catch {
+      return []
+    }
+  })()
+  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities }
 }
 
-export async function serveSite(env, request, id) {
+// page: a page slug of an AI-designed (multi-page) site; '' is the home page. Unknown pages are "not available".
+export async function serveSite(env, request, id, page = '') {
   const db = env.ONBOARDING_DB
   const rl = await hitByIp(env, 'pageView', request)
   if (rl.limited) return htmlResponse(429, renderNotice('Please wait a moment', 'Too many requests. Try again shortly.'), { cache: 'no-store' })
@@ -34,6 +42,7 @@ export async function serveSite(env, request, id) {
     if (!isHosted(await hostingStatus(db, customer.id))) return unavailable()
     const live = await liveContent(db, customer.id)
     if (!live) return unavailable()
+    if (page && !live.content.site?.pages?.some((p) => p.slug === page)) return unavailable()
     const host = await connectedHost(db, customer.id)
     const canonical = host ? `https://${host}/` : `${siteOrigin(env)}/p/${customer.id}`
     // Booking always happens on the GetShowUps address (same-origin checks, one sign-in domain).
@@ -41,7 +50,7 @@ export async function serveSite(env, request, id) {
     const bookUrl = `${origin}/book/${customer.id}${carryQuery(request.url)}`
     // Test businesses (admin-marked) are published for checks only: never indexed (fails closed via testStatus).
     const noindex = (await testStatus(env, customer.id)).test
-    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex }), { noindex })
+    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}` }), { noindex })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })

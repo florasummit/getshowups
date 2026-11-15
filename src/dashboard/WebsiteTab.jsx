@@ -6,6 +6,7 @@ import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
 import AiKeySettings from './AiKeySettings.jsx'
+import WebsiteDesigner from './WebsiteDesigner.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -124,6 +125,19 @@ export default function WebsiteTab() {
         <WebsiteImport
           defaultUrl={data.domain?.hostname || ''}
           onApplied={async () => {
+            const { status, data: d } = await api('/api/dashboard/website')
+            if (status === 200) {
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }
+          }}
+        />
+      </section>
+
+      <section className="card" aria-label="AI designer">
+        <h2 className="card-title">AI designer</h2>
+        <WebsiteDesigner
+          onChanged={async () => {
             const { status, data: d } = await api('/api/dashboard/website')
             if (status === 200) {
               refresh(d)
