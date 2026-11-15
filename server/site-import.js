@@ -387,8 +387,14 @@ export async function fetchImage(url) {
     return { ok: false, error: 'invalid_url' }
   }
   if (u.protocol !== 'https:') return { ok: false, error: 'unsafe_url' }
-  if (/squarespace-cdn\.com$/.test(u.hostname) && !u.searchParams.has('format')) u.searchParams.set('format', '1500w')
-  const r = await fetchPublic(u.href, { maxBytes: IMAGE_BYTES, accept: 'image/jpeg,image/png,image/webp' })
+  // Squarespace's CDN serves web sizes on request: step down until the photo fits the upload limit.
+  const sizes = /squarespace-cdn\.com$/.test(u.hostname) && !u.searchParams.has('format') ? ['1500w', '1000w', '750w'] : [null]
+  let r
+  for (const size of sizes) {
+    if (size) u.searchParams.set('format', size)
+    r = await fetchPublic(u.href, { maxBytes: IMAGE_BYTES, accept: 'image/jpeg,image/png,image/webp' })
+    if (r.ok || r.error !== 'too_large') break
+  }
   return r.ok ? { ok: true, bytes: r.bytes } : r
 }
 

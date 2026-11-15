@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
-import { applyFixes, contentFixes, crawlSite, extractPage, parseRobots, robotsAllows, suggestContent } from '../server/site-import.js'
+import { applyFixes, contentFixes, crawlSite, extractPage, fetchImage, parseRobots, robotsAllows, suggestContent } from '../server/site-import.js'
 import { LIMITS } from '../server/website.js'
 import * as importApi from '../functions/api/dashboard/website/import.js'
 import * as website from '../functions/api/dashboard/website/index.js'
@@ -208,4 +208,25 @@ test("content fixes: typos only towards the site's own spelling; template text a
   // A cleaning business talking about houses is fine; no site spelling → no typo suggestion.
   const cleaning = { pages: [page(['House cleaning and maid service', 'We clean every room'], 'Sparkle Maids')] }
   assert.deepEqual(contentFixes({ headline: 'Spotless homes', services: [{ name: 'Deep clean', description: 'Every corner of your house, top to bottom, with eco-friendly products.' }] }, cleaning), [])
+})
+
+test('photos from Squarespace that are too large at 1500px are fetched at a smaller web size; other hosts are never resized', async () => {
+  const real = globalThis.fetch
+  const asked = []
+  globalThis.fetch = async (input) => {
+    const u = new URL(String(input))
+    asked.push(u.search)
+    const big = u.hostname.endsWith('squarespace-cdn.com') ? u.searchParams.get('format') === '1500w' : true
+    return new Response(big ? new Uint8Array(1_100_000) : PNG, { headers: { 'content-type': 'image/png' } })
+  }
+  try {
+    const sq = await fetchImage('https://images.squarespace-cdn.com/content/v1/abc/photo.jpg')
+    assert.equal(sq.ok, true)
+    assert.deepEqual(asked, ['?format=1500w', '?format=1000w'])
+    asked.length = 0
+    assert.deepEqual(await fetchImage('https://images.cdn.example/huge.jpg'), { ok: false, error: 'too_large' })
+    assert.deepEqual(asked, [''], 'one try, no resizing parameters invented for other hosts')
+  } finally {
+    globalThis.fetch = real
+  }
 })
