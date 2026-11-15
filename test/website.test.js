@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { validateContent, hostingStatus, HOSTING_GRACE_MS } from '../server/website.js'
 import { renderSite } from '../server/site-render.js'
-import { normalizeHostname, checkDomain, checkDueDomains } from '../server/domains.js'
+import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, TOKEN_REUSE_MS } from '../server/domains.js'
 import { sniffImage } from '../server/assets.js'
 import { readiness } from '../server/onboarding.js'
 import { customerRows, growth } from '../server/metrics.js'
@@ -420,6 +420,69 @@ test('domain: without hosting-provider credentials a verified domain waits (admi
   const v = (await call(domain, 'GET', { cookie: c })).json.domain
   assert.deepEqual([v.status, v.detail, v.step, v.records], ['verifying', 'activation_pending', 'activate', []])
   assert.ok((await customerRows(env)).find((r) => r.id === 'pools').attention.includes('domain_activation'))
+})
+
+test('domain reconnect: the same business keeps its verification value (ownership re-proven); expired or other-business claims get a new one', async () => {
+  const H = 'www.poolsco.com'
+  const tok = () => db.sql.prepare('SELECT verify_token t, customer, status, verified_at, attached_at FROM website_domains WHERE hostname = ?').get(H)
+  const t0 = Date.now()
+  assert.equal((await claimDomain(env, 'pools', H, t0)).ok, true)
+  const first = tok().t
+  dns.TXT[`_getshowups.${H}`] = [`gsu-verify=${first}`]
+  assert.equal(await checkDomain(env, H, { now: t0 + 1 }), 'verifying', 'verified (no hosting provider here)')
+  assert.ok(tok().verified_at)
+  // Disconnect, reconnect (also after a typo detour): same value, but ownership must be proven again.
+  assert.equal((await disconnectDomain(env, 'pools', t0 + 2)).ok, true)
+  assert.equal((await claimDomain(env, 'pools', 'www.poolsc0.com', t0 + 3)).ok, true)
+  assert.equal((await disconnectDomain(env, 'pools', t0 + 4)).ok, true)
+  assert.equal((await claimDomain(env, 'pools', H, t0 + 5)).ok, true)
+  assert.deepEqual({ ...tok() }, { t: first, customer: 'pools', status: 'pending', verified_at: null, attached_at: null })
+  assert.equal(await checkDomain(env, H, { now: t0 + 6 }), 'verifying', 'the existing TXT record verifies again')
+  // Removed longer than the reuse window: a new value.
+  await disconnectDomain(env, 'pools', t0 + 7)
+  assert.equal((await claimDomain(env, 'pools', H, t0 + 7 + TOKEN_REUSE_MS + 1)).ok, true)
+  const second = tok().t
+  assert.notEqual(second, first)
+  assert.equal(await checkDomain(env, H, { now: t0 + 8 + TOKEN_REUSE_MS }), 'pending', 'the old record no longer verifies')
+  // Another business takes over the removed hostname: a fresh value; the previous owner's record proves nothing.
+  await disconnectDomain(env, 'pools', t0 + 9 + TOKEN_REUSE_MS)
+  dns.TXT[`_getshowups.${H}`] = [`gsu-verify=${second}`]
+  assert.equal((await claimDomain(env, 'salon', H, t0 + 10 + TOKEN_REUSE_MS)).ok, true)
+  const salon = tok()
+  assert.equal(salon.customer, 'salon')
+  assert.ok(![first, second].includes(salon.t))
+  assert.equal(await checkDomain(env, H, { now: t0 + 11 + TOKEN_REUSE_MS }), 'pending')
+  assert.equal(db.sql.prepare('SELECT detail FROM website_domains WHERE hostname = ?').get(H).detail, 'wrong_value')
+  // …and when it comes back to the first business, that business gets a fresh value too (the row was another's).
+  await disconnectDomain(env, 'salon', t0 + 12 + TOKEN_REUSE_MS)
+  assert.equal((await claimDomain(env, 'pools', H, t0 + 13 + TOKEN_REUSE_MS)).ok, true)
+  assert.ok(![first, second, salon.t].includes(tok().t))
+})
+
+test('domain claims under concurrency: duplicates are idempotent; one business, one domain; one owner per hostname', async () => {
+  // Same business, same hostname, three at once: all succeed, one row, one value.
+  const same = await Promise.all([1, 2, 3].map(() => claimDomain(env, 'pools', 'www.race.example')))
+  assert.ok(same.every((r) => r.ok), JSON.stringify(same))
+  assert.equal(new Set(same.map((r) => r.domain.records[0].value)).size, 1)
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM website_domains WHERE hostname = 'www.race.example'").get().n, 1)
+  // Same business, two hostnames at once: exactly one wins, the other is told to disconnect first.
+  await disconnectDomain(env, 'pools')
+  const two = await Promise.all([claimDomain(env, 'pools', 'www.one.example'), claimDomain(env, 'pools', 'www.two.example')])
+  assert.deepEqual(two.map((r) => r.ok).sort(), [false, true])
+  assert.equal(two.find((r) => !r.ok).error, 'already_has_domain')
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM website_domains WHERE customer = 'pools' AND status <> 'removed'").get().n, 1)
+  // Two businesses, one hostname at once: one owner; the other is refused and nothing of the winner's changes.
+  const both = await Promise.all([claimDomain(env, 'salon', 'www.contested.example'), claimDomain(env, 'pools', 'www.contested.example')])
+  assert.deepEqual(both.map((r) => r.ok).sort(), [false, true])
+  const loser = both.find((r) => !r.ok)
+  assert.ok(['domain_in_use', 'already_has_domain'].includes(loser.error))
+  const row = db.sql.prepare("SELECT customer, verify_token FROM website_domains WHERE hostname = 'www.contested.example'").get()
+  assert.equal(row.customer, both[0].ok ? 'salon' : 'pools')
+  // A later attempt by another business on an ACTIVE claim is refused and leaves it untouched.
+  const other = row.customer === 'salon' ? 'pools' : 'salon'
+  if (other === 'pools') await disconnectDomain(env, 'pools')
+  assert.equal((await claimDomain(env, other, 'WWW.Contested.Example')).error, 'domain_in_use')
+  assert.deepEqual({ ...db.sql.prepare("SELECT customer, verify_token FROM website_domains WHERE hostname = 'www.contested.example'").get() }, { ...row })
 })
 
 test('domain: one business per hostname; no takeover; one domain per business; cross-site and signed-out refused', async () => {
