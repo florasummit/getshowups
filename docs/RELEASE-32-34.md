@@ -7,7 +7,7 @@ The new tables and indexes don't exist in production yet, and every column the c
 
 | Step | Action | Verify |
 | --- | --- | --- |
-| 0 | Record the D1 restore point: `wrangler d1 time-travel info getshowups-onboarding` | bookmark noted |
+| 0 | Record the D1 restore point: `wrangler d1 time-travel info getshowups-onboarding` (Time Travel keeps 30 days). Restore if ever needed: `wrangler d1 time-travel restore getshowups-onboarding --bookmark=<id>` (destructive; replaces the database; approval) | bookmark noted, then re-confirmed after each migration |
 | 1 | Apply **0018** (indexes only) with `--remote` | `leads_created`, `appointments_created`, `appointment_changes_changed` exist |
 | 2 | Merge **#32** at its reviewed head (`--match-head-commit`) → Pages deploys | smoke (below) + `GET /api/appointment/confirm?a=bad&k=x` → 404 |
 | 3 | Retarget #33 to main (`gh pr edit 33 --base main`); CI green. Apply **0019**. Merge **#33** | `/api/book/poolthru-llc` has `policies`; `/api/dashboard/policies` → 401 |
@@ -38,7 +38,10 @@ Unchanged: `MESSAGES_LIVE` stays off, so owner notices and customer messages rea
   - the booking stays `booked` and the owner or customer sees "try again" (`cancel_incomplete`);
   - an open failure event shows in Business Review;
   - a retry finds the event gone and completes;
-  - until that retry, reminders could still go out for that booking.
+  - the sender skips every confirmation/reminder for that appointment (`skipped/cancel_incomplete`), so no reminder goes
+    out for an event that no longer exists.
+  - Residual: if the database is so unavailable that even the failure event can't be written, no marker exists. That
+    case also fails the request visibly, so the person retries.
 - **Cancel link:**
   - it's the HMAC-signed confirm link (tampered tokens get 404);
   - it works only while the appointment is booked and in the future, so it expires at the start time;
