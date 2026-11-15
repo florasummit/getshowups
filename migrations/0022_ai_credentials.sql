@@ -49,16 +49,21 @@ INSERT OR IGNORE INTO ai_model_registry (provider, model, status, quality, input
   ('openai', 'gpt-5.4-mini', 'supported', 2, 0.75, 4.50, NULL, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5.4-nano', 'supported', 1, 0.20, 1.25, NULL, 'openai pricing 2026-11-15', 0);
 
--- Every request made with a business's own key, successful or not (a failed request can still be billed), so the
--- monthly limit counts real usage. Tokens only: no prompts, no output.
+-- Every request made with a business's own key. Before sending, a row RESERVES the request's worst-case cost in one
+-- atomic statement that also checks the monthly limit (so concurrent requests can't both slip under it); afterwards it is
+-- settled to the cost of the tokens the provider reported. A request with no usage report keeps its worst case (it may
+-- still have been billed). Estimates from published prices, not the provider's invoice. Tokens only: no prompts/output.
 CREATE TABLE IF NOT EXISTS ai_key_usage (
+  id            TEXT PRIMARY KEY,
   customer      TEXT NOT NULL,
   provider      TEXT NOT NULL,
   model         TEXT NOT NULL,
   kind          TEXT NOT NULL,
+  state         TEXT NOT NULL CHECK (state IN ('reserved', 'settled', 'unknown')),
   input_tokens  INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
-  ok            INTEGER NOT NULL,
+  cost_micros   INTEGER NOT NULL DEFAULT 0, -- USD millionths: worst case while reserved/unknown, estimate once settled
+  ok            INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai_key_usage_customer ON ai_key_usage (customer, created_at);

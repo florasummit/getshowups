@@ -8,7 +8,7 @@
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
 import { credentialFor, markCredential } from './ai-credentials.js'
 import { runWithOwnKey } from './ai-providers.js'
-import { inputTokensFor, recordUsage, resolveModel } from './ai-models.js'
+import { inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { brandName, generateContent, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
@@ -194,7 +194,7 @@ async function ownKey(env, customer, msgs, schema, now) {
   const m = await resolveModel(env, customer.id, cred, { kind: 'writer', input: inputTokensFor(JSON.stringify(msgs), JSON.stringify(schema)) }, now)
   if (!m.ok) return { ok: false, error: m.error }
   const r = await runWithOwnKey(env, { ...cred, model: m.model, maxOutput: m.maxOutput }, msgs, schema)
-  if (r.usage) await recordUsage(env.ONBOARDING_DB, customer.id, cred.provider, r.model || m.model, 'writer', r.usage, r.ok, now)
+  await settleUsage(env.ONBOARDING_DB, m.reservation, cred.provider, r)
   if (!r.ok && KEY_ERRORS.has(r.error)) await markCredential(env, customer.id, 'invalid', now)
   return r
 }

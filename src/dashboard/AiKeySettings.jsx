@@ -80,7 +80,9 @@ export default function AiKeySettings({ onChange }) {
           <button className="btn btn-quiet btn-sm" disabled={state.busy}>
             Save limit
           </button>
-          <p className="fine">${key.spentUsd.toFixed(2)} used this month (estimated from your provider’s published prices). We stop before a request could go over your limit.</p>
+          <p className="fine">
+            About ${key.spentUsd.toFixed(2)} used this month. This is our estimate from your provider’s published prices, not their bill: we don’t send a request whose largest possible cost would go over your limit, but your provider bills you directly. Set a spending limit in your {key.label} account too.
+          </p>
         </form>
         {state.saved && (
           <p className="fine" role="status">
