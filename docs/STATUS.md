@@ -632,3 +632,19 @@ See docs/LAUNCH_READINESS.md. Draft PRs: #30 (review accuracy, +unmark fix 60e79
   businesses' appointments unchanged; its 2 reminders stay 'scheduled' until send time, where skipReason returns
   not_needed (and the business is test-only anyway).
 - No migrations, secrets or switches changed. Rollback target: 1db27fd7 (abbbbfa).
+
+## 2026-11-15: controlled release of #32, #33, #34 (approved)
+
+- Restore point (D1 Time Travel) before any change: bookmark 00000700-00000000-00005124-dd24ee22d6306a427f11e16a5941dd9d
+  at 2026-11-15T19:09:47Z (resolves by timestamp; 30-day window). Baseline row counts recorded.
+- Pre-release safeguard added to #32 (852e646): no confirmation/reminder for an appointment with an unresolved
+  cancel_incomplete (Google event removed, save failed).
+- 0018 applied → #32 merged at 852e646 → main 520a59b → deployment 16b83cbe. Smoke 11/11 + confirm-link 404s; cron ran
+  (audit seq 25).
+- #33 retargeted, CI green → 0019 applied → merged at d2c41e4 → main 4a93ab7 → deployment 9ea6df38. Smoke 11/11;
+  booking API returns policies; policies route 401 unauthenticated; cron ran (seq 26).
+- #34 retargeted, CI green → 0020 applied → merged at 7dd551a → main f82caa8 → deployment 27be9f6a. Smoke 11/11;
+  webhook 503 not_configured; cron ran (seq 27) with the new sender queries.
+- Data: only change = 3 platform.release audit rows. No new incidents (pre-existing: billing.reconcile sandbox diffs).
+- Not done (separate approval): RESEND_WEBHOOK_SECRET + Resend webhook, MESSAGE_TEST_RECIPIENTS for the live journey
+  test, the journey test itself. MESSAGES_LIVE, Stripe live, ads, SMS unchanged (off).
