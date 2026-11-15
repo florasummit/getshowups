@@ -1855,3 +1855,80 @@
 .hl--failing { background: #fee2e2; color: #991b1b; }
 .hl--degraded { background: #fef3c7; color: #92400e; }
 .cap-events { margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.82rem; display: grid; gap: 4px; overflow-wrap: anywhere; }
+
+/* Website import */
+.import > * + * {
+  margin-top: 14px;
+}
+.import-pages ul,
+.notice-bad ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.import-fields,
+.import-photos {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.import-fields legend,
+.import-photos legend {
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.import-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.import-field input {
+  margin-top: 4px;
+}
+.import-label {
+  display: block;
+  font-weight: 600;
+}
+.import-text {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.import-services {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.import-services p {
+  margin: 2px 0 6px;
+}
+.import-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.import-photo {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.import-photo.is-on {
+  border-color: var(--orange-500);
+}
+.import-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.import-photo input {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+}

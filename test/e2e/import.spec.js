@@ -1,0 +1,33 @@
+// Website import in the browser: the owner brings their existing website (a fake Squarespace-style site served by the
+// local mock), reviews what was found, and puts it into the private draft. Nothing goes live.
+import { test, expect } from './test.js'
+import { fixtures } from '../../playwright.config.js'
+import { useSession } from './helpers.js'
+
+test.describe.configure({ timeout: 90_000 })
+
+test('owner imports their current website into the draft (text, prices, photos); the live site is unchanged @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await page.goto('/dashboard/website')
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Bring your current website' }) })
+  // A previous run (other viewport) may already have imported: the form is then under "Import a different website".
+  await expect(card.getByLabel('Your current website').or(card.getByText('Import a different website')).first()).toBeVisible()
+  if (await card.getByText('Import a different website').isVisible()) await card.getByText('Import a different website').click()
+  const go = card.getByRole('button', { name: /^Import (my website|again)$/ })
+  await card.getByLabel('Your current website').fill('www.harborpools.example')
+  await expect(go).toBeDisabled()
+  await card.getByLabel('This is my business’s website and I can use its content.').check()
+  await go.click()
+  await expect(card.getByText('Found 3 pages on www.harborpools.example.')).toBeVisible({ timeout: 30_000 })
+  await expect(card.getByText('Clear Pools in Charleston')).toBeVisible()
+  const services = card.locator('.import-services li')
+  await expect(services).toHaveCount(2)
+  await expect(services.first()).toContainText('Weekly Pool Care · $180+')
+  await expect(card.getByText('Photos (1 selected, up to 6)')).toBeVisible()
+  await card.getByRole('button', { name: 'Use this in my draft' }).click()
+  await expect(card.getByRole('status')).toContainText('Added to your draft with 1 photo. Your live website hasn’t changed.')
+  // The editor now holds the imported text.
+  await page.getByText('Edit text and photos').click().catch(() => {})
+  await expect(page.locator('input[value="Clear Pools in Charleston"], textarea:has-text("Clear Pools in Charleston")').first()).toBeAttached()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})

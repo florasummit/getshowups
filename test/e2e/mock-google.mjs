@@ -268,6 +268,27 @@ createServer(async (req, res) => {
     const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
     return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
   }
+  // Website import stand-in (SITE_IMPORT_MOCK_ORIGIN): /__site/<host><path> serves a small Squarespace-style site.
+  if (url.pathname.startsWith('/__site/')) {
+    const [, , host, ...rest] = url.pathname.split('/')
+    const path = '/' + rest.join('/')
+    const html = (title, body) => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Weekly pool care in Charleston, booked online."></head><body>${body}</body></html>`
+    const pages = {
+      '/robots.txt': ['text/plain', 'User-agent: *\nDisallow: /config\nSitemap: https://www.harborpools.example/sitemap.xml'],
+      '/sitemap.xml': ['application/xml', '<urlset><url><loc>https://www.harborpools.example/services</loc></url><url><loc>https://www.harborpools.example/about</loc></url></urlset>'],
+      '/': ['text/html', html('Harbor Pools', '<h1>Clear Pools in Charleston</h1><p>Weekly pool care from a small local team.</p><img data-src="https://img.harborcdn.example/pool.jpg" data-image-dimensions="1600x1000" alt="Pool">')],
+      '/services': ['text/html', html('Services — Harbor Pools', '<h1>Services</h1><h3>Weekly Pool Care</h3><p>$180+</p><p>Skimming, brushing and balanced water every week.</p><h3>Green Pool Cleanup</h3><p>$400+</p><p>We bring green water back to clear in a few visits.</p>')],
+      '/about': ['text/html', html('About — Harbor Pools', '<h2>Who we are</h2><p>A small Charleston team focused on reliable weekly visits and clear communication.</p>')],
+    }
+    if (host === 'img.harborcdn.example') {
+      res.writeHead(200, { 'Content-Type': 'image/png' })
+      return res.end(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]))
+    }
+    const p = host === 'www.harborpools.example' ? pages[path] : null
+    if (!p) return send(res, 404, { error: 'not found' })
+    res.writeHead(200, { 'Content-Type': p[0] })
+    return res.end(p[1])
+  }
   if (url.pathname === '/__dns' && req.method === 'POST') {
     const body = JSON.parse(raw)
     dnsRecords.set(`${body.type}:${body.name}`, body.values)

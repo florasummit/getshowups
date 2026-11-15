@@ -50,6 +50,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
+  api/dashboard/website/import  GET latest import; POST start (url, confirm) | apply (importId, fields, photos)
   api/dashboard/website/ Website: index (GET state; POST save|publish|unpublish|restore|regenerate), preview (owner-only
                      HTML), assets (image upload), export (owner's content + images as JSON)
   api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
@@ -94,6 +95,11 @@ server/              Shared backend modules imported by functions/ (bundled by P
   site-designed.js   Renderer for content.design (escaped, script-free, self-hosted fonts/photos). Content without
                      a design still uses site-render.js unchanged, so existing sites look exactly the same
   stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
+  site-import.js     Website import: public pages of the owner's existing site (robots.txt honoured, same site only, public
+                     hosts only via normalizeWebsiteUrl, ≤12 pages, size/time caps, manual redirects re-checked), tolerant
+                     HTML extraction (no scripts), suggestContent (only text found on the site). website-import.js: stored
+                     imports (0021) and applyImport → PRIVATE draft (fields through validateContent; photos only from that
+                     import, via saveAsset). Imported text is untrusted data, never instructions
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)

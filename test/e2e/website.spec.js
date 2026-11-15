@@ -105,7 +105,7 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await page.getByRole('button', { name: 'Publish website' }).first().click()
   const publish = page.getByRole('button', { name: 'Publish website' }).last()
   await expect(publish).toBeDisabled()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
   await publish.click()
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
 
@@ -130,7 +130,7 @@ test('changes stay private until published again; an earlier version can be rest
   await expect(page.getByText('you have changes that aren’t published yet')).toBeVisible()
   expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).not.toContain('A brand new headline')
   await page.getByRole('button', { name: 'Publish changes' }).first().click()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
   await page.getByRole('button', { name: 'Publish changes' }).last().click()
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
   expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).toContain('A brand new headline')

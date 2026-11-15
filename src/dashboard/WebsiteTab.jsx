@@ -4,6 +4,7 @@ import { api, fmt } from '../lib/api.js'
 import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
+import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -115,6 +116,20 @@ export default function WebsiteTab() {
             }}
           />
         )}
+      </section>
+
+      <section className="card" aria-label="Bring your current website">
+        <h2 className="card-title">Bring your current website</h2>
+        <WebsiteImport
+          defaultUrl={data.domain?.hostname || ''}
+          onApplied={async () => {
+            const { status, data: d } = await api('/api/dashboard/website')
+            if (status === 200) {
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }
+          }}
+        />
       </section>
 
       <section className="card" aria-label="Create with AI">
