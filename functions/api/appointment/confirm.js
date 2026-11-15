@@ -1,10 +1,14 @@
-// /api/appointment/confirm?a=<appointment id>&k=<signed token> — the "confirm you'll be there" link in
-// confirmation and reminder messages.
-//   GET  shows the appointment and a Confirm button (read-only: email scanners prefetch links).
-//   POST records the confirmation (appointment_confirmations).
+// /api/appointment/confirm?a=<appointment id>&k=<signed token>[&do=cancel] — the link in confirmation and reminder
+// messages ("confirm you'll be there" / "can't make it?").
+//   GET  shows the appointment with Confirm and "Can't make it?" (read-only: email scanners prefetch links);
+//        do=cancel shows the cancel question (still read-only).
+//   POST records the confirmation (appointment_confirmations), or with do=cancel cancels the appointment the same way
+//        the owner does (server/booking.js cancelAppointment: Google event removed first, then cancelled; the business
+//        is told by an owner notice) and offers a new time through the signed lead link.
 // The signed token only works for its own appointment; the page shows the business name and time only.
 import { escapeHtml, page } from '../../../server/google-oauth.js'
-import { verifyLinkToken } from '../../../server/links.js'
+import { resumeUrl, verifyLinkToken } from '../../../server/links.js'
+import { cancelAppointment } from '../../../server/booking.js'
 import { track } from '../../../server/events.js'
 import { hitByIp, tooManyPage } from '../../../server/ratelimit.js'
 
@@ -18,7 +22,7 @@ const when = (ts, timeZone) =>
 async function load(env, a, k) {
   if (!ID_RE.test(String(a)) || !(await verifyLinkToken(env, 'confirm', a, k))) return null
   return env.ONBOARDING_DB.prepare(
-    `SELECT ap.id, ap.customer, ap.start_at, ap.status, c.name, c.timezone,
+    `SELECT ap.id, ap.customer, ap.lead_id, ap.start_at, ap.status, c.name, c.timezone,
             (SELECT ss.appointment_mode FROM service_settings ss WHERE ss.customer = ap.customer) AS appointment_mode,
             (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = ap.id) AS confirmed_at
        FROM appointments ap JOIN customers c ON c.id = ap.customer WHERE ap.id = ?1`,
@@ -30,10 +34,31 @@ async function load(env, a, k) {
 const invalid = () => page(404, 'Link not valid', 'This confirmation link is not valid. Please use the link from your most recent message.', HEADERS, '', false)
 const closed = (row) => page(410, 'Can’t confirm online', `This appointment can no longer be confirmed online. Please contact ${row.name} directly.`, HEADERS, '', false)
 const isVisit = (row) => row.appointment_mode === 'at_customer'
-const done = (row) =>
-  page(200, 'You’re confirmed', `${row.name} · ${when(row.start_at, row.timezone)}. ${isVisit(row) ? 'Thanks for confirming the visit.' : 'See you then!'}`, HEADERS, '', false)
+const what = (row) => (isVisit(row) ? 'visit' : 'appointment')
+const hidden = (a, k, action) =>
+  `<input type="hidden" name="a" value="${escapeHtml(a)}"><input type="hidden" name="k" value="${escapeHtml(k)}">${action ? `<input type="hidden" name="do" value="${action}">` : ''}`
+const cantMake = (a, k) => `<p><a href="/api/appointment/confirm?a=${encodeURIComponent(a)}&amp;k=${encodeURIComponent(k)}&amp;do=cancel">Can’t make it? Cancel or pick a new time</a></p>`
+const done = (row, a, k) =>
+  page(200, 'You’re confirmed', `${row.name} · ${when(row.start_at, row.timezone)}. ${isVisit(row) ? 'Thanks for confirming the visit.' : 'See you then!'}`, HEADERS, cantMake(a, k), false)
+const CANCEL_FAIL = {
+  calendar_unavailable: 'We couldn’t cancel it right now. Please try again in a few minutes.',
+  calendar_access: 'We couldn’t cancel it online. Please contact the business directly.',
+  cancel_incomplete: 'We couldn’t finish cancelling. Please try again in a minute.',
+}
 
-async function handle(request, env, a, k, confirm) {
+async function cancel(env, row, a, k, confirm) {
+  if (!confirm) {
+    const form = `<form method="post" action="/api/appointment/confirm">${hidden(a, k, 'cancel')}<button type="submit">Yes, cancel my ${what(row)}</button></form><p><a href="/api/appointment/confirm?a=${encodeURIComponent(a)}&amp;k=${encodeURIComponent(k)}">Keep it</a></p>`
+    return page(200, `Cancel your ${what(row)}?`, `${row.name} · ${when(row.start_at, row.timezone)}. After cancelling you can pick a new time.`, HEADERS, form, false)
+  }
+  const r = await cancelAppointment(env, { id: row.customer }, row.id, { by: 'customer' })
+  if (!r.ok) return page(r.httpStatus === 409 ? 410 : 503, 'Not cancelled yet', CANCEL_FAIL[r.error] || `This ${what(row)} can no longer be cancelled online. Please contact ${row.name} directly.`, HEADERS, '', false)
+  return cancelled(env, row)
+}
+const cancelled = async (env, row) =>
+  page(200, `Your ${what(row)} is cancelled`, `${row.name} has been told. Want another time?`, HEADERS, `<p><a href="${escapeHtml(await resumeUrl(env, row.customer, row.lead_id))}">Pick a new time</a></p>`, false)
+
+async function handle(request, env, a, k, confirm, action = null) {
   const rl = await hitByIp(env, 'confirm', request)
   if (rl.limited) return tooManyPage(rl.retryAfter)
   let row
@@ -45,11 +70,20 @@ async function handle(request, env, a, k, confirm) {
   }
   if (!row) return invalid()
   const now = Date.now()
+  if (action === 'cancel' && row.status === 'cancelled' && row.start_at > now) return cancelled(env, row)
   if (row.status !== 'booked' || row.start_at <= now) return closed(row)
-  if (row.confirmed_at) return done(row)
+  if (action === 'cancel') {
+    try {
+      return await cancel(env, row, a, k, confirm)
+    } catch (err) {
+      console.error('confirm: cancel failed:', err?.name)
+      return page(503, 'Not cancelled yet', CANCEL_FAIL.cancel_incomplete, HEADERS, '', false)
+    }
+  }
+  if (row.confirmed_at) return done(row, a, k)
   if (!confirm) {
     const label = isVisit(row) ? 'Confirm the visit' : 'Confirm I’ll be there'
-    const form = `<form method="post" action="/api/appointment/confirm"><input type="hidden" name="a" value="${escapeHtml(a)}"><input type="hidden" name="k" value="${escapeHtml(k)}"><button type="submit">${label}</button></form>`
+    const form = `<form method="post" action="/api/appointment/confirm"><input type="hidden" name="a" value="${escapeHtml(a)}"><input type="hidden" name="k" value="${escapeHtml(k)}"><button type="submit">${label}</button></form>${cantMake(a, k)}`
     const note = isVisit(row) ? 'Confirm the time works and that the business can access the property.' : ''
     return page(200, isVisit(row) ? 'Confirm your visit' : 'Confirm your appointment', `${row.name} · ${when(row.start_at, row.timezone)}${note ? `. ${note}` : ''}`, HEADERS, form, false)
   }
@@ -61,15 +95,15 @@ async function handle(request, env, a, k, confirm) {
     .bind(row.id, now)
     .first()
   if (updated) await track(env, 'appointment_confirmed', { id: `confirmed:${row.id}`, customer: row.customer, at: now })
-  return done(row)
+  return done(row, a, k)
 }
 
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url)
-  return handle(request, env, url.searchParams.get('a'), url.searchParams.get('k'), false)
+  return handle(request, env, url.searchParams.get('a'), url.searchParams.get('k'), false, url.searchParams.get('do') === 'cancel' ? 'cancel' : null)
 }
 
 export async function onRequestPost({ request, env }) {
   const form = await request.formData().catch(() => null)
-  return handle(request, env, form?.get('a'), form?.get('k'), true)
+  return handle(request, env, form?.get('a'), form?.get('k'), true, form?.get('do') === 'cancel' ? 'cancel' : null)
 }

@@ -1,5 +1,5 @@
-// Owner notices: tells a business's members (customer_users) about a new booking, and about a qualified lead that
-// hasn't booked within LEAD_GRACE_MS (so they can call while it's fresh). Run by the cron (/api/cron/run) as a scan,
+// Owner notices: tells a business's members (customer_users) about a new booking, a customer's cancellation, and a
+// qualified lead that hasn't booked within LEAD_GRACE_MS (so they can call while it's fresh). Run by the cron (/api/cron/run) as a scan,
 // so booking paths are untouched and a missed run is caught up by the next one.
 //   - Exactly once per item and member: outbox id owner_<kind>:<item>:<member hash> (INSERT OR IGNORE).
 //   - Only recent items (WINDOW_MS): never a burst of stale notices (e.g. when messaging goes live).
@@ -16,7 +16,7 @@ const MIN = 60 * 1000
 export const LEAD_GRACE_MS = 10 * MIN
 export const WINDOW_MS = 2 * 60 * MIN
 const LIMIT = 200
-export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead']
+export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel']
 
 const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, n)
 // Still owed to at least one member (one held by the launch gate, or added since, is not skipped).
@@ -35,6 +35,13 @@ const LEADS_SQL = `
     AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.lead_id = l.id AND a.status <> 'cancelled')
     AND ${notQueued('owner_lead', 'l.id', 'l.customer')}
   ORDER BY l.created_at LIMIT ${LIMIT}`
+// Customer cancellations (from the link in their messages); owner cancellations need no notice.
+const CANCELS_SQL = `
+  SELECT a.id AS item, a.customer, ch.changed_at AS created_at, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
+  FROM appointment_changes ch JOIN appointments a ON a.id = ch.appointment_id JOIN leads l ON l.id = a.lead_id JOIN customers c ON c.id = a.customer
+  WHERE ch.changed_at > ?1 AND ch.to_status = 'cancelled' AND ch.changed_by = 'customer' AND c.status = 'active'
+    AND ${notQueued('owner_cancel', 'a.id', 'a.customer')}
+  ORDER BY ch.changed_at LIMIT ${LIMIT}`
 
 export function ownerNotice(kind, r, origin) {
   const name = clean(r.name, 80)
@@ -46,6 +53,13 @@ export function ownerNotice(kind, r, origin) {
       body: `${name} booked ${clean(r.biz, 80)} for ${when}.\n\nService: ${clean(shortNeed(r.need), 80)}\n${contact}\n\nIt's on your Google Calendar. All appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
     }
   }
+  if (kind === 'owner_cancel') {
+    const when = longWhen(r.start_at, r.timezone)
+    return {
+      subject: clean(`Cancelled: ${name}, ${when}`, 150),
+      body: `${name} cancelled their ${clean(r.biz, 80)} appointment for ${when}. It's been removed from your Google Calendar and the time is open again. They were offered a new time.\n\nService: ${clean(shortNeed(r.need), 80)}\n${contact}\n\nAll appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
+    }
+  }
   return {
     subject: clean(`New lead: ${name} hasn't picked a time yet`, 150),
     body: `${name} asked ${clean(r.biz, 80)} about: ${clean(shortNeed(r.need), 80)}\n\n${contact}\n\nThey haven't booked a time yet. Your dashboard: ${origin}/dashboard\n\n— GetShowUps`,
@@ -55,11 +69,12 @@ export function ownerNotice(kind, r, origin) {
 export async function queueOwnerNotices(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const out = { queued: 0, held: 0 }
-  const [bookings, leads] = await Promise.all([
+  const [bookings, leads, cancels] = await Promise.all([
     db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
+    db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
   ])
-  const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r])]
+  const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r]), ...cancels.results.map((r) => ['owner_cancel', r])]
   if (!items.length) return out
   const customers = [...new Set(items.map(([, r]) => r.customer))]
   const { results: members } = await db

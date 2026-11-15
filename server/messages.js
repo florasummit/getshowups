@@ -171,13 +171,13 @@ export async function render(env, m) {
       if (visit) {
         return {
           subject: `${biz} visit booked: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
+          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
           sms: `${biz}: visit booked${place} for ${when}. Confirm access: ${url} Reply STOP to opt out.`,
         }
       }
       return {
         subject: `You're booked with ${biz}: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nNeed to change the time? Reply to this email.${footer}`,
+        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
         sms: `${biz}: you're booked for ${when}. Confirm you'll be there: ${url} Reply STOP to opt out.`,
       }
     }
@@ -190,14 +190,14 @@ export async function render(env, m) {
         const access = confirmed ? 'Thanks for confirming.' : `Please confirm ${biz} can access the property:\n${url}`
         return {
           subject: `Reminder: ${biz} visit ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nNeed to change the time? Reply to this email.${footer}`,
+          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
           sms: `${biz}: reminder of your visit${place} ${when}.${confirmed ? '' : ` Confirm access: ${url}`} Reply STOP to opt out.`,
         }
       }
       const ask = confirmed ? 'See you then!' : `Please confirm you'll be there:\n${url}`
       return {
         subject: `Reminder: ${biz} ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nNeed to change the time? Reply to this email.${footer}`,
+        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
         sms: `${biz}: reminder of your appointment ${when}.${confirmed ? '' : ` Confirm: ${url}`} Reply STOP to opt out.`,
       }
     }

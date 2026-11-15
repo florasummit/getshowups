@@ -52,9 +52,11 @@ d1 "
     ('$E2E_AUTO_CUSTOMER', 'E2E Auto Co', 'America/New_York', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
     ('seed-lead-resume', '$E2E_AUTO_CUSTOMER', 'Riley Resume', 'riley@example.net', '555-010-0101', 'Pool opening', 'new', 'x', $NOW, $NOW),
-    ('seed-lead-confirm', '$E2E_AUTO_CUSTOMER', 'Casey Confirm', 'casey@example.net', '555-010-0102', 'Leak check', 'booked', 'x', $NOW, $NOW);
+    ('seed-lead-confirm', '$E2E_AUTO_CUSTOMER', 'Casey Confirm', 'casey@example.net', '555-010-0102', 'Leak check', 'booked', 'x', $NOW, $NOW),
+    ('seed-lead-cancel', '$E2E_AUTO_CUSTOMER', 'Corey Cancel', 'corey@example.net', '555-010-0103', 'Filter repair', 'booked', 'x', $NOW, $NOW);
   INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES
-    ('0123456789abcdef0123456789abcdef', '$E2E_AUTO_CUSTOMER', 'seed-lead-confirm', $((NOW + 259200000)), $((NOW + 262800000)), 'booked', 'seed-event-2', $NOW, $NOW);
+    ('0123456789abcdef0123456789abcdef', '$E2E_AUTO_CUSTOMER', 'seed-lead-confirm', $((NOW + 259200000)), $((NOW + 262800000)), 'booked', 'seed-event-2', $NOW, $NOW),
+    ('fedcba9876543210fedcba9876543210', '$E2E_AUTO_CUSTOMER', 'seed-lead-cancel', $((NOW + 345600000)), $((NOW + 349200000)), 'booked', 'seed-event-3', $NOW, $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_HOME_CUSTOMER', 'E2E Home Service', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES ('$E2E_HOME_CUSTOMER', 'at_customer', $NOW);

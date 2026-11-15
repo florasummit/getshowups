@@ -314,7 +314,7 @@ registerCapability({
       : messagesLive(env)
         ? { mode: 'live' }
         : { mode: 'sandbox', note: 'Sent to test recipients only', approval: 'MESSAGES_LIVE=true' },
-  verify: seen('owner notice sent for a real business', 30, `SELECT max(sent_at) AS at FROM email_outbox o WHERE status = 'sent' AND template IN ('owner_booking', 'owner_lead') AND ${NOT_TEST_BIZ('o.customer', 'o.created_at')}`),
+  verify: seen('owner notice sent for a real business', 30, `SELECT max(sent_at) AS at FROM email_outbox o WHERE status = 'sent' AND template IN ('owner_booking', 'owner_lead', 'owner_cancel') AND ${NOT_TEST_BIZ('o.customer', 'o.created_at')}`),
 })
 registerCapability({
   id: 'messaging.sms',
