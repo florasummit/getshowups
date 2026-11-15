@@ -47,7 +47,9 @@ INSERT OR IGNORE INTO ai_model_registry (provider, model, status, quality, input
   ('openai', 'gpt-5-mini', 'supported', 2, 0.25, 2.00, NULL, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5', 'supported', 3, 1.25, 10.00, NULL, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5.4-mini', 'supported', 2, 0.75, 4.50, NULL, 'openai pricing 2026-11-15', 0),
-  ('openai', 'gpt-5.4-nano', 'supported', 1, 0.20, 1.25, NULL, 'openai pricing 2026-11-15', 0);
+  ('openai', 'gpt-5.4-nano', 'supported', 1, 0.20, 1.25, NULL, 'openai pricing 2026-11-15', 0),
+  -- OpenAI's "balance intelligence and cost" model (developers.openai.com/api/docs/models); short-context price (<272K).
+  ('openai', 'gpt-6.1-sol', 'supported', 2, 2.00, 10.00, NULL, 'openai pricing 2026-11-15 (short context)', 0);
 
 -- Every request made with a business's own key. Before sending, a row RESERVES the request's worst-case cost in one
 -- atomic statement that also checks the monthly limit (so concurrent requests can't both slip under it); afterwards it is
