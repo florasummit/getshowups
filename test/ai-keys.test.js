@@ -278,6 +278,17 @@ test('hard spending limit: a request whose worst case would cross the monthly li
   assert.equal((await call(aiKey, 'GET', { cookie: c })).json.key.spentUsd, 0.74)
 })
 
+test('requests never ask for more output than the model allows (GPT-4o mini: 16,384), and the worst case uses that cap', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'openai', key: OPENAI_KEY, model: 'gpt-4o-mini' } })
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.equal(calls.findLast((x) => x.path === '/v1/chat/completions').body.max_completion_tokens, 16000, 'writer cap is below the ceiling')
+  const { outputCap } = await import('../server/ai-models.js')
+  assert.equal(outputCap('designer', { max_output: 16384 }, null), 16384)
+  assert.equal(outputCap('designer', null, { maxOutput: 128000 }), 32000)
+  assert.equal(outputCap('writer', null, null), 16000)
+})
+
 test('failed requests that the provider still bills count toward the limit; the ledger holds tokens only', async () => {
   const c = await cookieFor('owner@pools.example')
   await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-opus-5-5' } })
