@@ -263,6 +263,22 @@ test('onboarding: "skip for now" (no website at all) also completes setup; a web
   assert.equal(w.published, false)
 })
 
+test('start from a design: three professional layouts from the business details, no model call, no AI allowance used', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const before = (await call(website, 'GET', { cookie: c })).json.aiUsage
+  const modelCallsBefore = calls
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'template' } })
+  assert.equal(calls, modelCallsBefore, 'no model call')
+  assert.equal(r.status, 200)
+  assert.equal(r.json.generation.source, 'template')
+  assert.equal(r.json.generation.designs.length, 3)
+  assert.deepEqual(r.json.aiUsage, before, 'allowance unchanged')
+  const applied = await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: r.json.generation.id, option: 1 } })
+  assert.equal(applied.status, 200)
+  assert.equal(applied.json.website.draft.design.name, r.json.generation.designs[1].name)
+  assert.equal(applied.json.website.published, false)
+})
+
 // ---------- AI design (layouts from the safe design system) ----------
 import { validateDesign, presetDesigns, diversify, STOCK_IDS, stockFor } from '../server/site-design.js'
 import { renderSite } from '../server/site-render.js'

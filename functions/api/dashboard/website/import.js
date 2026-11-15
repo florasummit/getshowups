@@ -1,7 +1,7 @@
 // /api/dashboard/website/import — bring the business's existing website into its draft.
 //   GET  → { import | null }   the latest import (pages found, skipped, flags, suggested content and photos)
 //   POST { action: 'start', url, confirm: true }              read the public website (owner confirms it's theirs)
-//        { action: 'apply', importId, fields[], photos[] }    put chosen content/photos into the PRIVATE draft
+//        { action: 'apply', importId, fields[], photos[], fixes[] }  chosen content/photos (+ offered fixes) → PRIVATE draft
 // The live website never changes here; publishing stays a separate, explicit step.
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
@@ -35,7 +35,7 @@ export async function onRequestPost({ request, env }) {
       return json(r.ok ? 200 : 422, r.ok ? { import: r.import } : { error: r.error, import: r.import })
     }
     if (body?.action === 'apply') {
-      const r = await applyImport(env, session.customer, body.importId, { fields: body.fields, photos: body.photos, by: session.email })
+      const r = await applyImport(env, session.customer, body.importId, { fields: body.fields, photos: body.photos, fixes: body.fixes, by: session.email })
       if (!r.ok) return json(r.httpStatus, { error: r.error, fields: r.fields })
       return json(200, r)
     }

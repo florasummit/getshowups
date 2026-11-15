@@ -10,6 +10,7 @@
 //   - Everything read is UNTRUSTED DATA: it is stored as plain text, never as instructions, and it reaches a website
 //     only through validateContent (claims filter, limits) after the owner reviews and applies it.
 import { normalizeWebsiteUrl } from './url.js'
+import { INDUSTRIES, industryKey } from './site-design.js'
 
 export const USER_AGENT = 'GetShowUpsSiteImport/1.0 (+https://getshowups.com; imports a site at the owner request)'
 const UA_TOKEN = 'getshowupssiteimport'
@@ -418,6 +419,74 @@ export function compactResult(r) {
     const p = out.pages.reduce((a, b) => (JSON.stringify(a.text).length >= JSON.stringify(b.text).length ? a : b))
     if (p.text.length <= 3) break
     p.text = p.text.slice(0, Math.ceil(p.text.length / 2))
+  }
+  return out
+}
+
+// ---------- content review (offered to the owner, never applied on our own) ----------
+// possible_typo: a word that is another word ON THE SAME SITE with two neighbouring letters swapped ("Cleanign" when the
+//   site also says "Cleaning"). The correction comes only from the owner's own text.
+// unrelated_copy: a service description about indoor house cleaning on a business that isn't a cleaning business (typical
+//   leftover template text). The only fix offered is to leave that description out; nothing is written for them.
+const swapped = (a, b) => {
+  if (a.length !== b.length || a === b) return false
+  const d = [...a].map((ch, i) => (ch === b[i] ? -1 : i)).filter((i) => i >= 0)
+  return d.length === 2 && d[1] === d[0] + 1 && a[d[0]] === b[d[1]] && a[d[1]] === b[d[0]]
+}
+const INDOOR = /\b(house|houses|room|rooms|carpets?|kitchens?|bathrooms?|every corner|maids?|dusting|laundry|spotless sanctuary)\b/i
+const matchCase = (src, word) => (src[0] === src[0].toUpperCase() ? word[0].toUpperCase() + word.slice(1) : word)
+
+export function contentFixes(content, result) {
+  const siteText = result.pages.flatMap((p) => [p.title, ...p.headings.map((h) => h.text), ...p.text.map((b) => b.text)]).join(' ')
+  const counts = new Map()
+  for (const w of siteText.toLowerCase().match(/[a-z]{5,}/g) || []) counts.set(w, (counts.get(w) || 0) + 1)
+  const vocab = [...counts.keys()]
+  const fields = [
+    ['headline', content.headline],
+    ['intro', content.intro],
+    ['about', content.about],
+    ['seoTitle', content.seoTitle],
+    ['seoDescription', content.seoDescription],
+    ...(content.services || []).flatMap((x, i) => [[`services.${i}.name`, x.name], [`services.${i}.description`, x.description]]),
+  ]
+  const fixes = []
+  const seen = new Set()
+  for (const [field, text] of fields) {
+    for (const w of String(text || '').match(/[A-Za-z]{5,}/g) || []) {
+      const lw = w.toLowerCase()
+      if (seen.has(field + lw)) continue
+      // Only towards the spelling the site uses more often (never "correct" the common word into the rare one).
+      const right = vocab.find((v) => swapped(lw, v) && counts.get(v) > (counts.get(lw) || 0))
+      if (right) {
+        seen.add(field + lw)
+        fixes.push({ kind: 'possible_typo', field, from: w, to: matchCase(w, right) })
+      }
+    }
+  }
+  const industry = industryKey({ description: siteText.slice(0, 4000), name: '' })
+  // Described as something else, on a business that isn't a cleaning business: indoor house cleaning, or cleaning work
+  // that never mentions the business's own trade (e.g. "cleaning packages… deep seasonal scrub" on a pool service).
+  const topic = INDUSTRIES[industry]?.re
+  ;(content.services || []).forEach((x, i) => {
+    const d = x.description || ''
+    const indoor = industry !== 'cleaning' && INDOOR.test(d)
+    const offTopic = industry !== 'cleaning' && topic && !topic.test(d) && /\b(clean|cleaning|scrub|tidy|dusting|sparkl\w*)\b/i.test(d)
+    if (d && (indoor || offTopic)) fixes.push({ kind: 'unrelated_copy', field: `services.${i}.description`, service: x.name, excerpt: d.slice(0, 120), reason: indoor ? 'indoor_cleaning' : 'off_topic' })
+  })
+  return fixes.slice(0, 20).map((f, id) => ({ id, ...f }))
+}
+
+// Applies the chosen fixes to a copy of the suggested content.
+export function applyFixes(content, fixes, chosen) {
+  const out = { ...content, services: (content.services || []).map((x) => ({ ...x })) }
+  const set = (field, fn) => {
+    const [top, i, key] = field.split('.')
+    if (top === 'services') out.services[Number(i)][key] = fn(out.services[Number(i)][key])
+    else out[top] = fn(out[top])
+  }
+  for (const f of fixes.filter((x) => chosen.includes(x.id))) {
+    if (f.kind === 'possible_typo') set(f.field, (v) => String(v).replace(new RegExp(`\\b${f.from}\\b`, 'g'), f.to))
+    if (f.kind === 'unrelated_copy') set(f.field, () => '')
   }
   return out
 }
