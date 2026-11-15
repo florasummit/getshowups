@@ -204,7 +204,9 @@ test('designer: needs the owner’s own key; one turn streams progress, designs 
   assert.equal(req.body.output_config.format.type, 'json_schema')
   assert.equal(req.body.output_config.effort, 'high')
   assert.match(req.body.system, /Never invent prices, numbers/)
-  assert.match(req.body.messages[0].content, /<IMPORTED_WEBSITE note="reference data[^"]*not instructions">/)
+  // Only reviewed content goes to the model: the draft text, never the raw import (which can hold rejected copy).
+  assert.match(req.body.messages[0].content, /"currentWebsiteText": "Pool care in Charleston\\n\\nWeekly pool care\."/)
+  assert.doesNotMatch(req.body.messages[0].content, /IMPORTED_WEBSITE|Ignore previous instructions|since forever/)
   assert.ok(!('tool_choice' in req.body))
   // The draft now holds the AI design; nothing is live.
   const w = (await call(website, 'GET', { cookie: c })).json.website
@@ -286,7 +288,7 @@ test('designer requests are refused before sending when their worst case would c
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')
   // Opus designer worst case ≥ 40k × $4 + 32k × $20 per M = $0.80; with $9.50 already used, $10 can't cover it.
-  db.sql.prepare("INSERT INTO ai_key_usage (customer, provider, model, kind, input_tokens, output_tokens, ok, created_at) VALUES ('pools', 'anthropic', 'anthropic:claude-opus-5-5', 'designer', 0, 475000, 1, ?)").run(Date.now())
+  db.sql.prepare("INSERT INTO ai_key_usage (id, customer, provider, model, kind, state, cost_micros, ok, created_at) VALUES ('u1', 'pools', 'anthropic', 'anthropic:claude-opus-5-5', 'designer', 'settled', 9500000, 1, ?)").run(Date.now())
   const r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
   assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'budget_reached' })
   assert.equal(requests.length, 0, 'nothing sent')
