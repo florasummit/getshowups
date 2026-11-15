@@ -9,6 +9,7 @@
 // Honesty rules: a message is 'sent' only when the provider accepted it. Without a configured
 // provider a due message is marked skipped/no_provider (never sent later in a burst); before launch
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
+import { policiesOrEmpty } from './policies.js'
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
 import { FOLLOW_UP_KINDS, isOptedOut, recordOptOut, unsubscribeUrl } from './optouts.js'
 import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
@@ -137,6 +138,8 @@ export function skipReason(m, now) {
   }
 }
 
+const policyNotes = (p) =>
+  `${p.beforeVisit ? `\n\nBefore your appointment: ${p.beforeVisit}` : ''}${p.cancellation ? `\n\nCancellations: ${p.cancellation}` : ''}`
 const firstName = (name) => String(name).trim().split(/\s+/)[0]
 const whenText = (ts, timeZone, opts) => new Intl.DateTimeFormat('en-US', { timeZone, ...opts }).format(new Date(ts))
 export const longWhen = (ts, tz) => whenText(ts, tz, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
@@ -153,6 +156,8 @@ export async function render(env, m) {
   const unsub = FOLLOW_UP_KINDS.includes(m.kind) ? `\n\nNo more follow-up emails from ${biz}: ${await unsubscribeUrl(env, m.lead_id)}` : ''
   const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you requested an appointment on their booking page. Reply to this email to reach ${biz}.${unsub}`
   const confirmed = Boolean(m.confirmed_at)
+  // What customers should know (owner-written): in the confirmation and the day-before reminder only.
+  const notes = ['confirmation', 'reminder_24h'].includes(m.kind) ? policyNotes(await policiesOrEmpty(env.ONBOARDING_DB, m.customer)) : ''
   const visit = m.appointment_mode === 'at_customer'
   const place = m.street ? ` at ${m.street}` : ''
   switch (m.kind) {
@@ -172,13 +177,13 @@ export async function render(env, m) {
       if (visit) {
         return {
           subject: `${biz} visit booked: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
+          text: `${hi}\n\n${biz} is scheduled to visit${place} on ${when}.\n\nPlease confirm the time works and that ${biz} can access the property:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${notes}${footer}`,
           sms: `${biz}: visit booked${place} for ${when}. Confirm access: ${url} Reply STOP to opt out.`,
         }
       }
       return {
         subject: `You're booked with ${biz}: ${whenText(m.start_at, m.timezone, { weekday: 'short', month: 'short', day: 'numeric' })}`,
-        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
+        text: `${hi}\n\nYou're booked with ${biz} on ${when}.\n\nPlease confirm you'll be there:\n${url}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${notes}${footer}`,
         sms: `${biz}: you're booked for ${when}. Confirm you'll be there: ${url} Reply STOP to opt out.`,
       }
     }
@@ -191,14 +196,14 @@ export async function render(env, m) {
         const access = confirmed ? 'Thanks for confirming.' : `Please confirm ${biz} can access the property:\n${url}`
         return {
           subject: `Reminder: ${biz} visit ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
+          text: `${hi}\n\nA reminder that ${biz} is scheduled to visit${place} ${when}.\n\n${access}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${notes}${footer}`,
           sms: `${biz}: reminder of your visit${place} ${when}.${confirmed ? '' : ` Confirm access: ${url}`} Reply STOP to opt out.`,
         }
       }
       const ask = confirmed ? 'See you then!' : `Please confirm you'll be there:\n${url}`
       return {
         subject: `Reminder: ${biz} ${soon ? 'today' : 'tomorrow'} at ${timeOnly(m.start_at, m.timezone)}`,
-        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${footer}`,
+        text: `${hi}\n\nA reminder of your appointment with ${biz} ${when}.\n\n${ask}\n\nCan’t make it? Cancel or pick a new time:\n${url}&do=cancel${notes}${footer}`,
         sms: `${biz}: reminder of your appointment ${when}.${confirmed ? '' : ` Confirm: ${url}`} Reply STOP to opt out.`,
       }
     }

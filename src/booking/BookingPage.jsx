@@ -82,6 +82,7 @@ export default function BookingPage({ id }) {
             }}
           />
         )}
+        {step === 'time' && <GoodToKnow policies={biz.policies} />}
         {step === 'outside' && (
           <>
             <h1 className="title">Thanks, {lead.firstName}</h1>
@@ -105,6 +106,7 @@ export default function BookingPage({ id }) {
               </p>
             )}
             <p className="lede">A calendar invitation is on its way to {lead.email || 'your email'}.</p>
+            <GoodToKnow policies={biz.policies} />
           </div>
         )}
       </section>
@@ -112,6 +114,28 @@ export default function BookingPage({ id }) {
         Powered by <a href="/">GetShowUps</a>
       </p>
     </main>
+  )
+}
+
+// Owner-written notes (Settings → What customers should know). Plain text; React escapes it.
+function GoodToKnow({ policies }) {
+  if (!policies?.beforeVisit && !policies?.cancellation) return null
+  return (
+    <section className="good-to-know" aria-labelledby="good-to-know">
+      <h2 id="good-to-know">Good to know</h2>
+      {policies.beforeVisit && (
+        <p>
+          <strong>Before your appointment: </strong>
+          {policies.beforeVisit}
+        </p>
+      )}
+      {policies.cancellation && (
+        <p>
+          <strong>Cancellations: </strong>
+          {policies.cancellation}
+        </p>
+      )}
+    </section>
   )
 }
 

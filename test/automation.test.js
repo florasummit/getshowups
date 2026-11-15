@@ -18,6 +18,7 @@ import * as outcomeApi from '../functions/api/dashboard/outcome.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as automationsApi from '../functions/api/dashboard/automations.js'
 import * as confirmApi from '../functions/api/appointment/confirm.js'
+import * as policiesApi from '../functions/api/dashboard/policies.js'
 import { queueOwnerNotices } from '../server/notify.js'
 import * as cronApi from '../functions/api/cron/run.js'
 import * as unsubApi from '../functions/api/messages/unsubscribe.js'
@@ -695,6 +696,50 @@ test("customer can't make it: the link in their email cancels (Google first), fr
   assert.equal((await book('alpha', resume.searchParams.get('lead'), resume.searchParams.get('k'), start)).status, 201)
   assert.equal(db.sql.prepare("SELECT count(*) c FROM appointments WHERE status = 'booked'").get().c, 1)
   assert.equal(db.sql.prepare('SELECT status FROM leads').get().status, 'booked')
+})
+
+test('what customers should know: owner writes it (validated, claims-filtered, isolated); booking page + confirmation + day-before reminder show it', async () => {
+  await seed('alpha')
+  await seed('bravo')
+  withEmail()
+  const alpha = await session('owner@alpha.example')
+  const save = (body, opts = {}) => call(policiesApi, 'POST', '/api/dashboard/policies', { cookie: alpha, body, ...opts })
+  assert.deepEqual((await call(policiesApi, 'GET', '/api/dashboard/policies', { cookie: alpha })).json().policies, { beforeVisit: '', cancellation: '' })
+  assert.equal((await save({ beforeVisit: 'x'.repeat(301) })).json().fields[0], 'beforeVisit')
+  assert.deepEqual((await save({ cancellation: 'Satisfaction guaranteed or your money back' })).json().fields, ['cancellation:unapproved_claim'])
+  assert.equal((await save({ beforeVisit: 'Unlock the gate' }, { origin: 'https://evil.example' })).status, 403)
+  assert.equal((await call(policiesApi, 'POST', '/api/dashboard/policies', { body: { beforeVisit: 'x' } })).status, 401)
+  const ok = await save({ beforeVisit: '  Please unlock the gate\r\nand keep pets inside.\u0007 ', cancellation: 'Please cancel at least 24 hours ahead.' })
+  assert.deepEqual(ok.json().policies, { beforeVisit: 'Please unlock the gate\nand keep pets inside.', cancellation: 'Please cancel at least 24 hours ahead.' })
+  // Isolation: bravo sees its own (empty) notes, and alpha's booking page shows alpha's only.
+  assert.deepEqual((await call(policiesApi, 'GET', '/api/dashboard/policies', { cookie: await session('owner@bravo.example') })).json().policies, { beforeVisit: '', cancellation: '' })
+  assert.deepEqual((await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).json().policies, ok.json().policies)
+  assert.deepEqual((await call(bookInfo, 'GET', '/api/book/bravo', { params: { customer: 'bravo' } })).json().policies, { beforeVisit: '', cancellation: '' })
+
+  const l = (await lead('alpha')).json()
+  const start = await slotAfter('alpha', 2 * DAY)
+  await book('alpha', l.leadId, l.leadToken, start)
+  const appt = db.sql.prepare('SELECT start_at FROM appointments').get()
+  await processDueMessages(env, Date.now())
+  const confirmation = sentEmails().find((e) => /You're booked/.test(e.subject))
+  assert.match(confirmation.text, /Before your appointment: Please unlock the gate\nand keep pets inside\.\n\nCancellations: Please cancel at least 24 hours ahead\.\n\n— alpha Co/)
+  await processDueMessages(env, appt.start_at - DAY + MIN)
+  assert.match(sentEmails().find((e) => /^Reminder: .* tomorrow/.test(e.subject)).text, /Before your appointment: Please unlock the gate/)
+  await processDueMessages(env, appt.start_at - 2 * HOUR + MIN)
+  assert.ok(!sentEmails().find((e) => /^Reminder: .* today/.test(e.subject)).text.includes('Before your appointment'), 'the 2-hour reminder stays short')
+})
+
+test('what customers should know: before migration 0019 the booking page and messages work without it', async () => {
+  await seed('alpha')
+  withEmail()
+  db.sql.exec('DROP TABLE business_policies')
+  const info = (await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } }))
+  assert.equal(info.status, 200)
+  assert.deepEqual(info.json().policies, { beforeVisit: '', cancellation: '' })
+  const l = (await lead('alpha')).json()
+  assert.equal((await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))).status, 201)
+  await processDueMessages(env, Date.now())
+  assert.ok(sentEmails().some((e) => /You're booked/.test(e.subject)), 'confirmation still sent')
 })
 
 test('cancel link after the BUSINESS cancelled: says it was cancelled and offers the normal booking page (the signed rebook link would be refused)', async () => {

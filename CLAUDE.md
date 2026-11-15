@@ -44,6 +44,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      (same cancelAppointment; lead reopened; "Pick a new time" via the signed lead link)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
+  api/dashboard/policies   What customers should know (GET/POST beforeVisit, cancellation ≤300 chars)
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
@@ -67,6 +68,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
   accounts.js        Account invitations (issue/peek/accept/resend/revoke) + onboarding follow-ups
   email.js           Email outbox + sendEmail(); delivers only via configured Resend (RESEND_API_KEY, EMAIL_FROM)
   messages.js        Lead follow-ups, confirmation, reminders, no-show rebook: schedule rows, re-check at send time
+  policies.js        What customers should know (business_policies, 0019): booking page + confirmation/24 h reminder;
+                     claims-filtered; public reads fail soft (policiesOrEmpty) so a missing table never breaks booking
   notify.js          Owner notices (cron scan): new booking / customer cancellation / lead unbooked after 10 min → each member, once
   sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)

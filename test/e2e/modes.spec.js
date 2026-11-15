@@ -8,6 +8,21 @@ const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 
 test.describe.configure({ mode: 'serial', timeout: 60_000 })
 
+test('settings: the owner writes what customers should know', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_HOME_SESSION_TOKEN)
+  await page.goto('/dashboard/settings')
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'What customers should know' }) })
+  await card.getByLabel('Before the appointment').fill('Please unlock the side gate and keep pets inside.')
+  await card.getByLabel('Cancellations').fill('Guaranteed lowest price!')
+  await card.getByRole('button', { name: 'Save' }).click()
+  await expect(card.getByRole('alert')).toContainText('Please remove promises')
+  await card.getByLabel('Cancellations').fill('Please cancel at least 24 hours ahead.')
+  await card.getByRole('button', { name: 'Save' }).click()
+  await expect(card.getByRole('status')).toHaveText('Saved.')
+  await page.reload()
+  await expect(page.locator('.card', { has: page.getByRole('heading', { name: 'What customers should know' }) }).getByLabel('Cancellations')).toHaveValue('Please cancel at least 24 hours ahead.')
+})
+
 test('visit booking: service address is required and lands on the calendar event', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_HOME_CUSTOMER}`)
   await expect(page.getByRole('heading', { name: 'Book a visit' })).toBeVisible()
@@ -25,12 +40,16 @@ test('visit booking: service address is required and lands on the calendar event
   await page.getByLabel('State').fill('sc')
   await page.getByRole('button', { name: 'Choose a time' }).click()
   await expect(page.getByRole('heading', { name: 'Pick a visit time' })).toBeVisible()
+  const notes = page.getByRole('region', { name: 'Good to know' })
+  await expect(notes).toContainText('Before your appointment: Please unlock the side gate and keep pets inside.')
+  await expect(notes).toContainText('Cancellations: Please cancel at least 24 hours ahead.')
   // The mock calendar is shared by all businesses and other specs book the first slot in parallel,
   // so take the last offered slot to avoid a cross-spec race (production calendars are separate).
   await page.locator('.slot').last().click()
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: 'Visit booked' })).toBeVisible()
   await expect(page.getByText('E2E Home Service will visit 21 Tide Ln.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Good to know' })).toContainText('keep pets inside')
 
   const events = await (await page.request.get(`${mock}/__events`)).json()
   const event = events.find((e) => e.attendees?.[0]?.email === 'robin@example.net')

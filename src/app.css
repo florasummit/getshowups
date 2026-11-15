@@ -628,6 +628,32 @@
   text-align: center;
 }
 
+.good-to-know {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--ink-50);
+  text-align: left;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.good-to-know h2 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.good-to-know p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.good-to-know strong {
+  color: var(--text);
+}
+
 .done > * + * {
   margin-top: 10px;
 }

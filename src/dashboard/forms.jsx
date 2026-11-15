@@ -207,3 +207,56 @@ export function ProfileForm({ onSaved }) {
     </form>
   )
 }
+
+const POLICY_ERRORS = {
+  beforeVisit: 'Keep “Before the appointment” under 300 characters.',
+  cancellation: 'Keep the cancellation note under 300 characters.',
+  'beforeVisit:unapproved_claim': 'Please remove promises like guarantees, discounts, ratings or “licensed/insured” unless we’ve verified them with you.',
+  'cancellation:unapproved_claim': 'Please remove promises like guarantees, discounts, ratings or “licensed/insured” unless we’ve verified them with you.',
+}
+
+// What customers should know: shown on the booking page and in the confirmation and day-before reminder.
+export function PoliciesForm() {
+  const [p, setP] = useState(undefined)
+  const [state, setState] = useState({})
+  useEffect(() => {
+    api('/api/dashboard/policies').then(({ status, data }) => setP(status === 200 ? data.policies : { beforeVisit: '', cancellation: '' }))
+  }, [])
+  if (p === undefined) return <div aria-busy="true" />
+  const submit = async (e) => {
+    e.preventDefault()
+    const f = new FormData(e.currentTarget)
+    setState({ saving: true })
+    const { status, data } = await api('/api/dashboard/policies', { method: 'POST', body: { beforeVisit: f.get('beforeVisit'), cancellation: f.get('cancellation') } })
+    if (status === 200) {
+      setP(data.policies)
+      setState({ saved: true })
+    } else setState({ error: POLICY_ERRORS[data.fields?.[0]] || 'Couldn’t save. Please try again.' })
+  }
+  return (
+    <form className="form" onSubmit={submit}>
+      <p className="fine">Shown on your booking page and in the confirmation and day-before reminder. Leave a box empty to leave it out.</p>
+      <label className="field">
+        <span>Before the appointment <em>(optional)</em></span>
+        <textarea name="beforeVisit" rows={3} maxLength={300} defaultValue={p.beforeVisit} placeholder="Please unlock the gate and keep pets inside." />
+      </label>
+      <label className="field">
+        <span>Cancellations <em>(optional)</em></span>
+        <textarea name="cancellation" rows={2} maxLength={300} defaultValue={p.cancellation} placeholder="Please cancel at least 24 hours ahead." />
+      </label>
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+      {state.saved && (
+        <p className="fine" role="status">
+          Saved.
+        </p>
+      )}
+      <button className="btn btn-quiet btn-block" disabled={state.saving}>
+        Save
+      </button>
+    </form>
+  )
+}
