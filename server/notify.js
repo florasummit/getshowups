@@ -42,14 +42,16 @@ const CANCELS_SQL = `
   WHERE ch.changed_at > ?1 AND ch.to_status = 'cancelled' AND ch.changed_by = 'customer' AND c.status = 'active'
     AND ${notQueued('owner_cancel', 'a.id', 'a.customer')}
   ORDER BY ch.changed_at LIMIT ${LIMIT}`
-// A customer's email bounced permanently (server/email-feedback.js): the owner should reach them another way.
+// A customer's address stopped accepting our email (server/email-feedback.js, migration 0020): permanent bounce or spam
+// complaint. Driven by the suppression record, so both are covered; the owner should reach them another way.
 const BOUNCES_SQL = `
-  SELECT m.id AS item, m.customer, m.updated_at AS created_at, m.kind AS message_kind, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
-  FROM messages m JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer JOIN customers c ON c.id = m.customer
+  SELECT m.id AS item, m.customer, s.created_at, s.reason, m.kind AS message_kind, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
+  FROM email_suppressions s JOIN messages m ON m.id = s.message_id AND m.customer = s.customer
+  JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer JOIN customers c ON c.id = m.customer
   LEFT JOIN appointments a ON a.id = m.appointment_id
-  WHERE m.updated_at > ?1 AND m.status = 'failed' AND m.error = 'bounced' AND m.channel = 'email' AND c.status = 'active'
+  WHERE s.created_at > ?1 AND c.status = 'active'
     AND ${notQueued('owner_bounce', 'm.id', 'm.customer')}
-  ORDER BY m.updated_at LIMIT ${LIMIT}`
+  ORDER BY s.created_at LIMIT ${LIMIT}`
 const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', reminder_2h: 'reminder', lead_followup_1: 'follow-up', lead_followup_2: 'follow-up', no_show_rebook: 'rebooking email' }
 
 export function ownerNotice(kind, r, origin) {
@@ -65,8 +67,12 @@ export function ownerNotice(kind, r, origin) {
   if (kind === 'owner_bounce') {
     const appt = r.start_at ? ` (appointment ${longWhen(r.start_at, r.timezone)})` : ''
     return {
-      subject: clean(`Email to ${name} bounced: please call them`, 150),
-      body: `The ${WHAT[r.message_kind] || 'email'} to ${name}${appt} couldn't be delivered: ${clean(r.email, 120)} doesn't accept email. We won't email that address again.\n\nPlease reach them by phone: ${clean(r.phone, 40)}\n\nAll appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
+      subject: clean(r.reason === 'complained' ? `${name} asked not to get our emails: please call them` : `Email to ${name} bounced: please call them`, 150),
+      body: `${
+        r.reason === 'complained'
+          ? `${name}${appt} marked the ${WHAT[r.message_kind] || 'email'} as spam, so they won't get any more emails or reminders from ${clean(r.biz, 80)}.`
+          : `The ${WHAT[r.message_kind] || 'email'} to ${name}${appt} couldn't be delivered: ${clean(r.email, 120)} doesn't accept email. We won't email that address again.`
+      }\n\nIf you need to reach them: ${clean(r.phone, 40)}\n\nAll appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
     }
   }
   if (kind === 'owner_cancel') {
@@ -89,7 +95,8 @@ export async function queueOwnerNotices(env, now = Date.now()) {
     db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
     db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
-    db.prepare(BOUNCES_SQL).bind(now - WINDOW_MS).all(),
+    // Before migration 0020 there are no suppressions: the other notices must still go out.
+    db.prepare(BOUNCES_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
   ])
   const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r]), ...cancels.results.map((r) => ['owner_cancel', r]), ...bounces.results.map((r) => ['owner_bounce', r])]
   if (!items.length) return out

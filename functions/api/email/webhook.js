@@ -8,6 +8,7 @@ export async function onRequestPost({ request, env }) {
   if (!feedbackConfigured(env)) return json(503, { error: 'not_configured' })
   const rl = await hitByIp(env, 'emailWebhook', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)
+  if (Number(request.headers.get('content-length') || 0) > 256 * 1024) return json(413, { error: 'too_large' })
   const raw = await request.text()
   if (raw.length > 256 * 1024) return json(413, { error: 'too_large' })
   if (!(await verifySvix(env, request.headers, raw))) return json(401, { error: 'invalid_signature' })

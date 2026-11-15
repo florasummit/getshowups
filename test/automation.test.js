@@ -812,7 +812,7 @@ test('Resend feedback: a permanent bounce stops emails to that address, marks th
   assert.equal(notices[0].to_email, 'owner@alpha.example')
   assert.match(notices[0].subject, /^Email to .* bounced: please call them$/)
   assert.match(notices[0].body, /booking confirmation to .* couldn't be delivered/)
-  assert.match(notices[0].body, /Please reach them by phone: /)
+  assert.match(notices[0].body, /If you need to reach them: /)
 
   // Suppression is per business: bravo can still email the same person.
   const lb = (await lead('bravo')).json()
@@ -826,6 +826,23 @@ test('Resend feedback: a permanent bounce stops emails to that address, marks th
   assert.equal((await post({ type: 'email.complained', data: { email_id: bconf.provider_id } })).json().result, 'complained')
   assert.equal(db.sql.prepare('SELECT status FROM messages WHERE id = ?').get(bconf.id).status, 'sent')
   assert.equal(db.sql.prepare("SELECT reason FROM email_suppressions WHERE customer = 'bravo'").get().reason, 'complained')
+  // …and bravo's owner is told (they won't get reminders any more).
+  await queueOwnerNotices(env, Date.now())
+  const told = db.sql.prepare("SELECT to_email, subject, body FROM email_outbox WHERE template = 'owner_bounce' AND customer = 'bravo'").get()
+  assert.equal(told.to_email, 'owner@bravo.example')
+  assert.match(told.subject, /asked not to get our emails: please call them$/)
+  assert.match(told.body, /marked the booking confirmation as spam, so they won't get any more emails or reminders from bravo Co/)
+})
+
+test('owner notices still go out before migration 0020 (no suppression table yet)', async () => {
+  await seed('alpha')
+  withEmail()
+  db.sql.exec('DROP TABLE email_suppressions')
+  const l = (await lead('alpha')).json()
+  await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))
+  assert.equal((await queueOwnerNotices(env, Date.now())).queued, 1)
+  await processDueMessages(env, Date.now())
+  assert.ok(sentEmails().some((e) => /You're booked/.test(e.subject)), 'sender works without the table')
 })
 
 test('cancel link after the BUSINESS cancelled: says it was cancelled and offers the normal booking page (the signed rebook link would be refused)', async () => {
