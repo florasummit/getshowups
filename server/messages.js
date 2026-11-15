@@ -138,9 +138,9 @@ export function skipReason(m, now) {
 
 const firstName = (name) => String(name).trim().split(/\s+/)[0]
 const whenText = (ts, timeZone, opts) => new Intl.DateTimeFormat('en-US', { timeZone, ...opts }).format(new Date(ts))
-const longWhen = (ts, tz) => whenText(ts, tz, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+export const longWhen = (ts, tz) => whenText(ts, tz, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 const timeOnly = (ts, tz) => whenText(ts, tz, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
-const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need)
+export const shortNeed = (need) => (need.length > 60 ? `${need.slice(0, 57)}…` : need)
 
 // Returns { subject, text, sms } for one message row (joined with its business, lead, appointment).
 // 'at_customer' businesses visit the lead, so their messages talk about a visit to the service

@@ -539,7 +539,7 @@ test('scheduler endpoint: fails closed, requires the exact secret, returns count
   assert.equal((await run(CRON)).status, 401)
   const ok = await run(`Bearer ${CRON}`)
   assert.equal(ok.status, 200)
-  assert.deepEqual(Object.keys(ok.json()).sort(), ['ads', 'audit', 'changes', 'deletions', 'domains', 'messages', 'onboardingQueued', 'outbox', 'reconcile', 'recovery'])
+  assert.deepEqual(Object.keys(ok.json()).sort(), ['ads', 'audit', 'changes', 'deletions', 'domains', 'messages', 'onboardingQueued', 'outbox', 'ownerNotices', 'reconcile', 'recovery'])
   assert.deepEqual(ok.json().changes, { release: false, config: true }, 'first run records the configuration (names only)')
   assert.deepEqual(ok.json().audit, { ok: true, checked: 1 }, 'daily audit chain check: counts only')
   for (const step of Object.values(ok.json().ads)) for (const v of Object.values(step)) assert.ok(typeof v === 'number' || v === 'failed', 'ads step reports counts only')
