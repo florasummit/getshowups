@@ -10,6 +10,7 @@
 // provider a due message is marked skipped/no_provider (never sent later in a burst); before launch
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
 import { policiesOrEmpty } from './policies.js'
+import { isSuppressed } from './email-feedback.js'
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
 import { FOLLOW_UP_KINDS, isOptedOut, recordOptOut, unsubscribeUrl } from './optouts.js'
 import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
@@ -276,7 +277,9 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
-      (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null)
+      (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null) ??
+      // Known bad address (permanent bounce / spam complaint, from Resend's signed feedback): never sent again.
+      (m.channel === 'email' && (await isSuppressed(env, m.customer, m.lead_email)) ? 'suppressed' : null)
     if (reason) {
       await db.prepare("UPDATE messages SET status = 'skipped', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, reason, now).run()
       out.skipped++

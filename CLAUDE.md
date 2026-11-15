@@ -40,6 +40,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
                      invite-action, status, plans, test-business. Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
+  api/email/webhook  Resend delivery feedback (Svix signature, 5-min tolerance; 503 until RESEND_WEBHOOK_SECRET)
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records); &do=cancel: customer cancels
                      (same cancelAppointment; lead reopened; "Pick a new time" via the signed lead link)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
@@ -70,6 +71,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
   messages.js        Lead follow-ups, confirmation, reminders, no-show rebook: schedule rows, re-check at send time
   policies.js        What customers should know (business_policies, 0019): booking page + confirmation/24 h reminder;
                      claims-filtered; public reads fail soft (policiesOrEmpty) so a missing table never breaks booking
+  email-feedback.js  Resend webhook (Svix-signed): permanent bounce/complaint → email_suppressions (0020, hashes), message
+                     failed/bounced, owner_bounce notice; sender skips suppressed addresses ('suppressed')
   notify.js          Owner notices (cron scan): new booking / customer cancellation / lead unbooked after 10 min → each member, once
   sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)

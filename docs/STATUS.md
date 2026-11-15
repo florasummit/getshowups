@@ -573,3 +573,15 @@ Everything below is **local and tested**, not in production.
    login → connect Google Calendar → connection status → submit test lead → view availability → see bookings.
    First step: verify what GHL access actually exists before choosing CRM/SMS build-vs-reuse.
 2. Then: lead capture → qualification → booking → reminders → show-up tracking.
+
+## 2026-11-15: customer journey gaps (draft PRs #32 → #33 → #34, stacked; NOT merged/deployed)
+
+- #32 Owner notices (new booking / customer cancellation / lead unbooked after 10 min) + customers cancel and pick a
+  new time from their email link. Migration 0018 (indexes, optional).
+- #33 What customers should know (before-the-appointment + cancellation notes) on the booking page and in the
+  confirmation / day-before reminder. Migration 0019 (public reads fail soft without it).
+- #34 Resend delivery feedback: signed webhook; permanent bounce/complaint → address suppressed, owner asked to call.
+  Migration 0020 + Resend endpoint + RESEND_WEBHOOK_SECRET (approval).
+- Evidence: local only (verify:all 390 unit / 74 Playwright on #34's tip). Nothing live-verified yet.
+- Next: approve merge/deploy in order #32, #33, #34 with migrations 0018–0020; then Stripe live + MESSAGES_LIVE
+  per docs/LAUNCH_READINESS.md (PR #29).

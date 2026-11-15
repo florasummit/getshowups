@@ -2,6 +2,7 @@
 // configuration says (state), and how real production activity proves it works (verify: read-only database checks,
 // no calls to outside services). A new feature adds its own registerCapability() call (here or in its module,
 // imported below) and appears in Business Review with no UI change.
+import { feedbackConfigured } from '../email-feedback.js'
 import { registerCapability } from './registry.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
 import { emailConfigured, messagesLive } from '../email.js'
@@ -314,7 +315,20 @@ registerCapability({
       : messagesLive(env)
         ? { mode: 'live' }
         : { mode: 'sandbox', note: 'Sent to test recipients only', approval: 'MESSAGES_LIVE=true' },
-  verify: seen('owner notice sent for a real business', 30, `SELECT max(sent_at) AS at FROM email_outbox o WHERE status = 'sent' AND template IN ('owner_booking', 'owner_lead', 'owner_cancel') AND ${NOT_TEST_BIZ('o.customer', 'o.created_at')}`),
+  verify: seen('owner notice sent for a real business', 30, `SELECT max(sent_at) AS at FROM email_outbox o WHERE status = 'sent' AND template IN ('owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce') AND ${NOT_TEST_BIZ('o.customer', 'o.created_at')}`),
+})
+registerCapability({
+  id: 'messaging.email_feedback',
+  name: 'Email bounces and spam complaints (Resend webhook)',
+  journey: 'booking',
+  description: 'Permanently bounced or complaining addresses are not emailed again; the owner is asked to call instead.',
+  external: 'Resend',
+  dependsOn: ['messaging.email'],
+  state: (env) =>
+    feedbackConfigured(env)
+      ? { mode: 'live' }
+      : { mode: 'missing', note: 'No signed webhook: bounces go unnoticed', approval: 'RESEND_WEBHOOK_SECRET + webhook endpoint in Resend' },
+  verify: seen('bounce or complaint received for a real business', 90, `SELECT max(created_at) AS at FROM email_suppressions s WHERE ${NOT_TEST_BIZ('s.customer', 's.created_at')}`),
 })
 registerCapability({
   id: 'messaging.sms',
