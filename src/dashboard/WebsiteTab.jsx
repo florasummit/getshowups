@@ -5,6 +5,7 @@ import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
+import AiKeySettings from './AiKeySettings.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -183,6 +184,13 @@ export default function WebsiteTab() {
           </section>
         </>
       )}
+
+      <section className="card">
+        <details>
+          <summary className="card-title">Your own AI key (optional)</summary>
+          <AiKeySettings />
+        </details>
+      </section>
 
       <section className="card">
         <h2 className="card-title">Website address</h2>

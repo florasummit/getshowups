@@ -50,6 +50,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
+  api/dashboard/ai-key  GET (provider + last 4) · POST save (validated) | remove
   api/dashboard/website/import  GET latest import; POST start (url, confirm) | apply (importId, fields, photos)
   api/dashboard/website/ Website: index (GET state; POST save|publish|unpublish|restore|regenerate), preview (owner-only
                      HTML), assets (image upload), export (owner's content + images as JSON)
@@ -89,6 +90,11 @@ server/              Shared backend modules imported by functions/ (bundled by P
   website-ai.js      AI website design: one Workers AI request (binding AI, model WEBSITE_MODEL) → copy + 3 designs;
                      revise (natural-language change) → 1 design. Facts from records only; claims + invented-number
                      filter; designs repaired via site-design.js; stored in website_generations; template fallback
+  ai-credentials.js  Bring-your-own Claude/OpenAI key (0022): validated read-only before storing; AES-GCM under an HKDF
+                     subkey of TOKEN_ENCRYPTION_KEY bound to (customer, provider); only provider + last 4 ever returned
+  ai-providers.js    Own-key website writer: Claude (SDK, claude-opus-5-5, output_config json_schema, fallbacks default)
+                     or OpenAI (strict json_schema); same mergeGenerated/claims/number/design-repair pipeline; own-key
+                     errors are reported (never a silent fallback); cost recorded as 0 (billed to the owner's account)
   site-design.js     The design system the AI chooses from: 8 palettes (AA-checked), 5 font pairings, 4 hero / 3
                      services / 3 about layouts, shapes, section order, image refs (asset:<id> | stock:<id>).
                      validateDesign(), presetDesigns(), diversify() (3 designs never share hero/palette/fonts)

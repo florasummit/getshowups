@@ -7,6 +7,15 @@ import { api } from '../lib/api.js'
 import { ScaledFrame } from './WebsiteEditor.jsx'
 
 const FAIL = { 503: 'Our website designer is busy. Please try again in a minute.' }
+// Errors from the business's own Claude/OpenAI key, in plain words.
+const OWN_KEY = {
+  invalid_key: 'Your AI API key isn’t working any more. Replace it under “Your own AI key”, or remove it to use the included writer.',
+  provider_rejected: 'Your AI provider declined the request. Check that your API account has credit and billing set up.',
+  provider_rate_limited: 'Your AI provider says you’ve hit its rate limit. Please wait a minute and try again.',
+  ai_declined: 'The AI declined this request. Try describing the change differently.',
+  ai_invalid_output: 'The AI’s answer couldn’t be used. Please try again.',
+  provider_unavailable: 'Your AI provider isn’t responding right now. Please try again in a minute.',
+}
 
 const resetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 // Today's AI allowance for one kind ('generation' or 'revision'), e.g. "18 of 20 left today · resets at 7:00 PM".
@@ -27,7 +36,7 @@ const failText = (status, data, noun) =>
       ? 'You’ve reached this month’s AI limit. You can still edit the text and photos below.'
       : data?.error === 'rate_limited'
         ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
-        : FAIL[status]
+        : OWN_KEY[data?.error] || FAIL[status]
 
 export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage }) {
   const [gen, setGen] = useState(null)

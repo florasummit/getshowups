@@ -20,15 +20,17 @@ import { FONTS, PALETTES } from '../../../../server/site-design.js'
 import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../../../../server/website-ai.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
+import { credentialView } from '../../../../server/ai-credentials.js'
 
 async function state(env, customer, email) {
   const db = env.ONBOARDING_DB
-  const [website, hosting, domain, assets, usage] = await Promise.all([
+  const [website, hosting, domain, assets, usage, aiKey] = await Promise.all([
     loadWebsite(db, customer),
     hostingStatus(db, customer.id),
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),
+    credentialView(env, customer.id).catch(() => null), // before migration 0022: no own key
   ])
   return {
     website,
@@ -38,7 +40,8 @@ async function state(env, customer, email) {
     assets,
     // Bookable = calendar connected and hours saved; a site without booking isn't published.
     ready: customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`)),
-    writer: aiConfigured(env), // AI copy available (otherwise the template is used)
+    writer: aiConfigured(env) || aiKey?.status === 'ok', // AI copy available (otherwise the template is used)
+    aiKey, // the business's own Claude/OpenAI key (provider + last 4 only), if any
     aiUsage: usage, // today's AI allowance (server/ai-usage.js); manual edits are never limited
     options: {
       templates: TEMPLATES,
@@ -75,11 +78,20 @@ export async function onRequestPost({ request, env }) {
       if (rl.limited) return tooManyJson(rl.retryAfter)
       const usage = await aiUsage(env, customer, session.email)
       if (usage[kind].remaining <= 0) return json(429, { error: 'daily_limit', kind, limit: usage[kind].limit, resetsAt: usage.resetsAt, aiUsage: usage })
-      if (kind === 'revision' && usage.monthlyCapReached) return json(429, { error: 'monthly_limit', aiUsage: usage })
-      const draft = (await loadWebsite(db, customer)).draft
+      const own = (await credentialView(env, customer.id).catch(() => null))?.status === 'ok'
+      // The monthly ceiling protects OUR spend; a business using its own key isn't limited by it (daily limits still apply).
+      if (kind === 'revision' && usage.monthlyCapReached && !own) return json(429, { error: 'monthly_limit', aiUsage: usage })
+      const loaded = await loadWebsite(db, customer)
+      const draft = loaded.draft
       const r =
         kind === 'generation'
-          ? await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), logo: draft.logo || null, allowAi: !usage.monthlyCapReached })
+          ? await generateWebsite(env, customer, {
+              draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean),
+              logo: draft.logo || null,
+              allowAi: !usage.monthlyCapReached,
+              // The owner's own (imported or edited) text informs a new design.
+              draftText: loaded.generated ? null : [draft.headline, draft.intro, draft.about, ...(draft.services || []).map((x) => `${x.name} ${x.price} ${x.description}`)].join('\n'),
+            })
           : await reviseWebsite(env, customer, draft, body.instruction)
       if (!r.ok) return json(r.httpStatus, { error: r.error, aiUsage: usage })
       // Only successful AI results count against the allowance (template fallbacks are free).

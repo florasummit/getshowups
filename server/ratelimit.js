@@ -25,6 +25,7 @@ export const RULES = {
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
   domain: { limit: 30, windowSec: 600 }, //          POST /api/dashboard/domain (per business; each check does DNS lookups)
   assetUpload: { limit: 40, windowSec: 3600 }, //    POST /api/dashboard/website/assets (per business)
+  aiKey: { limit: 10, windowSec: 3600 }, //         POST /api/dashboard/ai-key save (per business; each validates with the provider)
   siteImport: { limit: 6, windowSec: 3600 }, //    POST website import start (per business; each reads up to 12 pages)
   websiteAi: { limit: 30, windowSec: 600 }, //      POST website generate/revise attempts (per business; burst guard,
   //                                                   daily allowances are in server/ai-usage.js)

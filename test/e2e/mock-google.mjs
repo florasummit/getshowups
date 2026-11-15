@@ -268,6 +268,12 @@ createServer(async (req, res) => {
     const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
     return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
   }
+  // Own-key AI providers (AI_API_MOCK_ORIGIN): key check only; a key containing BAD is refused.
+  if (url.pathname === '/anthropic/v1/models' || url.pathname === '/openai/v1/models') {
+    const auth = req.headers['x-api-key'] || String(req.headers.authorization || '')
+    if (auth.includes('BAD')) return send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid' } })
+    return send(res, 200, { data: [{ id: 'model', type: 'model' }], has_more: false, first_id: 'model', last_id: 'model' })
+  }
   // Website import stand-in (SITE_IMPORT_MOCK_ORIGIN): /__site/<host><path> serves a small Squarespace-style site.
   if (url.pathname.startsWith('/__site/')) {
     const [, , host, ...rest] = url.pathname.split('/')
