@@ -6,6 +6,7 @@ import { api } from '../lib/api.js'
 
 const ERRORS = {
   invalid_key_format: 'That doesn’t look like an API key. Copy it again from your provider’s API keys page.',
+  invalid_model: 'That model isn’t available here. Choose one from the list.',
   invalid_key: 'The provider didn’t accept that key. Check it and try again.',
   provider_rate_limited: 'The provider is busy. Please try again in a minute.',
   provider_unavailable: 'We couldn’t reach the provider. Please try again in a minute.',
@@ -39,6 +40,18 @@ export default function AiKeySettings({ onChange }) {
           <span className="status-dot" aria-hidden="true" />
           {key.label} key ending {key.hint} · {key.status === 'ok' ? 'in use for your website' : 'not working, replace it'}
         </p>
+        {key.models?.length > 1 && (
+          <label className="field">
+            <span>Model</span>
+            <select value={key.model} disabled={state.busy} onChange={(e) => post({ action: 'model', model: e.target.value })}>
+              {key.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {state.saved && (
           <p className="fine" role="status">
             Connected. New designs and changes now use your own API account.
