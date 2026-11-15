@@ -443,8 +443,8 @@ export async function cancelAppointment(env, customer, id, { by = 'owner' } = {}
   // If saving fails after Google removed the event, the booking is still 'booked' (reminders could go): that is
   // recorded as an open failure (Business Review) and the owner is told to press Cancel again; a retry finds the event
   // already gone and completes.
-  try {
-    await db.batch([
+  const save = () =>
+    db.batch([
       db.prepare("UPDATE appointments SET status = 'cancelled', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'booked'").bind(id, customer.id, now),
       db
         .prepare("INSERT INTO appointment_changes (appointment_id, customer, from_status, to_status, work, changed_by, changed_at) SELECT ?1, ?2, 'booked', 'cancelled', NULL, ?3, ?4 WHERE changes() = 1")
@@ -457,6 +457,10 @@ export async function cancelAppointment(env, customer, id, { by = 'owner' } = {}
           ]
         : []),
     ])
+  try {
+    // The Google event is already gone: a transient write error gets one immediate retry (the batch is conditional,
+    // so a retry after a write that did land changes nothing).
+    await save().catch(() => save())
   } catch (err) {
     console.error('appointment cancel: save failed:', err?.name)
     await recordEvent(db, { type: 'booking.cancel', ...who, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'failure', details: { error: 'cancel_incomplete', calendarEventRemoved: Boolean(appt.google_event_id) }, at: now })
