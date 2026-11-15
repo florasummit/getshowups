@@ -127,8 +127,22 @@ test('new customer: get started → pay → onboard → publish → book → man
     await expect(page.getByRole('alert')).toContainText('www.harborpoolcare.example')
     await page.getByRole('button', { name: 'www.harborpoolcare.example' }).click()
     await expect(page.getByText('Step 1 of 2: verify you own www.harborpoolcare.example.')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText('_getshowups.www.harborpoolcare.example')).toBeVisible()
+    // The Host is shown the way DNS providers want it (they add the domain themselves).
+    const host = page.locator('.record code').first()
+    await expect(host).toHaveText('_getshowups.www')
     await expect(page.getByText('Waiting for your record')).toBeVisible()
+    await expect(page.getByText(/Not found yet \(last checked/)).toBeVisible()
+    // Live audit (www.poolthru.com): the provider appended the domain to a full name typed into Host. The owner is
+    // told exactly what to change instead of an indefinite "waiting".
+    const value = await page.locator('.record code').nth(1).textContent()
+    const setDns = (name, values) => page.request.post(`${mock}/__dns`, { data: { type: 'TXT', name, values } })
+    await setDns('_getshowups.www.harborpoolcare.example.harborpoolcare.example', [value])
+    await page.getByRole('button', { name: 'Check now' }).click()
+    await expect(page.getByText('Record needs a fix')).toBeVisible()
+    await expect(page.locator('.notice-bad')).toContainText('your DNS provider added harborpoolcare.example a second time')
+    await expect(page.locator('.notice-bad')).toContainText('change its Host to _getshowups.www')
+    // (Fixed record → verified: covered in test/website.test.js. Left unfixed here so the dashboard's next step stays
+    // "Finish connecting your domain".)
   }
   await noOverflow()
   await page.getByRole('button', { name: 'Continue' }).click()

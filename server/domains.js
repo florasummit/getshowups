@@ -21,6 +21,17 @@ export const cnameTarget = (env) => env.SITE_CNAME_TARGET || 'getshowups.pages.d
 export const txtName = (hostname) => `_getshowups.${hostname}`
 export const txtValue = (token) => `gsu-verify=${token}`
 
+// The DNS zone the owner manages (poolthru.com for www.poolthru.com; example.co.uk for www.example.co.uk). DNS
+// providers (Squarespace, GoDaddy, Namecheap, …) want the Host relative to it and append ".<zone>" themselves: typing the
+// full name there produces _getshowups.www.poolthru.com.poolthru.com.
+export function zoneOf(hostname) {
+  const labels = String(hostname).split('.')
+  return labels.slice(SECOND_LEVEL.has(labels.slice(-2).join('.')) ? -3 : -2).join('.')
+}
+export const relativeHost = (name, zone) => (name === zone ? '@' : name.endsWith(`.${zone}`) ? name.slice(0, -(zone.length + 1)) : name)
+// Where a record lands when a provider appends the zone (or the hostname) to a full name typed into Host.
+const doubledNames = (name, hostname) => [...new Set([`${name}.${zoneOf(hostname)}`, `${name}.${hostname}`])]
+
 // Our own addresses (and the hosting platform's) can never be claimed by a business.
 const RESERVED = [/(^|\.)getshowups\.com$/, /\.pages\.dev$/, /\.workers\.dev$/, /^localhost$/, /(^|\.)cloudflare\.com$/]
 // Common two-part public suffixes, so example.co.uk counts as an apex domain.
@@ -104,11 +115,13 @@ const view = (env, r) =>
     // Step 1 asks only for the TXT record. The CNAME (which moves the address to us) is shown only once
     // hosting is ready for it, so an existing website is never interrupted early.
     step: !r.verified_at ? 'verify' : !r.attached_at ? 'activate' : 'point',
-    records: !r.verified_at
+    // name: the full DNS name; host: what to type in the provider's Host/Name field (relative to zone).
+    records: (!r.verified_at
       ? [{ type: 'TXT', name: txtName(r.hostname), value: txtValue(r.verify_token) }]
       : r.attached_at
         ? [{ type: 'CNAME', name: r.hostname, value: cnameTarget(env) }]
-        : [],
+        : []
+    ).map((x) => ({ ...x, host: relativeHost(x.name, zoneOf(r.hostname)), zone: zoneOf(r.hostname) })),
     verifiedAt: r.verified_at,
     connectedAt: r.connected_at,
     checkedAt: r.checked_at,
@@ -176,8 +189,20 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
       return r.status
     }
     if (!txt.values.includes(txtValue(r.verify_token))) {
+      // Tell the owner what is wrong, not just "waiting": a different verification value at the right name, or our
+      // record at a doubled name (the provider appended the domain to a full name typed into Host).
+      let detail = txt.values.some((v) => v.startsWith('gsu-verify=')) ? 'wrong_value' : null
+      if (!detail) {
+        for (const name of doubledNames(txtName(hostname), hostname)) {
+          const d = await dnsLookup(env, name, 'TXT')
+          if (d.ok && d.values.includes(txtValue(r.verify_token))) {
+            detail = 'record_doubled'
+            break
+          }
+        }
+      }
       const stale = now - r.created_at > 14 * DAY
-      await set(db, hostname, { status: stale ? 'needs_attention' : 'pending', detail: stale ? 'not_verified' : 'waiting_for_record' }, now)
+      await set(db, hostname, { status: stale ? 'needs_attention' : 'pending', detail: detail || (stale ? 'not_verified' : 'waiting_for_record') }, now)
       return stale ? 'needs_attention' : 'pending'
     }
     await set(db, hostname, { verified_at: now, status: 'verifying', detail: null }, now)
@@ -217,7 +242,18 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
     await set(db, hostname, { status: 'needs_attention', detail: pointed ? 'certificate_pending' : 'dns_changed' }, now)
     return 'needs_attention'
   }
-  await set(db, hostname, { status: 'securing', detail: pointed ? 'certificate_pending' : 'waiting_for_cname' }, now)
+  // Not pointed yet: same doubled-Host mistake for the CNAME?
+  let detail = pointed ? 'certificate_pending' : 'waiting_for_cname'
+  if (!pointed) {
+    for (const name of doubledNames(hostname, hostname)) {
+      const d = await dnsLookup(env, name, 'CNAME')
+      if (d.ok && d.values.includes(cnameTarget(env))) {
+        detail = 'cname_doubled'
+        break
+      }
+    }
+  }
+  await set(db, hostname, { status: 'securing', detail }, now)
   return 'securing'
 }
 
