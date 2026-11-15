@@ -12,7 +12,8 @@ import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
 import { brandName, loadWebsite, saveDraft, validateContent } from './website.js'
-import { CLAUDE_MODEL, strictSchema } from './ai-providers.js'
+import { strictSchema } from './ai-providers.js'
+import { MAX_OUTPUT, claudeFallbackFor, inputTokensFor, recordUsage, resolveModel } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
 
 const opt = (t) => ({ anyOf: [t, { type: 'null' }] })
@@ -174,15 +175,15 @@ const userPrompt = (ctx, history, current, message) =>
     .filter(Boolean)
     .join('\n\n')
 
-async function callClaude(env, apiKey, prompt, { effort, onProgress }) {
+// maxRetries 0: a retry would be a second billed request the budget check didn't account for.
+async function callClaude(env, apiKey, model, prompt, { effort, onProgress }) {
   const mock = providerMock(env)
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 600000, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 600000, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
   try {
     const stream = client.beta.messages.stream({
-      model: CLAUDE_MODEL,
-      max_tokens: 64000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      model,
+      max_tokens: MAX_OUTPUT.designer,
+      ...claudeFallbackFor(model),
       output_config: { effort, format: { type: 'json_schema', schema: DESIGN_SCHEMA } },
       system: SYSTEM,
       messages: [{ role: 'user', content: prompt }],
@@ -197,9 +198,12 @@ async function callClaude(env, apiKey, prompt, { effort, onProgress }) {
     if (msg.stop_reason === 'refusal') return { ok: false, error: 'ai_declined', usage }
     if (msg.stop_reason === 'max_tokens') return { ok: false, error: 'ai_invalid_output', usage }
     const text = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
-    return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${msg.model || CLAUDE_MODEL}` }
+    try {
+      return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${msg.model || model}` }
+    } catch {
+      return { ok: false, error: 'ai_invalid_output', usage }
+    }
   } catch (err) {
-    if (err instanceof SyntaxError) return { ok: false, error: 'ai_invalid_output' }
     if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return { ok: false, error: 'invalid_key' }
     if (err instanceof Anthropic.RateLimitError) return { ok: false, error: 'provider_rate_limited' }
     if (err instanceof Anthropic.BadRequestError) return { ok: false, error: 'provider_rejected' }
@@ -207,15 +211,14 @@ async function callClaude(env, apiKey, prompt, { effort, onProgress }) {
   }
 }
 
-async function callOpenAI(env, apiKey, prompt, { onProgress }) {
+async function callOpenAI(env, apiKey, model, prompt, { onProgress }) {
   const mock = providerMock(env)
-  const model = typeof env.OPENAI_WEBSITE_MODEL === 'string' && /^[a-z0-9.:-]{3,60}$/i.test(env.OPENAI_WEBSITE_MODEL) ? env.OPENAI_WEBSITE_MODEL : 'gpt-4o-mini'
   const tick = setInterval(() => onProgress?.(0), 5000)
   try {
     const res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, max_completion_tokens: 16000, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }], response_format: { type: 'json_schema', json_schema: { name: 'website_design', strict: true, schema: DESIGN_SCHEMA } } }),
+      body: JSON.stringify({ model, max_completion_tokens: MAX_OUTPUT.designer, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }], response_format: { type: 'json_schema', json_schema: { name: 'website_design', strict: true, schema: DESIGN_SCHEMA } } }),
       signal: AbortSignal.timeout(600000),
     })
     const body = await res.json().catch(() => ({}))
@@ -224,7 +227,11 @@ async function callOpenAI(env, apiKey, prompt, { onProgress }) {
     const usage = { input: body?.usage?.prompt_tokens ?? 0, output: body?.usage?.completion_tokens ?? 0 }
     if (ch?.message?.refusal) return { ok: false, error: 'ai_declined', usage }
     if (ch?.finish_reason === 'length') return { ok: false, error: 'ai_invalid_output', usage }
-    return { ok: true, raw: JSON.parse(ch?.message?.content || ''), usage, model: `openai:${body?.model || model}` }
+    try {
+      return { ok: true, raw: JSON.parse(ch?.message?.content || ''), usage, model: `openai:${body?.model || model}` }
+    } catch {
+      return { ok: false, error: 'ai_invalid_output', usage }
+    }
   } catch (err) {
     return { ok: false, error: err instanceof SyntaxError ? 'ai_invalid_output' : 'provider_unavailable' }
   } finally {
@@ -247,9 +254,14 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   const history = (await conversation(ctx.db, customer.id, 12)).map((t) => ({ role: t.role, text: t.text }))
   const current = ctx.draft.site || null
   const prompt = userPrompt(ctx, history, current, text)
+  // The owner's model (or Auto's pick) from their account's catalog; refused before sending if the worst case of this
+  // request would cross their monthly limit.
+  const m = await resolveModel(env, customer.id, cred, { kind: 'designer', input: inputTokensFor(SYSTEM, prompt, JSON.stringify(DESIGN_SCHEMA)) }, now)
+  if (!m.ok) return { ok: false, httpStatus: { budget_reached: 402 }[m.error] || 409, error: m.error }
   const t0 = Date.now()
   const call = cred.provider === 'anthropic' ? callClaude : callOpenAI
-  const r = await call(env, cred.apiKey, prompt, { effort: current ? 'medium' : 'high', onProgress })
+  const r = await call(env, cred.apiKey, m.model, prompt, { effort: current ? 'medium' : 'high', onProgress })
+  if (r.usage) await recordUsage(ctx.db, customer.id, cred.provider, r.model || m.model, 'designer', r.usage, r.ok, now)
   if (!r.ok) {
     if (r.error === 'invalid_key') await markCredential(env, customer.id, 'invalid', now)
     await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error } })

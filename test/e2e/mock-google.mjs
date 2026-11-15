@@ -285,7 +285,12 @@ createServer(async (req, res) => {
   if (url.pathname === '/anthropic/v1/models' || url.pathname === '/openai/v1/models') {
     const auth = req.headers['x-api-key'] || String(req.headers.authorization || '')
     if (auth.includes('BAD')) return send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid' } })
-    return send(res, 200, { data: [{ id: 'model', type: 'model' }], has_more: false, first_id: 'model', last_id: 'model' })
+    // What a connected account offers: Anthropic reports capabilities; OpenAI ids only (one non-text model to filter out).
+    const caps = { structured_outputs: { supported: true }, effort: { supported: true } }
+    const data = url.pathname.startsWith('/anthropic')
+      ? ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((id) => ({ id, type: 'model', display_name: id, max_tokens: 128000, capabilities: caps }))
+      : ['gpt-4o-mini', 'gpt-4.1', 'text-embedding-3-small'].map((id) => ({ id, object: 'model', owned_by: 'openai' }))
+    return send(res, 200, { data, has_more: false, first_id: data[0].id, last_id: data.at(-1).id })
   }
   // Website import stand-in (SITE_IMPORT_MOCK_ORIGIN): /__site/<host><path> serves a small Squarespace-style site.
   if (url.pathname.startsWith('/__site/')) {

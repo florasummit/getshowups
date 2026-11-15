@@ -16,6 +16,15 @@ test('owner designs the website in conversation: first design, revision, undo @m
     await card.getByLabel('API key').fill('sk-ant-api03-' + 'A'.repeat(40) + 'WXYZ')
     await card.getByRole('button', { name: 'Connect key' }).click()
   }
+  // The model list comes from the connected account (discovered, not a fixed list). Auto needs a TESTED model, so the
+  // owner picks one here.
+  const keyPanel = card.locator('details.designer-key')
+  await keyPanel.locator('summary').click()
+  const model = keyPanel.getByLabel('Model')
+  await expect(model.locator('option', { hasText: 'claude-haiku-5-5' })).toHaveCount(1)
+  await expect(model.locator('option', { hasText: /^Auto/ })).toHaveCount(1)
+  await model.selectOption('claude-opus-5-5')
+  await expect(keyPanel.locator('summary')).toContainText('claude-opus-5-5')
   await card.getByLabel(/Describe your website|Ask for a change/).fill('Modern and premium, booking front and centre')
   await card.getByRole('button', { name: /Design my website|Send/ }).click()
   await expect(card.getByText('A fresh coastal design with booking up front.').or(card.getByText('Darker and more premium, with a serif headline.')).first()).toBeVisible({ timeout: 30_000 })

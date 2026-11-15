@@ -14,6 +14,9 @@ const ERRORS = {
   ai_invalid_output: 'The AI’s design couldn’t be used. Please try again.',
   provider_unavailable: 'Your AI provider isn’t responding right now. Please try again in a minute.',
   daily_limit: 'You’ve reached today’s design limit. You can keep editing by hand.',
+  model_unavailable: 'Your chosen AI model is no longer offered on your account. Choose another under “AI model and monthly limit”.',
+  no_tested_model: 'Auto has no tested model on your account yet. Choose a model under “AI model and monthly limit”.',
+  budget_reached: 'This would go over your monthly AI limit. Raise it under “AI model and monthly limit”, or edit by hand.',
   rate_limited: 'That’s a lot of requests in a few minutes. Please wait a moment.',
 }
 const FIRST = ['Design a modern, premium website from my current website’s content', 'Design a bright, friendly one-page site that makes booking easy', 'Design an elegant site with a separate Services page']
@@ -151,6 +154,12 @@ export default function WebsiteDesigner({ onChanged }) {
           {state.error}
         </p>
       )}
+      <details className="designer-key">
+        <summary>
+          AI model and monthly limit · {data.key.model === 'auto' ? `Auto${data.key.autoModel ? ` (${data.key.autoModel})` : ''}` : data.key.model}
+        </summary>
+        <AiKeySettings onChange={load} />
+      </details>
       <p className="fine">Each request runs on your {data.key.label} account and is billed by them.</p>
     </div>
   )

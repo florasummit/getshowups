@@ -1997,3 +1997,15 @@
   display: grid;
   gap: 10px;
 }
+.designer-key summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.designer-key[open] summary {
+  margin-bottom: 10px;
+}
+.designer-key select {
+  max-width: 100%;
+}

@@ -12,6 +12,7 @@ import { sealKey } from '../server/ai-credentials.js'
 import * as designer from '../functions/api/dashboard/website/designer.js'
 import * as website from '../functions/api/dashboard/website/index.js'
 import * as preview from '../functions/api/dashboard/website/preview.js'
+import * as aiKeyRoute from '../functions/api/dashboard/ai-key.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as publicPage from '../functions/p/[customer]/[page].js'
 
@@ -19,6 +20,7 @@ const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
 const DAY = 864e5
 const CLAUDE_KEY = 'sk-ant-api03-' + 'A'.repeat(40) + 'WXYZ'
+const OPENAI_KEY = 'sk-proj-' + 'B'.repeat(40) + 'QRST'
 const SERVICES = [{ name: 'One Time Service', price: '$150+' }, { name: 'Weekly Pool Care', price: '$280+' }, { name: 'Pool Winterization', price: '$350+' }]
 let env, db, kv, requests, nextDesign, origFetch
 
@@ -65,9 +67,13 @@ async function call(mod, method, { cookie, body, origin = ORIGIN, url = `${ORIGI
   return { status: res.status, json, text, headers: res.headers }
 }
 const events = (text) => text.trim().split('\n').map((l) => JSON.parse(l))
-async function addKey(customer) {
+// A connected key with a fresh catalog (as saveCredential leaves it) and a chosen model.
+async function addKey(customer, provider = 'anthropic', model = provider === 'anthropic' ? 'claude-opus-5-5' : 'gpt-4o-mini') {
   const now = Date.now()
-  db.sql.prepare("INSERT INTO ai_credentials (customer, provider, sealed, hint, status, validated_at, created_at, updated_at) VALUES (?, 'anthropic', ?, 'WXYZ', 'ok', ?, ?, ?)").run(customer, await sealKey(env, customer, 'anthropic', CLAUDE_KEY), now, now, now)
+  const catalog = JSON.stringify([{ id: model, label: model, compatible: true }])
+  db.sql
+    .prepare("INSERT INTO ai_credentials (customer, provider, sealed, hint, model, catalog, catalog_at, monthly_budget_cents, status, validated_at, created_at, updated_at) VALUES (?, ?, ?, 'WXYZ', ?, ?, ?, 1000, 'ok', ?, ?, ?)")
+    .run(customer, provider, await sealKey(env, customer, provider, provider === 'anthropic' ? CLAUDE_KEY : OPENAI_KEY), model, catalog, now, now, now, now)
 }
 // A server-sent-events body like the Messages API stream.
 function sse(text, { stop = 'end_turn' } = {}) {
@@ -118,6 +124,12 @@ beforeEach(() => {
       requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key') })
       if (nextDesign instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
       return new Response(sse(JSON.stringify(nextDesign)), { headers: { 'content-type': 'text/event-stream' } })
+    }
+    if (u.hostname === 'api.openai.com' && u.pathname === '/v1/chat/completions') {
+      const body = await req.clone().json()
+      requests.push({ body, auth: req.headers.get('authorization') })
+      if (nextDesign instanceof Error) return Response.json({ error: { code: 'invalid_api_key' } }, { status: 401 })
+      return Response.json({ model: `${body.model}-2024-07-18`, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(nextDesign) } }], usage: { prompt_tokens: 5000, completion_tokens: 7000 } })
     }
     throw new Error(`unexpected fetch ${u}`)
   }
@@ -241,6 +253,48 @@ test('conversational revision updates the draft from the CURRENT design; undo re
   assert.match(page.text, /Weekly skimming, brushing and balancing\./)
   assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'nope' } })).status, 404)
   assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: '../x' } })).status, 404)
+})
+
+test('OpenAI key: the same designer end to end (design → revision → publish) with the chosen model and strict json_schema', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools', 'openai', 'gpt-4o-mini')
+  let r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.equal(events(r.text).at(-1).type, 'done')
+  let req = requests[0]
+  assert.ok(req.auth.includes(OPENAI_KEY))
+  assert.equal(req.body.model, 'gpt-4o-mini')
+  assert.equal(req.body.max_completion_tokens, 32000, 'output cap the budget check assumes')
+  assert.deepEqual([req.body.response_format.type, req.body.response_format.json_schema.strict], ['json_schema', true])
+  assert.equal(req.body.messages[0].role, 'system')
+  nextDesign = { reply: 'Darker.', site: DESIGN({ name: 'Midnight Pool' }) }
+  r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it darker' } })
+  assert.equal(events(r.text).at(-1).type, 'done')
+  req = requests[1]
+  assert.match(req.body.messages[1].content, /CURRENT_SITE \(the design to revise\):\n\{"version":2,"name":"Lowcountry Blue"/)
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal(draft.site.name, 'Midnight Pool')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: draft, confirm: true } })).status, 200)
+  assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
+  // Usage of both requests is on the ledger, priced via the snapshot the provider answered with.
+  const usage = db.sql.prepare('SELECT model, kind, input_tokens, output_tokens, ok FROM ai_key_usage').all()
+  assert.deepEqual(usage.map((u) => [u.model, u.kind, u.ok]), [['openai:gpt-4o-mini-2024-07-18', 'designer', 1], ['openai:gpt-4o-mini-2024-07-18', 'designer', 1]])
+  const k = (await call(aiKeyRoute, 'GET', { cookie: c })).json.key
+  assert.equal(k.spentUsd, Math.round(((2 * 5000 * 0.15 + 2 * 7000 * 0.6) / 1e6) * 100) / 100)
+})
+
+test('designer requests are refused before sending when their worst case would cross the monthly limit', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  // Opus designer worst case ≥ 40k × $4 + 32k × $20 per M = $0.80; with $9.50 already used, $10 can't cover it.
+  db.sql.prepare("INSERT INTO ai_key_usage (customer, provider, model, kind, input_tokens, output_tokens, ok, created_at) VALUES ('pools', 'anthropic', 'anthropic:claude-opus-5-5', 'designer', 0, 475000, 1, ?)").run(Date.now())
+  const r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'budget_reached' })
+  assert.equal(requests.length, 0, 'nothing sent')
+  // A chosen model the account stopped offering: refused, never swapped.
+  db.sql.prepare("UPDATE ai_credentials SET catalog = '[]', catalog_at = ?").run(Date.now())
+  db.sql.prepare('DELETE FROM ai_key_usage').run()
+  assert.deepEqual(events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1), { type: 'error', error: 'model_unavailable' })
+  assert.equal(requests.length, 0)
 })
 
 test('provider failures change nothing and are explained; a dead key is marked', async () => {
