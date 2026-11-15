@@ -248,7 +248,7 @@ test('the chosen model is used and kept; Auto picks only tested models within th
   assert.equal(req.body.model, 'claude-opus-5-5', 'tested, best quality, worst case fits $10')
   assert.equal(db.sql.prepare('SELECT auto_model FROM ai_credentials').get().auto_model, 'claude-opus-5-5')
   // A tighter limit with $0.66 already spent: Opus' worst case ($0.37) no longer fits $1, Haiku's does → Auto steps DOWN.
-  db.sql.prepare("UPDATE ai_key_usage SET input_tokens = 15000, output_tokens = 30000 WHERE model = 'anthropic:claude-opus-5-5'").run()
+  db.sql.prepare("UPDATE ai_key_usage SET cost_micros = 660000 WHERE model = 'anthropic:claude-opus-5-5'").run()
   await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
   await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-haiku-5-5')
@@ -270,7 +270,7 @@ test('hard spending limit: a request whose worst case would cross the monthly li
   await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
   // Opus writer worst case: 12k in × $4 + 16k out × $20 per M = $0.368 → fits $1 twice, not three times.
   for (let i = 0; i < 2; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
-  db.sql.prepare('UPDATE ai_key_usage SET input_tokens = 12000, output_tokens = 16000').run()
+  db.sql.prepare('UPDATE ai_key_usage SET cost_micros = 368000').run()
   const sent = calls.filter((x) => x.path === '/v1/messages').length
   const r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   assert.deepEqual([r.status, r.json.error], [402, 'budget_reached'])
@@ -296,9 +296,50 @@ test('failed requests that the provider still bills count toward the limit; the 
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.error, 'ai_invalid_output')
   const rows = db.sql.prepare('SELECT * FROM ai_key_usage').all()
   assert.equal(rows.length, 1)
-  assert.deepEqual(Object.keys(rows[0]).sort(), ['created_at', 'customer', 'input_tokens', 'kind', 'model', 'ok', 'output_tokens', 'provider'])
-  assert.deepEqual([rows[0].ok, rows[0].input_tokens, rows[0].output_tokens], [0, 1200, 900])
+  assert.deepEqual(Object.keys(rows[0]).sort(), ['cost_micros', 'created_at', 'customer', 'id', 'input_tokens', 'kind', 'model', 'ok', 'output_tokens', 'provider', 'state'])
+  // Settled to the reported tokens: 1,200 × $4 + 900 × $20 per M = $0.0228.
+  assert.deepEqual([rows[0].state, rows[0].ok, rows[0].input_tokens, rows[0].output_tokens, rows[0].cost_micros], ['settled', 0, 1200, 900, 22800])
   assert.ok((await call(aiKey, 'GET', { cookie: c })).json.key.spentUsd > 0)
+})
+
+test('concurrent requests cannot both use the same headroom: the worst case is reserved atomically before sending', async () => {
+  const { reserveUsage } = await import('../server/ai-models.js')
+  const ids = await Promise.all(Array.from({ length: 5 }, () => reserveUsage(env.ONBOARDING_DB, 'pools', 'anthropic', 'claude-opus-5-5', 'writer', 0.4, 1)))
+  assert.equal(ids.filter(Boolean).length, 2, '$1 holds two $0.40 worst cases, not five')
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM ai_key_usage WHERE state = 'reserved'").get().n, 2)
+  // The limit covers the business across providers (switching keys doesn't reset it).
+  assert.equal(await reserveUsage(env.ONBOARDING_DB, 'pools', 'openai', 'gpt-4o-mini', 'writer', 0.3, 1), null)
+})
+
+test('no usage report (timeout / provider error) keeps the worst case reserved; refusals before work are released', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-opus-5-5' } })
+  providerReply = { status: 500 }
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.error, 'provider_unavailable')
+  let row = db.sql.prepare('SELECT state, cost_micros FROM ai_key_usage').get()
+  assert.equal(row.state, 'unknown')
+  assert.ok(row.cost_micros >= 368000, 'worst case kept: it may have been billed')
+  assert.equal(calls.filter((x) => x.path === '/v1/messages').length, 1, 'no retry (a retry would be a second billed request)')
+  db.sql.prepare('DELETE FROM ai_key_usage').run()
+  providerReply = { status: 400 }
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  row = db.sql.prepare('SELECT state, cost_micros FROM ai_key_usage').get()
+  assert.deepEqual([row.state, row.cost_micros], ['settled', 0])
+})
+
+test('discovered is not compatible: a model without structured outputs is never selectable or picked by Auto, even if marked tested', async () => {
+  db.sql.prepare("INSERT INTO ai_model_registry (provider, model, status, quality, input_per_m, output_per_m, updated_at) VALUES ('anthropic', 'claude-legacy-2', 'tested', 9, 0.01, 0.01, 1)").run()
+  const c = await cookieFor('owner@pools.example')
+  const k = (await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })).json.key
+  assert.ok(!k.choices.some((x) => x.id === 'claude-legacy-2'))
+  assert.deepEqual((await call(aiKey, 'POST', { cookie: c, body: { action: 'model', model: 'claude-legacy-2' } })).json, { error: 'invalid_model' })
+  await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-opus-5-5', 'Auto: tested AND compatible on this account')
+  // Nothing in the product marks a model tested: discovery/refresh never write the registry.
+  const before = db.sql.prepare('SELECT model, status FROM ai_model_registry ORDER BY provider, model').all()
+  accounts.anthropic.push('claude-new-9')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'refresh' } })
+  assert.deepEqual(db.sql.prepare('SELECT model, status FROM ai_model_registry ORDER BY provider, model').all(), before)
 })
 
 test('strictSchema closes every object and lists every property as required', () => {

@@ -92,29 +92,59 @@ export const worstCase = (c, kind) => {
   return costOf(c, Math.max(k.input || 0, WORST[k.kind].input), k.output ?? WORST[k.kind].output)
 }
 
-// Every own-key request, successful or not (failed requests can still be billed by the provider).
-export async function recordUsage(db, customer, provider, model, kind, usage, ok, now = Date.now()) {
-  await db
-    .prepare('INSERT INTO ai_key_usage (customer, provider, model, kind, input_tokens, output_tokens, ok, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)')
-    .bind(customer, provider, String(model).slice(0, 80), kind, usage?.input || 0, usage?.output || 0, ok ? 1 : 0, now)
-    .run()
-    .catch(() => null)
+const monthStart = (now) => {
+  const d = new Date(now)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
+}
+// The provider may answer with a dated snapshot of the model we asked for: price by the longest registry prefix.
+export const priceFor = (reg, model) => {
+  const id = String(model).replace(/^[a-z]+:/, '')
+  return reg.get(id) || [...reg.entries()].filter(([k]) => id.startsWith(k)).sort((a, b) => b[0].length - a[0].length)[0]?.[1] || null
+}
+const micros = (usd) => Math.ceil(usd * 1e6)
+
+// Atomically reserves `worstUsd` for one request if month-to-date spend (all providers, reservations included) plus it
+// stays within the limit. One INSERT … SELECT … WHERE statement, so two concurrent requests can't both pass on the same
+// headroom. Returns the reservation id, or null when the limit would be crossed.
+export async function reserveUsage(db, customer, provider, model, kind, worstUsd, budgetUsd, now = Date.now()) {
+  const id = crypto.randomUUID().replaceAll('-', '')
+  const r = await db
+    .prepare(
+      `INSERT INTO ai_key_usage (id, customer, provider, model, kind, state, cost_micros, created_at)
+       SELECT ?1, ?2, ?3, ?4, ?5, 'reserved', ?6, ?7
+       WHERE (SELECT coalesce(sum(cost_micros), 0) FROM ai_key_usage WHERE customer = ?2 AND created_at >= ?8) + ?6 <= ?9
+       RETURNING id`,
+    )
+    .bind(id, customer, provider, `${provider}:${model}`.slice(0, 80), kind, micros(worstUsd), now, monthStart(now), micros(budgetUsd))
+    .first()
+  return r?.id ?? null
 }
 
-// Month-to-date spend (USD) of this key's AI website work, from recorded tokens × registry prices.
-export async function monthSpend(db, customer, provider, now = Date.now()) {
-  const d = new Date(now)
-  const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
-  const { results } = await db.prepare('SELECT model, input_tokens, output_tokens FROM ai_key_usage WHERE customer = ?1 AND provider = ?2 AND created_at >= ?3').bind(customer, provider, start).all()
-  const reg = await registry(db, provider)
-  let usd = 0
-  for (const r of results) {
-    const id = String(r.model).replace(/^[a-z]+:/, '')
-    // The provider may answer with a dated snapshot of the model we asked for: price by the longest registry prefix.
-    const price = reg.get(id) || [...reg.entries()].filter(([k]) => id.startsWith(k)).sort((a, b) => b[0].length - a[0].length)[0]?.[1]
-    usd += costOf(price, r.input_tokens || 0, r.output_tokens || 0) ?? 0
-  }
-  return usd
+// Errors that mean the provider refused the request before doing work (auth, bad request, rate limit): not billed.
+const NOT_BILLED = new Set(['invalid_key', 'provider_rejected', 'provider_rate_limited'])
+
+// After the request: the reservation becomes the estimated cost of the tokens the provider reported. With no usage report
+// (timeout, dropped connection) it keeps the worst case, because the provider may still have billed it.
+export async function settleUsage(db, reservation, provider, result) {
+  if (!reservation) return
+  const usage = result?.usage
+  let q
+  if (usage) {
+    // A failed result may not name the model: price by the one reserved.
+    const reserved = result.model ? null : await db.prepare('SELECT model FROM ai_key_usage WHERE id = ?1').bind(reservation).first()
+    const price = priceFor(await registry(db, provider), result.model || reserved?.model || '')
+    q = db
+      .prepare("UPDATE ai_key_usage SET state = 'settled', model = coalesce(?2, model), input_tokens = ?3, output_tokens = ?4, ok = ?5, cost_micros = coalesce(?6, cost_micros) WHERE id = ?1")
+      .bind(reservation, result.model ? String(result.model).slice(0, 80) : null, usage.input || 0, usage.output || 0, result.ok ? 1 : 0, price ? micros(costOf(price, usage.input || 0, usage.output || 0)) : null)
+  } else if (NOT_BILLED.has(result?.error)) q = db.prepare("UPDATE ai_key_usage SET state = 'settled', cost_micros = 0 WHERE id = ?1").bind(reservation)
+  else q = db.prepare("UPDATE ai_key_usage SET state = 'unknown' WHERE id = ?1").bind(reservation)
+  await q.run().catch(() => null)
+}
+
+// Month-to-date estimated spend (USD) of this business's AI website work on its own keys (reservations included).
+export async function monthSpend(db, customer, _provider, now = Date.now()) {
+  const r = await db.prepare('SELECT coalesce(sum(cost_micros), 0) AS c FROM ai_key_usage WHERE customer = ?1 AND created_at >= ?2').bind(customer, monthStart(now)).first()
+  return (r?.c || 0) / 1e6
 }
 
 // Refreshes the stored catalog if it is older than CATALOG_TTL (or `force`). Keeps the old catalog if the provider is
@@ -142,12 +172,19 @@ export async function resolveModel(env, customer, cred, kind = 'designer', now =
   const spent = await monthSpend(db, customer, cred.provider, now)
   const k = typeof kind === 'string' ? { kind } : kind
   const capFor = (id) => outputCap(k.kind, reg.get(id), (catalog || []).find((c) => c.id === id))
-  const fits = (id) => spent + (worstCase(reg.get(id), { ...k, output: capFor(id) }) ?? Infinity) <= budgetUsd
+  const worstFor = (id) => worstCase(reg.get(id), { ...k, output: capFor(id) }) ?? Infinity
+  const fits = (id) => spent + worstFor(id) <= budgetUsd
+  // The decisive check: an atomic reservation of the worst case (the reads above only choose the model).
+  const reserve = async (id, auto) => {
+    const reservation = await reserveUsage(db, customer, cred.provider, id, k.kind, worstFor(id), budgetUsd, now)
+    if (!reservation) return { ok: false, error: 'budget_reached', spent, budgetUsd }
+    return { ok: true, model: id, auto, maxOutput: capFor(id), reservation }
+  }
   const selection = row?.model || 'auto'
   if (selection !== 'auto') {
     if (!offered.has(selection)) return { ok: false, error: 'model_unavailable', model: selection }
     if (!fits(selection)) return { ok: false, error: 'budget_reached', spent, budgetUsd }
-    return { ok: true, model: selection, auto: false, maxOutput: capFor(selection) }
+    return reserve(selection, false)
   }
   // Auto: tested models only, within budget; best quality, then cheapest. Never more expensive than the previous pick.
   const prev = row?.auto_model ? reg.get(row.auto_model) : null
@@ -159,7 +196,7 @@ export async function resolveModel(env, customer, cred, kind = 'designer', now =
   const keep = affordable.find((c) => c.id === row?.auto_model)
   const pick = keep && !affordable.some((c) => c.quality > keep.quality) ? keep : affordable.sort((a, b) => b.quality - a.quality || a.outputPerM - b.outputPerM)[0]
   if (pick.id !== row?.auto_model) await db.prepare('UPDATE ai_credentials SET auto_model = ?2, updated_at = ?3 WHERE customer = ?1').bind(customer, pick.id, now).run()
-  return { ok: true, model: pick.id, auto: true, maxOutput: capFor(pick.id) }
+  return reserve(pick.id, true)
 }
 
 export const claudeFallbackFor = (id) => (/^claude-(opus-5|sonnet-5-5|fable-5)/.test(id) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {})
