@@ -19,6 +19,8 @@ import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as automationsApi from '../functions/api/dashboard/automations.js'
 import * as confirmApi from '../functions/api/appointment/confirm.js'
 import * as policiesApi from '../functions/api/dashboard/policies.js'
+import * as emailWebhook from '../functions/api/email/webhook.js'
+import { svixSignature, verifySvix } from '../server/email-feedback.js'
 import { queueOwnerNotices } from '../server/notify.js'
 import * as cronApi from '../functions/api/cron/run.js'
 import * as unsubApi from '../functions/api/messages/unsubscribe.js'
@@ -740,4 +742,88 @@ test('what customers should know: before migration 0019 the booking page and mes
   assert.equal((await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))).status, 201)
   await processDueMessages(env, Date.now())
   assert.ok(sentEmails().some((e) => /You're booked/.test(e.subject)), 'confirmation still sent')
+})
+
+test('Svix signature: matches the official test vector; stale, tampered, and wrong-version signatures are refused', async () => {
+  const e = { RESEND_WEBHOOK_SECRET: 'whsec_plJ3nmyCDGBKInavdOK15jsl' }
+  const body = '{"event_type":"ping","data":{"success":true}}'
+  const h = (sig, ts = '1731705121') => new Headers({ 'svix-id': 'msg_loFOjxBNrRLzqYUf', 'svix-timestamp': ts, 'svix-signature': sig })
+  assert.equal(await svixSignature(e.RESEND_WEBHOOK_SECRET, 'msg_loFOjxBNrRLzqYUf', '1731705121', body), 'rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0=')
+  const at = 1731705121 * 1000
+  assert.equal(await verifySvix(e, h('v1,rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0='), body, at), true)
+  assert.equal(await verifySvix(e, h('v1,bm9ldHUjKzFob2VudXRob2VodWUzMjRvdWVvdW9ldQo= v1,rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0='), body, at), true, 'any listed v1 signature')
+  assert.equal(await verifySvix(e, h('v2,rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0='), body, at), false, 'only v1')
+  assert.equal(await verifySvix(e, h('v1,rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0='), body + ' ', at), false, 'tampered body')
+  assert.equal(await verifySvix(e, h('v1,rAvfW3dJ/X/qxhsaXPOyyCGmRKsaKWcsNccKXlIktD0='), body, at + 6 * MIN), false, 'stale')
+})
+
+test('Resend feedback: a permanent bounce stops emails to that address, marks the message failed, and asks the owner to call; complaints suppress; replays are harmless', async () => {
+  await seed('alpha')
+  await seed('bravo')
+  withEmail()
+  env.RESEND_WEBHOOK_SECRET = 'whsec_' + btoa('k'.repeat(24))
+  let n = 0
+  resend = () => [200, { id: `re_${++n}` }]
+  const post = async (event, { secret = env.RESEND_WEBHOOK_SECRET, ts = Math.floor(Date.now() / 1000) } = {}) => {
+    const raw = JSON.stringify(event)
+    const id = `msg_${event.data?.email_id}_${event.type}`
+    const sig = await svixSignature(secret, id, String(ts), raw)
+    return call(emailWebhook, 'POST', '/api/email/webhook', { raw, headers: { 'svix-id': id, 'svix-timestamp': String(ts), 'svix-signature': `v1,${sig}` } })
+  }
+  // Not configured → 503; bad signature / stale → 401.
+  const saved = env.RESEND_WEBHOOK_SECRET
+  delete env.RESEND_WEBHOOK_SECRET
+  assert.equal((await call(emailWebhook, 'POST', '/api/email/webhook', { raw: '{}' })).status, 503)
+  env.RESEND_WEBHOOK_SECRET = saved
+  assert.equal((await post({ type: 'email.bounced', data: { email_id: 'x' } }, { secret: 'whsec_' + btoa('z'.repeat(24)) })).status, 401)
+  assert.equal((await post({ type: 'email.bounced', data: { email_id: 'x' } }, { ts: Math.floor(Date.now() / 1000) - 3600 })).status, 401)
+
+  const l = (await lead('alpha')).json()
+  const start = await slotAfter('alpha', 2 * DAY)
+  await book('alpha', l.leadId, l.leadToken, start)
+  await processDueMessages(env, Date.now())
+  const conf = db.sql.prepare("SELECT id, provider_id FROM messages WHERE kind = 'confirmation' AND channel = 'email'").get()
+  assert.ok(conf.provider_id, 'Resend id stored')
+  // Temporary bounces and unknown ids change nothing.
+  assert.equal((await post({ type: 'email.bounced', data: { email_id: conf.provider_id, bounce: { type: 'Temporary' } } })).json().result, 'ignored')
+  assert.equal((await post({ type: 'email.bounced', data: { email_id: 'not-ours', bounce: { type: 'Permanent' } } })).json().result, 'unknown_email')
+  assert.equal(db.sql.prepare('SELECT status FROM messages WHERE id = ?').get(conf.id).status, 'sent')
+
+  const bounce = { type: 'email.bounced', data: { email_id: conf.provider_id, to: ['someone-else@example.org'], bounce: { type: 'Permanent', subType: 'General' } } }
+  assert.equal((await post(bounce)).json().result, 'bounced')
+  assert.equal((await post(bounce)).json().result, 'bounced', 'replay is harmless')
+  assert.deepEqual({ ...db.sql.prepare('SELECT status, error FROM messages WHERE id = ?').get(conf.id) }, { status: 'failed', error: 'bounced' })
+  const sup = db.sql.prepare('SELECT customer, reason, address_hash FROM email_suppressions').all()
+  assert.equal(sup.length, 1)
+  assert.deepEqual([sup[0].customer, sup[0].reason], ['alpha', 'bounced'])
+  assert.ok(!sup[0].address_hash.includes('@'), 'hash only')
+
+  // The next email to that address is skipped, not sent.
+  const before = sentEmails().length
+  await processDueMessages(env, db.sql.prepare('SELECT start_at FROM appointments').get().start_at - DAY + MIN)
+  assert.equal(sentEmails().length, before)
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, error FROM messages WHERE kind = 'reminder_24h' AND channel = 'email'").get() }, { status: 'skipped', error: 'suppressed' })
+
+  // The owner is asked to call (once), with the phone number.
+  await queueOwnerNotices(env, Date.now())
+  await queueOwnerNotices(env, Date.now())
+  const notices = db.sql.prepare("SELECT to_email, subject, body FROM email_outbox WHERE template = 'owner_bounce'").all()
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].to_email, 'owner@alpha.example')
+  assert.match(notices[0].subject, /^Email to .* bounced: please call them$/)
+  assert.match(notices[0].body, /booking confirmation to .* couldn't be delivered/)
+  assert.match(notices[0].body, /Please reach them by phone: /)
+
+  // Suppression is per business: bravo can still email the same person.
+  const lb = (await lead('bravo')).json()
+  await book('bravo', lb.leadId, lb.leadToken, await slotAfter('bravo', 2 * DAY))
+  const b0 = sentEmails().length
+  await processDueMessages(env, Date.now())
+  assert.ok(sentEmails().length > b0, 'bravo confirmation sent')
+
+  // A spam complaint suppresses without marking the (delivered) message failed.
+  const bconf = db.sql.prepare("SELECT id, provider_id FROM messages WHERE customer = 'bravo' AND kind = 'confirmation' AND channel = 'email'").get()
+  assert.equal((await post({ type: 'email.complained', data: { email_id: bconf.provider_id } })).json().result, 'complained')
+  assert.equal(db.sql.prepare('SELECT status FROM messages WHERE id = ?').get(bconf.id).status, 'sent')
+  assert.equal(db.sql.prepare("SELECT reason FROM email_suppressions WHERE customer = 'bravo'").get().reason, 'complained')
 })

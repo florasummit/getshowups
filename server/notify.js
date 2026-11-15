@@ -16,7 +16,7 @@ const MIN = 60 * 1000
 export const LEAD_GRACE_MS = 10 * MIN
 export const WINDOW_MS = 2 * 60 * MIN
 const LIMIT = 200
-export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel']
+export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce']
 
 const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, n)
 // Still owed to at least one member (one held by the launch gate, or added since, is not skipped).
@@ -42,6 +42,15 @@ const CANCELS_SQL = `
   WHERE ch.changed_at > ?1 AND ch.to_status = 'cancelled' AND ch.changed_by = 'customer' AND c.status = 'active'
     AND ${notQueued('owner_cancel', 'a.id', 'a.customer')}
   ORDER BY ch.changed_at LIMIT ${LIMIT}`
+// A customer's email bounced permanently (server/email-feedback.js): the owner should reach them another way.
+const BOUNCES_SQL = `
+  SELECT m.id AS item, m.customer, m.updated_at AS created_at, m.kind AS message_kind, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
+  FROM messages m JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer JOIN customers c ON c.id = m.customer
+  LEFT JOIN appointments a ON a.id = m.appointment_id
+  WHERE m.updated_at > ?1 AND m.status = 'failed' AND m.error = 'bounced' AND m.channel = 'email' AND c.status = 'active'
+    AND ${notQueued('owner_bounce', 'm.id', 'm.customer')}
+  ORDER BY m.updated_at LIMIT ${LIMIT}`
+const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', reminder_2h: 'reminder', lead_followup_1: 'follow-up', lead_followup_2: 'follow-up', no_show_rebook: 'rebooking email' }
 
 export function ownerNotice(kind, r, origin) {
   const name = clean(r.name, 80)
@@ -51,6 +60,13 @@ export function ownerNotice(kind, r, origin) {
     return {
       subject: clean(`New booking: ${name}, ${when}`, 150),
       body: `${name} booked ${clean(r.biz, 80)} for ${when}.\n\nService: ${clean(shortNeed(r.need), 80)}\n${contact}\n\nIt's on your Google Calendar. All appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
+    }
+  }
+  if (kind === 'owner_bounce') {
+    const appt = r.start_at ? ` (appointment ${longWhen(r.start_at, r.timezone)})` : ''
+    return {
+      subject: clean(`Email to ${name} bounced: please call them`, 150),
+      body: `The ${WHAT[r.message_kind] || 'email'} to ${name}${appt} couldn't be delivered: ${clean(r.email, 120)} doesn't accept email. We won't email that address again.\n\nPlease reach them by phone: ${clean(r.phone, 40)}\n\nAll appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
     }
   }
   if (kind === 'owner_cancel') {
@@ -69,12 +85,13 @@ export function ownerNotice(kind, r, origin) {
 export async function queueOwnerNotices(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const out = { queued: 0, held: 0 }
-  const [bookings, leads, cancels] = await Promise.all([
+  const [bookings, leads, cancels, bounces] = await Promise.all([
     db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
     db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
+    db.prepare(BOUNCES_SQL).bind(now - WINDOW_MS).all(),
   ])
-  const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r]), ...cancels.results.map((r) => ['owner_cancel', r])]
+  const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r]), ...cancels.results.map((r) => ['owner_cancel', r]), ...bounces.results.map((r) => ['owner_bounce', r])]
   if (!items.length) return out
   const customers = [...new Set(items.map(([, r]) => r.customer))]
   const { results: members } = await db

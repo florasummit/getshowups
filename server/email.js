@@ -87,7 +87,7 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
     if (r.ok) {
       sent++
       // Owner notices carry a lead's contact details: once delivered, the stored copy is cleared.
-      await db.prepare("UPDATE email_outbox SET status = 'sent', sent_at = ?2, attempts = attempts + 1, error = NULL, body = CASE WHEN template IN ('owner_booking', 'owner_lead', 'owner_cancel') THEN '' ELSE body END WHERE id = ?1").bind(msg.id, now).run()
+      await db.prepare("UPDATE email_outbox SET status = 'sent', sent_at = ?2, attempts = attempts + 1, error = NULL, body = CASE WHEN template IN ('owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce') THEN '' ELSE body END WHERE id = ?1").bind(msg.id, now).run()
       await track(env, 'email_sent', { id: `email_sent:${msg.id}`, customer: msg.customer, props: { template: msg.template }, at: now })
     } else {
       failed++
