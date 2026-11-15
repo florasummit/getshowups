@@ -518,6 +518,7 @@ function WebsiteStep({ onDone, back }) {
           {[
             ['new', 'Create a new website', 'Pick a design. We write it from your details; you can edit everything.'],
             ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you redesign it here.'],
+            ['design', 'Start from a design', 'Choose one of our professional designs, filled in with your details. No AI needed.'],
             ['skip', 'Skip for now', 'Just use your booking link. You can create a website any time.'],
           ].map(([value, label, hint]) => (
             <label key={value} className="choice-card">
@@ -541,6 +542,17 @@ function WebsiteStep({ onDone, back }) {
           />
         )}
         {mode === 'import' && <WebsiteImport onApplied={reload} />}
+        {mode === 'design' && (
+          <WebsiteGenerator
+            templates
+            usage={data.aiUsage}
+            intro="Nothing is public until you publish."
+            onApplied={(d) => {
+              setData(d)
+              setStamp((n) => n + 1)
+            }}
+          />
+        )}
         {mode === 'skip' && (
           <div className="stack">
             <p className="lede">You’ll get your booking link at the end of setup to share or add to an existing website. Create a website later from the Website tab.</p>

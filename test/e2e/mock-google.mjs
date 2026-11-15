@@ -283,7 +283,7 @@ createServer(async (req, res) => {
       '/robots.txt': ['text/plain', 'User-agent: *\nDisallow: /config\nSitemap: https://www.harborpools.example/sitemap.xml'],
       '/sitemap.xml': ['application/xml', '<urlset><url><loc>https://www.harborpools.example/services</loc></url><url><loc>https://www.harborpools.example/about</loc></url></urlset>'],
       '/': ['text/html', html('Harbor Pools', '<h1>Clear Pools in Charleston</h1><p>Weekly pool care from a small local team.</p><img data-src="https://img.harborcdn.example/pool.jpg" data-image-dimensions="1600x1000" alt="Pool">')],
-      '/services': ['text/html', html('Services — Harbor Pools', '<h1>Services</h1><h3>Weekly Pool Care</h3><p>$180+</p><p>Skimming, brushing and balanced water every week.</p><h3>Green Pool Cleanup</h3><p>$400+</p><p>We bring green water back to clear in a few visits.</p>')],
+      '/services': ['text/html', html('Services — Harbor Pools', '<h1>Services</h1><h3>Weekly Pool Care</h3><p>$180+</p><p>Skimming, brushing and balanced water every week.</p><h3>Green Pool Cleanup</h3><p>$400+</p><p>We bring green water back to clear in a few visits.</p><h3>Spring Opening</h3><p>$250+</p><p>Experience the joy of coming home to a spotless sanctuary, every corner of your house.</p>')],
       '/about': ['text/html', html('About — Harbor Pools', '<h2>Who we are</h2><p>A small Charleston team focused on reliable weekly visits and clear communication.</p>')],
     }
     if (host === 'img.harborcdn.example') {

@@ -5,6 +5,7 @@
 //        { action: 'unpublish' }                   take the site offline (content kept)
 //        { action: 'restore', version }            make an earlier published version live again
 //        { action: 'regenerate' }                  a fresh draft from the business details (not saved)
+//        { action: 'template' }                    three professional designs from the business details, no AI (stored)
 //        { action: 'generate' }                    AI copy + three designs from the business details, stored (draft untouched)
 //        { action: 'revise', instruction }         AI revision of the draft ("make it more modern"), stored (draft untouched)
 //        { action: 'apply', generationId, option } make a stored design the private draft (owner photos kept)
@@ -72,6 +73,13 @@ export async function onRequestPost({ request, env }) {
   const customer = session.customer
   try {
     if (action === 'regenerate') return json(200, { content: await generateContent(db, customer) })
+    // Start from a design: the three professional layouts filled with the business details. No AI, no allowance used.
+    if (action === 'template') {
+      const draft = (await loadWebsite(db, customer)).draft
+      const r = await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), logo: draft.logo || null, allowAi: false, useAi: false })
+      await track(env, 'website_template', { customer: customer.id })
+      return json(200, { generation: r.generation, aiUsage: await aiUsage(env, customer, session.email) })
+    }
     if (action === 'generate' || action === 'revise') {
       const kind = action === 'generate' ? 'generation' : 'revision'
       const rl = await hit(env, 'websiteAi', customer.id)

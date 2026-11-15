@@ -21,10 +21,14 @@ test('owner imports their current website into the draft (text, prices, photos);
   await expect(card.getByText('Found 3 pages on www.harborpools.example.')).toBeVisible({ timeout: 30_000 })
   await expect(card.getByText('Clear Pools in Charleston')).toBeVisible()
   const services = card.locator('.import-field', { hasText: 'Services and prices' }).locator('li')
-  await expect(services).toHaveCount(2)
+  await expect(services).toHaveCount(3)
   await expect(services.first()).toContainText('Weekly Pool Care · $180+')
   await expect(card.locator('.import-field', { hasText: 'Old page addresses' })).toContainText('/services → services section')
   await expect(card.getByText('Photos (1 selected, up to 6)')).toBeVisible()
+  // Leftover template text is offered for removal, never rewritten.
+  const fixes = card.locator('.import-fields', { has: page.getByText('Suggested fixes') })
+  await expect(fixes.getByText('Leave out the description of “Spring Opening”')).toBeVisible()
+  await expect(fixes.getByRole('checkbox')).toBeChecked()
   await card.getByRole('button', { name: 'Use this in my draft' }).click()
   await expect(card.getByRole('status')).toContainText('Added to your draft with 1 photo. Your live website hasn’t changed.')
   // The editor now holds the imported text.

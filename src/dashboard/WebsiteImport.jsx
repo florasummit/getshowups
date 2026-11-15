@@ -63,11 +63,13 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
   const [state, setState] = useState({})
   const [fields, setFields] = useState([])
   const [photos, setPhotos] = useState([])
+  const [fixes, setFixes] = useState([])
   const choose = (i) => {
     setImp(i)
     if (i?.status === 'done') {
       setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined))
       setPhotos(i.suggestion.photos.slice(0, 6).map((p) => p.url))
+      setFixes((i.suggestion.fixes || []).map((f) => f.id))
     }
   }
   useEffect(() => {
@@ -86,7 +88,7 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
   }
   const apply = async () => {
     setState({ applying: true })
-    const { status, data } = await api('/api/dashboard/website/import', { method: 'POST', body: { action: 'apply', importId: imp.id, fields, photos } })
+    const { status, data } = await api('/api/dashboard/website/import', { method: 'POST', body: { action: 'apply', importId: imp.id, fields, photos, fixes } })
     if (status === 200) {
       const notes = [data.rejected.length ? `${data.rejected.length} item(s) were left out because they make promises we can’t verify or are too long.` : '', data.photosFailed.length ? `${data.photosFailed.length} photo(s) couldn’t be copied.` : ''].filter(Boolean)
       setState({ done: `Added to your draft${data.photosAdded ? ` with ${data.photosAdded} photo${data.photosAdded === 1 ? '' : 's'}` : ''}. Your live website hasn’t changed.`, notes })
@@ -157,6 +159,31 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
             ))}
           </ul>
         </div>
+      )}
+      {s.fixes?.length > 0 && (
+        <fieldset className="import-fields">
+          <legend>Suggested fixes</legend>
+          <p className="fine">We found these on your current website. Nothing is rewritten for you: tick what you want fixed.</p>
+          {s.fixes.map((f) => (
+            <label key={f.id} className="import-field">
+              <input type="checkbox" checked={fixes.includes(f.id)} onChange={() => toggle(fixes, setFixes, f.id)} />
+              <span>
+                {f.kind === 'possible_typo' ? (
+                  <>
+                    Spelling: “{f.from}” → “{f.to}” <span className="fine">(as spelled elsewhere on your site)</span>
+                  </>
+                ) : (
+                  <>
+                    Leave out the description of “{f.service}”{' '}
+                    <span className="fine">
+                      {f.reason === 'indoor_cleaning' ? 'It reads like house-cleaning text' : 'It doesn’t describe this service'}: “{f.excerpt}…”
+                    </span>
+                  </>
+                )}
+              </span>
+            </label>
+          ))}
+        </fieldset>
       )}
       <fieldset className="import-fields">
         <legend>Text</legend>
