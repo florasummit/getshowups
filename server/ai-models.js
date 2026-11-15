@@ -16,8 +16,12 @@ import { providerMock } from './ai-credentials.js'
 
 export const CATALOG_TTL = 24 * 60 * 60 * 1000
 export const DEFAULT_BUDGET_CENTS = 1000
-// Worst case of one request, by kind (tokens): prompt size we send and the max output we allow.
-export const WORST = { designer: { input: 40_000, output: 32_000 }, writer: { input: 12_000, output: 16_000 } }
+// Worst case of one request, by kind (tokens): prompt size we send and the max output we allow. The output caps are the
+// ones the requests actually use (MAX_OUTPUT), so the worst case is a real bound; callers that know the prompt pass its size.
+export const MAX_OUTPUT = { designer: 32_000, writer: 16_000 }
+export const WORST = { designer: { input: 40_000, output: MAX_OUTPUT.designer }, writer: { input: 12_000, output: MAX_OUTPUT.writer } }
+// Upper estimate of input tokens for a prompt (≈3 characters per token is conservative for English + JSON).
+export const inputTokensFor = (...parts) => Math.ceil(parts.reduce((n, p) => n + String(p ?? '').length, 0) / 3) + 500
 const OPENAI_OK = /^(gpt-4o|gpt-4\.1|gpt-[5-9]|o[3-9])(?:[.-][a-z0-9.]+)*$/i
 const OPENAI_NO = /(audio|realtime|transcribe|tts|search|image|embedding|moderation|instruct|codex|vision|preview|deep-research|computer)/i
 const DATED = /-\d{4}-\d{2}-\d{2}$/
@@ -78,17 +82,30 @@ export function choices(catalog, reg) {
 }
 
 export const costOf = (c, input, output) => (c ? (input * c.input_per_m + output * c.output_per_m) / 1e6 : null) // USD
-export const worstCase = (c, kind) => costOf(c, WORST[kind].input, WORST[kind].output)
+// kind: 'designer' | 'writer', optionally with the measured prompt size: { kind, input }.
+export const worstCase = (c, kind) => {
+  const k = typeof kind === 'string' ? { kind } : kind
+  return costOf(c, Math.max(k.input || 0, WORST[k.kind].input), WORST[k.kind].output)
+}
+
+// Every own-key request, successful or not (failed requests can still be billed by the provider).
+export async function recordUsage(db, customer, provider, model, kind, usage, ok, now = Date.now()) {
+  await db
+    .prepare('INSERT INTO ai_key_usage (customer, provider, model, kind, input_tokens, output_tokens, ok, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)')
+    .bind(customer, provider, String(model).slice(0, 80), kind, usage?.input || 0, usage?.output || 0, ok ? 1 : 0, now)
+    .run()
+    .catch(() => null)
+}
 
 // Month-to-date spend (USD) of this key's AI website work, from recorded tokens × registry prices.
 export async function monthSpend(db, customer, provider, now = Date.now()) {
   const d = new Date(now)
   const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
-  const { results } = await db.prepare("SELECT model, input_tokens, output_tokens FROM website_generations WHERE customer = ?1 AND created_at >= ?2 AND model LIKE ?3").bind(customer, start, `${provider}:%`).all()
+  const { results } = await db.prepare('SELECT model, input_tokens, output_tokens FROM ai_key_usage WHERE customer = ?1 AND provider = ?2 AND created_at >= ?3').bind(customer, provider, start).all()
   const reg = await registry(db, provider)
   let usd = 0
   for (const r of results) {
-    const id = String(r.model).slice(provider.length + 1)
+    const id = String(r.model).replace(/^[a-z]+:/, '')
     // The provider may answer with a dated snapshot of the model we asked for: price by the longest registry prefix.
     const price = reg.get(id) || [...reg.entries()].filter(([k]) => id.startsWith(k)).sort((a, b) => b[0].length - a[0].length)[0]?.[1]
     usd += costOf(price, r.input_tokens || 0, r.output_tokens || 0) ?? 0
