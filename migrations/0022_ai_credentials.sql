@@ -46,3 +46,17 @@ INSERT OR IGNORE INTO ai_model_registry (provider, model, status, quality, input
   ('openai', 'gpt-5', 'supported', 3, 1.25, 10.00, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5.4-mini', 'supported', 2, 0.75, 4.50, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5.4-nano', 'supported', 1, 0.20, 1.25, 'openai pricing 2026-11-15', 0);
+
+-- Every request made with a business's own key, successful or not (a failed request can still be billed), so the
+-- monthly limit counts real usage. Tokens only: no prompts, no output.
+CREATE TABLE IF NOT EXISTS ai_key_usage (
+  customer      TEXT NOT NULL,
+  provider      TEXT NOT NULL,
+  model         TEXT NOT NULL,
+  kind          TEXT NOT NULL,
+  input_tokens  INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  ok            INTEGER NOT NULL,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_key_usage_customer ON ai_key_usage (customer, created_at);
