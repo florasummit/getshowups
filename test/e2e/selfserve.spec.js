@@ -86,7 +86,14 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // Website: written from the answers in one AI request (local stand-in), design chosen, private until published.
-  await expect(page.getByRole('heading', { name: 'Create your website' })).toBeVisible()
+  // Three ways in (create new · bring my current website · skip), one editor. The skip and import paths are shown; this
+  // journey creates a new one.
+  await expect(page.getByRole('heading', { name: 'Your website' })).toBeVisible()
+  await page.getByLabel(/Skip for now/).check()
+  await expect(page.getByRole('button', { name: 'Skip the website for now' })).toBeVisible()
+  await page.getByLabel(/Bring my current website/).check()
+  await expect(page.getByLabel('Your current website')).toBeVisible()
+  await page.getByLabel(/Create a new website/).check()
   await page.getByRole('button', { name: 'Create my website' }).click()
   await expect(page.getByText('Choose a design.')).toBeVisible()
   await expect(page.frameLocator('iframe[title="Deep End design"]').getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)

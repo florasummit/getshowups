@@ -248,6 +248,21 @@ test('onboarding: "keep my current website" completes the website steps without 
   assert.equal(r.status ?? 200, 200)
 })
 
+test('onboarding: "skip for now" (no website at all) also completes setup; a website can still be created later from the same editor', async () => {
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('pools', 'founding', 1)").run()
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, updated_at) VALUES ('pools', 'c', 's', 'active', 1)").run()
+  const c = await cookieFor('owner@pools.example')
+  assert.equal((await call(onboarding, 'POST', { cookie: c, body: { action: 'keep_website', choice: 'none' } })).status, 200)
+  assert.equal(db.sql.prepare("SELECT value FROM onboarding_marks WHERE customer = 'pools' AND step = 'website'").get().value, 'none')
+  const steps = Object.fromEntries((await call(me, 'GET', { cookie: c })).json.progress.steps.map((s) => [s.id, s.done]))
+  assert.deepEqual([steps.website, steps.address, steps.publish], [true, true, true])
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM websites').get().n, 0, 'no website was created')
+  // Later: the Website tab still offers the same draft (generated from the business details) and editor.
+  const w = (await call(website, 'GET', { cookie: c })).json.website
+  assert.equal(w.generated, true)
+  assert.equal(w.published, false)
+})
+
 // ---------- AI design (layouts from the safe design system) ----------
 import { validateDesign, presetDesigns, diversify, STOCK_IDS, stockFor } from '../server/site-design.js'
 import { renderSite } from '../server/site-render.js'
