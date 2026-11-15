@@ -827,3 +827,56 @@ test('Resend feedback: a permanent bounce stops emails to that address, marks th
   assert.equal(db.sql.prepare('SELECT status FROM messages WHERE id = ?').get(bconf.id).status, 'sent')
   assert.equal(db.sql.prepare("SELECT reason FROM email_suppressions WHERE customer = 'bravo'").get().reason, 'complained')
 })
+
+test('cancel link after the BUSINESS cancelled: says it was cancelled and offers the normal booking page (the signed rebook link would be refused)', async () => {
+  await seed('alpha')
+  withEmail()
+  const l = (await lead('alpha')).json()
+  await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))
+  const appt = db.sql.prepare('SELECT id FROM appointments').get()
+  const { cancelAppointment } = await import('../server/booking.js')
+  assert.equal((await cancelAppointment(env, { id: 'alpha' }, appt.id, { by: 'owner@alpha.example' })).ok, true)
+  const k = await linkToken(env, 'confirm', appt.id)
+  for (const method of ['GET', 'POST']) {
+    const page = method === 'GET'
+      ? await call(confirmApi, 'GET', `/api/appointment/confirm?a=${appt.id}&k=${k}&do=cancel`)
+      : await call(confirmApi, 'POST', '/api/appointment/confirm', { raw: new URLSearchParams({ a: appt.id, k, do: 'cancel' }).toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+    assert.equal(page.status, 200)
+    assert.match(page.text, /This appointment has been cancelled\. Want another time\?/)
+    assert.ok(!page.text.includes('has been told'), 'does not claim the customer cancelled')
+    assert.match(page.text, /href="\/book\/alpha">Pick a new time/)
+  }
+  assert.equal(db.sql.prepare('SELECT count(*) c FROM appointment_changes').get().c, 1, 'nothing more happened')
+})
+
+test('cancel: a transient save error after Google removed the event is retried once in the same request', async () => {
+  await seed('alpha')
+  withEmail()
+  const l = (await lead('alpha')).json()
+  await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))
+  const appt = db.sql.prepare('SELECT id FROM appointments').get()
+  const real = db.batch
+  let calls = 0
+  db.batch = async (list) => { if (++calls === 1) throw new Error('D1 blip'); return real(list) }
+  const { cancelAppointment } = await import('../server/booking.js')
+  const r = await cancelAppointment(env, { id: 'alpha' }, appt.id, { by: 'customer' })
+  db.batch = real
+  assert.deepEqual([r.ok, calls], [true, 2])
+  assert.equal(db.sql.prepare('SELECT status FROM appointments').get().status, 'cancelled')
+  assert.equal(db.sql.prepare('SELECT count(*) c FROM appointment_changes').get().c, 1)
+  assert.equal(db.sql.prepare('SELECT status FROM leads').get().status, 'new')
+})
+
+test('cancel link expires with the appointment: after the start time it cancels nothing', async () => {
+  await seed('alpha')
+  withEmail()
+  const l = (await lead('alpha')).json()
+  await book('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 2 * DAY))
+  const appt = db.sql.prepare('SELECT id FROM appointments').get()
+  db.sql.prepare('UPDATE appointments SET start_at = ? WHERE id = ?').run(Date.now() - HOUR, appt.id)
+  const k = await linkToken(env, 'confirm', appt.id)
+  const r = await call(confirmApi, 'POST', '/api/appointment/confirm', { raw: new URLSearchParams({ a: appt.id, k, do: 'cancel' }).toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  assert.equal(r.status, 410)
+  assert.equal(db.sql.prepare('SELECT status FROM appointments').get().status, 'booked')
+  assert.ok(!fetches.some((f) => f.init.method === 'DELETE'), 'Google untouched')
+})
