@@ -248,7 +248,7 @@ test('the chosen model is used and kept; Auto picks only tested models within th
   assert.equal(req.body.model, 'claude-opus-5-5', 'tested, best quality, worst case fits $10')
   assert.equal(db.sql.prepare('SELECT auto_model FROM ai_credentials').get().auto_model, 'claude-opus-5-5')
   // A tighter limit with $0.66 already spent: Opus' worst case ($0.37) no longer fits $1, Haiku's does → Auto steps DOWN.
-  db.sql.prepare("UPDATE website_generations SET input_tokens = 15000, output_tokens = 30000 WHERE model = 'anthropic:claude-opus-5-5'").run()
+  db.sql.prepare("UPDATE ai_key_usage SET input_tokens = 15000, output_tokens = 30000 WHERE model = 'anthropic:claude-opus-5-5'").run()
   await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
   await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-haiku-5-5')
@@ -270,12 +270,24 @@ test('hard spending limit: a request whose worst case would cross the monthly li
   await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 100 } })
   // Opus writer worst case: 12k in × $4 + 16k out × $20 per M = $0.368 → fits $1 twice, not three times.
   for (let i = 0; i < 2; i++) assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
-  db.sql.prepare('UPDATE website_generations SET input_tokens = 12000, output_tokens = 16000').run()
+  db.sql.prepare('UPDATE ai_key_usage SET input_tokens = 12000, output_tokens = 16000').run()
   const sent = calls.filter((x) => x.path === '/v1/messages').length
   const r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   assert.deepEqual([r.status, r.json.error], [402, 'budget_reached'])
   assert.equal(calls.filter((x) => x.path === '/v1/messages').length, sent, 'refused before sending')
   assert.equal((await call(aiKey, 'GET', { cookie: c })).json.key.spentUsd, 0.74)
+})
+
+test('failed requests that the provider still bills count toward the limit; the ledger holds tokens only', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-opus-5-5' } })
+  providerReply = { stop: 'max_tokens' }
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).json.error, 'ai_invalid_output')
+  const rows = db.sql.prepare('SELECT * FROM ai_key_usage').all()
+  assert.equal(rows.length, 1)
+  assert.deepEqual(Object.keys(rows[0]).sort(), ['created_at', 'customer', 'input_tokens', 'kind', 'model', 'ok', 'output_tokens', 'provider'])
+  assert.deepEqual([rows[0].ok, rows[0].input_tokens, rows[0].output_tokens], [0, 1200, 900])
+  assert.ok((await call(aiKey, 'GET', { cookie: c })).json.key.spentUsd > 0)
 })
 
 test('strictSchema closes every object and lists every property as required', () => {

@@ -5,7 +5,7 @@
 // Returns { ok: true, raw, usage: { input, output }, model } or { ok: false, error } with an allowlisted error code.
 import Anthropic from '@anthropic-ai/sdk'
 import { providerMock } from './ai-credentials.js'
-import { claudeFallbackFor } from './ai-models.js'
+import { MAX_OUTPUT, claudeFallbackFor } from './ai-models.js'
 
 export const CLAUDE_MODEL = 'claude-opus-5-5'
 export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini'
@@ -31,7 +31,7 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL) {
   try {
     response = await client.beta.messages.create({
       model,
-      max_tokens: 16000,
+      max_tokens: MAX_OUTPUT.writer,
       ...claudeFallbackFor(model),
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: strictSchema(schema) } },
       system: msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
@@ -61,7 +61,7 @@ async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL
     res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: msgs, max_completion_tokens: 8000, response_format: { type: 'json_schema', json_schema: { name: 'website', strict: true, schema: strictSchema(schema) } } }),
+      body: JSON.stringify({ model, messages: msgs, max_completion_tokens: MAX_OUTPUT.writer, response_format: { type: 'json_schema', json_schema: { name: 'website', strict: true, schema: strictSchema(schema) } } }),
       signal: AbortSignal.timeout(TIMEOUT),
     })
   } catch {
