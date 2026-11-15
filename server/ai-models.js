@@ -64,7 +64,7 @@ export async function discoverModels(env, provider, apiKey) {
 }
 
 export async function registry(db, provider) {
-  const { results } = await db.prepare('SELECT model, status, quality, input_per_m, output_per_m, retires_at FROM ai_model_registry WHERE provider = ?1').bind(provider).all()
+  const { results } = await db.prepare('SELECT model, status, quality, input_per_m, output_per_m, max_output, retires_at FROM ai_model_registry WHERE provider = ?1').bind(provider).all()
   return new Map(results.map((r) => [r.model, r]))
 }
 
@@ -82,10 +82,14 @@ export function choices(catalog, reg) {
 }
 
 export const costOf = (c, input, output) => (c ? (input * c.input_per_m + output * c.output_per_m) / 1e6 : null) // USD
-// kind: 'designer' | 'writer', optionally with the measured prompt size: { kind, input }.
+// The output cap a request uses: ours for the kind, lowered to the model's own ceiling (registry, or what the provider
+// reported in the catalog). The budget's worst case uses the same number, so it is a true bound.
+export const outputCap = (kind, regRow, catalogRow) => Math.min(MAX_OUTPUT[kind], regRow?.max_output || Infinity, catalogRow?.maxOutput || Infinity)
+
+// kind: 'designer' | 'writer', optionally with the measured prompt size and output cap: { kind, input, output }.
 export const worstCase = (c, kind) => {
   const k = typeof kind === 'string' ? { kind } : kind
-  return costOf(c, Math.max(k.input || 0, WORST[k.kind].input), WORST[k.kind].output)
+  return costOf(c, Math.max(k.input || 0, WORST[k.kind].input), k.output ?? WORST[k.kind].output)
 }
 
 // Every own-key request, successful or not (failed requests can still be billed by the provider).
@@ -136,12 +140,14 @@ export async function resolveModel(env, customer, cred, kind = 'designer', now =
   const offered = new Map(list.filter((c) => c.selectable).map((c) => [c.id, c]))
   const budgetUsd = (row?.monthly_budget_cents ?? DEFAULT_BUDGET_CENTS) / 100
   const spent = await monthSpend(db, customer, cred.provider, now)
-  const fits = (id) => spent + (worstCase(reg.get(id), kind) ?? Infinity) <= budgetUsd
+  const k = typeof kind === 'string' ? { kind } : kind
+  const capFor = (id) => outputCap(k.kind, reg.get(id), (catalog || []).find((c) => c.id === id))
+  const fits = (id) => spent + (worstCase(reg.get(id), { ...k, output: capFor(id) }) ?? Infinity) <= budgetUsd
   const selection = row?.model || 'auto'
   if (selection !== 'auto') {
     if (!offered.has(selection)) return { ok: false, error: 'model_unavailable', model: selection }
     if (!fits(selection)) return { ok: false, error: 'budget_reached', spent, budgetUsd }
-    return { ok: true, model: selection, auto: false }
+    return { ok: true, model: selection, auto: false, maxOutput: capFor(selection) }
   }
   // Auto: tested models only, within budget; best quality, then cheapest. Never more expensive than the previous pick.
   const prev = row?.auto_model ? reg.get(row.auto_model) : null
@@ -153,7 +159,7 @@ export async function resolveModel(env, customer, cred, kind = 'designer', now =
   const keep = affordable.find((c) => c.id === row?.auto_model)
   const pick = keep && !affordable.some((c) => c.quality > keep.quality) ? keep : affordable.sort((a, b) => b.quality - a.quality || a.outputPerM - b.outputPerM)[0]
   if (pick.id !== row?.auto_model) await db.prepare('UPDATE ai_credentials SET auto_model = ?2, updated_at = ?3 WHERE customer = ?1').bind(customer, pick.id, now).run()
-  return { ok: true, model: pick.id, auto: true }
+  return { ok: true, model: pick.id, auto: true, maxOutput: capFor(pick.id) }
 }
 
 export const claudeFallbackFor = (id) => (/^claude-(opus-5|sonnet-5-5|fable-5)/.test(id) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {})

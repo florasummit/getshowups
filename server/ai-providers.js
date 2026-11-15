@@ -24,14 +24,15 @@ export function strictSchema(s) {
   return out
 }
 
-async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL) {
+async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL, maxOutput = MAX_OUTPUT.writer) {
   const mock = providerMock(env)
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: TIMEOUT, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
+  // maxRetries 0: a retry would be a second billed request the budget check did not account for.
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: TIMEOUT, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
   let response
   try {
     response = await client.beta.messages.create({
       model,
-      max_tokens: MAX_OUTPUT.writer,
+      max_tokens: maxOutput,
       ...claudeFallbackFor(model),
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: strictSchema(schema) } },
       system: msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
@@ -54,14 +55,14 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL) {
   }
 }
 
-async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL) {
+async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL, maxOutput = MAX_OUTPUT.writer) {
   const mock = providerMock(env)
   let res
   try {
     res = await fetch(`${mock ? `${mock}/openai` : 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: msgs, max_completion_tokens: MAX_OUTPUT.writer, response_format: { type: 'json_schema', json_schema: { name: 'website', strict: true, schema: strictSchema(schema) } } }),
+      body: JSON.stringify({ model, messages: msgs, max_completion_tokens: maxOutput, response_format: { type: 'json_schema', json_schema: { name: 'website', strict: true, schema: strictSchema(schema) } } }),
       signal: AbortSignal.timeout(TIMEOUT),
     })
   } catch {
@@ -85,4 +86,4 @@ async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL
   }
 }
 
-export const runWithOwnKey = (env, cred, msgs, schema) => (cred.provider === 'anthropic' ? runClaude(env, cred.apiKey, msgs, schema, cred.model) : runOpenAI(env, cred.apiKey, msgs, schema, cred.model))
+export const runWithOwnKey = (env, cred, msgs, schema) => (cred.provider === 'anthropic' ? runClaude(env, cred.apiKey, msgs, schema, cred.model, cred.maxOutput) : runOpenAI(env, cred.apiKey, msgs, schema, cred.model, cred.maxOutput))
