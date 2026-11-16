@@ -37,6 +37,7 @@ const WHY = {
 const SMS_REASON = {
   provider_not_configured: 'Texting isn’t available on GetShowUps yet.',
   no_sender: 'Your texting number hasn’t been set up yet.',
+  no_account: 'GetShowUps hasn’t set up your texting account yet.',
   registration_not_configured: 'Carriers require a one-time business registration before texting. Start it below.',
   registration_ready: 'Your registration details are ready to review and approve.',
   registration_pending: 'Your registration is with the carriers. This usually takes a few days.',
@@ -390,20 +391,59 @@ const BUSINESS_TYPES = [
   ['partnership', 'Partnership'],
   ['nonprofit', 'Nonprofit'],
 ]
+// [key, label, hint, onlyForBusinessesWithEin]
 const FIELDS = [
-  ['legalName', 'Legal business name', 'As registered with the IRS or your state'],
-  ['ein', 'EIN (tax ID)', 'Not needed for sole proprietors'],
-  ['address', 'Business address', 'Street, city, state, ZIP'],
+  ['legalName', 'Legal business name', 'Exactly as on your IRS EIN letter (or your own name if you’re a sole proprietor)'],
+  ['ein', 'EIN (tax ID)', 'Not needed for sole proprietors', true],
+  ['street', 'Street address', 'Not a P.O. box'],
+  ['street2', 'Suite / unit', 'Optional'],
+  ['city', 'City', ''],
+  ['region', 'State', 'Two letters, e.g. SC'],
+  ['postalCode', 'ZIP code', ''],
   ['website', 'Business website', 'Where customers find you'],
-  ['contactName', 'Contact name', ''],
-  ['contactEmail', 'Contact email', ''],
-  ['contactPhone', 'Contact phone', ''],
+  ['firstName', 'Your first name', 'The person authorized to register the business'],
+  ['lastName', 'Your last name', ''],
+  ['repTitle', 'Your title', 'e.g. Owner', true],
+  ['contactEmail', 'Your email', ''],
+  ['contactPhone', 'Your mobile number', 'A real mobile number (sole proprietors get a one-time code here)'],
 ]
+const SHOWN = ['legalName', 'businessType', 'address', 'website', 'contactName', 'contactEmail', 'contactPhone']
+const FACT_LABELS = { legalName: 'Legal business name', businessType: 'Business type', address: 'Business address', website: 'Business website', contactName: 'Authorized representative', contactEmail: 'Email', contactPhone: 'Mobile' }
+const INDUSTRIES = [
+  ['', 'Choose…'],
+  ['PROFESSIONAL', 'Professional / home services'],
+  ['CONSTRUCTION', 'Construction / trades'],
+  ['REAL_ESTATE', 'Real estate'],
+  ['RETAIL', 'Retail'],
+  ['HEALTHCARE', 'Health care'],
+  ['HOSPITALITY', 'Hospitality'],
+  ['TRANSPORTATION', 'Transportation'],
+  ['AGRICULTURE', 'Agriculture / landscaping'],
+  ['EDUCATION', 'Education / tutoring'],
+  ['ENTERTAINMENT', 'Entertainment / events'],
+  ['TECHNOLOGY', 'Technology'],
+  ['FINANCIAL', 'Financial'],
+  ['INSURANCE', 'Insurance'],
+  ['LEGAL', 'Legal'],
+  ['MANUFACTURING', 'Manufacturing'],
+  ['ENERGY', 'Energy'],
+  ['COMMUNICATION', 'Communication'],
+  ['HUMAN_RESOURCES', 'Staffing / HR'],
+  ['NGO', 'Nonprofit'],
+]
+const JOB_POSITIONS = ['', 'Director', 'GM', 'VP', 'CEO', 'CFO', 'General Counsel', 'Other']
 const STATUS_TEXT = { not_configured: 'Not started', ready: 'Ready for your approval', pending: 'Pending with carriers', approved: 'Approved', rejected: 'Needs changes', suspended: 'Suspended' }
 
 function Texting({ texting: t, channels, onSaved }) {
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState(() => ({ legalName: '', businessType: '', ein: '', address: '', website: '', contactName: '', contactEmail: '', contactPhone: '', ...(t.facts ? { ...t.facts, ein: '' } : {}) }))
+  const [form, setForm] = useState(() => ({
+    ...Object.fromEntries(FIELDS.map(([k]) => [k, ''])),
+    businessType: '',
+    industry: '',
+    repJobPosition: '',
+    ...(t.facts ? { ...t.facts, ein: '' } : {}),
+  }))
+  const sole = form.businessType === 'sole_proprietor'
   const [bad, setBad] = useState([])
   const [agree, setAgree] = useState(false)
   const [msg, setMsg] = useState('')
@@ -438,12 +478,20 @@ function Texting({ texting: t, channels, onSaved }) {
       {t.note && <p className="fu-attn">Carrier feedback: {t.note}</p>}
       {t.facts && !editing && (
         <dl className="fu-facts">
-          {FIELDS.map(([k, l]) => (t.facts[k] ? (
-            <div key={k}>
-              <dt>{l}</dt>
-              <dd>{t.facts[k]}</dd>
+          {SHOWN.map((k) =>
+            t.facts[k] ? (
+              <div key={k}>
+                <dt>{FACT_LABELS[k]}</dt>
+                <dd>{k === 'businessType' ? BUSINESS_TYPES.find(([v]) => v === t.facts[k])?.[1] || t.facts[k] : t.facts[k]}</dd>
+              </div>
+            ) : null,
+          )}
+          {t.path && (
+            <div>
+              <dt>Carrier registration</dt>
+              <dd>{t.path === 'sole_proprietor' ? 'Sole proprietor (no EIN)' : 'Low-volume business (EIN)'}</dd>
             </div>
-          ) : null))}
+          )}
         </dl>
       )}
       {canEdit && !editing && (
@@ -464,15 +512,46 @@ function Texting({ texting: t, channels, onSaved }) {
               ))}
             </select>
           </label>
-          {FIELDS.map(([k, l, hint]) =>
-            k === 'ein' && form.businessType === 'sole_proprietor' ? null : (
+          {sole && <p className="fine">Sole proprietors register with their own name and mobile number; carriers text a one-time code to that mobile to verify it.</p>}
+          {FIELDS.map(([k, l, hint, einOnly]) =>
+            einOnly && sole ? null : (
               <label key={k} className="field">
                 <span>{l}</span>
-                <input value={form[k]} inputMode={k === 'website' ? 'url' : k === 'contactPhone' ? 'tel' : k === 'contactEmail' ? 'email' : undefined} onChange={(e) => setForm({ ...form, [k]: e.target.value })} aria-invalid={bad.includes(k)} />
+                <input
+                  value={form[k]}
+                  inputMode={k === 'website' ? 'url' : k === 'contactPhone' ? 'tel' : k === 'contactEmail' ? 'email' : k === 'postalCode' ? 'numeric' : undefined}
+                  maxLength={k === 'region' ? 2 : undefined}
+                  onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+                  aria-invalid={bad.includes(k)}
+                />
                 {bad.includes(k) ? <span className="form-error">Please check this.</span> : hint ? <span className="fine">{hint}</span> : null}
               </label>
             ),
           )}
+          {!sole && (
+            <label className="field">
+              <span>Your position</span>
+              <select value={form.repJobPosition} onChange={(e) => setForm({ ...form, repJobPosition: e.target.value })} aria-invalid={bad.includes('repJobPosition')}>
+                {JOB_POSITIONS.map((v) => (
+                  <option key={v} value={v}>
+                    {v || 'Choose…'}
+                  </option>
+                ))}
+              </select>
+              {bad.includes('repJobPosition') && <span className="form-error">Please choose one.</span>}
+            </label>
+          )}
+          <label className="field">
+            <span>Industry</span>
+            <select value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} aria-invalid={bad.includes('industry')}>
+              {INDUSTRIES.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+            {bad.includes('industry') && <span className="form-error">Please choose one.</span>}
+          </label>
           <div className="card-actions">
             <button type="submit" className="btn btn-primary btn-sm">
               Save details

@@ -5,7 +5,8 @@
 // /api/sms/twilio/status (signed). Credentials stay server-side; nothing about them is logged or returned.
 import { siteOrigin } from '../auth.js'
 import { toE164 } from '../sms.js'
-import { sendEmail } from '../email.js'
+import { sendEmail, recipientAllowed } from '../email.js'
+import { ACCOUNT_SID_RE, signingKeys } from './twilio.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 // Test-only: a loopback Twilio stand-in (never honored for any other origin).
@@ -22,17 +23,21 @@ export function segmentsOf(text) {
 // US 10DLC list price per segment incl. typical carrier fee, in micro-dollars (estimate; overridable).
 export const smsSegmentMicros = (env) => (Number.isInteger(Number(env.SMS_SEGMENT_MICROS)) && Number(env.SMS_SEGMENT_MICROS) > 0 ? Number(env.SMS_SEGMENT_MICROS) : 11_000)
 
-export async function sendTwilio(env, { to, text, sender, statusToken }) {
+export async function sendTwilio(env, { to, text, sender, statusToken, testOnly = false }) {
   const number = toE164(to)
   if (!number) return { ok: false, error: 'invalid_phone', permanent: true }
+  // Defense in depth: the launch gate is re-checked at the provider call (callers check it too).
+  if (!recipientAllowed(env, number, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
   if (!sender?.messagingService && !sender?.from) return { ok: false, error: 'no_sender', permanent: true }
+  // Always from the business's OWN subaccount (parent credentials may act on a subaccount's v2010 resources).
+  if (!ACCOUNT_SID_RE.test(sender?.accountSid || '')) return { ok: false, error: 'no_account', permanent: true }
   const form = new URLSearchParams({ To: number, Body: text })
   if (sender.messagingService) form.set('MessagingServiceSid', sender.messagingService)
   else form.set('From', sender.from)
   if (statusToken) form.set('StatusCallback', `${siteOrigin(env)}/api/sms/twilio/status?m=${encodeURIComponent(statusToken)}`)
   const segments = segmentsOf(text)
   try {
-    const res = await fetch(`${twilioOrigin(env)}/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID)}/Messages.json`, {
+    const res = await fetch(`${twilioOrigin(env)}/2010-04-01/Accounts/${encodeURIComponent(sender.accountSid)}/Messages.json`, {
       method: 'POST',
       headers: { Authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form,
@@ -65,13 +70,21 @@ export async function twilioSignature(authToken, url, params) {
   return btoa(String.fromCharCode(...new Uint8Array(sig)))
 }
 
+const sameSig = (a, b) => {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+// Signed by the account that owns the number (the business's subaccount; the parent's token is also accepted for
+// that subaccount). Returns { ok, customer } — customer = the business whose subaccount sent it (null = parent), so
+// callers can refuse a webhook that names another business's sender.
 export async function verifyTwilio(env, request, params) {
   const given = request.headers.get('X-Twilio-Signature') || ''
-  if (!env.TWILIO_AUTH_TOKEN || !given) return false
+  if (!env.TWILIO_AUTH_TOKEN || !given) return { ok: false }
+  const keys = await signingKeys(env, params.get('AccountSid') || '').catch(() => null)
+  if (!keys) return { ok: false }
   // Twilio signs the public URL it called (behind Cloudflare: the request URL as received).
-  const expected = await twilioSignature(env.TWILIO_AUTH_TOKEN, request.url, params)
-  if (expected.length !== given.length) return false
-  let diff = 0
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ given.charCodeAt(i)
-  return diff === 0
+  for (const token of keys.tokens) if (sameSig(await twilioSignature(token, request.url, params), given)) return { ok: true, customer: keys.customer }
+  return { ok: false }
 }

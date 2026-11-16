@@ -17,19 +17,24 @@ Nothing here has been submitted, bought or attested. Every step marked (approval
 
 - GetShowUps is the ISV: **one Primary Customer Profile** (business identity "ISV Reseller or Partner"), created only in
   the Console (Trust Hub). It must be approved before any business can be registered.
-- Each business gets its own **Secondary Customer Profile → Brand → Campaign → Messaging Service → number**.
-  GetShowUps's code supports one Twilio account with one Messaging Service per business (Twilio's architecture #4,
-  "supported"). Twilio prefers a **subaccount per business** (#1); #4 carries the risk that one business's
-  non-compliant traffic can suspend the whole account. Our risk is lower because GetShowUps writes every message
-  (fixed templates, checked assistant), but this is a founder decision before the 3rd business; switching later
-  resets account-level opt-outs. Subaccounts would need per-business credentials in the code (not built).
+- Each business gets its **own Twilio subaccount** (Twilio's preferred ISV architecture #1, decided 2026-11-16) and,
+  inside it, its own **Secondary (or Starter) Customer Profile → A2P profile → Brand → Messaging Service → Campaign →
+  number**. One business's traffic, suspension or opt-outs never touch another's.
+- Credentials (Twilio subaccount docs): the parent's credentials act on a subaccount's v2010 resources (sending,
+  numbers, addresses, usage, closing); Trust Hub and Messaging APIs (subdomains) are called with the subaccount's own
+  credentials, stored encrypted. Webhooks are verified with the token of the account Twilio names (`AccountSid`).
+- The registration runs through Twilio's APIs from /admin → Twilio setup (server/followups/provisioning.js), one
+  confirmed, audited step at a time; submitting and paid steps need `TWILIO_REGISTRATION_SUBMIT=true` plus an
+  approval tick for that step. Not verified until the first real run (Twilio's docs don't say): whether a profile
+  created in a subaccount can reference the parent's Primary profile SID directly. If Twilio refuses it, the step
+  stops with Twilio's error code before anything is submitted; see "If the first real run fails" below.
 - Registration type is chosen **per business**, never assumed:
 
 | Business has | Brand type | Campaign use case | Notes |
 | --- | --- | --- | --- |
 | An EIN (every US LLC, corporation, partnership; most nonprofits) and < 6,000 segments/day | **Low-Volume Standard** | `LOW_VOLUME` (mixed) | No secondary vetting. Our businesses send tens of texts a day. |
 | An EIN and more volume | Standard (secondary vetting) | `CUSTOMER_CARE` or `MIXED` | Not needed today. |
-| **No EIN** (true sole proprietor, SSN only) | Sole Proprietor | `SOLE_PROPRIETOR` | 1 campaign, 1 number, ~1,000/day to T-Mobile. For ISVs Twilio documents this **API-only** (Starter profile + OTP to the proprietor's own, non-Twilio mobile within 24 h). Not supported by our manual flow yet. A business with an EIN must **not** register as sole proprietor (fees lost, redo). |
+| **No EIN** (true sole proprietor, SSN only) | Sole Proprietor | `SOLE_PROPRIETOR` | 1 campaign, 1 number, ~1,000/day to T-Mobile. For ISVs Twilio documents this **API-only**: supported by Twilio setup (Starter profile `RN806d…`, trust product `RN670d…` with `sole_proprietor_information`, `BrandType=SOLE_PROPRIETOR`; Twilio texts a one-time code to the proprietor's own, non-Twilio mobile — reply within 24 h, "Resend owner code" otherwise; verify within 30 days). Lifetime caps across all carriers' registrations: mobile 3 uses, email/address 10. A business with an EIN must **not** register as sole proprietor (fees lost, redo); the owner form derives the path from the business type. |
 | 501(c)(3) | Standard, nonprofit | `CHARITY` (special) | Extra review. None today. |
 
 Legal name must match the IRS EIN letter (CP 575 / 147C) **exactly**; a new EIN can take 30–90 days to propagate.
@@ -62,12 +67,13 @@ review the description, opt-in flow and samples; tick the attestation; **Approve
 optional, unchecked texting box appears on PoolThru's booking page and website forms (no texts are sent before
 carrier approval: `smsReadiness` still requires the provider's approval + own sender + `SMS_LIVE`).
 
-**B. Collect at submission** (Twilio asks; not in our form): authorized representative's title and job position, industry
-(e.g. "Home services / Consumer"), company type (private), brand contact email if public (not PoolThru).
+**B. In the owner form** (since 2026-11-16): street address, city, state, ZIP; authorized representative's first/last
+name, title and position; industry; mobile number. Company type is derived (private; nonprofit → non-profit).
 
-**C. Admin, in Twilio** (approval: spend), Console → Messaging → Regulatory Compliance → Onboarding
-(https://console.twilio.com/us1/develop/sms/regulatory-compliance/a2p-onboarding), "Switch Customer Profile" → new
-Secondary Customer Profile for PoolThru → Brand (Low-Volume Standard) → Campaign:
+**C. Admin, /admin → Follow-ups and texting → PoolThru → Twilio setup…** (approvals per step): create subaccount →
+prepare profile (draft + Twilio evaluation) → submit profile → prepare + submit A2P profile → register brand (fee) →
+Sync until the brand is APPROVED → create Messaging Service → register campaign (fee) → buy number (fee) → Sync until
+the campaign is VERIFIED. The campaign is submitted with these values (the same the owner approved):
 
 | Campaign field | Value (copy from the owner's Texting view, which shows exactly what they approved) |
 | --- | --- |
@@ -83,16 +89,24 @@ Secondary Customer Profile for PoolThru → Brand (Low-Volume Standard) → Camp
 | Opt-out / help | Twilio keyword handling (STOP/UNSUBSCRIBE/END/QUIT/STOPALL/REVOKE/OPTOUT/CANCEL; START; HELP) with **Advanced Opt-Out enabled** on the Messaging Service (so Twilio reports `OptOutType` and we never answer twice) and the HELP text "Poolthru LLC: replies about your request. Call [phone]. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out." (Advanced Opt-Out can only be turned off again by Twilio support.) GetShowUps never sends a second answer to a keyword Twilio answered (`OptOutType`). |
 | Volume | < 2,000 segments/day to T-Mobile |
 
-Then in /admin → Follow-ups and texting → **Record** `pending`.
+The registration shows `pending` from the profile submission and `approved` only when Twilio reports the campaign
+VERIFIED (Sync, and hourly by cron). Console fallback: Messaging → Regulatory Compliance → Onboarding
+(https://console.twilio.com/us1/develop/sms/regulatory-compliance/a2p-onboarding) with "Switch Customer Profile",
+inside the business's subaccount, then /admin → Record.
+
+**If the first real run fails** at "Prepare the business profile" with a Twilio error on the Primary-profile link
+(the one undocumented point): stop there (nothing was submitted or charged), send me the error code, and we either
+link via the parent account or create the client profile from the Console in that subaccount.
 
 **D. Review**: brand usually minutes (manual review 7+ business days); campaign vetting up to 5 business days
 (contact support after 10). Common rejections: legal name/EIN mismatch, website unreachable/parked/login-gated,
 privacy policy missing the non-sharing statement, terms off-domain or not public, vague samples, description not
 matching the use case. Record the outcome **exactly as Twilio reports it** (`approved` / `rejected` + reason).
 
-**E. Sender** (approval: purchase): buy a local 10DLC number (estimate ~$1.15/month; Console shows the price) in a new
-Messaging Service "PoolThru" linked to the approved campaign; Integration → incoming messages
-`https://getshowups.com/api/sms/twilio/inbound` (POST). Record the `MG…` SID and number in /admin.
+**E. Sender** (approval: purchase): the "Buy a local number" step searches the business phone's area code, buys one
+number in PoolThru's subaccount (estimate ~$1.15/month), attaches it to PoolThru's Messaging Service (incoming
+messages already point to `https://getshowups.com/api/sms/twilio/inbound`) and records it as PoolThru's sender.
+Then enable Advanced Opt-Out on that Messaging Service in the Console (row above).
 
 ### Fees (estimates unless stated)
 

@@ -87,6 +87,6 @@ Staff identities are kept for accountability. Limits of its tamper evidence: doc
 
 - `thread_messages` holds conversation text for the owner's inbox. It is never logged, never shown in admin views, and
   is removed after 365 days (cron, `purgeOldMessages`, 500 per run). Delivery counts stay in the audit log (no text).
-- `lead_threads`, `followup_settings`, `sms_registrations` and `thread_messages` are in `ERASED_TABLES` (account deletion).
+- `lead_threads`, `followup_settings`, `sms_registrations`, `sms_registration_extra`, `sms_provider_objects`, `sms_accounts` and `thread_messages` are in `ERASED_TABLES` (account deletion); the business's Twilio subaccount is closed first (integrations step; Twilio releases its numbers).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
   for as long as the lead exists.

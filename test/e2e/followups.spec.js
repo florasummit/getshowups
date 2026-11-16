@@ -9,14 +9,18 @@ import { useSession } from './helpers.js'
 
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const mobile = (info) => info.project.name === 'mobile'
-const biz = (info) => (mobile(info) ? { id: fixtures.E2E_TEXTS_M_CUSTOMER, token: fixtures.E2E_TEXTS_M_SESSION_TOKEN, sender: fixtures.E2E_TEXTS_M_SENDER, other: fixtures.E2E_TEXTS_CUSTOMER } : { id: fixtures.E2E_TEXTS_CUSTOMER, token: fixtures.E2E_TEXTS_SESSION_TOKEN, sender: fixtures.E2E_TEXTS_SENDER, other: fixtures.E2E_TEXTS_M_CUSTOMER })
+const biz = (info) =>
+  mobile(info)
+    ? { id: fixtures.E2E_TEXTS_M_CUSTOMER, token: fixtures.E2E_TEXTS_M_SESSION_TOKEN, sender: fixtures.E2E_TEXTS_M_SENDER, account: fixtures.E2E_TEXTS_M_ACCOUNT_SID, other: fixtures.E2E_TEXTS_CUSTOMER }
+    : { id: fixtures.E2E_TEXTS_CUSTOMER, token: fixtures.E2E_TEXTS_SESSION_TOKEN, sender: fixtures.E2E_TEXTS_SENDER, account: fixtures.E2E_TEXTS_ACCOUNT_SID, other: fixtures.E2E_TEXTS_M_CUSTOMER }
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 const site = `http://127.0.0.1:${fixtures.E2E_PORT}`
 
 // Sends a text "from" the lead to the business, signed the way Twilio signs webhooks.
 async function textFromLead(request, b, body) {
   const url = `${site}/api/sms/twilio/inbound`
-  const params = new URLSearchParams({ From: fixtures.E2E_TEXTS_LEAD_PHONE, To: b.sender, Body: body, MessageSid: `SMlead${Date.now()}${Math.random().toString(36).slice(2, 8)}` })
+  // AccountSid: the business's own subaccount (Twilio includes it in every webhook).
+  const params = new URLSearchParams({ AccountSid: b.account, From: fixtures.E2E_TEXTS_LEAD_PHONE, To: b.sender, Body: body, MessageSid: `SMlead${Date.now()}${Math.random().toString(36).slice(2, 8)}` })
   const data = url + [...params.keys()].sort().map((k) => k + params.get(k)).join('')
   const sig = createHmac('sha1', fixtures.E2E_TWILIO_AUTH_TOKEN).update(data).digest('base64')
   return request.post(url, { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': sig }, data: params.toString() })

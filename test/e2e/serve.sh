@@ -126,8 +126,8 @@ done
 
 # Follow-ups: a business per browser project, texting registration APPROVED (as an admin records it) with its own
 # sender, default preferences (answers to their texts aren't held by quiet hours), one lead with texting consent.
-for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER" "$E2E_TEXTS_M_CUSTOMER:$E2E_TEXTS_M_SESSION_TOKEN:$E2E_TEXTS_M_SENDER"; do
-  IFS=: read -r TC TT TS <<< "$E"
+for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TEXTS_ACCOUNT_SID" "$E2E_TEXTS_M_CUSTOMER:$E2E_TEXTS_M_SESSION_TOKEN:$E2E_TEXTS_M_SENDER:$E2E_TEXTS_M_ACCOUNT_SID"; do
+  IFS=: read -r TC TT TS TA <<< "$E"
   d1 "
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$TC', 'Texts Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
@@ -136,6 +136,7 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER" "$E2E_
   INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
     ('$TC', '(843) 555-0120', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280\"}]', '[\"Charleston\"]', $NOW);
   INSERT INTO sms_registrations (customer, legal_name, business_type, status, approved_at, sender_phone, updated_at) VALUES ('$TC', 'Texts Pools LLC', 'llc', 'approved', $NOW, '$TS', $NOW);
+  INSERT INTO sms_accounts (customer, account_sid, auth_token_enc, status, created_at, updated_at) VALUES ('$TC', '$TA', 'unreadable-in-e2e', 'active', $NOW, $NOW);
   INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
     ('lead-$TC', '$TC', 'Morgan Lane', 'morgan@example.net', '$E2E_TEXTS_LEAD_PHONE', 'Green pool cleanup', 'new', 'x', $NOW, $NOW);
   INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES ('lead-$TC', '$TC', 'site-form-sms-v1', $NOW);

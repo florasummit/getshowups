@@ -15,9 +15,10 @@ import { getCustomer } from '../server/customers.js'
 import { formToken, submitSiteForm } from '../server/site-form.js'
 import { twilioSignature, segmentsOf } from '../server/followups/transport.js'
 import { classify, checkReply } from '../server/followups/assistant.js'
-import { inQuietHours, validateSettings, smsReadiness } from '../server/followups/settings.js'
+import { inQuietHours, validateSettings, smsReadiness, registrationOf } from '../server/followups/settings.js'
 import { processReplies, sendQueued, handleInbound } from '../server/followups/engine.js'
 import { validateFacts } from '../server/followups/registration.js'
+import { sealToken } from '../server/followups/twilio.js'
 import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
 import * as bookAppt from '../functions/api/book/[customer]/appointment.js'
@@ -36,6 +37,11 @@ const MIN = 6e4
 const DAY = 864e5
 const PHONE = '+18435550142'
 const SENDER = { alpha: '+18435550100', beta: '+18435550200' }
+// Each business's own Twilio subaccount (sid + its own auth token, stored sealed like production).
+const SUB = { alpha: `AC${'a'.repeat(32)}`, beta: `AC${'b'.repeat(32)}` }
+const SUB_TOKEN = { alpha: 'sub_alpha_SECRET_token_1234', beta: 'sub_beta_SECRET_token_5678' }
+const SEALED = { alpha: await sealToken({ TOKEN_ENCRYPTION_KEY: KEY }, 'alpha', SUB.alpha, SUB_TOKEN.alpha), beta: await sealToken({ TOKEN_ENCRYPTION_KEY: KEY }, 'beta', SUB.beta, SUB_TOKEN.beta) }
+const accountOfSender = (to) => Object.keys(SENDER).find((k) => SENDER[k] === to)
 
 function d1({ skip = [] } = {}) {
   const sql = new DatabaseSync(':memory:')
@@ -80,6 +86,7 @@ const withTwilio = () => Object.assign(env, { TWILIO_ACCOUNT_SID: 'AC123', TWILI
 // A business's texting setup as a platform admin would record it (status = what the provider reported).
 const register = (id, status, { quiet = false } = {}) => {
   db.sql.prepare("INSERT OR REPLACE INTO sms_registrations (customer, legal_name, status, approved_at, sender_phone, updated_at) VALUES (?, 'x', ?, 1, ?, 1)").run(id, status, SENDER[id])
+  db.sql.prepare("INSERT OR IGNORE INTO sms_accounts (customer, account_sid, auth_token_enc, status, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, 1)").run(id, SUB[id], SEALED[id])
   if (!quiet) db.sql.prepare('INSERT OR REPLACE INTO followup_settings (customer, quiet_start, quiet_end, updated_at) VALUES (?, 0, 0, 1)').run(id)
 }
 
@@ -109,7 +116,8 @@ beforeEach(() => {
     else if (u.endsWith('/freeBusy')) out = [200, { calendars: { primary: { busy: [] } } }]
     else if (u.endsWith('/events?sendUpdates=all')) out = [200, { id: JSON.parse(init.body).id }]
     else if (u === 'https://api.resend.com/emails') out = [200, { id: 'email_1' }]
-    else if (u === 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json') out = twilio(new URLSearchParams(init.body))
+    // Texts are sent only under a business's OWN subaccount (parent credentials, subaccount path).
+    else if (Object.values(SUB).some((s) => u === `https://api.twilio.com/2010-04-01/Accounts/${s}/Messages.json`)) out = twilio(new URLSearchParams(init.body))
     else throw new Error(`unexpected ${u}`)
     return new Response(JSON.stringify(out[1]), { status: out[0] })
   }
@@ -152,10 +160,11 @@ async function call(mod, method, path, { cookie, origin = ORIGIN, body, headers 
   return { res, status: res.status, json: () => JSON.parse(text), text }
 }
 
-// A Twilio webhook, signed like Twilio signs it.
-async function inbound(fields, { sign = true, path = '/api/sms/twilio/inbound' } = {}) {
-  const params = new URLSearchParams(fields)
-  const sig = sign ? await twilioSignature('tw_SECRET', ORIGIN + path, params) : 'bad'
+// A Twilio webhook, signed like Twilio signs it: by the subaccount that owns the business number (AccountSid).
+async function inbound(fields, { sign = true, path = '/api/sms/twilio/inbound', token } = {}) {
+  const biz = accountOfSender(fields.To) || accountOfSender(fields.From) || 'alpha'
+  const params = new URLSearchParams({ AccountSid: SUB[biz], ...fields })
+  const sig = sign ? await twilioSignature(token || SUB_TOKEN[biz], ORIGIN + path, params) : 'bad'
   return call(path.includes('status') ? statusApi : inboundApi, 'POST', path, { raw: params.toString(), headers: { 'X-Twilio-Signature': sig, 'Content-Type': 'application/x-www-form-urlencoded' } })
 }
 const text = (from, body, sid, to = SENDER.alpha) => inbound({ From: from, To: to, Body: body, MessageSid: sid })
@@ -235,7 +244,9 @@ test('consent box before approval (carriers review it), but never a text before 
     assert.equal(await offer(), false, `${s} closes it`)
   }
   register('alpha', 'pending')
-  assert.deepEqual(smsReadiness(env, db.sql.prepare('SELECT * FROM sms_registrations').get()).reasons, ['registration_pending'])
+  assert.deepEqual(smsReadiness(env, await registrationOf(db, 'alpha')).reasons, ['registration_pending'])
+  // Without its own subaccount a business can never text (never from the parent or another business's account).
+  assert.ok(smsReadiness(env, db.sql.prepare('SELECT * FROM sms_registrations').get()).reasons.includes('no_account'))
   const l = await smsConsentLead()
   await processDueMessages(env, Date.now() + 16 * MIN)
   assert.equal(sentSms().length, 0, 'never texted before approval')
@@ -247,6 +258,7 @@ test('consent box before approval (carriers review it), but never a text before 
   await processDueMessages(env, Date.now() + 16 * MIN)
   const [sms] = sentSms()
   assert.equal(sms.get('From'), SENDER.alpha, "the business's own number, not the platform's")
+  assert.ok(fetches.some((f) => f.url === `https://api.twilio.com/2010-04-01/Accounts/${SUB.alpha}/Messages.json`), "sent under the business's own subaccount")
   assert.equal(sms.get('To'), '+18435550177')
   assert.ok(threadMsgs(l2).some((m) => m.channel === 'sms' && m.status === 'sent'))
 })
@@ -565,9 +577,14 @@ test('texting registration: owner details validated, explicit approval required;
   await seed('alpha')
   const owner = await session('owner@alpha.example')
   const admin = await session('staff@getshowups.com')
-  const details = { legalName: 'Alpha Pools LLC', businessType: 'llc', ein: '12-3456789', address: '1 King St, Charleston, SC 29401', website: 'alphapools.example.com', contactName: 'Pat Alpha', contactEmail: 'pat@alpha.example', contactPhone: '843-555-0123' }
+  const details = { legalName: 'Alpha Pools LLC', businessType: 'llc', ein: '12-3456789', street: '1 King St', city: 'Charleston', region: 'sc', postalCode: '29401', website: 'alphapools.example.com', firstName: 'Pat', lastName: 'Alpha', repTitle: 'Owner', repJobPosition: 'CEO', industry: 'PROFESSIONAL', contactEmail: 'pat@alpha.example', contactPhone: '843-555-0123' }
   assert.deepEqual(validateFacts({ ...details, ein: '', website: 'localhost' })[0], ['ein', 'website'])
-  assert.equal(validateFacts({ ...details, businessType: 'sole_proprietor', ein: '' })[0].length, 0)
+  assert.deepEqual(validateFacts({ ...details, region: 'XX', postalCode: '123', industry: 'GAMBLING', repJobPosition: 'Boss' })[0], ['region', 'postalCode', 'repJobPosition', 'industry'])
+  // The registration path follows the business type: an LLC (it has an EIN) is never registered as a sole proprietor.
+  assert.equal(validateFacts(details)[1].path, 'low_volume_standard')
+  const soleFacts = validateFacts({ ...details, businessType: 'sole_proprietor', ein: '99-9999999', repTitle: '', repJobPosition: '' })
+  assert.deepEqual([soleFacts[0], soleFacts[1].path, soleFacts[1].ein], [[], 'sole_proprietor', ''])
+  assert.equal(validateFacts(details)[1].address, '1 King St, Charleston, SC 29401')
   const save = await call(textingApi, 'POST', '/api/dashboard/followups/texting', { cookie: owner, body: { action: 'save', details } })
   assert.equal(save.status, 200)
   assert.deepEqual([save.json().texting.status, save.json().texting.next], ['ready', 'approve'])

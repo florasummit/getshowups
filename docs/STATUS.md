@@ -2,9 +2,33 @@
 
 _Update at the end of every task. Newest first._
 
-## Texting onboarding: opt-in before approval, A2P registration prep (2026-11-16) — fix/a2p-onboarding
+## Twilio: one subaccount per business, A2P through Twilio's APIs (2026-11-16) — feature/twilio-subaccounts; migration 0025 (NOT applied)
 
-**Production now**: release e2cde29 (PR #50) + this PR once merged; migration 0024 APPLIED 2026-11-16 (founder approval):
+- Founder decision: ONE GetShowUps parent account, ONE Twilio subaccount PER business (Twilio's preferred ISV
+  architecture). Reuses the Build 49 engine unchanged except where it talks to Twilio.
+- server/followups/twilio.js: subaccount create/recover (stable FriendlyName, adopted after a lost response, only
+  subaccounts of our parent), token sealed (AES-GCM, HKDF subkey, AAD business|SID), usage (provider records),
+  close on account deletion. Sending: parent creds on `/Accounts/<sub>/Messages.json`; a business without an active
+  subaccount never texts (`no_account`). Webhooks: verified with the token of the AccountSid Twilio names; a sender
+  is accepted only from its own business's subaccount (`account_mismatch` otherwise). Dead `sendSms` (parent
+  account) removed; the test-mode check now also runs at the provider call.
+- server/followups/provisioning.js: both paths through Twilio's APIs, one confirmed + audited admin step at a time
+  (/admin → Twilio setup): low_volume_standard (EIN: Secondary profile → A2P profile → brand SkipAutomaticSecVet →
+  LOW_VOLUME campaign) and sole_proprietor (no EIN: Starter profile → sole-prop trust product → SOLE_PROPRIETOR brand +
+  owner OTP, resend → SOLE_PROPRIETOR campaign). Submitting/paid steps need TWILIO_REGISTRATION_SUBMIT=true (off)
+  AND an approval tick; unknown outcomes recorded and never resent; noncompliant evaluations stop before submitting;
+  'approved' only when Twilio reports the campaign VERIFIED (Sync + hourly cron). Number bought in the business's
+  subaccount and attached to its Messaging Service.
+- Owner form: structured address, representative (name, title, position), industry; path derived from business type.
+- Unverified until the first real run (not in Twilio's docs): a subaccount profile referencing the parent's Primary
+  profile SID; failure stops before submission (docs/A2P_REGISTRATION.md "If the first real run fails").
+- Tests: unit 518 (8 new), browser 88 (Twilio setup panel). Nothing real was created, submitted or bought.
+- **Needs approval**: migration 0025; then docs/TEXTING_ACTIVATION.md §1 (Twilio upgrade, Primary ISV profile,
+  secrets) and §2 per business. SMS_LIVE / FOLLOWUP_AI / MESSAGES_LIVE stay off.
+
+## Texting onboarding: opt-in before approval, A2P registration prep (2026-11-16) — PR #51 (8a5bba3)
+
+**Production then**: release e2cde29 (PR #50) + PR #51; migration 0024 APPLIED 2026-11-16 (founder approval):
 4 tables + 5 indexes verified; existing leads/appointments/messages/outbox/opt-outs/consents unchanged (counts
 identical). Production test on the sandboxed `gsu-journey-test` (fake example.invalid lead): conversation record
 created, follow-ups scheduled, booking → stage booked, retry 409, wrong token / other business 404, confirmation
