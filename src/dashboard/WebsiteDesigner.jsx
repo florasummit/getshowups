@@ -19,6 +19,7 @@ const ERRORS = {
   no_tested_model: 'Auto has no tested model on your account yet. Choose a model under “AI model and monthly limit”.',
   budget_reached: 'This would go over your monthly AI limit. Raise it under “AI model and monthly limit”, or edit by hand.',
   rate_limited: 'That’s a lot of requests in a few minutes. Please wait a moment.',
+  ai_design_incomplete: 'That design didn’t come out complete, so nothing was changed. Please try again.',
 }
 const FIRST = ['Design a modern, premium website from my current website’s content', 'Design a bright, friendly one-page site that makes booking easy', 'Design an elegant site with a separate Services page']
 const NEXT = ['Make it feel more premium', 'Make booking more prominent', 'Try a darker palette', 'Add a Services page', 'Simplify the home page']
@@ -39,12 +40,13 @@ export default function WebsiteDesigner({ onChanged }) {
   if (data === undefined) return <div aria-busy="true" />
   if (data.failed) return <p className="form-error">Couldn’t load the designer. Please refresh.</p>
 
-  const send = async (message) => {
+  // action 'different': a fresh design in a genuinely different direction (the server enforces that it differs).
+  const send = async (message, action = 'message') => {
     if (!message.trim() || state.busy) return
     setState({ busy: true, chars: 0, pending: message })
     setText('')
     try {
-      const res = await fetch('/api/dashboard/website/designer', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'message', message }) })
+      const res = await fetch('/api/dashboard/website/designer', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, message }) })
       if (!res.ok || !res.body) {
         const d = await res.json().catch(() => ({}))
         return setState({ error: ERRORS[d.error] || 'Something went wrong. Please try again.' })
@@ -123,6 +125,16 @@ export default function WebsiteDesigner({ onChanged }) {
         </ol>
       )}
       {!data.turns.length && <p className="fine">Describe the website you want: the feel, who your customers are, what matters most. The designer uses your business details{data.hasSite ? '' : ' and your imported website, if you brought one'}. Nothing goes live until you publish.</p>}
+      {data.hasSite && data.direction && (
+        <p className="fine designer-direction">
+          <strong>Design idea:</strong> {data.direction}
+        </p>
+      )}
+      {data.hasSite && (
+        <button type="button" className="btn btn-quiet btn-sm" disabled={state.busy} onClick={() => send('Show me a different direction', 'different')}>
+          Show me a different direction
+        </button>
+      )}
       <div className="chips">
         {chips.map((c) => (
           <button key={c} type="button" className="chip" disabled={state.busy} onClick={() => send(c)}>

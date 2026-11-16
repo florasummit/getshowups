@@ -11,10 +11,12 @@ import { FONTS, ICONS, LIMITS, SECTION_TYPES, validateSpec } from './site-spec.j
 import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
-import { brandName, loadWebsite, saveDraft, validateContent } from './website.js'
+import { displayBrand, loadWebsite, saveDraft, validateContent } from './website.js'
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
+import { blockToItem, itemToBlock, recipesText, sectionBlocksFromModel, sectionBlocksToModel } from './design-blocks.js'
+import { checkDesign, firstScreenSignature, redactRaw } from './design-checks.js'
 
 // No union types: Anthropic's structured outputs allow at most 16 union-typed parameters (anyOf / type arrays) per
 // schema and refuse larger ones with HTTP 400 "Schema is too complex for compilation". "Not used" is therefore a value,
@@ -41,6 +43,18 @@ const ITEM = {
     image: T(),
   },
 }
+// Composition blocks: plain strings (server/design-blocks.js parses the place/look tokens; validateSpec checks them).
+const BLOCK = {
+  type: 'object',
+  properties: {
+    kind: T('heading | text | button | media | mark'),
+    place: T('"c<col 1-12>/<span> r<row 1-6>/<span> z<0-2>" plus optional x-start|x-center|x-end and y-start|y-center|y-end|y-stretch, e.g. "c1/7 r2/1 z1 y-end"'),
+    look: T('space-separated: one type-size word (display|xl|l|m|s, e.g. "display"); media: aspect-1x1|4x5|3x4|4x3|3x2|16x9|21x9|auto, focus-<x%>-<y%>, shape-rect|shape-rounded|shape-arch|shape-circle, tint|duo|scrim; button: secondary; phone: m-order-<n>, m-span-<1-4>, m-hide (media/mark only)'),
+    text: T('heading/text words, button label, photo alt text, or a mark (1–3 letters/symbols, or the number of services)'),
+    image: T('media only: an image ref from IMAGES; "" otherwise'),
+    target: T('button only: "book", "page:<slug>" or "section:<id>"; "" otherwise'),
+  },
+}
 const SECTION = {
   type: 'object',
   properties: {
@@ -56,7 +70,7 @@ const SECTION = {
     heading: T(),
     text: T(),
     body: T(),
-    layout: T('"" for the default, or hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split'),
+    layout: T('choose one deliberately — hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split; "" only for sections without layouts (text, faq, area, contact, composition)'),
     image: T(),
     images: { type: 'array', items: S, description: '[] if not used' },
     imageAlt: T(),
@@ -72,6 +86,7 @@ const SECTION = {
     secondaryCta: CTA,
     cta: CTA,
     items: { type: 'array', items: ITEM, description: '[] if not used' },
+    blocks: { type: 'array', items: BLOCK, description: 'composition sections only: up to 10 blocks; [] otherwise' },
   },
 }
 // The "not used" values of DESIGN_SCHEMA back to missing fields (sections, their items, buttons, footer text), so
@@ -93,7 +108,7 @@ export function fromStrict(site) {
   return {
     ...site,
     footer: site.footer ? dropUnused(site.footer) : site.footer,
-    pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(dropUnused) : p.sections } : p)) : site.pages,
+    pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map((x) => sectionBlocksFromModel(dropUnused(x))) : p.sections } : p)) : site.pages,
   }
 }
 
@@ -114,14 +129,14 @@ const COMPACT_SECTION = {
     heading: T(),
     text: T('short intro line; "" if not used'),
     body: T('text and imageText sections: the main paragraphs; "" otherwise'),
-    layout: T('"" for the default, or hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split'),
+    layout: T('choose one deliberately — hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split; "" only for sections without layouts (text, faq, area, contact, composition)'),
     images: { type: 'array', items: S, description: 'image refs. hero: [main, ...up to 3 mosaic]; imageText/cta: [image]; gallery: all photos (owner photos only); [] if none' },
     imageAlt: T(),
     options: T('space-separated, any that apply: side-left|side-right, shape-rect|shape-rounded|shape-arch|shape-circle, height-auto|height-tall|height-screen, overlay-0..85 (hero darkening %), cols-1..4, lead (text: larger first paragraph), no-prices (services: hide prices), phone (contact: show phone); "" for defaults'),
     buttons: { type: 'array', items: { type: 'object', properties: { label: S, target: { type: 'string', description: '"book", "page:<slug>" ("page:" for home) or "section:<section id>"' } } }, description: 'hero: [main, optional secondary]; imageText/cta: [one]; [] otherwise' },
     items: {
       type: 'array',
-      description: 'services/features/steps/faq entries; [] otherwise. faq: title = question, text = answer',
+      description: 'services/features/steps/faq entries; composition: its blocks (up to 10); [] otherwise. faq: title = question, text = answer. composition block: title = "<kind> <place tokens> <look tokens>" (kind heading|text|button|media|mark; place c<col>/<span> r<row>/<span> z<0-2> x-…|y-…; look display|xl|l|m|s aspect-… focus-x-y shape-… tint|duo|scrim secondary m-order-n m-span-n m-hide), text = the words / button label / photo alt, image = the photo ref (media) or link target (button)',
       items: { type: 'object', properties: { serviceIndex: { type: 'integer', description: 'services only: index into facts.services; -1 otherwise' }, icon: T(`one of: ${ICONS.join(' | ')} — or ""`), title: T(), text: T(), image: T() } },
     },
   },
@@ -156,12 +171,15 @@ function sectionFromCompact(c) {
   s.lead = opts.includes('lead')
   s.showPrices = !opts.includes('no-prices')
   s.showPhone = opts.includes('phone')
-  if (Array.isArray(c.items)) s.items = c.items.map((x) => (c.type === 'faq' ? { question: x?.title, answer: x?.text } : { serviceIndex: x?.serviceIndex, icon: x?.icon, title: x?.title, text: x?.text, image: x?.image }))
+  if (c.type === 'composition') s.blocks = (Array.isArray(c.items) ? c.items : []).map(itemToBlock)
+  else if (Array.isArray(c.items)) s.items = c.items.map((x) => (c.type === 'faq' ? { question: x?.title, answer: x?.text } : { serviceIndex: x?.serviceIndex, icon: x?.icon, title: x?.title, text: x?.text, image: x?.image }))
   return s
 }
 export function fromCompact(site) {
   if (!site || typeof site !== 'object') return site
-  return { ...site, pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(sectionFromCompact) : p.sections } : p)) : site.pages }
+  // The compact answer's `name` carries the one-line art direction (no extra schema field; see design-blocks.js).
+  const idea = typeof site.name === 'string' ? site.name.replace(/\s+/g, ' ').trim() : ''
+  return { ...site, direction: site.direction ?? idea, name: idea.length > 40 ? idea.slice(0, 40).replace(/\s+\S*$/, '') : idea, pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(sectionFromCompact) : p.sections } : p)) : site.pages }
 }
 // Standard (validated) → compact, so Claude revises the current design in the shape it answers in.
 function sectionToCompact(s) {
@@ -181,19 +199,41 @@ function sectionToCompact(s) {
     imageAlt: s.imageAlt || '',
     options: opts.join(' '),
     buttons,
-    items: (s.items || []).map((x) => (s.type === 'faq' ? { serviceIndex: -1, icon: '', title: x.question || '', text: x.answer || '', image: '' } : { serviceIndex: Number.isInteger(x.serviceIndex) ? x.serviceIndex : -1, icon: x.icon || '', title: x.title || '', text: x.text || '', image: x.image || '' })),
+    items: s.type === 'composition' ? (s.blocks || []).map(blockToItem) : (s.items || []).map((x) => (s.type === 'faq' ? { serviceIndex: -1, icon: '', title: x.question || '', text: x.answer || '', image: '' } : { serviceIndex: Number.isInteger(x.serviceIndex) ? x.serviceIndex : -1, icon: x.icon || '', title: x.title || '', text: x.text || '', image: x.image || '' })),
   }
 }
-export const toCompact = (site) => (site && Array.isArray(site.pages) ? { ...site, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionToCompact) })) } : site)
+export const toCompact = (site) => (site && Array.isArray(site.pages) ? { ...site, name: site.direction || site.name, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionToCompact) })) } : site)
+// The model refers to services by their position in FACTS.services (the current list, numbered for it); the stored
+// design refers to them by stable id. The current design is converted only here, for the prompt; answers are converted
+// back by validateSpec against the same list. Ids never reach the model.
+export const servicesForModel = (site, services) =>
+  site && Array.isArray(site.pages)
+    ? {
+        ...site,
+        pages: site.pages.map((p) => ({
+          ...p,
+          sections: (p.sections || []).map((s) =>
+            s?.type === 'services' && Array.isArray(s.items)
+              ? { ...s, items: s.items.map(({ serviceId, serviceIndex, ...x }) => ({ serviceIndex: typeof serviceId === 'string' ? services.findIndex((v) => v.id === serviceId) : Number.isInteger(serviceIndex) ? serviceIndex : -1, ...x })) }
+              : s,
+          ),
+        })),
+      }
+    : site
+// Standard shape for revisions (OpenAI): composition blocks back in the token form the model writes.
+export const toStandard = (site) => (site && Array.isArray(site.pages) ? { ...site, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionBlocksToModel) })) } : site)
 
-const designSchema = (section) => strictSchema({
+const designSchema = (section, { compact = false } = {}) => strictSchema({
   type: 'object',
   properties: {
     reply: { type: 'string', description: 'One to three sentences to the owner: the design idea, or what you changed' },
     site: {
       type: 'object',
       properties: {
-        name: S,
+        // Claude (compact): the art direction rides in `name` (its schema keeps the live-compiled size). OpenAI: its own field.
+        ...(compact
+          ? { name: { type: 'string', description: 'The design idea in one line, at most 160 characters (art direction): concept, type, palette, composition' } }
+          : { name: S, direction: { type: 'string', description: 'The design idea in one line, at most 160 characters (art direction): concept, type, palette, composition — e.g. "Quiet coastal editorial: oversized serif over a large photo, sand and deep teal"' } }),
         theme: {
           type: 'object',
           properties: {
@@ -222,19 +262,30 @@ const designSchema = (section) => strictSchema({
 })
 // OpenAI: the standard shape (live-tested 2026-11-15). Claude: the compact shape (its grammar compiler's size limit).
 export const DESIGN_SCHEMA = designSchema(SECTION)
-export const COMPACT_DESIGN_SCHEMA = designSchema(COMPACT_SECTION)
+export const COMPACT_DESIGN_SCHEMA = designSchema(COMPACT_SECTION, { compact: true })
 
 const SYSTEM = `You are the senior web designer at GetShowUps. You design complete, original, polished websites for small local service businesses, and you revise them in conversation with the owner. Your output is a design specification (JSON) that our renderer turns into a fast, accessible, mobile-first website. You decide the art direction and the composition: which pages exist, which sections each page has and in what order, every section's layout, alignment, width, spacing, background and imagery, and the theme (an original colour palette in hex, a font pairing, type scale, heading weight/case/tracking, line height, corner radius, density, button style and motion). You write every word.
 
 Design like a top agency would for this specific business, not like a template:
 - Start from the business, its customers and its town. Choose a clear art direction and carry it through: palette, type, composition and copy should feel like one idea.
 - Make deliberate, varied compositions: contrast large and small type, full-bleed and contained sections, image-led and text-led sections, light and dark backgrounds. Avoid repeating the same section shape back to back.
+- Commit to one art direction and state it in "direction" (one line, at most 160 characters; where the schema has no "direction" field, put it in "name"): the idea, the type pairing, the palette, the composition. A "different direction" means a different first screen, type pairing and palette, not a recolour.
+- The first screen is the most important decision and it must not look like a template. The safe default (one photo on one side, the headline and a button on the other, nothing overlapping) is NOT acceptable for a new design: it is what every template does. Build the first screen as a "composition" section from one of the FIRST-SCREEN RECIPES below (adapt placement, sizes and proportions to the business and the photos), or something at least as bold.
+- Composition blocks are written as kind | place | look | text. place: c<start column>/<columns> (12 columns) r<start row>/<rows> (rows 1-6) z<layer 0-2> and optional x-start|center|end, y-start|center|end|stretch. look: one type size (display|xl|l|m|s), and for photos aspect-<1x1|4x5|3x4|4x3|3x2|16x9|21x9>, focus-<x%>-<y%>, shape-<rect|rounded|arch|circle>, tint|duo|scrim; secondary (second button); m-order-<n> (phone reading order), m-span-<1-4> (phone width of 4 columns), m-hide (photos and marks only). Text fully inside a photo turns white over a darkening layer; text partly over a photo gets a solid card.
+- Craft rules for compositions: stacked blocks share the same left column edge (never miss by one column); size rows so neighbouring columns end together, or make the open side clearly deliberate; the headline is 4-7 words and display or xl; keep the paragraph short (one or two sentences). Plan the phone: m-order gives the phone a clear first screen (headline and Book button early; for a collage, photos first is fine).
+- Photography: lead with the strongest owner photo for the idea (a calm water detail for an editorial, a wide scene for an immersive photo); use 2-3 photos in a collage; don't use the same photo twice on a page; set focus so the subject stays in frame. A different direction should lead with a different photo, or be type-led.
+- Beyond the first screen, use one more composition as a signature moment (a photo band, a statement with a mark, a two-photo spread) and the other section types for services, steps, FAQ, area and contact. Alternate backgrounds deliberately (at most one strong accent or dark section in a row) and vary section shapes.
+
+FIRST-SCREEN RECIPES (kind | place | look | text):
+${recipesText()}
+- Every page shows a Book button in the navigation automatically; still give the first screen its own booking button.
 - Use the owner's own photos where they fit best (asset:...). Use stock photos only where an owner photo doesn't fit, never in a gallery, and never as proof of the business's own work.
 - Make booking the obvious next step on every page (the "book" target). Keep forms and friction away: booking happens on our booking page.
 - Mobile first: short paragraphs, strong headings, generous tap targets. Keep text readable: the renderer enforces contrast, but choose a palette that works in the first place.
 - 1 to 4 pages. A small business usually needs Home plus Services and/or About; only add a page when there's real content for it. Home: 5 to 9 sections. Other pages: 3 to 7.
 
 Truth rules (mandatory; anything that breaks them is removed before the owner sees it):
+- Call the business by FACTS.brandName, spelled exactly as given (it is the public brand; businessName is the legal name and never appears on the site).
 - Facts come ONLY from FACTS (business details and services from our records) and the owner's own words in the conversation. Never invent prices, numbers, years in business, ratings, reviews, testimonials, awards, guarantees, licences, insurance, certifications, team size or response times.
 - Services: refer to them by serviceIndex (an index into FACTS.services). Their names and prices are shown from records automatically; write only the description text. Show every service.
 - Service area towns are shown from records by an "area" section; the phone number only by a "contact" section with the phone shown (showPhone, or option "phone"; only if the owner wants it shown).
@@ -258,12 +309,12 @@ export async function designContext(env, customer) {
   ])
   const draft = website.draft
   const cities = profile ? JSON.parse(profile.cities || '[]') : []
-  const services = (draft.services || []).map((s) => ({ name: s.name, price: s.price || '' }))
+  const services = (draft.services || []).map((s) => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: s.price || '' }))
   const industry = industryOf(customer, profile ? { ...profile, services: JSON.parse(profile.services || '[]') } : null, draft)
   const assetIds = new Set(assets.results.map((a) => a.id).filter((id) => id !== draft.logo))
   const facts = {
     businessName: customer.name,
-    brandName: brandName(customer.name),
+    brandName: displayBrand(customer.name, draft),
     whatTheyDo: profile?.industry || null,
     ownDescription: profile?.description || null,
     services: services.map((s, i) => ({ serviceIndex: i, name: s.name, price: s.price || null, ownDescription: draft.services[i]?.description || null })),
@@ -360,8 +411,15 @@ export async function conversation(db, customerId, limit = 30) {
   return results.reverse().map((r) => ({ role: r.role, text: r.text, generationId: r.generation_id, at: r.created_at }))
 }
 
-// One designer turn. Returns { ok, reply, generationId, warnings } or { ok: false, error }. onProgress(chars) streams.
-export async function designTurn(env, customer, message, { by, onProgress, now = Date.now() } = {}) {
+// Texts the validator removed (claims, invented numbers, too long, foreign images/links): what the owner is told about.
+const REMOVALS = new Set(['claim', 'invented_number', 'too_long', 'image', 'link', 'mark'])
+
+// One designer turn: up to TWO model calls. The answer is validated and checked (server/design-checks.js); if a check
+// fails, ONE automatic revision is asked for with the specific problems. A design that still isn't usable is an error
+// (nothing saved, the owner is told), never a generic stand-in presented as the AI's work. Each call is reserved against
+// the owner's monthly limit before it is sent. mode 'different': a fresh design that must move away from the current one
+// (undo still brings the current one back). Returns { ok, reply, generationId, removed, revised } or { ok: false, error }.
+export async function designTurn(env, customer, message, { by, onProgress, now = Date.now(), mode = 'design' } = {}) {
   const text = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 1200)
   if (!text) return { ok: false, httpStatus: 400, error: 'message_required' }
   const cred = await credentialFor(env, customer.id)
@@ -369,39 +427,73 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   const ctx = await designContext(env, customer)
   const history = (await conversation(ctx.db, customer.id, 12)).map((t) => ({ role: t.role, text: t.text }))
   const current = ctx.draft.site || null
+  const different = mode === 'different' && Boolean(current)
   // Claude answers (and revises) in the compact section shape; OpenAI in the standard one.
   const compact = cred.provider === 'anthropic'
-  const prompt = userPrompt(ctx, history, compact ? toCompact(current) : current, text)
-  // The owner's model (or Auto's pick) from their account's catalog; refused before sending if the worst case of this
-  // request would cross their monthly limit.
-  const m = await resolveModel(env, customer.id, cred, { kind: 'designer', input: inputTokensFor(SYSTEM, prompt, JSON.stringify(DESIGN_SCHEMA)) }, now)
-  if (!m.ok) return { ok: false, httpStatus: { budget_reached: 402 }[m.error] || 409, error: m.error }
-  const t0 = Date.now()
+  const shape = (site) => (compact ? toCompact : toStandard)(servicesForModel(site, ctx.services))
+  const away = different ? `\n\nMOVE AWAY FROM the current direction and design something genuinely different: a first screen from a DIFFERENT recipe than the current one, led by a different photo (or type-led), with a new type pairing and palette. Mirroring or recolouring the current design is not different. Current direction: "${current.direction || current.name}"; first screen ${firstScreenSignature(current)}.` : ''
   const call = cred.provider === 'anthropic' ? callClaude : callOpenAI
-  const r = await call(env, cred.apiKey, m.model, prompt, { effort: current ? 'medium' : 'high', onProgress, maxOutput: m.maxOutput })
-  await settleUsage(ctx.db, m.reservation, cred.provider, r)
-  if (!r.ok) {
-    if (r.error === 'invalid_key') await markCredential(env, customer.id, 'invalid', now)
-    // The provider's status and error type/code (identifiers only) are kept on the event so a refusal is diagnosable
-    // without retrying it.
-    await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error, provider: cred.provider, model: m.model, ...(r.detail ? { status: r.detail.status, type: r.detail.type, code: r.detail.code } : {}) } })
-    return { ok: false, httpStatus: { invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
+  const attempts = []
+  let prompt = userPrompt(ctx, history, different ? null : shape(current), text) + away
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // The owner's model (or Auto's pick), refused before sending if this request's worst case would cross their limit.
+    const m = await resolveModel(env, customer.id, cred, { kind: 'designer', input: inputTokensFor(SYSTEM, prompt, JSON.stringify(DESIGN_SCHEMA)) }, now)
+    if (!m.ok) {
+      if (attempt === 0) return { ok: false, httpStatus: { budget_reached: 402 }[m.error] || 409, error: m.error }
+      break // no room for the revision: decide on the first answer
+    }
+    const t0 = Date.now()
+    const r = await call(env, cred.apiKey, m.model, prompt, { effort: current && !different ? 'medium' : 'high', onProgress, maxOutput: m.maxOutput })
+    await settleUsage(ctx.db, m.reservation, cred.provider, r)
+    if (!r.ok) {
+      if (r.error === 'invalid_key') await markCredential(env, customer.id, 'invalid', now)
+      if (attempt > 0) break // the revision failed: decide on the first answer
+      // The provider's status and error type/code (identifiers only) are kept on the event so a refusal is diagnosable
+      // without retrying it.
+      await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error, provider: cred.provider, model: m.model, ...(r.detail ? { status: r.detail.status, type: r.detail.type, code: r.detail.code } : {}) } })
+      return { ok: false, httpStatus: { invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
+    }
+    const answer = fromStrict(compact ? fromCompact(r.raw?.site) : r.raw?.site)
+    const { spec, warnings } = validateSpec(answer, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: ctx.facts?.brandName || customer.name })
+    const report = checkDesign({ raw: answer, spec, warnings, previous: different ? current : null, mode: different ? 'different' : 'design', fresh: !current || different })
+    attempts.push({ r, spec, warnings, report, ms: Date.now() - t0 })
+    if (!report.hard.length && !report.soft.length) break
+    if (attempt === 0) prompt = `${userPrompt(ctx, history, shape(spec), text)}${away}\n\nQUALITY CHECK of your previous answer (it is CURRENT_SITE above). Fix these and return the complete site:\n- ${report.notes.join('\n- ')}`
   }
-  const { spec, warnings } = validateSpec(fromStrict(compact ? fromCompact(r.raw?.site) : r.raw?.site), { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: brandName(customer.name) })
+  const usage = attempts.reduce((u, a) => ({ input: u.input + a.r.usage.input, output: u.output + a.r.usage.output }), { input: 0, output: 0 })
+  const raw = attempts.map((a) => redactRaw(a.r.raw))
+  const usable = attempts.filter((a) => !a.report.hard.length)
+  const chosen = usable.sort((a, b) => a.report.soft.length - b.report.soft.length)[0] || null
+  const generationId = crypto.randomUUID().replaceAll('-', '')
+  const latency = attempts.reduce((n, a) => n + a.ms, 0)
+  if (!chosen) {
+    // Kept for diagnosis only (redacted, purged after 30 days); the draft and the conversation are unchanged.
+    const last = attempts.at(-1)
+    await ctx.db.prepare("INSERT INTO website_generations (id, customer, content, source, model, input_tokens, output_tokens, cost_micros, latency_ms, rejected, created_at) VALUES (?1, ?2, ?3, 'ai', ?4, ?5, ?6, 0, ?7, ?8, ?9)").bind(generationId, customer.id, JSON.stringify({ kind: 'designer_failed', raw, checks: attempts.map((a) => ({ hard: a.report.hard, soft: a.report.soft })) }), last.r.model, usage.input, usage.output, latency, JSON.stringify(last.warnings.slice(0, 50)), now).run()
+    await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: 'ai_design_incomplete', provider: cred.provider, attempts: attempts.length, checks: last.report.hard } })
+    return { ok: false, httpStatus: 502, error: 'ai_design_incomplete' }
+  }
+  const { spec, warnings, report, r } = chosen
   const reply = String(r.raw?.reply || '').replace(/\s+/g, ' ').trim().slice(0, 600) || 'Here is the design.'
   const [errors, content] = validateContent({ ...ctx.draft, site: spec }, ctx.claims, ctx.assetIds)
   if (errors.length) return { ok: false, httpStatus: 502, error: 'ai_invalid_output' }
-  const generationId = crypto.randomUUID().replaceAll('-', '')
   await ctx.db.batch([
     ctx.db
       .prepare("INSERT INTO website_generations (id, customer, content, source, model, input_tokens, output_tokens, cost_micros, latency_ms, rejected, created_at) VALUES (?1, ?2, ?3, 'ai', ?4, ?5, ?6, 0, ?7, ?8, ?9)")
-      .bind(generationId, customer.id, JSON.stringify({ kind: 'designer', site: spec, previous: current, reply }), r.model, r.usage.input, r.usage.output, Date.now() - t0, warnings.length ? JSON.stringify(warnings.slice(0, 50)) : null, now),
+      .bind(generationId, customer.id, JSON.stringify({ kind: 'designer', site: spec, previous: current, reply, raw, checks: { attempts: attempts.length, soft: report.soft, info: report.info } }), r.model, usage.input, usage.output, latency, warnings.length ? JSON.stringify(warnings.slice(0, 50)) : null, now),
     ctx.db.prepare("INSERT INTO website_design_turns (customer, role, text, generation_id, created_at) VALUES (?1, 'owner', ?2, NULL, ?3)").bind(customer.id, text, now),
     ctx.db.prepare("INSERT INTO website_design_turns (customer, role, text, generation_id, created_at) VALUES (?1, 'designer', ?2, ?3, ?4)").bind(customer.id, reply, generationId, now + 1),
   ])
   await saveDraft(ctx.db, customer.id, content, now)
-  await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { revision: Boolean(current), removed: warnings.length, pages: spec.pages.length } })
-  return { ok: true, reply, generationId, warnings, usage: r.usage, model: r.model }
+  const removed = warnings.filter((w) => REMOVALS.has(w.reason)).length
+  await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { revision: Boolean(current) && !different, different, attempts: attempts.length, soft: report.soft, removed, pages: spec.pages.length } })
+  return { ok: true, reply, generationId, warnings, removed, revised: attempts.length > 1, usage, model: r.model }
+}
+
+// Retention: the private copies of raw model answers are removed after RAW_RETENTION_DAYS (cron). Called with `now`.
+export async function purgeDesignerRaw(db, now = Date.now(), days = 30) {
+  const r = await db.prepare("UPDATE website_generations SET content = json_remove(content, '$.raw') WHERE created_at < ?1 AND json_type(content, '$.raw') IS NOT NULL").bind(now - days * 86_400_000).run()
+  return r?.meta?.changes ?? 0
 }
 
 // Undo: put back the draft design from before a turn.

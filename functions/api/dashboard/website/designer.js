@@ -3,6 +3,7 @@
 //   POST { action: 'message', message }        one design turn, streamed as NDJSON:
 //                                               {"type":"progress","chars":n}… then {"type":"done",reply,generationId,removed}
 //                                               or {"type":"error","error"}. The result is the PRIVATE draft (never live).
+//        { action: 'different' }               the same, but a fresh design in a genuinely different direction
 //        { action: 'undo', generationId }      put back the design from before that turn
 // Owner session, same-origin, the business's own AI key, rate limits and the daily AI allowance (runaway guard).
 import { json } from '../../../../server/google-oauth.js'
@@ -21,7 +22,7 @@ export async function onRequestGet({ request, env }) {
   if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   try {
     const [turns, key, website] = await Promise.all([conversation(env.ONBOARDING_DB, session.customer.id), credentialView(env, session.customer.id).catch(() => null), loadWebsite(env.ONBOARDING_DB, session.customer)])
-    return json(200, { turns, key, hasSite: Boolean(website.draft.site) })
+    return json(200, { turns, key, hasSite: Boolean(website.draft.site), direction: website.draft.site?.direction || '' })
   } catch (err) {
     console.error('designer load failed:', err?.name)
     return json(503, { error: 'storage_error' })
@@ -39,11 +40,13 @@ export async function onRequestPost({ request, env }) {
     const r = await undoTurn(env, customer, body.generationId).catch(() => ({ ok: false, httpStatus: 503, error: 'storage_error' }))
     return r.ok ? json(200, { ok: true }) : json(r.httpStatus, { error: r.error })
   }
-  if (body?.action !== 'message') return json(400, { error: 'invalid_request' })
+  // 'different': a fresh design that must move away from the current one (counts as a new design, not a change).
+  if (body?.action !== 'message' && body?.action !== 'different') return json(400, { error: 'invalid_request' })
   const rl = await hit(env, 'websiteAi', customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const website = await loadWebsite(env.ONBOARDING_DB, customer)
-  const kind = website.draft.site ? 'revision' : 'generation'
+  const different = body.action === 'different' && Boolean(website.draft.site)
+  const kind = website.draft.site && !different ? 'revision' : 'generation'
   const usage = await aiUsage(env, customer, session.email)
   if (usage[kind].remaining <= 0) return json(429, { error: 'daily_limit', kind, limit: usage[kind].limit, resetsAt: usage.resetsAt })
 
@@ -56,8 +59,9 @@ export async function onRequestPost({ request, env }) {
   const heartbeat = setInterval(() => send({ type: 'progress', chars: last }), 10000)
   const work = (async () => {
     try {
-      const r = await designTurn(env, customer, body.message, {
+      const r = await designTurn(env, customer, different ? 'Show me a different direction' : body.message, {
         by: session.email,
+        mode: different ? 'different' : 'design',
         onProgress: (chars) => {
           if (chars - last >= 400 || chars === 0) {
             last = chars
@@ -67,7 +71,7 @@ export async function onRequestPost({ request, env }) {
       })
       if (r.ok) {
         await recordAiUse(env.ONBOARDING_DB, customer.id, kind)
-        await send({ type: 'done', reply: r.reply, generationId: r.generationId, removed: r.warnings.length })
+        await send({ type: 'done', reply: r.reply, generationId: r.generationId, removed: r.removed, revised: r.revised })
       } else await send({ type: 'error', error: r.error })
     } catch (err) {
       console.error('designer turn failed:', err?.name)

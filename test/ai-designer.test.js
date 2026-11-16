@@ -126,10 +126,12 @@ beforeEach(() => {
     if (u.hostname === 'api.anthropic.com' && u.pathname === '/v1/messages') {
       const body = await req.clone().json()
       requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key'), beta: req.headers.get('anthropic-beta') })
-      if (nextDesign instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
-      if (nextDesign?.httpError) return Response.json({ type: 'error', error: { type: nextDesign.httpError.type, message: 'mock' } }, { status: nextDesign.httpError.status })
+      // nextDesign may be a queue (array): one answer per request, the last one repeats.
+      const nd = Array.isArray(nextDesign) ? (nextDesign.length > 1 ? nextDesign.shift() : nextDesign[0]) : nextDesign
+      if (nd instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
+      if (nd?.httpError) return Response.json({ type: 'error', error: { type: nd.httpError.type, message: 'mock' } }, { status: nd.httpError.status })
       // Claude answers in the compact section shape. (The mock's message_start always names claude-opus-5-5.)
-      return new Response(sse(nextDesign.refusal ? '' : JSON.stringify({ ...nextDesign, site: toCompact(nextDesign.site) }), { stop: nextDesign.refusal ? 'refusal' : 'end_turn' }), { headers: { 'content-type': 'text/event-stream' } })
+      return new Response(sse(nd.refusal ? '' : JSON.stringify({ ...nd, site: nd.rawSite || toCompact(nd.site) }), { stop: nd.refusal ? 'refusal' : 'end_turn' }), { headers: { 'content-type': 'text/event-stream' } })
     }
     if (u.hostname === 'api.openai.com' && u.pathname === '/v1/chat/completions') {
       const body = await req.clone().json()
@@ -377,6 +379,109 @@ test('regression (owner decision 2026-11-16): no hidden model substitution or un
   assert.deepEqual((await call(website, 'GET', { cookie: c })).json.website.draft, before)
 })
 
+// A model answer whose first screen was left to the default layout (raw compact shape, as Claude would send it).
+const genericAnswer = (reply = 'Generic design.') => {
+  const raw = toCompact(DESIGN())
+  raw.pages[0].sections[0] = { ...raw.pages[0].sections[0], layout: '' }
+  return { reply, rawSite: raw }
+}
+const thinAnswer = () => ({ reply: 'Thin.', rawSite: { name: 'Thin', theme: DESIGN().theme, nav: DESIGN().nav, footer: DESIGN().footer, pages: [{ slug: '', navLabel: 'Home', seoTitle: '', seoDescription: '', sections: [toCompact({ pages: [{ sections: [{ type: 'area', id: 'area', heading: 'Where we work' }] }] }).pages[0].sections[0]] }] } })
+const POSTER = () => DESIGN({ name: 'Poster', direction: 'Loud typographic poster', theme: { ...DESIGN().theme, headingFont: 'bricolage-grotesque', colors: { ...DESIGN().theme.colors, bg: '#ffffff' } }, pages: [{ slug: '', navLabel: 'Home', seoTitle: 'Pools', seoDescription: 'Pools', sections: [
+  { type: 'composition', id: 'top', height: 'screen', blocks: [{ kind: 'heading', text: 'Pools, handled.', size: 'display', col: [1, 10], row: [1, 1] }, { kind: 'button', label: 'Book a visit', target: 'book', col: [1, 4], row: [2, 1] }] },
+  { type: 'area', id: 'area', heading: 'Where we work' },
+] }] })
+
+test('quality check: a generic first answer gets exactly ONE automatic revision with the problems; the revision is saved; raw answers kept redacted', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  nextDesign = [genericAnswer('Generic. Write to owner@pools.example or call (843) 555-0142.'), { reply: 'A deliberate coastal design.', site: DESIGN() }]
+  const done = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+  assert.deepEqual([done.type, done.revised, done.reply], ['done', true, 'A deliberate coastal design.'])
+  assert.equal(requests.length, 2, 'one automatic revision')
+  assert.match(requests[1].body.messages[0].content, /QUALITY CHECK of your previous answer[\s\S]*first screen was left to the default layout/)
+  assert.match(requests[1].body.messages[0].content, /CURRENT_SITE \(the design to revise\)/)
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.site.pages[0].sections[0].layout, 'overlay')
+  assert.deepEqual(db.sql.prepare('SELECT state FROM ai_key_usage').all().map((r) => r.state), ['settled', 'settled'], 'both calls reserved and settled')
+  const g = JSON.parse(db.sql.prepare("SELECT content FROM website_generations WHERE json_extract(content, '$.kind') = 'designer'").get().content)
+  assert.equal(g.raw.length, 2)
+  assert.doesNotMatch(g.raw.join(''), /owner@pools\.example|555-0142/, 'contact details redacted')
+  assert.match(g.raw[0], /\[email\]/)
+  assert.equal(g.checks.attempts, 2)
+})
+
+test('never more than one automatic revision: a second generic answer is saved (soft), no third call', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  nextDesign = [genericAnswer(), genericAnswer('Still generic.')]
+  const done = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+  assert.equal(done.type, 'done')
+  assert.equal(requests.length, 2)
+  assert.ok((await call(website, 'GET', { cookie: c })).json.website.draft.site)
+})
+
+test('an unusable design is an error, not a generic stand-in: nothing saved, the owner is told, raw kept for diagnosis', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  const before = (await call(website, 'GET', { cookie: c })).json.website.draft
+  nextDesign = [thinAnswer(), thinAnswer()]
+  const r = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+  assert.deepEqual([r.type, r.error], ['error', 'ai_design_incomplete'])
+  assert.equal(requests.length, 2)
+  assert.deepEqual((await call(website, 'GET', { cookie: c })).json.website.draft, before, 'the draft is unchanged')
+  assert.deepEqual((await call(designer, 'GET', { cookie: c })).json.turns, [], 'nothing added to the conversation')
+  const g = JSON.parse(db.sql.prepare('SELECT content FROM website_generations').get().content)
+  assert.equal(g.kind, 'designer_failed')
+  assert.equal(g.raw.length, 2)
+  assert.deepEqual(g.checks.at(-1).hard.sort(), ['first_screen_missing', 'too_few_sections'])
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM ai_key_usage WHERE state = 'settled'").get().n, 2, 'both calls billed as reported')
+})
+
+test('show me a different direction: a fresh design that must move away from the current one; undo brings the current one back', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.site.name, 'Lowcountry Blue')
+  // The first "different" answer is the same direction again → one revision → a genuinely different one is saved.
+  nextDesign = [{ reply: 'Same again.', site: DESIGN() }, { reply: 'A loud typographic poster.', site: POSTER() }]
+  const done = events((await call(designer, 'POST', { cookie: c, body: { action: 'different' } })).text).at(-1)
+  assert.deepEqual([done.type, done.revised], ['done', true])
+  const first = requests[1].body.messages[0].content
+  assert.match(first, /MOVE AWAY FROM the current direction/)
+  assert.doesNotMatch(first, /CURRENT_SITE/, 'a fresh design, not a revision of the current one')
+  assert.match(requests[2].body.messages[0].content, /meant to be a different direction/)
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual([draft.site.name, draft.site.pages[0].sections[0].type, draft.site.direction], ['Loud typographic poster', 'composition', 'Loud typographic poster'])
+  const g = (await call(designer, 'GET', { cookie: c })).json
+  assert.equal(g.direction, 'Loud typographic poster')
+  assert.deepEqual(g.turns.map((t) => t.text).slice(-2), ['Show me a different direction', 'A loud typographic poster.'])
+  // Undo → the previous design.
+  assert.equal((await call(designer, 'POST', { cookie: c, body: { action: 'undo', generationId: done.generationId } })).status, 200)
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.site.name, 'Lowcountry Blue')
+})
+
+test('the owner is told only about real removals (claims, numbers, foreign images), not about repaired choices', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  const d = DESIGN()
+  d.theme = { ...d.theme, density: 'spacious' }
+  d.pages[0].sections[1] = { ...d.pages[0].sections[1], background: 'plaid' }
+  nextDesign = { reply: 'Design.', site: d }
+  const done = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+  assert.equal(done.type, 'done')
+  assert.equal(done.removed, 1, 'only the invented "5 stars by 200 customers" text; the two invalid choices are not "removed items"')
+})
+
+test('retention: private copies of raw AI answers are removed after 30 days; everything else stays', async () => {
+  const { purgeDesignerRaw } = await import('../server/ai-designer.js')
+  const now = Date.now()
+  const ins = db.sql.prepare("INSERT INTO website_generations (id, customer, content, source, cost_micros, created_at) VALUES (?, 'pools', ?, 'ai', 0, ?)")
+  ins.run('o'.repeat(32), JSON.stringify({ kind: 'designer', site: { name: 'Old' }, raw: ['{}'] }), now - 31 * DAY)
+  ins.run('n'.repeat(32), JSON.stringify({ kind: 'designer', site: { name: 'New' }, raw: ['{}'] }), now - 2 * DAY)
+  await purgeDesignerRaw(db, now) // (this test adapter does not report D1 change counts; the rows below are the check)
+  const rows = Object.fromEntries(db.sql.prepare('SELECT id, content FROM website_generations').all().map((r) => [r.id[0], JSON.parse(r.content)]))
+  assert.deepEqual([rows.o.raw, rows.o.site.name, rows.n.raw], [undefined, 'Old', ['{}']])
+})
+
 test('regression (customer journey 2026-11-16): an older template/AI-writer version can never replace an AI-designed draft', async () => {
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')
@@ -554,11 +659,13 @@ test('regression (live test 2026-11-15): full-width sections keep their backgrou
   assert.match(css, /\.l-overlay \.hero-bg\{position:absolute;inset:0\}/)
 })
 
-test('option B: Claude gets the compact section shape (13 fields, within limits); OpenAI keeps the standard one', async () => {
+test('option B: Claude gets the compact section shape (13 fields: composition blocks ride in items, the design idea in name; live grammar limit); OpenAI keeps the standard one', async () => {
   assert.deepEqual(anthropicSchemaProblems(COMPACT_DESIGN_SCHEMA), [])
   const sec = (sch) => sch.properties.site.properties.pages.items.properties.sections.items.properties
   assert.deepEqual(Object.keys(sec(COMPACT_DESIGN_SCHEMA)), ['type', 'id', 'style', 'eyebrow', 'heading', 'text', 'body', 'layout', 'images', 'imageAlt', 'options', 'buttons', 'items'])
-  assert.equal(Object.keys(sec(DESIGN_SCHEMA)).length, 28)
+  assert.ok(!('direction' in COMPACT_DESIGN_SCHEMA.properties.site.properties), 'the compact schema keeps the size Anthropic compiled live')
+  assert.ok('direction' in DESIGN_SCHEMA.properties.site.properties)
+  assert.equal(Object.keys(sec(DESIGN_SCHEMA)).length, 29)
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')
   await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
@@ -678,4 +785,128 @@ test('designer: billing problems and provider refusals are classified, recorded 
   r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
   assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'provider_billing' })
   assert.equal(requests.length, 3, 'one request per attempt')
+})
+
+// ---- Stable service ids (2026-11-16): the AI design describes each service by id, never by list position. ----
+const ONE = 'A single visit to refresh your pool.'
+const WEEKLY = 'Weekly skimming, brushing and balancing.'
+const WINTER = 'Closing your pool for winter.'
+const describedDesign = () => {
+  const d = DESIGN()
+  d.pages[1].sections[0].items = [{ serviceIndex: 0, text: ONE }, { serviceIndex: 1, text: WEEKLY }, { serviceIndex: 2, text: WINTER }]
+  return d
+}
+// Each service as the AI-designed site shows it: [name, the description the design gives it], in the design's order.
+const shown = (draft) =>
+  draft.site.pages
+    .flatMap((p) => p.sections.filter((s) => s.type === 'services'))
+    .flatMap((s) => s.items)
+    .map((it) => [draft.services.find((v) => v.id === it.serviceId)?.name, it.text])
+const servicesHtml = (draft) => renderV2({ id: 'pools', name: 'Pools', cities: [], phone: '', services: draft.services }, draft.site, { page: 'services', bookUrl: '/book/pools', year: 2026 })
+
+test('services keep their own AI descriptions when the owner deletes (first, middle), adds or reorders services: save + reload', async () => {
+  const { servicesForModel } = await import('../server/ai-designer.js')
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  nextDesign = { reply: 'Design.', site: describedDesign() }
+  assert.equal(events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1).type, 'done')
+  const load = async () => (await call(website, 'GET', { cookie: c })).json.website.draft
+  const save = async (content) => assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content } })).status, 200)
+
+  let draft = await load()
+  assert.ok(draft.services.every((s) => /^[a-z][a-z0-9]{1,23}$/.test(s.id)), 'every service of an AI-designed draft has an id')
+  assert.ok(draft.site.pages[1].sections[0].items.every((it) => typeof it.serviceId === 'string' && !('serviceIndex' in it)), 'the design refers to services by id only')
+  assert.deepEqual(shown(draft), [['One Time Service', ONE], ['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  const ids = Object.fromEntries(draft.services.map((s) => [s.name, s.id]))
+
+  // Delete the FIRST service.
+  await save({ ...draft, services: draft.services.slice(1) })
+  draft = await load()
+  assert.deepEqual(shown(draft), [['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.match(servicesHtml(draft), /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+  assert.doesNotMatch(servicesHtml(draft), /A single visit to refresh your pool/, 'the deleted service\'s description is gone, not moved')
+
+  // ADD a service at the top and REORDER the other two.
+  await save({ ...draft, services: [{ name: 'Green Pool Rescue', price: '$400+', description: '' }, draft.services[1], draft.services[0]] })
+  draft = await load()
+  assert.deepEqual(draft.services.map((s) => s.name), ['Green Pool Rescue', 'Pool Winterization', 'Weekly Pool Care'])
+  assert.deepEqual(new Map(shown(draft)), new Map([['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER], ['Green Pool Rescue', '']]))
+  assert.deepEqual([draft.services[2].id, draft.services[1].id], [ids['Weekly Pool Care'], ids['Pool Winterization']], 'ids survive reordering')
+  assert.ok(!Object.values(ids).includes(draft.services[0].id), 'a new service never takes an old id')
+
+  // A page that sends services back without ids (opened before ids existed) still keeps each description.
+  const stale = { ...draft, services: draft.services.map(({ id: _id, ...s }) => s), site: servicesForModel(draft.site, draft.services) }
+  await save(stale)
+  const again = await load()
+  assert.deepEqual(again.services.map((s) => s.id), draft.services.map((s) => s.id), 'ids inherited by name')
+  assert.deepEqual(shown(again), shown(draft))
+
+  // Delete the MIDDLE service (Pool Winterization is in the middle now).
+  draft = again
+  await save({ ...draft, services: [draft.services[0], draft.services[2]] })
+  draft = await load()
+  assert.deepEqual(new Map(shown(draft)), new Map([['Green Pool Rescue', ''], ['Weekly Pool Care', WEEKLY]]))
+  assert.match(servicesHtml(draft), /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+  assert.doesNotMatch(servicesHtml(draft), /Closing your pool for winter/)
+
+  // Reload is stable (nothing changes by reading), and the model is shown positions in the CURRENT list, never ids.
+  assert.equal(JSON.stringify(await load()), JSON.stringify(draft))
+  nextDesign = { reply: 'Warmer.', site: describedDesign() }
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it warmer' } })
+  const prompt = requests.at(-1).body.messages[0].content
+  const current = prompt.slice(prompt.indexOf('CURRENT_SITE'))
+  assert.doesNotMatch(current, /serviceId/)
+  assert.match(current, new RegExp(`"serviceIndex":\\s*1,[^}]*${WEEKLY.slice(0, 20)}`), 'Weekly Pool Care is position 1 in the list the model sees')
+})
+
+test('designs saved before service ids: read with the right descriptions, upgraded the same way every time, saved right from an old page', async () => {
+  const c = await cookieFor('owner@pools.example')
+  // As stored before this change: services without ids, the design referring to them by position.
+  const legacySite = validateSpec(describedDesign(), { assetIds: new Set(), services: SERVICES, claims: [] }).spec
+  assert.deepEqual(legacySite.pages[1].sections[0].items.map((x) => x.serviceIndex), [0, 1, 2])
+  const stored = JSON.parse(db.sql.prepare("SELECT draft FROM websites WHERE customer = 'pools'").get().draft)
+  const legacy = { ...stored, services: SERVICES.map((s) => ({ ...s, description: '' })), site: legacySite }
+  db.sql.prepare("UPDATE websites SET draft = ?, live_version = 1, published_at = 1 WHERE customer = 'pools'").run(JSON.stringify(legacy))
+  db.sql.prepare("INSERT INTO website_versions (customer, version, content, created_at) VALUES ('pools', 1, ?, 1)").run(JSON.stringify(legacy))
+
+  const first = (await call(website, 'GET', { cookie: c })).json.website
+  const second = (await call(website, 'GET', { cookie: c })).json.website
+  assert.equal(JSON.stringify(first.draft), JSON.stringify(second.draft), 'deterministic: the same ids on every read')
+  assert.deepEqual(first.draft.services.map((s) => s.id), ['s1', 's2', 's3'])
+  assert.deepEqual(shown(first.draft), [['One Time Service', ONE], ['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.equal(first.changed, false, 'draft and live version still compare equal')
+  assert.equal(JSON.parse(db.sql.prepare("SELECT draft FROM websites WHERE customer = 'pools'").get().draft).services[0].id, undefined, 'reading never rewrites the stored draft')
+
+  // The published (pre-id) version renders each service with its own description.
+  const live = await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })
+  assert.equal(live.status, 200)
+  assert.match(live.text, /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+
+  // A page still holding the pre-id draft deletes the first service: positions are read against the saved list.
+  await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...legacy, services: legacy.services.slice(1) } } })
+  const after = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual(shown(after), [['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.deepEqual(after.services.map((s) => s.id), ['s2', 's3'], 'the ids from the upgrade are kept')
+})
+
+test('service ids exist only on AI-designed content; the model works with positions, its answer is stored by id', async () => {
+  const { validateContent } = await import('../server/website.js')
+  const { servicesForModel } = await import('../server/ai-designer.js')
+  // Content without an AI design keeps its exact shape (nothing changes outside the pilot).
+  const [, plain] = validateContent({ headline: 'Pool care', intro: 'Weekly pool care.', services: [{ id: 'abc', name: 'Weekly Pool Care', price: '$280+' }] })
+  assert.deepEqual(plain.services, [{ name: 'Weekly Pool Care', price: '$280+', description: '' }])
+  // The current design → positions in the current list for the prompt; an answer by position → ids again.
+  const services = [{ id: 's1', name: 'One Time Service', price: '' }, { id: 'vq2', name: 'Weekly Pool Care', price: '' }]
+  const site = { pages: [{ slug: '', sections: [{ type: 'services', items: [{ serviceId: 'vq2', text: 'weekly' }, { serviceId: 's1', text: 'once' }] }] }] }
+  assert.deepEqual(servicesForModel(site, services).pages[0].sections[0].items.map((x) => [x.serviceIndex, x.text, 'serviceId' in x]), [[1, 'weekly', false], [0, 'once', false]])
+  const { spec } = validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceIndex: 1, text: 'weekly' }] }] }] }, { assetIds: new Set(), services, claims: [] })
+  assert.deepEqual(spec.pages[0].sections[1].items.map((x) => [x.serviceId, x.text]), [['vq2', 'weekly'], ['s1', '']])
+  // An import that replaces the list (no ids, new order, one service gone): same-named services keep id and description.
+  const designedSite = { pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceId: 's1', text: 'once' }, { serviceId: 'vq2', text: 'weekly' }] }] }] }
+  const [, imported] = validateContent({ headline: 'Pool care', intro: 'Weekly pool care.', services: [{ name: 'Pool Winterization', price: '$350+' }, { name: 'weekly pool care', price: '$290+' }], site: designedSite }, [], null, { prior: services })
+  assert.deepEqual(imported.services.map((s) => [s.name, s.id === 'vq2']), [['Pool Winterization', false], ['weekly pool care', true]])
+  assert.deepEqual(imported.site.pages[0].sections[1].items.map((x) => [imported.services.find((s) => s.id === x.serviceId).name, x.text]), [['weekly pool care', 'weekly'], ['Pool Winterization', '']])
+  // A reference to a service that no longer exists is dropped, never re-pointed.
+  const gone = validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceId: 'zz9', text: 'old' }] }] }] }, { assetIds: new Set(), services, claims: [] }).spec
+  assert.deepEqual(gone.pages[0].sections[1].items.map((x) => [x.serviceId, x.text]), [['s1', ''], ['vq2', '']])
 })

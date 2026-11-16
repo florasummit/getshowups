@@ -48,8 +48,17 @@ test('owner designs the website in conversation: first design, revision, undo @m
   await card.getByRole('button', { name: 'Send' }).click()
   await expect(card.getByText('Darker and more premium, with a serif headline.').last()).toBeVisible({ timeout: 30_000 })
   await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Quietly perfect pools.')
-  // Undo the last change.
+  await expect(card.getByText('Design idea:')).toBeVisible()
+  // A genuinely different direction: a typographic composition as the first screen, the Book button still in view.
+  await card.getByRole('button', { name: 'Show me a different direction' }).click()
+  await expect(card.getByText('A bold typographic direction.').last()).toBeVisible({ timeout: 30_000 })
+  await expect(card.getByText('Bold typographic poster: the headline is the hero')).toBeVisible()
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Pool care, booked in a minute.')
+  await expect(frame.locator('section.comp')).toHaveCount(1)
+  await expect(frame.getByRole('link', { name: 'Book a visit' }).first()).toBeVisible()
+  // Undo the last change → the previous design is back.
   await card.getByRole('button', { name: 'Undo this change' }).click()
   await expect(card.getByText('Undone: the previous design is back.').last()).toBeVisible()
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Quietly perfect pools.')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })

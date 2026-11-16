@@ -139,7 +139,10 @@ export async function onRequestPost({ request, env }) {
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'save' || action === 'publish') {
-      const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
+      // `prior`: the saved services, so an AI-designed site keeps each service's id (and its description) whatever the
+      // page sends back (server/website.js assignServiceIds).
+      const prior = (await loadWebsite(db, customer)).draft.services
+      const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       if (action === 'save') {
         await saveDraft(db, customer.id, content)

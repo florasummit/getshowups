@@ -2,6 +2,111 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: stable service ids in AI-designed sites (2026-11-16) — PR #43; no paid calls; draft, NOT merged
+
+- Defect (on main since the pilot, found in the release review): the AI design pointed at services by list position, so
+  deleting the first service showed "Weekly Pool Care" with the one-time service's description. Now the design refers
+  to `content.services[].id` (AI-designed content only; content without an AI design keeps its exact shape).
+- Ids: kept if valid and unique; else inherited from the saved service with the same name (`prior`: save route, import
+  apply), so a page or import that drops ids keeps descriptions; else a new random id (never a position, never reused).
+- Backward compatible, no migration: drafts and versions saved before ids are upgraded at READ time, deterministically
+  (s1, s2, … against the same stored list their positions were written for), so they show the right descriptions,
+  compare equal draft vs live, and are never rewritten by reading. A pre-id page saving positions is read against the
+  saved list. The model still sees positions in FACTS.services (servicesForModel converts at that edge only).
+- Other positional references checked: photos (asset/stock ids), links (section ids, page slugs), redirects (paths) are
+  already stable. Remaining best effort: an undo stored BEFORE this change resolves positions against today's list.
+- Tests: delete first + middle, add, reorder, a page without ids, save + reload, pre-id draft + published version,
+  model positions ↔ stored ids, import by name, dangling id dropped. The 3 new tests fail on the old code.
+
+- Cap: actual settled spend in this test + the next request's worst case ≤ $0.50, checked before every request (the
+  product's own limit can't express a combined $0.50: $1 minimum, per provider). GPT ran first ($0.057 + $0.059 =
+  $0.116, revision included), then Claude ($0.068, no revision needed). Nothing blocked.
+- `same_lead` triggered LIVE on GPT: its first answer kept "Less upkeep. More pool time."; the revision request carried
+  the note and the saved design has a new headline ("Good days start with water."), lead photo, structure (one wide photo,
+  words inside), fonts (Syne/Inter) and palette (graphite/mint); no soft issues left. Claude's answer was different on
+  its own (collage, "Charleston pools, kept crystal clear", Syne/Inter, cobalt), so nothing triggered.
+- `buried_photo` did NOT trigger live (neither answer layered a card over most of a photo): untested live; covered by the
+  unit test built from GPT's earlier live layout.
+- Visual inspection found one more renderer defect, fixed + regression test: a solid button in a dark ("ink") section
+  took the section's light text colour (`.bg-ink a{color:inherit}` outranks `.btn`), so GPT's mint Book button read
+  white-on-mint. Now `.bg-ink .btn:not(.ghost)` keeps the button's own label colour.
+- Comparison sheet (full pages, desktop + phone, before/after per provider): scratchpad validation2/final-compare.png.
+- Unit 474/474, browser 79/79.
+
+## Website Studio: live re-validation for PR #43 (2026-11-16) — both providers pass; $0.497 spent; draft, NOT merged
+
+- Claude compatibility call (approved, $0.40 cap, enforced in the harness as a worst-case-before-send guard): passed,
+  1 request, $0.077. The compact 58-property schema compiles; the composition came back valid with no check issues.
+  That call is Claude's turn 1 (same brief), counted inside Claude's $2.50 product limit.
+- Three turns per provider (design → different direction → owner change request), approved $5 combined:
+  Claude Sonnet 5.5 $0.077 + $0.153 (1 revision) + $0.062 = $0.292; GPT-6.1 Sol $0.051 + $0.095 (1 revision) + $0.059 =
+  $0.205. Total $0.497. Every turn produced a valid design; no provider/schema errors.
+- Both models now use the composition system: Claude type poster → full-bleed photo with the headline inside; GPT type
+  poster with a large mark → three-photo collage with an overlapping headline card. Brand "PoolThru" everywhere.
+- Visual inspection found renderer defects (fixed, regression tests): a full-width photo under words kept its 21:9
+  proportion as a grid item (grew past the page edge as type grew; sat inside the margins on a dark band) → now a
+  backdrop (design-blocks.js compositionRoles) that fills the section/content area; a photo beside a stack spread its
+  extra height between rows (button far below its text) → two flexible spacer rows centre the stack; on phones photo
+  boxes took their width from their height and overflowed the screen (GPT's page measured 10,003px, now 5,342px) →
+  width:100%; footer "PoolThru: pool cleaning…" lost the brand but started lower-case, and "PoolThru. Pool care…"
+  repeated it → fixed. The balance estimator follows the same roles; a ragged text stack is no longer a "hole".
+- New soft checks (one revision): `buried_photo` (a photo mostly hidden under a layered card — GPT's revision left a
+  sliver) and `same_lead` ("different" kept the previous headline or lead photo — GPT kept "Less upkeep. More pool time."
+  and the hat photo). Both were applied to the saved live outputs offline, not yet with a live call.
+- Remaining weaknesses: GPT leads with the same owner photo it likes best; below-the-fold sections are still mostly
+  preset patterns (services rows, steps, area chips, CTA band); the collage's paragraph and button sit below a 900px
+  desktop first screen (the nav Book stays visible); the poster's large top padding.
+- Unit 473/473, browser 79/79, lint/build/Functions clean. Next: owner review of the screenshots; optional one more paid
+  "different direction" turn per provider to see `same_lead`/`buried_photo` trigger their revision live.
+
+## Website Studio: design quality pass for PR #43 (2026-11-16) — paid re-validation BLOCKED (Keychain), $0 spent
+
+- Root cause of generic AI first screens: the prompt described composition options abstractly and nothing pushed back
+  on the safe split. Now: four FIRST-SCREEN RECIPES in the exact token form (server/design-blocks.js RECIPES: editorial
+  overlap, immersive full-bleed, type poster, collage; each validated + rendered by test/design-recipes.test.js and
+  inspected visually with PoolThru's photos), craft rules (alignment, rows ending together, photo choice, a different
+  direction leads with a different photo), and a soft check `conventional_first_screen` (new designs only, never owner
+  revisions) that asks for the one revision.
+- Balance check (server/design-checks.js layoutComposition/compositionBalance): estimated desktop layout → mostly_empty,
+  empty_band (≥3 columns), misaligned (stacked edges off by one column; layered cards exempt). Showcases pass; the live
+  GPT signature section is flagged. Soft → one revision.
+- Brand: AI-designed sites show displayBrand() (legal suffix removed, the owner's own spelling from their reviewed text:
+  "PoolThru"); footer names it once. Legacy renderers unchanged.
+- Claude compatibility call (approved, $0.40 cap) NOT made: reading the key from Keychain timed out twice (an access
+  prompt on the Mac waiting for Allow). No request sent. Next: owner clicks Allow, then the compatibility call, then
+  the three-turn validation for both providers.
+- Unit 470/470, browser 79/79.
+
+- Claude Sonnet 5.5: STOPPED at turn 1. Anthropic refused the schema ("compiled grammar is too large"; $0, request
+  req_011Ch64roW2E444i4ZRqLVbx). Fixed: Claude's compact schema is back to main's 58 properties (the size that compiled
+  live): composition blocks ride in `items` (title = kind + place/look tokens), the design idea in `name`. NOT re-verified
+  live (stop rule); needs one approved Claude call before merge.
+- GPT-6.1 Sol: 3/3 turns ok, no revisions, $0.0437 + $0.0466 + $0.0568 = $0.147. Found and fixed: "size display" tokens
+  reported invalid (now accepted); a 184-char design idea was dropped (now shortened); the "different" design was the
+  first one mirrored with a serif (check now compares first-screen structure, so it would get the one revision).
+- Visual verdict: clean, legible, booking prominent on phones, but generic: all three first screens are photo + headline
+  side by side; the model used none of the overlap/scale/mark/treatment controls; below the fold is presets; the brand
+  shows as "Poolthru LLC" (record name), footer repeats it. Not "professionally art-directed" yet.
+- Centered nav fixed (logo centred, Book right, links below; phones: logo left, Book right) + regression test.
+- Unit 466/466, browser 79/79. Next: owner review; prompt work for bolder compositions needs another paid run.
+
+## Website Studio: composition section + design quality (2026-11-16) — draft PR, NOT merged; no paid calls
+
+- PR #42 (hero/nav/phone headlines) merged and deployed (f8239b2, 05:02 UTC): PoolThru's live page hash unchanged,
+  booking 160 slots.
+- New: `composition` section type in v2 (server/site-spec.js + site-render-v2.js, string renderer kept): ≤10 blocks on a
+  12-column grid; phone layout derived; readable overlaps; CSS from validated values only, sent only when used.
+- Generic fallbacks: invalid choices and empty blocks are reported; server/design-checks.js decides (hard → one revision
+  → error `ai_design_incomplete`, nothing saved; soft → one revision → saved). Raw answers redacted, kept 30 days.
+- Art direction (`direction`), prompt guidance for compositions and phone order, "Show me a different direction".
+- Fixes: CTA card on an accent background now readable; nav Book button ≥44px.
+- Evidence: three directions with identical PoolThru info + photos (test/fixtures/design-directions.js) differ on
+  desktop and phone, incl. as neutral wireframes; responsive checks pass at 320/390/768/1024/1440; saved AI designs
+  render with identical page bodies (CSS: only the two fixes). Bundle +25 KB (+1.1%).
+- Found by the browser test: the Claude path converted twice and dropped composition buttons silently; fixed
+  (idempotent parsing, empty blocks reported) with a regression test.
+- Unit 463/463, browser 79/79. Next: paid validation (approval) — Anthropic grammar size + real AI compositions.
+
 ## AI-designed sites: hero height, nav and phone headline fixes (2026-11-16) — draft, NOT merged
 
 - Production pilot design (GPT-6.1 Sol): hero 1,054px tall on a 900px screen, 353px empty above the copy, headline at
