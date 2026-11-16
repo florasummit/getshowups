@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio customer-journey validation (2026-11-16) — #38 → #40, draft, NOT merged; no paid calls
+
+- Walked the whole PoolThru journey in a real browser, UI only, on a local build (throwaway DB; local stand-ins for
+  Google sign-in/Calendar and for Claude, which replays Claude Sonnet 5.5's real saved PoolThru designs): sign in →
+  Website → connect key → design → desktop/phone preview → revision → publish (local /p/poolthru-llc) → a customer books
+  from the site's "Book a visit" on a phone → the owner sees it under Appointments. All steps work after the fixes.
+- Found and fixed:
+  - Auto dead end (#38, migration 0022 seed, unapplied): no model was 'tested', so a new owner's first request on the
+    default Auto was refused. claude-sonnet-5-5 and gpt-6.1-sol (verified live 2026-11-15) are now 'tested'.
+  - Data loss: the older "Create with AI" tools (Describe a change / three new designs / standard designs) build drafts
+    without the AI design; keeping one silently dropped it. Hidden for AI-designed drafts, and the server refuses such an
+    apply (409 designed_site, e.g. from an old tab). Regression test.
+  - Dead controls on AI-designed drafts: style, colours, logo and Google fields saved but changed nothing. Hidden, with
+    a note on what the remaining fields do (services/prices show directly; the rest is what the designer writes from).
+  - The applied import kept its full review ("Use this in my draft") → one-line summary with "Review again".
+  - Duplicate key panel ("Your own AI key") removed: the designer card holds key, model and limit.
+  - Two identical "Publish website" buttons while confirming → one, plus "Not yet". Designer chips were Title Cased.
+- Website tab after a design: 3,802 px (was 5,737). Unit 444/444, browser 79/79 (designer + import specs updated).
+- Not changed (noted): the older "N of 40 AI changes left today" allowance also counts designer turns but is now only
+  shown before an AI design; business name shows as "Poolthru LLC" (owner can rename in Settings).
+
 ## Live A/B test diagnosis (2026-11-15) — #38 → #40, draft, NOT merged; no paid calls since
 
 - Test run (approved): Claude Sonnet 5.5 → HTTP 400, 0 tokens; GPT-6.1 Sol → HTTP 429 insufficient_quota /

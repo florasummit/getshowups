@@ -5,7 +5,6 @@ import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
-import AiKeySettings from './AiKeySettings.jsx'
 import WebsiteDesigner from './WebsiteDesigner.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
@@ -66,6 +65,9 @@ export default function WebsiteTab() {
   if (!data) return <div aria-busy="true" />
   if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
   const w = data.website
+  // An AI-designed draft (content.site): the AI designer owns its look. The older template tools would replace it (their
+  // results carry no AI design), so they are not offered for it; Undo and earlier versions stay available.
+  const designed = Boolean(w.draft?.site)
   const live = data.domain?.status === 'connected' ? data.domain.url : data.url
   const setUsage = (aiUsage) => setData((d) => ({ ...d, aiUsage }))
   const refresh = (d) => {
@@ -96,7 +98,7 @@ export default function WebsiteTab() {
         )}
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
-          {!w.generated && !pending && (!w.published || w.changed) && (
+          {!w.generated && !pending && !publishing && (!w.published || w.changed) && (
             <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
@@ -109,14 +111,19 @@ export default function WebsiteTab() {
         </div>
         {pending && <p className="fine">Keep or discard the new version below before publishing.</p>}
         {publishing && !pending && (
-          <PublishBox
-            data={data}
-            label={w.published ? 'Publish changes' : 'Publish website'}
-            onDone={(d) => {
-              setPublishing(false)
-              refresh(d)
-            }}
-          />
+          <>
+            <PublishBox
+              data={data}
+              label={w.published ? 'Publish changes' : 'Publish website'}
+              onDone={(d) => {
+                setPublishing(false)
+                refresh(d)
+              }}
+            />
+            <button type="button" className="link-btn" onClick={() => setPublishing(false)}>
+              Not yet
+            </button>
+          </>
         )}
       </section>
 
@@ -147,6 +154,7 @@ export default function WebsiteTab() {
         />
       </section>
 
+      {!designed && (
       <section className="card" aria-label="Create with AI">
         {w.generated || rewrite ? (
           <WebsiteGenerator
@@ -197,6 +205,7 @@ export default function WebsiteTab() {
           </>
         )}
       </section>
+      )}
 
       {!w.generated && (
         <>
@@ -205,17 +214,10 @@ export default function WebsiteTab() {
           </section>
           <section className="card site-editor" aria-label="Edit website">
             <h2 className="card-title">Edit text and photos</h2>
-            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} />
+            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed} />
           </section>
         </>
       )}
-
-      <section className="card">
-        <details>
-          <summary className="card-title">Your own AI key (optional)</summary>
-          <AiKeySettings />
-        </details>
-      </section>
 
       <section className="card">
         <h2 className="card-title">Website address</h2>

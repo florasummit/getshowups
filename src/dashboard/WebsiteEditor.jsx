@@ -181,7 +181,9 @@ function Photos({ c, set }) {
 }
 
 // `initial`: website content; `colors`: { name: hex }; `onSaved(state)`: after each autosave.
-export default function WebsiteEditor({ initial, colors, designOptions, onSaved, onEdit, compact = false }) {
+// `designed`: the draft is an AI-designed site (content.site). Its layout, colours, type and wording come from the AI
+// designer, so the template controls (style, colours, logo, Google text) are hidden: they would save but change nothing.
+export default function WebsiteEditor({ initial, colors, designOptions, onSaved, onEdit, compact = false, designed = false }) {
   const [c, setC] = useState(initial)
   const status = useAutosave(c, onSaved)
   const edited = useRef(onEdit)
@@ -198,7 +200,12 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
 
   return (
     <div className="editor">
-      {c.design && designOptions?.palettes ? (
+      {designed ? (
+        <p className="fine editor-designed">
+          Your website was designed with the AI designer: ask it above to change the layout, colours, photos or wording. The details below are what it writes from.
+          Services and prices show on your website exactly as you enter them here; other changes are used the next time you ask the designer.
+        </p>
+      ) : c.design && designOptions?.palettes ? (
         <fieldset className="field">
           <legend>Look</legend>
           <div className="swatches" role="radiogroup" aria-label="Colours">
@@ -263,8 +270,9 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
       </fieldset>
 
       <details className="more">
-        <summary>Logo and photos</summary>
-        <ImagePicker label="Logo" hint="Shown at the top of your site." kind="logo" value={c.logo} onPick={(id) => set({ logo: id })} onRemove={() => set({ logo: null })} />
+        <summary>{designed ? 'Photos' : 'Logo and photos'}</summary>
+        {designed && <p className="fine">Add photos here, then ask the designer to use them.</p>}
+        {!designed && <ImagePicker label="Logo" hint="Shown at the top of your site." kind="logo" value={c.logo} onPick={(id) => set({ logo: id })} onRemove={() => set({ logo: null })} />}
         <ImagePicker label="Main photo" hint="A clear photo of your work or team." kind="photo" value={c.hero} onPick={(id) => set({ hero: id })} onRemove={() => set({ hero: null })} />
         <Photos c={c} set={set} />
       </details>
@@ -285,6 +293,7 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
         </label>
       </details>
 
+      {!designed && (
       <details className="more">
         <summary>How you appear in Google</summary>
         <label className="field">
@@ -296,6 +305,7 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
           <textarea rows={2} value={c.seoDescription} onChange={text('seoDescription')} maxLength={160} />
         </label>
       </details>
+      )}
 
       <SaveStatus status={status} />
     </div>

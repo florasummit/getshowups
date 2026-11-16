@@ -40,14 +40,16 @@ test('owner imports their current website into the draft (text, prices, photos);
 test('owner connects their own Claude key (checked, stored encrypted, shown by last 4 only) and can remove it', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
   await page.goto('/dashboard/website')
-  const card = page.locator('.card', { has: page.getByText('Your own AI key (optional)') })
-  await card.getByText('Your own AI key (optional)').click()
+  // One place for the key: the AI designer card (the separate "Your own AI key" panel was a duplicate).
+  const card = page.locator('section[aria-label="AI designer"]')
   await expect(card.getByText('A Claude Pro or ChatGPT Plus subscription doesn’t include API access.')).toBeVisible()
   await card.getByLabel('API key').fill('sk-ant-api03-BAD' + 'x'.repeat(30))
   await card.getByRole('button', { name: 'Connect key' }).click()
   await expect(card.getByRole('alert')).toHaveText('The provider didn’t accept that key. Check it and try again.')
   await card.getByLabel('API key').fill('sk-ant-api03-' + 'A'.repeat(40) + 'WXYZ')
   await card.getByRole('button', { name: 'Connect key' }).click()
+  // Connected: the designer opens; the key, model and limit sit under "AI model and monthly limit".
+  await card.locator('details.designer-key summary').click()
   await expect(card.getByText('Claude (Anthropic) key ending WXYZ · in use for your website')).toBeVisible()
   expect(await page.content()).not.toContain('A'.repeat(40))
   await card.getByRole('button', { name: 'Remove key' }).click()

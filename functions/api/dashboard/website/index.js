@@ -111,6 +111,9 @@ export async function onRequestPost({ request, env }) {
       const g = await getGeneration(db, customer.id, body.generationId)
       if (!g) return json(404, { error: 'not_found' })
       const current = (await loadWebsite(db, customer)).draft
+      // A template/AI-writer result carries no AI-designed site; applying it would silently drop the owner's AI design
+      // (e.g. from a tab opened before the design). The AI designer's Undo and earlier versions remain the way back.
+      if (current.site) return json(409, { error: 'designed_site' })
       const option = Number.isInteger(body.option) ? body.option : 0
       if (g.designs.length && !g.designs[option]) return json(400, { error: 'invalid_request' })
       // The owner's logo, photos and confirmed facts stay; the chosen design is applied. Only the private draft changes.

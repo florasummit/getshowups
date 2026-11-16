@@ -32,6 +32,7 @@ export function Allowance({ usage, kind, noun }) {
     </p>
   )
 }
+const DESIGNED_SITE = 'Your website is now designed with the AI designer, so this version wasn’t used (it would have replaced that design). Refresh the page to continue with the designer.'
 // Specific, honest messages for the server's limits (manual editing is never limited).
 const failText = (status, data, noun) =>
   data?.error === 'daily_limit'
@@ -61,7 +62,7 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
       setGen(null)
       setState({})
       onApplied(data)
-    } else setState({ error: 'Couldn’t use that design. Please try again.' })
+    } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t use that design. Please try again.' })
   }
 
   if (!gen) {
@@ -138,7 +139,7 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage }) {
       setState({})
       onPreview?.(null)
       onApplied(data)
-    } else setState({ error: 'Couldn’t save that version. Please try again.' })
+    } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t save that version. Please try again.' })
   }
   if (rev) {
     return (

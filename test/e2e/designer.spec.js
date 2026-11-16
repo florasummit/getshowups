@@ -30,6 +30,15 @@ test('owner designs the website in conversation: first design, revision, undo @m
   await expect(card.getByText('A fresh coastal design with booking up front.').or(card.getByText('Darker and more premium, with a serif headline.')).first()).toBeVisible({ timeout: 30_000 })
   const frame = page.frameLocator('iframe[title="Website preview"]')
   await expect(frame.getByRole('heading', { level: 1 })).toHaveText(/Clear water, every week\.|Quietly perfect pools\./)
+  // An AI-designed draft: the older template tools (which would replace it) are gone, the preview follows the designer,
+  // and the editor keeps only what the design uses (no style/colour/logo/Google controls that would change nothing).
+  await expect(page.locator('section[aria-label="Create with AI"]')).toHaveCount(0)
+  await expect(page.getByText('Your own AI key (optional)')).toHaveCount(0)
+  const editor = page.locator('section[aria-label="Edit website"]')
+  await expect(editor.getByText('Your website was designed with the AI designer')).toBeVisible()
+  await expect(editor.getByRole('radiogroup', { name: /Style|Colour|Colours/ })).toHaveCount(0)
+  await expect(editor.getByText('How you appear in Google')).toHaveCount(0)
+  await expect(card.locator('.chip').first()).toHaveCSS('text-transform', 'none')
   // Revision in conversation.
   await card.getByLabel('Ask for a change').fill('Make it darker and more premium')
   await card.getByRole('button', { name: 'Send' }).click()

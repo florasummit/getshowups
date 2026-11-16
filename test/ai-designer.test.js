@@ -230,6 +230,22 @@ test('designer: needs the owner’s own key; one turn streams progress, designs 
   assert.deepEqual((await call(designer, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.turns, [])
 })
 
+test('regression (customer journey 2026-11-16): an older template/AI-writer version can never replace an AI-designed draft', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const before = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal(before.site.name, 'Lowcountry Blue')
+  // A stored template-writer version (e.g. from a dashboard tab opened before the AI design): it carries no site.
+  const { site: _drop, ...plain } = before
+  db.sql.prepare("INSERT INTO website_generations (id, customer, content, source, cost_micros, created_at) VALUES ('01d0000000000000000000000000000d', 'pools', ?, 'template', 0, ?)").run(JSON.stringify({ content: { ...plain, headline: 'Older version' }, designs: [] }), Date.now())
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: '01d0000000000000000000000000000d', option: 0 } })
+  assert.equal(r.status, 409)
+  assert.equal(r.json.error, 'designed_site')
+  const after = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual(after, before, 'the AI design and the draft are untouched')
+})
+
 test('conversational revision updates the draft from the CURRENT design; undo restores the previous one; publish serves every page', async () => {
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')

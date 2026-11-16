@@ -64,6 +64,8 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
   const [fields, setFields] = useState([])
   const [photos, setPhotos] = useState([])
   const [fixes, setFixes] = useState([])
+  // An import already put into the draft is summarised in one line; the owner can open it again to re-apply parts.
+  const [review, setReview] = useState(false)
   const choose = (i) => {
     setImp(i)
     if (i?.status === 'done') {
@@ -92,6 +94,8 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
     if (status === 200) {
       const notes = [data.rejected.length ? `${data.rejected.length} item(s) were left out because they make promises we can’t verify or are too long.` : '', data.photosFailed.length ? `${data.photosFailed.length} photo(s) couldn’t be copied.` : ''].filter(Boolean)
       setState({ done: `Added to your draft${data.photosAdded ? ` with ${data.photosAdded} photo${data.photosAdded === 1 ? '' : 's'}` : ''}. Your live website hasn’t changed.`, notes })
+      setImp((i) => ({ ...i, appliedAt: Date.now() }))
+      setReview(false)
       onApplied?.()
     } else setState({ error: 'Couldn’t add this to your draft. Please try again.' })
   }
@@ -127,6 +131,31 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
 
   const s = imp.suggestion
   const host = imp.sourceUrl.replace(/^https?:\/\//, '')
+  if (imp.appliedAt && !review) {
+    return (
+      <div className="import">
+        {state.done ? (
+          <p className="fine" role="status">
+            {state.done} {state.notes?.join(' ')}
+          </p>
+        ) : (
+          <p>
+            Your draft has the text and photos you chose from <strong>{host}</strong>
+            <span className="fine"> · {new Date(imp.appliedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+          </p>
+        )}
+        <div className="card-actions">
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setReview(true)}>
+            Review what we found again
+          </button>
+        </div>
+        <details>
+          <summary className="fine">Import a different website</summary>
+          {form}
+        </details>
+      </div>
+    )
+  }
   return (
     <div className="import">
       <p>

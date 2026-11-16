@@ -1997,6 +1997,16 @@
   display: grid;
   gap: 10px;
 }
+/* Suggestions are sentences: the status-tag .chip rule capitalises every word. */
+.designer .chip {
+  text-transform: none;
+}
+.editor-designed {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--ink-100);
+}
 .designer-key summary {
   cursor: pointer;
   font-size: 0.9rem;
