@@ -24,6 +24,33 @@ export function strictSchema(s) {
   return out
 }
 
+// Provider errors → our allowlisted codes. Billing problems are not temporary (retrying won't help; the owner must add
+// credit), so they are 'provider_billing', never a rate limit:
+//   Anthropic: HTTP 402 / type billing_error.
+//   OpenAI: HTTP 429 with error.type insufficient_quota or a billing code such as credit_balance_exhausted (OpenAI:
+//   "inspect error.code … the broader error.type can still be insufficient_quota").
+// `detail` keeps the provider's own error type/code (short identifiers only, never the message text) for diagnosis.
+const ident = (v) => (typeof v === 'string' && /^[a-z0-9_.-]{1,64}$/i.test(v) ? v : null)
+const OPENAI_BILLING_CODE = /(quota|credit|billing|spend|payment)/i
+export function openAiError(status, body) {
+  const detail = { status, type: ident(body?.error?.type), code: ident(body?.error?.code) }
+  const billing = body?.error?.type === 'insufficient_quota' || OPENAI_BILLING_CODE.test(body?.error?.code || '')
+  if (status === 401 || status === 403) return { error: 'invalid_key', detail }
+  if (billing || status === 402) return { error: 'provider_billing', detail }
+  if (status === 429) return { error: 'provider_rate_limited', detail }
+  if (status === 400 || status === 404 || status === 422) return { error: 'provider_rejected', detail }
+  return { error: 'provider_unavailable', detail }
+}
+export function claudeError(err) {
+  const status = typeof err?.status === 'number' ? err.status : null
+  const detail = { status, type: ident(err?.error?.error?.type ?? err?.type) }
+  if (status === 401 || status === 403) return { error: 'invalid_key', detail }
+  if (status === 402 || detail.type === 'billing_error') return { error: 'provider_billing', detail }
+  if (status === 429) return { error: 'provider_rate_limited', detail }
+  if (status === 400 || status === 404 || status === 413 || status === 422) return { error: 'provider_rejected', detail }
+  return { error: 'provider_unavailable', detail }
+}
+
 async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL, maxOutput = MAX_OUTPUT.writer) {
   const mock = providerMock(env)
   // maxRetries 0: a retry would be a second billed request the budget check did not account for.
@@ -39,10 +66,7 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL, maxOut
       messages: msgs.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
     })
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return { ok: false, error: 'invalid_key' }
-    if (err instanceof Anthropic.RateLimitError) return { ok: false, error: 'provider_rate_limited' }
-    if (err instanceof Anthropic.BadRequestError) return { ok: false, error: 'provider_rejected' } // e.g. no credit on the API account
-    return { ok: false, error: 'provider_unavailable' }
+    return { ok: false, ...claudeError(err) }
   }
   const usage = { input: response.usage?.input_tokens ?? 0, output: response.usage?.output_tokens ?? 0 }
   if (response.stop_reason === 'refusal') return { ok: false, error: 'ai_declined', usage }
@@ -69,12 +93,7 @@ async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL
     return { ok: false, error: 'provider_unavailable' }
   }
   const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) return { ok: false, error: 'invalid_key' }
-    if (res.status === 429) return { ok: false, error: body?.error?.code === 'insufficient_quota' ? 'provider_rejected' : 'provider_rate_limited' }
-    if (res.status === 400) return { ok: false, error: 'provider_rejected' }
-    return { ok: false, error: 'provider_unavailable' }
-  }
+  if (!res.ok) return { ok: false, ...openAiError(res.status, body) }
   const choice = body?.choices?.[0]
   const usage = { input: body?.usage?.prompt_tokens ?? 0, output: body?.usage?.completion_tokens ?? 0 }
   if (choice?.message?.refusal) return { ok: false, error: 'ai_declined', usage }
