@@ -20,6 +20,7 @@ import { studioAccess, studioEnabled, studioSchemaReady } from '../server/websit
 import * as publicSite from '../functions/p/[customer].js'
 import * as publicPage from '../functions/p/[customer]/[page].js'
 import * as assetsRoute from '../functions/api/dashboard/website/assets.js'
+import * as siteAssetRoute from '../functions/site-assets/[id].js'
 
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -1076,4 +1077,99 @@ test('photos: removing one that the draft, live site, a saved version or an AI u
   db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'pools', 'image/jpeg', x'ffd8ff', ?, 1)").run('c'.repeat(32), 50 * 1024 * 1024 - 10)
   const { saveAsset } = await import('../server/assets.js')
   assert.deepEqual(await saveAsset(db, 'pools', new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), { ok: false, httpStatus: 409, error: 'quota' })
+})
+
+// ---- Website Studio closing pass (2026-11-16): framing, phone-sized photos, draft checkpoints, unused-photo cleanup. ----
+const photo = (id, size = 3) => db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'pools', 'image/jpeg', x'ffd8ffe000104a464946', ?, 1)").run(id, size)
+
+test('photo framing: focus point and shape are validated, stored only when changed, and rendered as a crop', async () => {
+  const P = 'a'.repeat(32)
+  const ctx = { assetIds: new Set([P]), services: [], claims: [] }
+  const page = (extra) => ({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'split', heading: 'Hi', image: `asset:${P}`, ...extra }] }] })
+  const plain = validateSpec(page({}), ctx).spec.pages[0].sections[0]
+  assert.equal('imageFocus' in plain || 'imageAspect' in plain, false, 'defaults are not stored')
+  const framed = validateSpec(page({ imageFocus: [20, 130], imageAspect: '4x5' }), ctx).spec.pages[0].sections[0]
+  assert.deepEqual([framed.imageFocus, framed.imageAspect], [[20, 100], '4x5'], 'clamped to 0–100; known shapes only')
+  assert.equal(validateSpec(page({ imageAspect: '7x2', imageFocus: ['x', 'y'] }), ctx).spec.pages[0].sections[0].imageAspect, undefined)
+  const html = renderV2({ id: 'pools', name: 'Pools', services: [], cities: [] }, validateSpec(page({ imageFocus: [20, 70], imageAspect: '4x5' }), ctx).spec, { bookUrl: '/b' })
+  assert.match(html, new RegExp(`<img class="" src="/site-assets/${P}" alt="" fetchpriority="high" decoding="async" style="object-position:20% 70%;aspect-ratio:4/5;height:auto;object-fit:cover">`))
+})
+
+test('phone-sized photos: the draft maps each photo to its small copy; pages offer it via srcset; it is public only with its photo', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const [big, small, other] = ['1'.repeat(32), '2'.repeat(32), '3'.repeat(32)]
+  photo(big, 600000)
+  photo(small, 60000)
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  const site = { pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'split', heading: 'Clear water', image: `asset:${big}`, primaryCta: { label: 'Book', target: 'book' } }] }] }
+  // A map to a photo that isn't this business's is dropped.
+  const saved = (await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, site, variants: { [big]: small, [other]: big } } } })).json.website.draft
+  assert.deepEqual(saved.variants, { [big]: small })
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: saved, confirm: true } })).status, 200)
+  const live = (await call(publicSite, 'GET', { params: { customer: 'pools' } })).text
+  assert.match(live, new RegExp(`src="/site-assets/${big}" srcset="/site-assets/${small} 800w, /site-assets/${big} 1600w" sizes="\\(max-width:860px\\) 100vw, 50vw"`))
+  // The small copy is served publicly because its photo is on the live site.
+  const res = await siteAssetRoute.onRequestGet({ request: new Request(`${ORIGIN}/site-assets/${small}`), env, params: { id: small } })
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('Cache-Control'), 'public, max-age=86400')
+})
+
+test('draft checkpoints: taken on save (at most every 10 min) and publish; newest 20 kept; restore brings one back and is itself undoable; Studio and owner only', async () => {
+  const { KEEP, saveCheckpoint } = await import('../server/website-history.js')
+  const c = await cookieFor('owner@pools.example')
+  const s = await cookieFor('owner@salon.example')
+  const save = async (headline) => {
+    const w = (await call(website, 'GET', { cookie: c })).json.website
+    return call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...w.draft, headline }, baseUpdatedAt: w.updatedAt } })
+  }
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  await save('First headline')
+  await save('Second headline')
+  let cps = (await call(website, 'GET', { cookie: c })).json.checkpoints
+  assert.equal(cps.length, 1, 'one checkpoint within 10 minutes of editing')
+  assert.equal(cps[0].reason, 'autosave')
+  // Older checkpoints beyond the newest 20 are removed (copies only).
+  for (let i = 0; i < KEEP + 5; i++) await saveCheckpoint(db, 'pools', { headline: `old ${i}` }, 'autosave', Date.now() - 1000 * (100 - i))
+  cps = (await call(website, 'GET', { cookie: c })).json.checkpoints
+  assert.equal(cps.length, KEEP)
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.kind') = 'checkpoint'").get().n, KEEP)
+  // Restore the 'First headline' save… (taken from the earliest autosave of this session, now the newest of its kind)
+  const target = db.sql.prepare("SELECT id FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.draft.headline') = 'First headline'").get()
+  assert.ok(target, 'the session checkpoint survived (it is among the newest)')
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: target.id } })
+  assert.equal(r.status, 200)
+  assert.equal(r.json.website.draft.headline, 'First headline')
+  // …and the draft from before the restore was kept, so the restore can be undone.
+  const before = r.json.checkpoints.find((x) => x.reason === 'before_restore')
+  assert.ok(before)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: before.id } })).json.website.draft.headline, 'Second headline')
+  // Another business can't restore (or see) these; a checkpoint is never "applied" as a generation.
+  assert.equal((await call(website, 'POST', { cookie: s, body: { action: 'restoreCheckpoint', id: target.id } })).status, 404)
+  assert.deepEqual((await call(website, 'GET', { cookie: s })).json.checkpoints, [])
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: target.id } })).status, 404)
+  // Outside Website Studio: no checkpoints are taken or offered.
+  env.WEBSITE_STUDIO_ENABLED = 'false'
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: target.id } })).status, 404)
+  env.WEBSITE_STUDIO_ENABLED = 'true'
+})
+
+test('unused-photo cleanup: removes only what nothing recoverable uses (draft, live, saved versions, AI undo, checkpoints); per business', async () => {
+  const { saveCheckpoint } = await import('../server/website-history.js')
+  const c = await cookieFor('owner@pools.example')
+  const s = await cookieFor('owner@salon.example')
+  const [inDraft, inDraftCopy, inCheckpoint, unused, unusedCopy] = ['4', '5', '6', '7', '8'].map((d) => d.repeat(32))
+  for (const id of [inDraft, inDraftCopy, inCheckpoint, unused, unusedCopy]) photo(id, 1000)
+  db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'salon', 'image/jpeg', x'ffd8ff', 3, 1)").run('9'.repeat(32))
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, hero: inDraft, variants: { [inDraft]: inDraftCopy, [unused]: unusedCopy } } } })
+  await saveCheckpoint(db, 'pools', { ...draft, hero: inCheckpoint }, 'autosave')
+  const r = await call(assetsRoute, 'POST', { cookie: c, body: { action: 'cleanup' } })
+  assert.equal(r.status, 200)
+  const left = db.sql.prepare("SELECT id FROM website_assets WHERE customer = 'pools'").all().map((x) => x.id)
+  assert.ok([inDraft, inDraftCopy, inCheckpoint].every((id) => left.includes(id)), 'everything in use is kept')
+  assert.ok(![unused].some((id) => left.includes(id)), 'an unused photo is removed')
+  assert.equal(r.json.removed >= 1, true)
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM website_assets WHERE customer = 'salon'").get().n, 1, 'another business’s photos are never touched')
+  assert.equal((await call(assetsRoute, 'POST', { cookie: s, body: { action: 'delete', id: inDraft } })).status, 404)
 })

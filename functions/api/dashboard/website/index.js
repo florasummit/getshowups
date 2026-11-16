@@ -23,6 +23,7 @@ import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
 import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../../server/website-studio.js'
+import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } from '../../../../server/website-history.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
 // redirects by hand-crafting a save: those two fields keep what the stored draft already has (nothing is lost).
@@ -57,6 +58,7 @@ async function state(env, customer, email) {
     // Bookable = calendar connected and hours saved; a site without booking isn't published.
     ready: customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`)),
     writer: aiConfigured(env) || aiKey?.status === 'ok', // AI copy available (otherwise the template is used)
+    checkpoints: studio ? await listCheckpoints(db, customer.id).catch(() => []) : [], // recoverable draft copies
     aiKey, // the business's own Claude/OpenAI key (provider + last 4 only), if any
     aiUsage: usage, // today's AI allowance (server/ai-usage.js); manual edits are never limited
     options: {
@@ -153,6 +155,8 @@ export async function onRequestPost({ request, env }) {
         const expect = body.force === true ? undefined : Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
         const saved = await saveDraft(db, customer.id, content, Date.now(), { expect })
         if (saved.conflict) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
+        // A recoverable server copy at most every 10 minutes of editing (best effort: never fails the save).
+        if (await studioAccess(env, customer)) await maybeCheckpoint(db, customer.id, content).catch((e) => console.error('checkpoint failed:', e?.name))
         return json(200, await state(env, customer, session.email))
       }
       if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
@@ -162,8 +166,19 @@ export async function onRequestPost({ request, env }) {
       // Internal pilot: AI-designed sites and Studio redirects stay private until publishing them is approved.
       if (hasStudioOutput(content) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
       const version = await publish(db, customer.id, content)
+      if (await studioAccess(env, customer)) await saveCheckpoint(db, customer.id, content, 'published').catch((e) => console.error('checkpoint failed:', e?.name))
       await track(env, 'website_published', { customer: customer.id, props: { version } })
       await recordEvent(db, { type: 'website.publish', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version } })
+      return json(200, await state(env, customer, session.email))
+    }
+    // Draft checkpoints (server/website-history.js): bring back an earlier server copy of the draft (the current draft is
+    // checkpointed first, so a restore can itself be undone). The live website is not touched.
+    if (action === 'restoreCheckpoint') {
+      if (!(await studioAccess(env, customer))) return json(404, { error: 'not_found' })
+      const current = (await loadWebsite(db, customer)).draft
+      const r = await restoreCheckpoint(db, customer.id, body.id, { claims: await approvedClaimsFor(db, customer.id), assetIds: await assetIdsFor(db, customer.id), current })
+      if (!r.ok) return json(r.httpStatus, { error: r.error })
+      await saveDraft(db, customer.id, r.content)
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'unpublish') {

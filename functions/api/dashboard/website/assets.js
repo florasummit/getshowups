@@ -3,7 +3,7 @@
 //   POST (raw JPEG/PNG/WebP body, ≤ 1 MB; the dashboard resizes before upload) → { asset }
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
-import { deleteAsset, listAssets, MAX_BYTES, saveAsset } from '../../../../server/assets.js'
+import { cleanupAssets, deleteAsset, listAssets, MAX_BYTES, saveAsset } from '../../../../server/assets.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 
 export async function onRequestGet({ request, env }) {
@@ -21,6 +21,15 @@ export async function onRequestPost({ request, env }) {
   // raw image bytes, checked by their content, never by the declared type.
   if ((request.headers.get('Content-Type') || '').startsWith('application/json')) {
     const body = await request.json().catch(() => null)
+    if (body?.action === 'cleanup') {
+      // { action: 'cleanup' }: remove every photo nothing recoverable uses → { removed, kept, bytesFreed }.
+      try {
+        return json(200, await cleanupAssets(env.ONBOARDING_DB, session.customer.id))
+      } catch (err) {
+        console.error('asset cleanup failed:', err?.name)
+        return json(503, { error: 'storage_error' })
+      }
+    }
     if (body?.action !== 'delete') return json(400, { error: 'invalid_request' })
     try {
       const r = await deleteAsset(env.ONBOARDING_DB, session.customer.id, body.id)

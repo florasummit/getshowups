@@ -2,6 +2,26 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio closing pass (2026-11-16) — feature/studio-finish; no paid calls; no migration
+
+- Production migrations 0021–0023 VERIFIED applied (read-only sqlite_master + pragma_table_info): all 8 tables/indexes
+  present, columns identical to a fresh migration build, ai_model_registry has the 13 seeded rows. Studio is live for
+  eligible businesses. No production migration needed or added.
+- Photo framing: hero / photo-and-text / booking-banner photos take `imageFocus` [x,y] and `imageAspect` (validated,
+  stored only when changed, rendered as object-position + aspect-ratio crop); composition photos use their existing
+  focus/aspect. Editor: click the photo (or arrow keys) for the point to keep, pick a shape.
+- Phone-sized photos: each owner photo can have a ≤800 px copy (made in the browser on upload, or "Make phone versions"
+  for older photos); content.variants { photoId: smallId } (validated, own photos only); pages use srcset 800w/1600w;
+  copies are public only with their photo (usedBy). PoolThru home on throttled 4G: 367 KB, LCP 2.2 s (was ~655 KB/3.6 s).
+- Draft checkpoints (server/website-history.js): server copies of the draft in website_generations kind 'checkpoint'
+  (no new table): on save at most every 10 min, on publish, before a restore; newest 20 kept per business; restore via
+  the History tab (Studio + owner only; the restore itself is undoable). getGeneration ignores designer/checkpoint rows.
+- Unused photos: "Remove unused photos" deletes only what nothing recoverable shows (draft, live, saved versions, AI
+  undo, checkpoints: read as content, not text search); per business; 120 files incl. phone copies, 50 MB.
+- R2: not needed yet. Production has 5 photos / 1.46 MB across 2 businesses (D1, ~10 GB capacity); per-site budget
+  50 MB. Revisit at ~2 GB total media or ~40 sites near their budget (needs a bucket binding: approval).
+- Tests: unit 487/487, browser 85/85 (photos/framing/history test desktop + phone), PoolThru acceptance 26/26 (local).
+
 ## Website Studio completion: direct editing, pages, forms, SEO, media (2026-11-16) — feature/studio-editor; no paid calls
 
 - Editor (src/dashboard/SiteStudio.jsx) for AI-designed sites (Studio access): click anything in the live preview to
