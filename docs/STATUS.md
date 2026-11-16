@@ -20,6 +20,16 @@ _Update at the end of every task. Newest first._
   OpenAI 429 credit_balance_exhausted again (the key's organization has no credit). $0, 0 tokens.
 - Fix A (owner-approved): choices are described strings, not enums (18 enums → 1: section type). validateSpec already
   enforces every list with a safe default (test). Grammar size can't be measured locally; needs a live call to confirm.
+- Third live run: GPT-6.1 Sol design + revision succeeded (7,781 in / 5,993 out tokens, ≈$0.0755; nothing removed by
+  validation). Claude still 400 "compiled grammar is too large" (req_011Ch5hhHLNWBx7VbHCWkrxZ).
+- Option B (owner-approved): Claude gets a compact section shape (13 fields instead of 28; 58 properties instead of
+  79): style/option tokens, one image list, one button list, FAQ via title/text. fromCompact() → standard shape →
+  unchanged validateSpec; toCompact() for revisions. Round-trip test: every section type and control comes back
+  identical. OpenAI keeps the standard schema.
+- Renderer: wide sections now share the header/footer content edge (were 160px wider → 20px vs 80px at 1440).
+  Measured in Chrome: 80px = header at 1440; mobile unchanged (20px), no horizontal overflow.
+- Known, pre-existing, unrelated: e2e automation.spec "can't make it … picks a new time" fails after 00:00 UTC
+  ("That time was just taken") — also on the previous commit; fixture/slot timing at the UTC date boundary. Not fixed.
 
 ## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
 

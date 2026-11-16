@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { contrast, validateSpec } from '../server/site-spec.js'
-import { DESIGN_SCHEMA, fromStrict } from '../server/ai-designer.js'
+import { COMPACT_DESIGN_SCHEMA, DESIGN_SCHEMA, fromCompact, fromStrict, toCompact } from '../server/ai-designer.js'
 import { anthropicSchemaProblems } from './schema-limits.js'
 import { renderV2 } from '../server/site-render-v2.js'
 import { sealKey } from '../server/ai-credentials.js'
@@ -126,7 +126,8 @@ beforeEach(() => {
       requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key') })
       if (nextDesign instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
       if (nextDesign?.httpError) return Response.json({ type: 'error', error: { type: nextDesign.httpError.type, message: 'mock' } }, { status: nextDesign.httpError.status })
-      return new Response(sse(JSON.stringify(nextDesign)), { headers: { 'content-type': 'text/event-stream' } })
+      // Claude answers in the compact section shape.
+      return new Response(sse(JSON.stringify({ ...nextDesign, site: toCompact(nextDesign.site) })), { headers: { 'content-type': 'text/event-stream' } })
     }
     if (u.hostname === 'api.openai.com' && u.pathname === '/v1/chat/completions') {
       const body = await req.clone().json()
@@ -341,6 +342,76 @@ test('regression (live test 2026-11-15, "compiled grammar is too large"): choice
   const theme = DESIGN_SCHEMA.properties.site.properties.theme.properties
   assert.match(theme.headingFont.description, /exactly one of: .*syne/)
   assert.match(DESIGN_SCHEMA.properties.site.properties.pages.items.properties.sections.items.properties.items.items.properties.icon.description, /exactly one of: .*water.*or "" if not used/)
+})
+
+test('wide sections share the header/footer content edge (no extra width that pushed them left of the header)', () => {
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const { spec } = validateSpec(fromStrict(DESIGN()), opts)
+  const html = renderV2({ id: 'pools', name: 'Pools', cities: ['Charleston'], phone: '' }, spec, { page: '', pageBase: '/p/pools/', bookUrl: '/book/pools', year: 2026 })
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+  const base = css.match(/(?:^|[}\n])\.wrap\{width:([^;]+);/)[1]
+  assert.equal(css.match(/\.w-wide \.wrap\{width:([^}]+)\}/)[1], base, 'wide = the same container as the header, hero and footer')
+  assert.doesNotMatch(css, /\+ 160px/)
+  assert.match(css, /\.w-full \.wrap\{width:100%;max-width:none\}/, 'full-width sections stay edge to edge on purpose')
+})
+
+test('option B: Claude gets the compact section shape (13 fields, within limits); OpenAI keeps the standard one', async () => {
+  assert.deepEqual(anthropicSchemaProblems(COMPACT_DESIGN_SCHEMA), [])
+  const sec = (sch) => sch.properties.site.properties.pages.items.properties.sections.items.properties
+  assert.deepEqual(Object.keys(sec(COMPACT_DESIGN_SCHEMA)), ['type', 'id', 'style', 'eyebrow', 'heading', 'text', 'body', 'layout', 'images', 'imageAlt', 'options', 'buttons', 'items'])
+  assert.equal(Object.keys(sec(DESIGN_SCHEMA)).length, 28)
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.ok('style' in sec(requests[0].body.output_config.format.schema), 'Claude request uses the compact schema')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it darker' } })
+  assert.match(requests[1].body.messages[0].content, /CURRENT_SITE \(the design to revise\):\n\{"version":2,.*"style":"/, 'Claude revises the current design in the compact shape')
+})
+
+test('option B keeps every creative control: standard → compact → standard validates to the identical site (all section types)', () => {
+  const asset = 'a'.repeat(32)
+  const asset2 = 'b'.repeat(32)
+  const opts = { assetIds: new Set([asset, asset2]), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const site = DESIGN({
+    pages: [
+      { slug: '', navLabel: 'Home', seoTitle: 'Pool care', seoDescription: 'Pool care.', sections: [
+        { type: 'hero', id: 'top', layout: 'mosaic', background: 'ink', spacing: 'xl', align: 'center', width: 'wide', animate: 'rise', eyebrow: 'Charleston', heading: 'Clear water.', text: 'Weekly care.', image: `asset:${asset}`, images: ['stock:pool-water', `asset:${asset2}`], imageAlt: 'A pool', imageSide: 'left', height: 'screen', overlay: 0.3, primaryCta: { label: 'Book', target: 'book' }, secondaryCta: { label: 'Services', target: 'page:services' } },
+        { type: 'text', id: 'intro', background: 'surface', heading: 'About', body: 'We look after pools.', columns: 2, lead: true },
+        { type: 'imageText', id: 'it', heading: 'Homes', body: 'Homes and businesses.', image: `asset:${asset2}`, imageAlt: 'Deck', imageSide: 'right', imageShape: 'arch', cta: { label: 'Book', target: 'book' } },
+        { type: 'gallery', id: 'g', layout: 'masonry', heading: 'Our work', images: [`asset:${asset}`, `asset:${asset2}`] },
+        { type: 'features', id: 'f', layout: 'inline', columns: 4, items: [{ icon: 'water', title: 'Balanced', text: 'Every visit.' }] },
+        { type: 'steps', id: 's', layout: 'timeline', items: [{ title: 'Book', text: 'Online.' }, { title: 'We visit', text: 'On time.' }] },
+        { type: 'faq', id: 'q', heading: 'Questions', items: [{ question: 'Do you winterize?', answer: 'Yes, it is one of our services.' }] },
+        { type: 'cta', id: 'c', layout: 'split', heading: 'Ready?', image: `asset:${asset}`, cta: { label: 'Book now', target: 'book' } },
+        { type: 'area', id: 'area', background: 'image', backgroundImage: `asset:${asset2}`, heading: 'Where we work' },
+      ] },
+      { slug: 'services', navLabel: 'Services', sections: [{ type: 'services', id: 'svc', layout: 'tiles', columns: 2, showPrices: false, items: [{ serviceIndex: 2, text: 'Close for winter.', icon: 'snow', image: `asset:${asset}` }] }, { type: 'contact', id: 'contact', showPhone: true }] },
+    ],
+  })
+  const { spec } = validateSpec(fromStrict(site), opts)
+  const back = validateSpec(fromStrict(fromCompact(toCompact(spec))), opts).spec
+  assert.deepEqual(back, spec)
+  // Spot checks that the controls really travel through the tokens.
+  const compact = toCompact(spec).pages[0].sections
+  assert.equal(compact[0].style, 'ink xl center wide rise')
+  assert.match(compact[0].options, /side-left .*height-screen .*overlay-30/)
+  assert.deepEqual(compact[6].items[0].title, 'Do you winterize?')
+  assert.equal(toCompact(spec).pages[1].sections[0].options.includes('no-prices'), true)
+})
+
+test('compact answers with garbled or missing tokens are repaired by validateSpec, never crash', () => {
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const garbled = { ...DESIGN(), pages: [{ slug: '', sections: [
+    { type: 'hero', id: 'top', style: 'NEON huge diagonal ∞', options: 'side-up overlay-999 cols-9 <script>', images: ['https://evil.example/x.jpg'], buttons: [{ label: 'Go', target: 'https://evil.example' }, null, 7], heading: 'Pools' },
+    { type: 'faq', id: 'q', style: '', options: '', images: [], buttons: [], items: [{ title: 'Q?', text: 'A.' }, null] },
+    { type: 'services', id: 's', style: null, options: null, images: null, buttons: null, items: null },
+  ] }] }
+  const { spec } = validateSpec(fromStrict(fromCompact(garbled)), opts)
+  const hero = spec.pages[0].sections[0]
+  assert.deepEqual([hero.background, hero.spacing, hero.align, hero.width, hero.imageSide, hero.overlay, hero.image], ['bg', 'l', 'left', 'normal', 'right', 0.45, null])
+  assert.deepEqual(hero.primaryCta, { label: 'Go', target: 'book' }, 'outside link refused: the button goes to booking')
+  assert.deepEqual(spec.pages[0].sections[1].items, [{ question: 'Q?', answer: 'A.' }])
+  assert.equal(spec.pages[0].sections[2].items.length, SERVICES.length, 'every service still shown')
 })
 
 test('values outside the allowed lists never reach a site: validateSpec repairs each to its safe default', () => {
