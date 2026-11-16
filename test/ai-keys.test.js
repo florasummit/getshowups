@@ -18,7 +18,11 @@ const DAY = 864e5
 const CLAUDE_KEY = 'sk-ant-api03-' + 'A'.repeat(40) + 'WXYZ'
 const OPENAI_KEY = 'sk-proj-' + 'B'.repeat(40) + 'QRST'
 let env, db, kv, calls, providerReply, origFetch, accounts
-const testedModels = (ids) => db.sql.prepare(`UPDATE ai_model_registry SET status = 'tested' WHERE model IN (${ids.map(() => '?').join(',')})`).run(...ids)
+// Exactly these models are tested in a test (the shipped seed marks others tested; pinned in its own test below).
+const testedModels = (ids) => {
+  db.sql.prepare("UPDATE ai_model_registry SET status = 'supported' WHERE status = 'tested'").run()
+  db.sql.prepare(`UPDATE ai_model_registry SET status = 'tested' WHERE model IN (${ids.map(() => '?').join(',')})`).run(...ids)
+}
 
 function d1() {
   const sql = new DatabaseSync(':memory:')
@@ -228,6 +232,20 @@ test('start from a design never uses the own key (no provider call)', async () =
   const r = await call(website, 'POST', { cookie: c, body: { action: 'template' } })
   assert.deepEqual([r.status, r.json.generation.source], [200, 'template'])
   assert.equal(calls.length, before)
+})
+
+test('shipped registry: only the models verified live end to end are tested, so a new owner on Auto is not refused', async () => {
+  const fresh = d1()
+  assert.deepEqual(fresh.sql.prepare("SELECT provider || ':' || model m FROM ai_model_registry WHERE status = 'tested' ORDER BY provider").all().map((r) => r.m), ['anthropic:claude-sonnet-5-5', 'openai:gpt-6.1-sol'])
+  // With that seed, Auto works out of the box: a new Claude key on Auto gets Sonnet 5.5 (no "no tested model" dead end).
+  db = fresh
+  env.ONBOARDING_DB = db
+  seed('pools', 'owner@pools.example')
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })
+  assert.equal((await call(aiKey, 'GET', { cookie: c })).json.key.model, 'auto')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'generate' } })).status, 200)
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-sonnet-5-5')
 })
 
 test('models are discovered from the customer’s account and filtered for compatibility; new ones appear without a deployment', async () => {
