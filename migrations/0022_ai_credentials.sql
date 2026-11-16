@@ -35,9 +35,12 @@ CREATE TABLE IF NOT EXISTS ai_model_registry (
 );
 -- Prices verified 2026-11-15 (Anthropic: claude-api model table; OpenAI: developers.openai.com/api/docs/pricing, standard).
 -- max_output: the model's own output ceiling where it is below ours (GPT-4o and GPT-4o mini: 16,384 tokens).
+-- status 'tested': verified live end to end with a real account (AI designer: first design + conversational revision,
+-- validated output, 2026-11-15): claude-sonnet-5-5 and gpt-6.1-sol. Auto chooses only tested models, so without one a
+-- new owner's first request would be refused (no_tested_model). Everything else stays 'supported' (manual choice only).
 INSERT OR IGNORE INTO ai_model_registry (provider, model, status, quality, input_per_m, output_per_m, max_output, source, updated_at) VALUES
   ('anthropic', 'claude-opus-5-5', 'supported', 3, 4.00, 20.00, NULL, 'anthropic pricing 2026-11-15', 0),
-  ('anthropic', 'claude-sonnet-5-5', 'supported', 2, 2.00, 10.00, NULL, 'anthropic pricing 2026-11-15', 0),
+  ('anthropic', 'claude-sonnet-5-5', 'tested', 2, 2.00, 10.00, NULL, 'anthropic pricing 2026-11-15', 0),
   ('anthropic', 'claude-haiku-5-5', 'supported', 1, 0.10, 0.50, NULL, 'anthropic pricing 2026-11-15', 0),
   ('openai', 'gpt-4o-mini', 'supported', 1, 0.15, 0.60, 16384, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-4o', 'supported', 2, 2.50, 10.00, 16384, 'openai pricing 2026-11-15', 0),
@@ -49,7 +52,7 @@ INSERT OR IGNORE INTO ai_model_registry (provider, model, status, quality, input
   ('openai', 'gpt-5.4-mini', 'supported', 2, 0.75, 4.50, NULL, 'openai pricing 2026-11-15', 0),
   ('openai', 'gpt-5.4-nano', 'supported', 1, 0.20, 1.25, NULL, 'openai pricing 2026-11-15', 0),
   -- OpenAI's "balance intelligence and cost" model (developers.openai.com/api/docs/models); short-context price (<272K).
-  ('openai', 'gpt-6.1-sol', 'supported', 2, 2.00, 10.00, NULL, 'openai pricing 2026-11-15 (short context)', 0);
+  ('openai', 'gpt-6.1-sol', 'tested', 2, 2.00, 10.00, NULL, 'openai pricing 2026-11-15 (short context)', 0);
 
 -- Every request made with a business's own key. Before sending, a row RESERVES the request's worst-case cost in one
 -- atomic statement that also checks the monthly limit (so concurrent requests can't both slip under it); afterwards it is
