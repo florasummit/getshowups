@@ -151,7 +151,10 @@ async function bookOne(id, extra = {}) {
   const l = await lead(id, { ...LEAD, ...extra })
   assert.equal(l.status, 201, l.text)
   const { leadId, leadToken } = l.json()
-  const slot = (await info(id)).json().slots[0]
+  // The first slot at least 10 minutes ahead (like automation.test.js slotAfter). slots[0] can start within a second (a
+  // slot on the hour, booked at hh:59:59): a test then sending messages "1 s later" saw an appointment that had already
+  // started, and confirmations were correctly skipped as not needed (CI failure at 16:00:00 UTC, 2026-11-16).
+  const slot = (await info(id)).json().slots.find((s) => Date.parse(s) > Date.now() + 10 * 60_000)
   const r = await call(bookAppt, 'POST', `/api/book/${id}/appointment`, { params: { customer: id }, body: { leadId, leadToken, start: slot } })
   assert.equal(r.status, 201, r.text)
   return db.sql.prepare('SELECT id FROM appointments WHERE lead_id = ?').get(leadId).id

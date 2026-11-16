@@ -243,10 +243,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
   /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
   per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
-  WEBSITE_STUDIO_ENABLED AND WEBSITE_STUDIO_BUSINESSES (same shape as Ads; server/website-studio.js studioEnabledFor()):
-  Website Studio internal pilot = own AI key, AI designer, website import (+ old-address redirects). Outside it: those
-  routes are 404, the dashboard/onboarding don't offer them, a stored key is never used, and a save can't add or change
-  `site`/`redirects` (stored values kept). Published content is never gated. WEBSITE_STUDIO_PUBLISH (off in the pilot):
+  Website Studio (server/website-studio.js studioAccess(), owner decision 2026-11-16: every eligible business, no
+  allowlist) = own Claude/OpenAI key, AI designer, website import (+ old-address redirects). Eligible: Studio not switched
+  off (WEBSITE_STUDIO_ENABLED === 'false' is the emergency off switch; default on), business active (not suspended),
+  hosting status 'active' (paid/trialing/past due, or a never-billed pilot), and Studio's tables exist (0021–0023; until
+  then Studio stays hidden, never broken). Not eligible: those routes are 404, the dashboard/onboarding don't offer them,
+  and a save can't add or change `site`/`redirects` (stored values kept). A STORED own key is never replaced by the
+  included (GetShowUps-paid) model: unusable/invalid key → invalid_key, no access → ai_unavailable (website-ai.js
+  ownCredential; the designer needs a usable key: key_required). Published content is never gated. WEBSITE_STUDIO_PUBLISH:
   unless 'true', content with an AI-designed `site` or `redirects` can't be published or restored (409
   studio_publish_off); drafts/previews unaffected. Turning one on in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'

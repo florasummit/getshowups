@@ -9,7 +9,7 @@ import { recordEvent } from '../auditlog.js'
 // Release switches and services whose on/off state matters operationally. Only whether each is set (or 'true').
 export const SWITCHES = [
   'STRIPE_LIVE_ENABLED', 'MESSAGES_LIVE', 'ADS_ENABLED', 'ADS_LIVE_LAUNCH', 'ADS_AUTOMATION_ENABLED', 'ADS_CONVERSIONS_ENABLED',
-  'GHL_ENABLED', 'ACCOUNT_DELETION_ENABLED', 'RETENTION_SCHEDULE_ENABLED',
+  'GHL_ENABLED', 'ACCOUNT_DELETION_ENABLED', 'RETENTION_SCHEDULE_ENABLED', 'WEBSITE_STUDIO_PUBLISH',
 ]
 export const SERVICES = {
   stripe: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],

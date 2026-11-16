@@ -13,13 +13,13 @@ import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
 import { loadWebsite } from '../../../../server/website.js'
 import { conversation, designTurn, undoTurn } from '../../../../server/ai-designer.js'
-import { studioEnabledFor } from '../../../../server/website-studio.js'
+import { studioAccess } from '../../../../server/website-studio.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
-  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  // Website Studio (server/website-studio.js): only eligible businesses have this route.
+  if (!(await studioAccess(env, session.customer))) return json(404, { error: 'not_found' })
   try {
     const [turns, key, website] = await Promise.all([conversation(env.ONBOARDING_DB, session.customer.id), credentialView(env, session.customer.id).catch(() => null), loadWebsite(env.ONBOARDING_DB, session.customer)])
     return json(200, { turns, key, hasSite: Boolean(website.draft.site), direction: website.draft.site?.direction || '' })
@@ -32,8 +32,8 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
-  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
-  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  // Website Studio (server/website-studio.js): only eligible businesses have this route.
+  if (!(await studioAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const body = await request.json().catch(() => null)
   const customer = session.customer
   if (body?.action === 'undo') {

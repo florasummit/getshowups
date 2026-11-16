@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio for every eligible business (2026-11-16) — feature/studio-access; no paid calls
+
+- Root cause (PoolThru saw no Claude/OpenAI controls after #43): Studio was an internal pilot behind
+  WEBSITE_STUDIO_ENABLED=true AND an explicit WEBSITE_STUDIO_BUSINESSES list; neither is set in production, so every
+  Studio route was 404 and the dashboard hid the cards. Not a #43 code defect (the deployed bundle had the UI).
+- Now (owner decision): server/website-studio.js studioAccess(env, session.customer): on by default
+  (WEBSITE_STUDIO_ENABLED=false = emergency off), business active, hosting status 'active' (paid/trialing/past due or a
+  never-billed pilot), and Studio's tables present (0021–0023; hidden, not broken, until applied: deploying needs no
+  migration). The allowlist is gone. Session, same-origin, tenant scoping, rate limits and the AI allowance unchanged.
+- No silent platform AI: the older writer used to treat a stored key marked invalid (or unreadable) as "no key" and fall
+  back to the included GetShowUps-paid model. Now a stored key is used or its problem reported (invalid_key /
+  ai_unavailable); the included model runs only when no key is stored (website-ai.js ownCredential, storedCredential).
+- Wording: the "N of 400 AI changes left today" line gets a second line: with an own key "a GetShowUps daily safety
+  limit, not your Anthropic/OpenAI credit … billed by them"; without one, "the daily limit of the AI writer included with
+  GetShowUps". (400 = the testing tier: a platform admin signed in.)
+- Business Review: capability website.studio (live / missing until 0021–0023 / disabled, plus the publish switch);
+  WEBSITE_STUDIO_PUBLISH recorded on/off in change history. Publishing unchanged: off unless exactly 'true'.
+- CI flake fixed (modes.test.js): it booked slots[0], which can start within a second (a slot on the hour booked at
+  hh:59:59), then sent messages "1 s later" to an appointment that had started → confirmations correctly skipped. Now the
+  first slot ≥10 min ahead (as automation.test.js slotAfter). Reproduced and verified with a shifted clock.
+
 ## Website Studio: stable service ids in AI-designed sites (2026-11-16) — PR #43; no paid calls; draft, NOT merged
 
 - Defect (on main since the pilot, found in the release review): the AI design pointed at services by list position, so

@@ -1,12 +1,18 @@
 # Website Studio
 
 Status as of 2026-11-16: one release candidate (`release/website-studio`, PRs #37–#40 combined), not merged or deployed.
-**Internal pilot only** (owner decision 2026-11-16): `WEBSITE_STUDIO_ENABLED=true` AND the business id listed in
-`WEBSITE_STUDIO_BUSINESSES` (server/website-studio.js). Everyone else keeps today's website tools unchanged; their
-dashboard and onboarding don't show the import, the AI designer or the AI-key controls, and those routes are 404.
+**Available to every eligible business** (owner decision 2026-11-16; before, an internal pilot listed in
+`WEBSITE_STUDIO_BUSINESSES`, which is no longer read). Eligible = signed-in member of an active business whose website
+hosting is active (paid, trialing, past due, or a never-billed pilot like PoolThru), while Studio isn't switched off
+(`WEBSITE_STUDIO_ENABLED=false` is the emergency off switch) and its tables exist (migrations 0021–0023: until they are
+applied, Studio stays hidden instead of failing). Business Review shows this as capability `website.studio`.
+Everyone else keeps today's website tools; their dashboard and onboarding don't show the import, the AI designer or
+the AI-key controls, and those routes are 404. Manual editing never needs a key.
+AI work runs on the business's own Claude or OpenAI key. A stored key is never replaced by the included GetShowUps-paid
+model: an invalid, revoked or unreadable key is reported (`invalid_key`), out of credit is `provider_billing`.
 Own-key requests never use Anthropic's server-side fallback: only the chosen/reserved model runs and is priced.
-During the pilot `WEBSITE_STUDIO_PUBLISH` stays unset: AI-designed sites (and imported old-address redirects) can be
-previewed but not published or restored live.
+`WEBSITE_STUDIO_PUBLISH` stays unset: AI-designed sites (and imported old-address redirects) can be previewed but not
+published or restored live.
 
 **Composition + design quality (2026-11-16, draft PR):** a `composition` section (blocks placed on a 12-column grid,
 phone layout derived) for the first screen and signature moments; invalid AI choices are reported, not silently made

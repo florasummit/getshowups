@@ -8,6 +8,7 @@ import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
 import { emailConfigured, messagesLive } from '../email.js'
 import { smsConfigured } from '../sms.js'
 import { aiConfigured } from '../website-ai.js'
+import { studioEnabled, studioPublishAllowed, studioSchemaReady } from '../website-studio.js'
 import { providerConfigured } from '../domains.js'
 import { adsEnabled } from '../ads/access.js'
 import { liveLaunchEnabled } from '../ads/campaigns.js'
@@ -191,6 +192,20 @@ registerCapability({
   dependsOn: ['website.hosting'],
   state: (env) => (aiConfigured(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Template fallback only', approval: 'AI binding on the Pages project' }),
   verify: seen('AI generation for a real business', 30, `SELECT max(created_at) AS at FROM website_generations g WHERE source = 'ai' AND ${NOT_TEST_BIZ('g.customer', 'g.created_at')}`),
+})
+registerCapability({
+  id: 'website.studio',
+  name: 'Website Studio (AI designer on the business’s own Claude/OpenAI key)',
+  journey: 'website',
+  external: 'Customer-owned Anthropic / OpenAI accounts',
+  dependsOn: ['website.hosting'],
+  // Every eligible business (server/website-studio.js); hidden until its tables exist. Publishing is a separate switch.
+  state: async (env) => {
+    const publishing = studioPublishAllowed(env) ? 'AI publishing ON' : 'AI publishing off (WEBSITE_STUDIO_PUBLISH unset)'
+    if (!studioEnabled(env)) return { mode: 'disabled', note: `Switched off (WEBSITE_STUDIO_ENABLED=false); ${publishing}` }
+    const ready = await studioSchemaReady(env.ONBOARDING_DB).catch(() => false)
+    return ready ? { mode: 'live', note: `Every eligible business; ${publishing}` } : { mode: 'missing', note: `Hidden until migrations 0021–0023 are applied; ${publishing}`, approval: 'Production migrations 0021–0023' }
+  },
 })
 registerCapability({
   id: 'website.domains',

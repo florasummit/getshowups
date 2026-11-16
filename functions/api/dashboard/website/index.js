@@ -22,12 +22,12 @@ import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
-import { hasStudioOutput, studioEnabledFor, studioPublishAllowed } from '../../../../server/website-studio.js'
+import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../../server/website-studio.js'
 
-// Outside the Website Studio pilot the owner can't introduce an AI-designed site or old-address redirects by hand-crafting
-// a save: those two fields keep what the stored draft already has (so nothing a former pilot business published is lost).
+// A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
+// redirects by hand-crafting a save: those two fields keep what the stored draft already has (nothing is lost).
 async function guardStudioFields(env, customer, content) {
-  if (studioEnabledFor(env, customer.id) || !content || typeof content !== 'object') return content
+  if (!content || typeof content !== 'object' || (await studioAccess(env, customer))) return content
   const { site: _s, redirects: _r, ...rest } = content
   const current = (await loadWebsite(env.ONBOARDING_DB, customer)).draft
   return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
@@ -35,16 +35,17 @@ async function guardStudioFields(env, customer, content) {
 
 async function state(env, customer, email) {
   const db = env.ONBOARDING_DB
+  const studio = await studioAccess(env, customer)
   const [website, hosting, domain, assets, usage, aiKey] = await Promise.all([
     loadWebsite(db, customer),
     hostingStatus(db, customer.id),
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),
-    studioEnabledFor(env, customer.id) ? credentialView(env, customer.id).catch(() => null) : null, // pilot only; before 0022: none
+    studio ? credentialView(env, customer.id).catch(() => null) : null, // Website Studio only
   ])
   return {
-    studio: studioEnabledFor(env, customer.id), // Website Studio internal pilot (server/website-studio.js)
+    studio, // Website Studio for this business (server/website-studio.js): designer, own AI key, import
     studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (off in the pilot)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,

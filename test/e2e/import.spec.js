@@ -52,6 +52,10 @@ test('owner connects their own Claude key (checked, stored encrypted, shown by l
   await card.locator('details.designer-key summary').click()
   await expect(card.getByText('Claude (Anthropic) key ending WXYZ · in use for your website')).toBeVisible()
   expect(await page.content()).not.toContain('A'.repeat(40))
+  // With the own key in use, the daily count is labelled as GetShowUps' safety limit, billed by Anthropic.
+  await page.reload()
+  await expect(page.locator('[data-allowance-note="revision"]')).toHaveText('This is a GetShowUps daily safety limit, not your Anthropic credit. These run on your own Claude API key and Anthropic bills you for them.')
+  await card.locator('details.designer-key summary').click()
   await card.getByRole('button', { name: 'Remove key' }).click()
   await expect(card.getByLabel('API key')).toBeVisible()
 })

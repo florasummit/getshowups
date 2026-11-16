@@ -23,13 +23,24 @@ const OWN_KEY = {
 
 const resetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 // Today's AI allowance for one kind ('generation' or 'revision'), e.g. "18 of 20 left today · resets at 7:00 PM".
-export function Allowance({ usage, kind, noun }) {
+// The count is always GetShowUps' own daily limit; who pays for the AI work depends on whether the business uses its own
+// key (`ownKey`: 'anthropic' | 'openai' | null), so the second line says which.
+const BILLER = { anthropic: ['Claude', 'Anthropic'], openai: ['OpenAI', 'OpenAI'] }
+export function Allowance({ usage, kind, noun, ownKey = null }) {
   const u = usage?.[kind]
   if (!u) return null
+  const own = BILLER[ownKey]
   return (
-    <p className="fine" data-allowance={kind}>
-      {u.remaining} of {u.limit} {noun} left today · resets at {resetTime(usage.resetsAt)}
-    </p>
+    <>
+      <p className="fine" data-allowance={kind}>
+        {u.remaining} of {u.limit} {noun} left today · resets at {resetTime(usage.resetsAt)}
+      </p>
+      <p className="fine" data-allowance-note={kind}>
+        {own
+          ? `This is a GetShowUps daily safety limit, not your ${own[1]} credit. These run on your own ${own[0]} API key and ${own[1]} bills you for them.`
+          : 'This is the daily limit of the AI writer included with GetShowUps (no API key needed). Editing by hand is never limited.'}
+      </p>
+    </>
   )
 }
 const DESIGNED_SITE = 'Your website is now designed with the AI designer, so this version wasn’t used (it would have replaced that design). Refresh the page to continue with the designer.'
@@ -43,7 +54,7 @@ const failText = (status, data, noun) =>
         ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
         : OWN_KEY[data?.error] || FAIL[status]
 
-export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false }) {
+export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false, ownKey = null }) {
   const [gen, setGen] = useState(null)
   const [state, setState] = useState({})
   const generate = async () => {
@@ -73,7 +84,7 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
         <button type="button" className="btn btn-primary btn-lg" disabled={Boolean(state.busy)} onClick={generate}>
           {state.busy ? 'Designing your website…' : templates ? 'Show me the designs' : hasDraft ? 'Design it again' : 'Create my website'}
         </button>
-        {templates ? null : state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
+        {templates ? null : state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" ownKey={ownKey} />}
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}
@@ -114,7 +125,7 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
 const SUGGESTIONS = ['Make it more modern', 'Make it warmer and friendlier', 'Use my photos', 'Make it simpler', 'Try a dark look']
 
 // "Describe a change": one AI revision of the private draft, shown before anything is saved.
-export function ReviseBox({ onApplied, onPreview, usage, onUsage }) {
+export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null }) {
   const [text, setText] = useState('')
   const [rev, setRev] = useState(null)
   const [state, setState] = useState({})
@@ -193,7 +204,7 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage }) {
           </button>
         ))}
       </div>
-      {state.busy ? <p className="fine" role="status">Updating your website… about 10 seconds.</p> : <Allowance usage={usage} kind="revision" noun="AI changes" />}
+      {state.busy ? <p className="fine" role="status">Updating your website… about 10 seconds.</p> : <Allowance usage={usage} kind="revision" noun="AI changes" ownKey={ownKey} />}
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}

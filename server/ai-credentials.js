@@ -110,4 +110,24 @@ export async function credentialFor(env, customer) {
     return null
   }
 }
+// Whatever key the business has stored, usable or not: { provider, apiKey } | { provider, unusable: true } | null.
+// A stored key is the owner's choice to pay for AI with their own account, so a key that was marked invalid or can't be
+// opened is reported to them, never replaced by the included (GetShowUps-paid) model. null only when no key is stored
+// (or the table doesn't exist yet: migration 0022 not applied, so nothing can have been stored).
+export async function storedCredential(env, customer) {
+  let r
+  try {
+    r = await env.ONBOARDING_DB.prepare('SELECT provider, sealed, status FROM ai_credentials WHERE customer = ?1').bind(customer).first()
+  } catch (err) {
+    if (/no such table/i.test(String(err?.message))) return null
+    throw err
+  }
+  if (!r) return null
+  if (r.status !== 'ok') return { provider: r.provider, unusable: true }
+  try {
+    return { provider: r.provider, apiKey: await openKey(env, customer, r.provider, r.sealed) }
+  } catch {
+    return { provider: r.provider, unusable: true }
+  }
+}
 export const markCredential = (env, customer, status, now = Date.now()) => env.ONBOARDING_DB.prepare('UPDATE ai_credentials SET status = ?2, updated_at = ?3 WHERE customer = ?1').bind(customer, status, now).run()
