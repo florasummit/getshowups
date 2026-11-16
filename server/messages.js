@@ -387,7 +387,7 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
             // Follow-ups: one-click unsubscribe headers (RFC 8058) with the same signed link as the footer.
             unsubscribeUrl: FOLLOW_UP_KINDS.includes(m.kind) ? await unsubscribeUrl(env, m.lead_id) : null,
           })
-          : await sendTwilio(env, { to: m.lead_phone, text: content.sms, sender: (await readyFor(m.customer)).sender })
+          : await sendTwilio(env, { to: m.lead_phone, text: content.sms, sender: (await readyFor(m.customer)).sender, testOnly })
     } catch (err) {
       console.error('messages: render/send error:', m.kind, err?.name)
       result = { ok: false, error: 'internal_error' }

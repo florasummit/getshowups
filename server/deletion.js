@@ -9,6 +9,7 @@
 //   verify       re-checks that nothing erasable is left, then records the report
 // Each step is idempotent; a failed step is retried with backoff by the cron (processDeletions). No undo window.
 // Runs only when ACCOUNT_DELETION_ENABLED is exactly 'true' (approval); otherwise nothing is requested or run.
+import { closeSubaccount } from './followups/twilio.js'
 import { emailRef, recordEvent } from './auditlog.js'
 import { decrypt, revokeUnlessInUse } from './google-oauth.js'
 import { enforceAdsHold } from './ads/holds.js'
@@ -25,7 +26,7 @@ const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 
 // Erased per business, children before parents (foreign keys).
 export const ERASED_TABLES = [
-  'thread_messages', 'lead_threads', 'followup_settings', 'sms_registrations', 'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'appointment_outcomes', 'appointment_changes',
+  'thread_messages', 'lead_threads', 'followup_settings', 'sms_provider_objects', 'sms_registration_extra', 'sms_accounts', 'sms_registrations', 'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'appointment_outcomes', 'appointment_changes',
   'lead_addresses', 'lead_attribution', 'test_marks', 'meta_lead_events', 'ghl_links', 'appointments', 'leads',
   'ad_metrics_daily', 'ad_creatives', 'ad_actions', 'ad_campaigns', 'ad_budget_approvals', 'ad_profiles', 'ad_connections',
   'website_versions', 'website_generations', 'website_ai_usage', 'website_assets', 'website_domains', 'websites', 'landing_pages',
@@ -106,7 +107,11 @@ async function billing(env, id) {
 
 async function integrations(env, id) {
   const kv = env.GOOGLE_TOKENS
-  const out = { calendar: false, googleRevoked: false, archives: 0, ads: [], ghl: false, domain: null, creatives: 0 }
+  const out = { calendar: false, googleRevoked: false, archives: 0, ads: [], ghl: false, domain: null, creatives: 0, twilio: null }
+  // The business's own Twilio subaccount is closed (Twilio releases its numbers); never the parent account.
+  const tw = await closeSubaccount(env, id).catch(() => ({ ok: false, error: 'storage_error' }))
+  if (!tw.ok) throw step(`twilio_${tw.error}`)
+  out.twilio = tw.skipped ? null : 'closed'
   // Google Calendar (and archived records from older OAuth clients): delete ours first, then revoke the grant
   // unless another stored connection still uses it (one grant per Google account + client).
   const keys = [`google:${id}`]

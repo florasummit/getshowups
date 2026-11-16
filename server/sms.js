@@ -1,5 +1,3 @@
-import { recipientAllowed } from './email.js'
-
 // Text messages through Twilio. Inactive unless TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are configured AND the
 // business has its own approved sender (server/followups/settings.js smsReadiness). US carriers require an approved
 // A2P 10DLC campaign before messages are delivered; nothing here assumes one.
@@ -19,30 +17,4 @@ export function toE164(phone) {
   return null
 }
 
-// Returns { ok, providerId } or { ok: false, error, permanent } with an allowlisted error code.
-export async function sendSms(env, { to, text, testOnly = false }) {
-  const number = toE164(to)
-  if (!number) return { ok: false, error: 'invalid_phone', permanent: true }
-  if (!recipientAllowed(env, number, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
-  const form = new URLSearchParams({ To: number, Body: text })
-  if (env.TWILIO_MESSAGING_SERVICE_SID) form.set('MessagingServiceSid', env.TWILIO_MESSAGING_SERVICE_SID)
-  else form.set('From', env.TWILIO_FROM)
-  try {
-    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(env.TWILIO_ACCOUNT_SID)}/Messages.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: form,
-      signal: AbortSignal.timeout(8000),
-    })
-    const body = await res.json().catch(() => ({}))
-    if (res.ok && typeof body.sid === 'string') return { ok: true, providerId: body.sid.slice(0, 64) }
-    const code = Number.isInteger(body.code) ? body.code : null
-    // 4xx are not retried (bad number, opted out, unverified sender); 429/5xx are.
-    return { ok: false, error: code ? `twilio_${code}` : `http_${res.status}`, permanent: res.status >= 400 && res.status < 500 && res.status !== 429 }
-  } catch {
-    return { ok: false, error: 'network_error' }
-  }
-}
+// Sending lives in server/followups/transport.js (sendTwilio): always from the business's own subaccount and sender.

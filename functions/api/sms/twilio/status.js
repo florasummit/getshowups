@@ -9,7 +9,7 @@ export async function onRequestPost({ request, env }) {
   const rl = await hitByIp(env, 'smsWebhook', request)
   if (rl.limited) return new Response('Too many requests', { status: 429 })
   const params = new URLSearchParams(await request.text())
-  if (!(await verifyTwilio(env, request, params))) return new Response('Forbidden', { status: 403 })
+  if (!(await verifyTwilio(env, request, params)).ok) return new Response('Forbidden', { status: 403 })
   const r = await deliveryUpdate(env, new URL(request.url).searchParams.get('m'), params)
   return new Response(null, { status: r.ok ? 204 : r.httpStatus || 400 })
 }

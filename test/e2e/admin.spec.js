@@ -302,3 +302,23 @@ test('existing pilot (non self-serve) business keeps its dashboard and is never 
   await expect(page.getByRole('heading', { name: 'Booking hours' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Plan' })).toHaveCount(0)
 })
+
+test('Twilio setup per business: steps in its own subaccount, submitting off, a step that can’t run says why (nothing sent to Twilio)', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto('/admin')
+  const card = page.locator('section[aria-labelledby="messaging-title"]')
+  await expect(card.getByRole('heading', { name: 'Texting registrations' })).toBeVisible()
+  const row = card.locator('li.row', { hasText: fixtures.E2E_TEXTS_CUSTOMER }).first()
+  await row.getByRole('button', { name: 'Twilio setup…' }).click()
+  const setup = row.locator(`[data-twilio-setup="${fixtures.E2E_TEXTS_CUSTOMER}"]`)
+  await expect(setup).toContainText('subaccount: active')
+  await expect(setup).toContainText('submitting off')
+  await expect(setup.getByRole('listitem').first()).toContainText('✓')
+  // The seeded business has no structured registration details: the step refuses before calling Twilio.
+  page.once('dialog', (d) => d.accept())
+  await setup.getByRole('button', { name: /^Run: Prepare the business profile/ }).click()
+  await expect(setup.getByRole('status')).toContainText('re-save their details')
+  // Owners can't reach these actions.
+  await useSession(context, fixtures.E2E_TEXTS_SESSION_TOKEN)
+  expect((await page.request.get(`/api/platform/messaging?customer=${fixtures.E2E_TEXTS_CUSTOMER}`)).status()).toBe(403)
+})

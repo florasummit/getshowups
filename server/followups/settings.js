@@ -7,10 +7,11 @@
 //                      sent later in a burst). Owner-typed replies are stopped too.
 //
 // A business may text only when ALL hold: the switch is not pulled, the provider is configured (TWILIO_*), the business
-// has its own sender (sms_registrations.messaging_service / sender_phone, set by a platform admin after provisioning),
+// has its own Twilio subaccount (sms_accounts, migration 0025) and its own sender (sms_registrations.messaging_service / sender_phone, set by a platform admin after provisioning),
 // and its US texting registration was APPROVED by the provider. Nothing here infers approval.
 import { smsConfigured } from '../sms.js'
 import { CUSTOMER_RE } from '../invites.js'
+import { accountsReady } from './twilio.js'
 
 export const FOLLOWUP_TABLES = ['lead_threads', 'thread_messages', 'followup_settings', 'sms_registrations']
 export const killSwitch = (env) => env?.MESSAGING_KILL_SWITCH === 'true'
@@ -93,8 +94,14 @@ export function quietEndsAt(now, timeZone, s) {
   return t
 }
 
+// The registration row plus the business's own Twilio subaccount (account_sid / account_status; migration 0025).
 export async function registrationOf(db, customer) {
-  const r = await db.prepare('SELECT * FROM sms_registrations WHERE customer = ?1').bind(customer).first()
+  const r = (await accountsReady(db))
+    ? await db
+        .prepare('SELECT r.*, a.account_sid AS account_sid, a.status AS account_status FROM sms_registrations r LEFT JOIN sms_accounts a ON a.customer = r.customer WHERE r.customer = ?1')
+        .bind(customer)
+        .first()
+    : await db.prepare('SELECT * FROM sms_registrations WHERE customer = ?1').bind(customer).first()
   return r || null
 }
 
@@ -104,9 +111,11 @@ export function smsReadiness(env, reg) {
   const reasons = []
   if (killSwitch(env)) reasons.push('paused_by_platform')
   if (!smsConfigured(env)) reasons.push('provider_not_configured')
+  // Every business texts from its OWN Twilio subaccount (never the parent account or another business's).
+  if (!reg?.account_sid || reg?.account_status !== 'active') reasons.push('no_account')
   if (!reg?.messaging_service && !reg?.sender_phone) reasons.push('no_sender')
   if (reg?.status !== 'approved') reasons.push(`registration_${reg?.status || 'not_configured'}`)
-  return { ok: reasons.length === 0, reasons, sender: reg ? { messagingService: reg.messaging_service || null, from: reg.sender_phone || null } : null }
+  return { ok: reasons.length === 0, reasons, sender: reg ? { messagingService: reg.messaging_service || null, from: reg.sender_phone || null, accountSid: reg.account_sid || null } : null }
 }
 
 // May the texting box be OFFERED (and consent recorded)? Carriers review the live opt-in BEFORE they approve a

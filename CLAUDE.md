@@ -89,7 +89,12 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      no invented numbers/prices, no commitments/times/links/claims; fallback = fixed safe reply + owner
                      asked), transport (Twilio with the business's OWN sender + signed status callbacks; email via Resend),
                      registration (A2P 10DLC facts + owner attestation; provider status recorded only by a platform admin),
-                     ops (admin counts, Business Review capabilities)
+                     twilio (ONE parent account, ONE subaccount PER BUSINESS, migration 0025: subaccount token sealed
+                     AES-GCM/HKDF bound to business+SID; parent creds for v2010 resources of a subaccount, subaccount
+                     creds for trusthub/messaging; webhooks verified per AccountSid), provisioning (A2P via Twilio APIs,
+                     one audited admin step at a time: low_volume_standard (EIN) or sole_proprietor (no EIN, OTP);
+                     submit/paid steps need TWILIO_REGISTRATION_SUBMIT=true + approve; unknown outcomes never resent;
+                     'approved' only when Twilio reports the campaign VERIFIED), ops (admin counts, Business Review)
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
   ai-usage.js        AI website allowances per business/UTC day (tiers; AI_TESTING_BUSINESSES), 30-day cost ceiling
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
@@ -336,7 +341,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Attendance changes are always reversible and recorded in appointment_changes.
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
-  the business has its OWN sender (sms_registrations.messaging_service/sender_phone) AND its registration status is
+  the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the
+  parent's or another business's; a webhook from one business's subaccount never routes to another), its OWN sender (sms_registrations.messaging_service/sender_phone) AND its registration status is
   'approved' (recorded by a platform admin from the PROVIDER's decision; never inferred, never set by the owner, refused
   before the owner's explicit approval), the person consented (form box, or they texted first) and hasn't opted out,
   and recipientAllowed with testOnly = test business OR SMS_LIVE !== 'true'. SMS_LIVE, FOLLOWUP_AI (assistant on the

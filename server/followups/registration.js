@@ -13,6 +13,7 @@ import { normalizeWebsiteUrl } from '../url.js'
 import { toE164 } from '../sms.js'
 import { sha256Hex } from '../google-oauth.js'
 import { recordEvent } from '../auditlog.js'
+import { accountsReady } from './twilio.js'
 
 export const BUSINESS_TYPES = ['sole_proprietor', 'llc', 'corporation', 'partnership', 'nonprofit']
 export const PROVIDER_STATUSES = ['pending', 'approved', 'rejected', 'suspended']
@@ -36,6 +37,15 @@ export const SAMPLES = (name, id) => [
 const clean = (v, max) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
+// Industry codes (Twilio's A2P vertical list, docs: onboarding-isv-api-sole-prop-new; excludes regulated special
+// cases we don't serve). Job positions for the authorized representative (standard brands).
+export const INDUSTRIES = ['PROFESSIONAL', 'CONSTRUCTION', 'REAL_ESTATE', 'RETAIL', 'HEALTHCARE', 'HOSPITALITY', 'TRANSPORTATION', 'AGRICULTURE', 'EDUCATION', 'ENTERTAINMENT', 'TECHNOLOGY', 'FINANCIAL', 'INSURANCE', 'LEGAL', 'MANUFACTURING', 'ENERGY', 'COMMUNICATION', 'HUMAN_RESOURCES', 'NGO']
+export const JOB_POSITIONS = ['Director', 'GM', 'VP', 'CEO', 'CFO', 'General Counsel', 'Other']
+const STATES = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR'.split(' '))
+// Registration path from the business type, never assumed: a business with an EIN (every US LLC, corporation,
+// partnership, most nonprofits) must NOT register as a sole proprietor (Twilio: fees lost, redo).
+export const pathFor = (businessType) => (businessType === 'sole_proprietor' ? 'sole_proprietor' : 'low_volume_standard')
+
 // Owner-entered facts → [errors[], value].
 export function validateFacts(b) {
   const errors = []
@@ -43,30 +53,76 @@ export function validateFacts(b) {
     legalName: clean(b?.legalName, 120),
     businessType: BUSINESS_TYPES.includes(b?.businessType) ? b.businessType : '',
     ein: clean(b?.ein, 20).replace(/[^\d-]/g, ''),
-    address: clean(b?.address, 200),
+    street: clean(b?.street, 120),
+    street2: clean(b?.street2, 60),
+    city: clean(b?.city, 60),
+    region: clean(b?.region, 2).toUpperCase(),
+    postalCode: clean(b?.postalCode, 10),
     website: b?.website ? normalizeWebsiteUrl(String(b.website)) : [null, null],
-    contactName: clean(b?.contactName, 80),
+    firstName: clean(b?.firstName, 40),
+    lastName: clean(b?.lastName, 40),
+    repTitle: clean(b?.repTitle, 60),
+    repJobPosition: JOB_POSITIONS.includes(b?.repJobPosition) ? b.repJobPosition : '',
+    industry: INDUSTRIES.includes(b?.industry) ? b.industry : '',
     contactEmail: clean(b?.contactEmail, 120).toLowerCase(),
     contactPhone: toE164(b?.contactPhone),
   }
+  const sole = v.businessType === 'sole_proprietor'
   if (v.legalName.length < 2) errors.push('legalName')
   if (!v.businessType) errors.push('businessType')
-  if (v.businessType !== 'sole_proprietor' && !/^\d{2}-?\d{7}$/.test(v.ein)) errors.push('ein')
-  if (v.address.length < 8) errors.push('address')
+  if (!sole && !/^\d{2}-?\d{7}$/.test(v.ein)) errors.push('ein')
+  if (v.street.length < 3) errors.push('street')
+  if (v.city.length < 2) errors.push('city')
+  if (!STATES.has(v.region)) errors.push('region')
+  if (!/^\d{5}(-\d{4})?$/.test(v.postalCode)) errors.push('postalCode')
   if (v.website[0] || !v.website[1]) errors.push('website')
-  if (v.contactName.length < 2) errors.push('contactName')
+  if (v.firstName.length < 1) errors.push('firstName')
+  if (v.lastName.length < 1) errors.push('lastName')
+  if (!sole && v.repTitle.length < 2) errors.push('repTitle')
+  if (!sole && !v.repJobPosition) errors.push('repJobPosition')
+  if (!v.industry) errors.push('industry')
   if (!EMAIL_RE.test(v.contactEmail)) errors.push('contactEmail')
-  if (!v.contactPhone) errors.push('contactPhone')
-  return [errors, { ...v, website: v.website[1] ? String(v.website[1]) : '' }]
+  // US mobile (sole proprietors get a one-time code on it; it must not be a Twilio or other virtual number).
+  if (!v.contactPhone || !v.contactPhone.startsWith('+1')) errors.push('contactPhone')
+  const address = [v.street, v.street2, v.city, `${v.region} ${v.postalCode}`].filter(Boolean).join(', ')
+  return [errors, { ...v, ein: sole ? '' : v.ein, address, contactName: `${v.firstName} ${v.lastName}`.trim(), path: pathFor(v.businessType), website: v.website[1] ? String(v.website[1]) : '' }]
 }
 
 export async function getRegistration(db, customer) {
+  if (await accountsReady(db)) {
+    return db
+      .prepare('SELECT r.*, x.path, x.street, x.street2, x.city, x.region, x.postal_code, x.rep_first_name, x.rep_last_name, x.rep_title, x.rep_job_position, x.industry FROM sms_registrations r LEFT JOIN sms_registration_extra x ON x.customer = r.customer WHERE r.customer = ?1')
+      .bind(customer)
+      .first()
+  }
   return db.prepare('SELECT * FROM sms_registrations WHERE customer = ?1').bind(customer).first()
 }
 
 // The owner's view: facts (their own), status, and the next step in plain words. Never the sender credentials.
 export function registrationView(r, name, id) {
-  const facts = r && r.legal_name ? { legalName: r.legal_name, businessType: r.business_type, ein: r.ein ? `•••${String(r.ein).slice(-4)}` : '', address: r.address, website: r.website, contactName: r.contact_name, contactEmail: r.contact_email, contactPhone: r.contact_phone } : null
+  const facts =
+    r && r.legal_name
+      ? {
+          legalName: r.legal_name,
+          businessType: r.business_type,
+          ein: r.ein ? `•••${String(r.ein).slice(-4)}` : '',
+          address: r.address,
+          street: r.street || '',
+          street2: r.street2 || '',
+          city: r.city || '',
+          region: r.region || '',
+          postalCode: r.postal_code || '',
+          website: r.website,
+          firstName: r.rep_first_name || '',
+          lastName: r.rep_last_name || '',
+          repTitle: r.rep_title || '',
+          repJobPosition: r.rep_job_position || '',
+          industry: r.industry || '',
+          contactName: r.contact_name,
+          contactEmail: r.contact_email,
+          contactPhone: r.contact_phone,
+        }
+      : null
   const status = r?.status || 'not_configured'
   const next =
     status === 'not_configured' ? 'enter_details'
@@ -78,6 +134,8 @@ export function registrationView(r, name, id) {
   return {
     status,
     next,
+    // Which carrier registration this business needs (from its type; a business with an EIN is never a sole prop).
+    path: r?.path || (r?.business_type ? pathFor(r.business_type) : null),
     note: r?.status_note || null,
     statusAt: r?.status_at || null,
     approvedAt: r?.approved_at || null,
@@ -105,6 +163,17 @@ export async function saveFacts(db, customer, v, now = Date.now()) {
     )
     .bind(customer, v.legalName, v.businessType, v.ein || null, v.address, v.website, v.contactName, v.contactEmail, v.contactPhone, now)
     .run()
+  if (await accountsReady(db)) {
+    await db
+      .prepare(
+        `INSERT INTO sms_registration_extra (customer, path, street, street2, city, region, postal_code, rep_first_name, rep_last_name, rep_title, rep_job_position, industry, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(customer) DO UPDATE SET path = ?2, street = ?3, street2 = ?4, city = ?5, region = ?6, postal_code = ?7, rep_first_name = ?8, rep_last_name = ?9,
+           rep_title = ?10, rep_job_position = ?11, industry = ?12, updated_at = ?13`,
+      )
+      .bind(customer, v.path, v.street, v.street2 || null, v.city, v.region, v.postalCode, v.firstName, v.lastName, v.repTitle || null, v.repJobPosition || null, v.industry, now)
+      .run()
+  }
   return { ok: true }
 }
 

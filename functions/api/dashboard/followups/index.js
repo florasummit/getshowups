@@ -5,7 +5,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { emailConfigured, messagesLive } from '../../../../server/email.js'
-import { followupsReady, getSettings, validateSettings, saveSettings, smsReadiness, smsLive, followupAiOn, killSwitch } from '../../../../server/followups/settings.js'
+import { followupsReady, getSettings, validateSettings, saveSettings, smsReadiness, smsLive, followupAiOn, killSwitch, registrationOf } from '../../../../server/followups/settings.js'
 import { getRegistration, registrationView } from '../../../../server/followups/registration.js'
 import { listThreads } from '../../../../server/followups/engine.js'
 import { assistantConfigured } from '../../../../server/followups/assistant.js'
@@ -19,7 +19,7 @@ export async function onRequestGet({ request, env }) {
   if (!(await followupsReady(db))) return json(200, { ready: false })
   try {
     const reg = await getRegistration(db, id)
-    const sms = smsReadiness(env, reg)
+    const sms = smsReadiness(env, await registrationOf(db, id))
     const auto = await db.prepare('SELECT coalesce((SELECT automations FROM customer_settings WHERE customer = ?1), 1) AS on_').bind(id).first()
     const { threads, counts } = await listThreads(env, id)
     return json(200, {

@@ -736,6 +736,7 @@ function MessagingOps() {
                         <p className="row-sub">
                           {r.customer} · owner approved: {r.ownerApproved ? 'yes' : 'no'} · sender: {r.hasSender ? 'set' : 'not set'}
                         </p>
+                        <TwilioSetup customer={r.customer} onChange={() => setTick((n) => n + 1)} />
                       </div>
                     </li>
                   ))}
@@ -768,6 +769,107 @@ function MessagingOps() {
         </>
       )}
     </section>
+  )
+}
+
+// One business's Twilio setup in ITS OWN subaccount: one step at a time, each confirmed and audited. Steps that submit
+// to Twilio/carriers or cost money also need the release switch and an explicit approval tick for that step.
+const STEP_ERRORS = {
+  submission_disabled: 'Submitting and paid steps are switched off (TWILIO_REGISTRATION_SUBMIT).',
+  approval_required: 'Tick the approval box for this step.',
+  provider_not_configured: 'Twilio isn’t configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN).',
+  primary_profile_missing: 'Set TWILIO_PRIMARY_PROFILE_SID (GetShowUps’s approved ISV profile, BU…).',
+  profile_email_missing: 'Set TWILIO_PROFILE_EMAIL (GetShowUps’s notifications address for Twilio).',
+  owner_approval_missing: 'The owner hasn’t approved submission yet.',
+  details_incomplete: 'The owner needs to re-save their details (address, representative, industry).',
+  unknown_outcome: 'Twilio didn’t answer clearly. Check the Twilio console, then clear it below if nothing was created.',
+  brand_not_approved: 'Wait for the brand to be approved (Sync), then continue.',
+}
+// Which recorded provider status belongs to each step.
+const STEP_STATUS = { customer_profile: 'profile_evaluation', submit_profile: 'profile_submitted', a2p_bundle: 'bundle_evaluation', submit_bundle: 'bundle_submitted', brand: 'brand', campaign: 'campaign' }
+function TwilioSetup({ customer, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [p, setP] = useState(null)
+  const [approve, setApprove] = useState(false)
+  const [areaCode, setAreaCode] = useState('')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    if (open) api(`/api/platform/messaging?customer=${encodeURIComponent(customer)}`).then(({ status, data }) => setP(status === 200 ? data.provisioning : { error: true }))
+  }, [open, customer])
+  const act = async (body, question) => {
+    if (!window.confirm(question)) return
+    const { status, data } = await api('/api/platform/messaging', { method: 'POST', body: { customer, confirm: true, ...body } })
+    setNote(status === 200 ? 'Done.' : STEP_ERRORS[data.error] || `Not done (${data.error || status}).`)
+    if (data?.provisioning) setP(data.provisioning)
+    setApprove(false)
+    onChange()
+  }
+  if (!open)
+    return (
+      <button type="button" className="link-btn" onClick={() => setOpen(true)}>
+        Twilio setup…
+      </button>
+    )
+  if (!p) return <p className="fine">Loading…</p>
+  if (p.error || !p.ready) return <p className="fine">Twilio setup isn’t available yet (migration 0025).</p>
+  const next = p.steps.find((s) => s.id === p.next)
+  return (
+    <div className="fu-form" data-twilio-setup={customer}>
+      <p className="fine">
+        Path: {p.path || 'unknown'} · subaccount: {p.account ? p.account.status : 'none'} · submitting {p.submitEnabled ? 'enabled' : 'off'}
+        {p.account?.usage ? ` · ${p.account.usage.messages} texts this month ($${(p.account.usage.micros / 1e6).toFixed(2)})` : ''}
+      </p>
+      <ol className="fine">
+        {p.steps.map((s) => (
+          <li key={s.id}>
+            {s.done ? '✓ ' : ''}
+            {s.label}
+            {p.statuses[STEP_STATUS[s.id]] ? ` (${p.statuses[STEP_STATUS[s.id]]})` : ''}
+          </li>
+        ))}
+      </ol>
+      {next && (
+        <>
+          {(next.submits || next.charges) && (
+            <label className="check">
+              <input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} />
+              <span>I approve this step ({[next.submits && 'submits to Twilio/carriers', next.charges && 'Twilio charges for it'].filter(Boolean).join('; ')}).</span>
+            </label>
+          )}
+          {next.id === 'phone_number' && (
+            <input aria-label="Area code" placeholder="Area code (default: business phone)" inputMode="numeric" maxLength={3} value={areaCode} onChange={(e) => setAreaCode(e.target.value.replace(/\D/g, ''))} />
+          )}
+          <button type="button" className="btn btn-sm btn-quiet" onClick={() => act({ action: 'provision', step: next.id, approve, areaCode: areaCode || undefined }, `${next.label} for ${customer}?`)}>
+            Run: {next.label}
+          </button>
+        </>
+      )}
+      <div className="card-actions">
+        <button type="button" className="link-btn" onClick={() => act({ action: 'sync' }, `Read ${customer}’s registration status from Twilio?`)}>
+          Sync status
+        </button>
+        {p.path === 'sole_proprietor' && p.statuses.brand && (
+          <button type="button" className="link-btn" onClick={() => act({ action: 'resend_otp' }, `Ask Twilio to text ${customer}’s owner a new verification code?`)}>
+            Resend owner code
+          </button>
+        )}
+        {p.account && (
+          <button type="button" className="link-btn" onClick={() => act({ action: 'usage' }, `Read ${customer}’s texting usage from Twilio?`)}>
+            Usage
+          </button>
+        )}
+        {p.unknown.map((k) => (
+          <button key={k} type="button" className="link-btn" onClick={() => act({ action: 'clear_unknown', kind: k }, `You checked Twilio and no ${k} was created for ${customer}? This allows that request again.`)}>
+            Clear unknown {k}
+          </button>
+        ))}
+      </div>
+      {note && (
+        <p className="fine" role="status">
+          {note}
+        </p>
+      )}
+    </div>
   )
 }
 

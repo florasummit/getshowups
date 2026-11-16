@@ -9,7 +9,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { linkToken } from '../server/links.js'
 import { processDueMessages, scheduleAppointmentMessages, TIMING } from '../server/messages.js'
-import { sendSms, toE164 } from '../server/sms.js'
+import { toE164 } from '../server/sms.js'
+import { sendTwilio } from '../server/followups/transport.js'
 import { flushOutbox, enqueue, sendEmail } from '../server/email.js'
 import * as bookInfo from '../functions/api/book/[customer]/index.js'
 import * as bookLead from '../functions/api/book/[customer]/lead.js'
@@ -84,6 +85,10 @@ const withSms = () => {
   const now = Date.now()
   db.sql.prepare("INSERT OR IGNORE INTO sms_registrations (customer, status, approved_at, messaging_service, updated_at) SELECT id, 'approved', ?1, 'MG123', ?1 FROM customers").run(now)
   db.sql.prepare('INSERT OR IGNORE INTO followup_settings (customer, quiet_start, quiet_end, updated_at) SELECT id, 0, 0, ?1 FROM customers').run(now)
+  // Each business's own Twilio subaccount (sending uses parent credentials on the subaccount's path).
+  db.sql
+    .prepare("INSERT OR IGNORE INTO sms_accounts (customer, account_sid, auth_token_enc, status, created_at, updated_at) SELECT id, 'AC' || lower(substr(hex(id) || '00000000000000000000000000000000', 1, 32)), 'sealed', 'active', ?1, ?1 FROM customers")
+    .run(now)
 }
 
 beforeEach(() => {
@@ -113,7 +118,8 @@ beforeEach(() => {
     else if (u.endsWith('/events?sendUpdates=all')) out = [200, { id: JSON.parse(init.body).id }]
     else if (init.method === 'DELETE' && /\/events\/[^/?]+\?sendUpdates=all$/.test(u)) out = googleDelete()
     else if (u === 'https://api.resend.com/emails') out = resend(JSON.parse(init.body))
-    else if (u === 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json') out = twilio(new URLSearchParams(init.body))
+    // Only a business subaccount path is a valid send (never the parent account AC123).
+    else if (/^https:\/\/api\.twilio\.com\/2010-04-01\/Accounts\/AC[0-9a-f]{32}\/Messages\.json$/.test(u)) out = twilio(new URLSearchParams(init.body))
     else throw new Error(`unexpected ${u}`)
     return new Response(JSON.stringify(out[1]), { status: out[0] })
   }
@@ -581,7 +587,7 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
 
   // Defense in depth at the provider call, and the account outbox holds (does not fail) other recipients.
   assert.deepEqual(await sendEmail(env, { id: 'x', to: 'someone@example.net', subject: 's', text: 't' }), { ok: false, error: 'test_mode', permanent: true })
-  assert.deepEqual(await sendSms({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+1' }, { to: '8435550142', text: 't' }), { ok: false, error: 'test_mode', permanent: true })
+  assert.deepEqual(await sendTwilio({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't' }, { to: '8435550142', text: 't', sender: { from: '+18435550100', accountSid: 'AC'.padEnd(34, '0') } }), { ok: false, error: 'test_mode', permanent: true })
   await enqueue(env, { id: 'held', to: 'owner@other.example', template: 't', subject: 's', body: 'b' })
   const before = sentEmails().length
   assert.deepEqual(await flushOutbox(env), { configured: true, sent: 0, failed: 0 })
@@ -610,7 +616,7 @@ test('test business: even with MESSAGES_LIVE, only test recipients; unmarking ne
   assert.deepEqual(alphaReal.map((r) => ({ ...r })), [{ status: 'skipped', error: 'test_mode' }], 'held as test_mode, never sent')
   // Provider-level defense: SMS and email refuse a real recipient for a test sender.
   assert.equal((await sendEmail(env, { id: 'y', to: 'someone@example.net', subject: 's', text: 't', testOnly: true })).error, 'test_mode')
-  assert.equal((await sendSms({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+1' }, { to: '8435550142', text: 't', testOnly: true })).error, 'test_mode')
+  assert.equal((await sendTwilio({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't' }, { to: '8435550142', text: 't', testOnly: true, sender: { from: '+18435550100', accountSid: 'AC'.padEnd(34, '0') } })).error, 'test_mode')
 
   // Messages scheduled while marked stay test-only after the mark is removed; new ones follow MESSAGES_LIVE.
   await lead('alpha', { email: 'later@example.net' }) // scheduled while still marked

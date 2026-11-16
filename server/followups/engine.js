@@ -126,12 +126,15 @@ async function leadForPhone(db, customer, phone) {
 // Opt-Out) already recognised the keyword AND answered it. Twilio's verdict wins over our own keyword list, and we never
 // send a second answer to a keyword the provider already answered.
 const PROVIDER_KEYWORDS = { STOP: 'stop', START: 'start', HELP: 'help' }
-export async function handleInbound(env, { from, to, body, providerId, messagingService, optOutType }, now = Date.now()) {
+// accountCustomer: the business whose Twilio subaccount signed the webhook (null = the parent account).
+export async function handleInbound(env, { from, to, body, providerId, messagingService, optOutType, accountCustomer = null }, now = Date.now()) {
   const db = env.ONBOARDING_DB
   if (!(await followupsReady(db))) return fail(503, 'not_ready')
-  const customerId = await businessForSender(db, { to, messagingService })
+  const routed = await businessForSender(db, { to, messagingService })
+  // Tenant isolation: a sender is only accepted from its own business's subaccount.
+  const customerId = routed && (accountCustomer === null || accountCustomer === routed) ? routed : null
   if (!customerId) {
-    await recordEvent(db, { type: 'sms.inbound_unrouted', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'sender', id: 'unknown' }, outcome: 'failure', details: { reason: 'unknown_sender' }, at: now })
+    await recordEvent(db, { type: 'sms.inbound_unrouted', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'sender', id: 'unknown' }, outcome: 'failure', details: { reason: routed ? 'account_mismatch' : 'unknown_sender' }, at: now })
     return ok({ action: 'unrouted' })
   }
   const rl = await hit(env, 'smsInboundPerSender', customerId, now)
