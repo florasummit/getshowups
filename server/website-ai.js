@@ -379,6 +379,8 @@ export async function getGeneration(db, customerId, id) {
   const r = await db.prepare('SELECT content, source FROM website_generations WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
   if (!r) return null
   const stored = JSON.parse(r.content)
+  // AI designer turns and draft checkpoints live in the same table; they are not generations to apply or preview.
+  if (stored?.kind) return null
   // Generations from before designs existed stored the content directly.
   return stored.content ? { content: stored.content, designs: stored.designs || [], source: r.source } : { content: stored, designs: [], source: r.source }
 }

@@ -2100,3 +2100,13 @@
   .studio-preview iframe { height: 60vh; }
   .studio-panel { max-height: none; overflow: visible; }
 }
+.studio-framing { display: grid; gap: 8px; margin-bottom: 10px; }
+.studio-focus { position: relative; padding: 0; border: 1px solid var(--ink-200); border-radius: 8px; overflow: hidden; cursor: crosshair; background: none; max-width: 260px; }
+.studio-focus img { display: block; width: 100%; height: auto; }
+.studio-focus-dot { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; border: 3px solid #fff; background: #2563eb; box-shadow: 0 0 0 1px rgba(0,0,0,.4); pointer-events: none; }
+.studio-photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0; }
+@media (max-width: 520px) {
+  .studio-panel .segmented--wide { flex-wrap: wrap; }
+  .studio-panel .segmented--wide button { flex: 1 1 30%; }
+  .studio-bar .segmented { order: 3; }
+}

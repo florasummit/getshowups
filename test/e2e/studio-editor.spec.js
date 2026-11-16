@@ -124,3 +124,51 @@ test('two tabs: a save from an older tab is refused with a clear choice, never s
   await expect(b.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 })).toHaveText('Saved first in tab A')
   await context.close()
 })
+
+test('photos: upload makes a phone version; frame a photo (shape + focus); draft history restores; unused photos can be cleaned up @mobile', async ({ page, context }, info) => {
+  await useSession(context, tokenFor(info))
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/dashboard/website')
+  const studio = page.locator('section[aria-label="Website Studio editor"]')
+  const frame = page.frameLocator('iframe[title="Editable website preview"]')
+  const saved = async () => {
+    await page.waitForTimeout(1300)
+    await expect(studio.locator('[data-save="saved"]')).toBeVisible({ timeout: 15_000 })
+  }
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
+
+  // Upload: the browser resizes it and stores a phone-sized copy next to it.
+  await studio.getByRole('tab', { name: 'Photos' }).click()
+  await studio.locator('input[type="file"]').setInputFiles('public/site-stock/' + (await import('node:fs')).readdirSync('public/site-stock').find((f) => f.endsWith('.jpg') && !f.includes('-sm')))
+  await expect(studio.getByText('Phone version ready')).toBeVisible({ timeout: 20_000 })
+  await saved()
+
+  // Use it in the opening and frame it: square crop, focus point by keyboard.
+  await frame.getByRole('heading', { level: 1 }).click()
+  const photoGroup = studio.locator('fieldset', { has: page.getByText('Photo', { exact: true }) }).first()
+  await photoGroup.locator('.studio-thumb').last().click()
+  await photoGroup.getByLabel('Shape').selectOption('1x1')
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('srcset', /800w/)
+  await photoGroup.getByRole('button', { name: /Point to keep in view/ }).focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /object-position:45% 50%/)
+  await saved()
+
+  // History: earlier server copies of the draft; restoring one changes only the draft and can itself be undone.
+  await studio.getByRole('tab', { name: 'History' }).click()
+  const versions = studio.locator('.studio-history-panel li')
+  await expect(versions.first()).toBeVisible()
+  await versions.last().getByRole('button', { name: 'Restore' }).click()
+  await expect(studio.locator('[data-save="saved"]')).toBeVisible()
+  await expect(studio.locator('.studio-history-panel li', { hasText: 'Before a restore' })).toHaveCount(1)
+  await studio.locator('.studio-history-panel li', { hasText: 'Before a restore' }).getByRole('button', { name: 'Restore' }).click()
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
+
+  // Cleanup keeps everything in use (the photo is in the draft and in history).
+  await studio.getByRole('tab', { name: 'Photos' }).click()
+  await studio.getByRole('button', { name: 'Remove unused photos' }).click()
+  await expect(studio.getByText(/Every photo is in use|Removed \d+ unused file/)).toBeVisible()
+  await expect(studio.getByText('Phone version ready')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})

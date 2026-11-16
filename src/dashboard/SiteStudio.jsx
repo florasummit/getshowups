@@ -5,7 +5,7 @@
 // kept in this browser until the server confirms them. The server validates every save (it is the trust boundary).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { uploadImage } from '../lib/images.js'
+import { makePhoneCopy, uploadPhotoWithCopy } from '../lib/images.js'
 import { ADDABLE, BACKGROUNDS, BUTTONS, FONT_PAIRS, LAYOUTS, PAGE_TYPES, SECTION_LABEL, colorsFor, newId, pageTemplate, sectionTemplate, takenIds, toneOf } from './site-templates.js'
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
@@ -27,7 +27,7 @@ const writeBackup = (v) => {
 }
 const REMOVED = { claim: 'a claim we can’t verify (for example a rating or guarantee) was left out', too_long: 'a text was shortened to fit', link: 'a link outside your website was changed to “Book”', image: 'a photo that isn’t yours was removed', invented_number: 'a number that isn’t in your details was left out' }
 
-export default function SiteStudio({ website, assets: initialAssets, brand, visit, onSaved }) {
+export default function SiteStudio({ website, assets: initialAssets, brand, visit, checkpoints = [], onSaved }) {
   const [content, setContent] = useState(() => clone(website.draft))
   const [base, setBase] = useState(website.updatedAt ?? null)
   const [past, setPast] = useState([])
@@ -53,9 +53,14 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   const page = site.pages[pageIndex]
   const sectionIndex = page.sections.findIndex((s) => s.id === selected)
   const section = sectionIndex >= 0 ? page.sections[sectionIndex] : null
+  // Photos to choose from: the owner's photos, not their phone-sized copies (content.variants values).
+  const photoAssets = useMemo(() => {
+    const copies = new Set(Object.values(content.variants || {}))
+    return assets.filter((a) => !copies.has(a.id))
+  }, [assets, content.variants])
   const biz = useMemo(
-    () => ({ name: brand || 'Our business', services: content.services || [], area: content.area || '', about: content.about || '', photos: assets.map((a) => a.id), visit: Boolean(visit) }),
-    [brand, visit, content.services, content.area, content.about, assets],
+    () => ({ name: brand || 'Our business', services: content.services || [], area: content.area || '', about: content.about || '', photos: photoAssets.map((a) => a.id), visit: Boolean(visit) }),
+    [brand, visit, content.services, content.area, content.about, photoAssets],
   )
 
   // One edit = one undo step (up to 50). `fn` changes a deep copy of the current content.
@@ -184,6 +189,20 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     doc.addEventListener('submit', (e) => e.preventDefault())
   }
 
+  // Bring back an earlier server copy of the draft (the current draft is kept as a copy first, so this can be undone).
+  const restoreVersion = async (id) => {
+    if (!window.confirm('Bring back this earlier version of your draft? Your current draft is kept in History, so you can switch back. Your live website doesn’t change.')) return
+    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'restoreCheckpoint', id } })
+    if (status !== 200) return setSave({ state: 'failed', retrying: false })
+    dirty.current = false
+    writeBackup(null)
+    setPast([])
+    setFuture([])
+    setContent(clone(data.website.draft))
+    setBase(data.website.updatedAt ?? null)
+    setSave({ state: 'saved' })
+    onSaved?.(data)
+  }
   const conflictKeepMine = () => saveNow({ force: true })
   const conflictLoadLatest = () => {
     setContent(clone(save.latest.draft))
@@ -278,6 +297,7 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
               ['page', 'Page'],
               ['site', 'Look'],
               ['photos', 'Photos'],
+              ['history', 'History'],
             ].map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} aria-pressed={tab === k} onClick={() => setTab(k)}>
                 {label}
@@ -286,13 +306,29 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
           </div>
           {tab === 'section' &&
             (section ? (
-              <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={assets} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
+              <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
             ) : (
               <p className="fine">Click a section in the preview, or choose one under Page.</p>
             ))}
           {tab === 'page' && <PageEditor site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s) => (setSlug(s), setSelected(null))} />}
           {tab === 'site' && <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />}
-          {tab === 'photos' && <PhotosPanel assets={assets} onUploaded={(a) => setAssets((l) => [a, ...l])} onRemoved={(id) => setAssets((l) => l.filter((x) => x.id !== id))} />}
+          {tab === 'photos' && (
+            <PhotosPanel
+              assets={assets}
+              variants={content.variants}
+              onAdded={(list) => {
+                setAssets((l) => [...list.filter((x) => !x.existing).map((x) => x.asset), ...l, ...list.filter((x) => x.small).map((x) => x.small)])
+                const pairs = list.filter((x) => x.small).map((x) => [x.asset.id, x.small.id])
+                if (pairs.length) change((c) => (c.variants = { ...(c.variants || {}), ...Object.fromEntries(pairs) }))
+              }}
+              onRemoved={(id) => setAssets((l) => l.filter((x) => x.id !== id))}
+              onReload={async () => {
+                const { status, data } = await api('/api/dashboard/website/assets')
+                if (status === 200) setAssets(data.assets)
+              }}
+            />
+          )}
+          {tab === 'history' && <HistoryPanel checkpoints={checkpoints} busy={save.state !== 'saved'} onRestore={restoreVersion} />}
         </div>
       </div>
     </section>
@@ -366,11 +402,45 @@ function ButtonFields({ title, cta, site, page, onChange, autoFocus, removable =
     </fieldset>
   )
 }
-function ImageField({ label, value, alt, assets, onChange, onAlt }) {
+// Framing: click the photo to choose the point that must stay in view; choose the shape it's cropped to. Simple
+// percentages and a short list of shapes (the server only accepts these).
+const ASPECT_CHOICES = [['auto', 'As designed'], ['1x1', 'Square'], ['4x5', 'Portrait 4:5'], ['4x3', 'Landscape 4:3'], ['3x2', 'Landscape 3:2'], ['16x9', 'Wide 16:9']]
+function Framing({ src, focus, aspect, onFocus, onAspect }) {
+  const f = Array.isArray(focus) ? focus : [50, 50]
+  const pick = (e) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    onFocus([Math.round(((e.clientX - r.left) / r.width) * 100), Math.round(((e.clientY - r.top) / r.height) * 100)])
+  }
+  const key = (e) => {
+    const step = { ArrowLeft: [-5, 0], ArrowRight: [5, 0], ArrowUp: [0, -5], ArrowDown: [0, 5] }[e.key]
+    if (!step) return
+    e.preventDefault()
+    onFocus([Math.min(100, Math.max(0, f[0] + step[0])), Math.min(100, Math.max(0, f[1] + step[1]))])
+  }
+  return (
+    <div className="studio-framing">
+      {src && (
+        <button type="button" className="studio-focus" onClick={pick} onKeyDown={key} aria-label={`Point to keep in view: ${f[0]}% across, ${f[1]}% down. Click the photo or use the arrow keys.`}>
+          <img src={src} alt="" />
+          <span className="studio-focus-dot" style={{ left: `${f[0]}%`, top: `${f[1]}%` }} aria-hidden="true" />
+        </button>
+      )}
+      <Choice label="Shape" value={aspect || 'auto'} options={ASPECT_CHOICES} onChange={onAspect} />
+      {Array.isArray(focus) && (focus[0] !== 50 || focus[1] !== 50) && (
+        <button type="button" className="link-btn" onClick={() => onFocus([50, 50])}>
+          Centre the photo again
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ImageField({ label, value, alt, assets, onChange, onAlt, focus, aspect, onFocus, onAspect }) {
   const id = value?.startsWith('asset:') ? value.slice(6) : null
   return (
     <fieldset className="field studio-group">
       <legend>{label}</legend>
+      {value && onFocus && <Framing src={id ? `/site-assets/${id}` : null} focus={focus} aspect={aspect} onFocus={onFocus} onAspect={onAspect} />}
       <div className="studio-thumbs">
         {assets.map((a) => (
           <button key={a.id} type="button" className="studio-thumb" aria-pressed={a.id === id} onClick={() => onChange(`asset:${a.id}`)} aria-label="Use this photo">
@@ -437,20 +507,20 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
           ) : b.kind === 'button' ? (
             <ButtonFields key={i} title="Button" cta={{ label: b.label, target: b.target }} site={site} page={page} autoFocus={focus === 'button'} onChange={(c) => onChange((x) => Object.assign(x.blocks[i], c))} />
           ) : b.kind === 'media' ? (
-            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => v && onChange((x) => (x.blocks[i].image = v))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} />
+            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => v && onChange((x) => (x.blocks[i].image = v))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
           ) : null,
         )}
       {s.type === 'hero' && (
         <>
           <ButtonFields title="Main button" cta={s.primaryCta} site={site} page={page} autoFocus={focus === 'button'} onChange={set('primaryCta')} />
           <ButtonFields title="Second button" cta={s.secondaryCta} site={site} page={page} removable onChange={set('secondaryCta')} />
-          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} />
+          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
         </>
       )}
       {(s.type === 'text' || s.type === 'imageText') && <Text label="Text" value={s.body} max={2400} area autoFocus={focus === 'text'} onChange={set('body')} />}
       {s.type === 'imageText' && (
         <>
-          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} />
+          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
           <Choice label="Photo side" value={s.imageSide} options={[['left', 'Left'], ['right', 'Right']]} onChange={set('imageSide')} />
           <ButtonFields title="Button" cta={s.cta} site={site} page={page} removable onChange={set('cta')} />
         </>
@@ -496,6 +566,7 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
         </fieldset>
       )}
       {s.type === 'cta' && <ButtonFields title="Button" cta={s.cta} site={site} page={page} autoFocus={focus === 'button'} onChange={set('cta')} />}
+      {s.type === 'cta' && s.layout === 'split' && <ImageField label="Photo" value={s.image} assets={assets} onChange={set('image')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />}
       {s.type === 'contact' && (
         <>
           <Choice label="Form" value={s.form || 'none'} options={[['none', 'No form (booking button only)'], ['contact', 'Contact form'], ['quote', 'Quote-request form']]} onChange={set('form')} />
@@ -685,52 +756,128 @@ function LookEditor({ site, onSite, services, onServices }) {
 }
 
 // ---------- photos ----------
-function PhotosPanel({ assets, onUploaded, onRemoved }) {
+function PhotosPanel({ assets, variants, onAdded, onRemoved, onReload }) {
   const [state, setState] = useState({})
   const used = assets.reduce((n, a) => n + (a.size || 0), 0)
+  const copies = new Set(Object.values(variants || {}))
+  const photos = assets.filter((a) => !copies.has(a.id))
+  const missing = photos.filter((a) => !variants?.[a.id])
   const pick = async (e) => {
     const files = [...(e.target.files || [])]
     e.target.value = ''
+    // One edit for the whole batch (each photo's phone copy recorded together; never one overwriting another).
+    const added = []
+    let error = null
     for (const file of files) {
       if (file.size > 10 * 1024 * 1024) {
-        setState({ error: `${file.name} is larger than 10 MB. Choose a smaller photo.` })
+        error = `${file.name} is larger than 10 MB. Choose a smaller photo.`
         continue
       }
-      setState({ busy: true })
-      const r = await uploadImage(file, 'photo')
-      if (r.asset) onUploaded({ ...r.asset, createdAt: Date.now() })
-      setState(r.error ? { error: r.error } : {})
+      setState({ busy: 'Uploading…' })
+      const r = await uploadPhotoWithCopy(file)
+      if (r.asset) added.push({ asset: { ...r.asset, createdAt: Date.now() }, small: r.small })
+      if (r.error) error = r.error
     }
+    if (added.length) onAdded(added)
+    setState(error ? { error } : {})
   }
   const remove = async (id) => {
     const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'delete', id } })
     if (status === 200) onRemoved(id)
-    else setState({ error: data?.error === 'in_use' ? 'That photo is used on your website (draft, live version or a saved version). Replace it there first.' : 'Couldn’t remove that photo.' })
+    else setState({ error: data?.error === 'in_use' ? 'That photo is used on your website (draft, live version, a saved version or an earlier draft). Replace it there first.' : 'Couldn’t remove that photo.' })
+  }
+  // Phone-sized copies for photos uploaded before copies existed (made in this browser from our own copy).
+  const makeCopies = async () => {
+    const made = []
+    let failed = 0
+    for (const [i, a] of missing.entries()) {
+      setState({ busy: `Making phone versions… ${i + 1} of ${missing.length}` })
+      const r = await makePhoneCopy(a.id)
+      if (r.small) made.push({ asset: a, small: r.small, existing: true })
+      else failed++
+    }
+    if (made.length) onAdded(made)
+    setState(failed ? { error: `Phone versions made for ${made.length} photos; ${failed} couldn’t be made (try again later).` } : { note: `Phone versions made for ${made.length} photo${made.length === 1 ? '' : 's'}.` })
+  }
+  const cleanup = async () => {
+    if (!window.confirm('Remove every photo that isn’t used anywhere (your draft, your live website, saved versions or earlier drafts)? Photos in use are kept.')) return
+    setState({ busy: 'Removing unused photos…' })
+    const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'cleanup' } })
+    if (status !== 200) return setState({ error: 'Couldn’t remove unused photos. Please try again.' })
+    await onReload()
+    setState({ note: data.removed ? `Removed ${data.removed} unused file${data.removed === 1 ? '' : 's'} (${(data.bytesFreed / 1048576).toFixed(1)} MB freed). Photos in use were kept.` : 'Every photo is in use; nothing was removed.' })
   }
   return (
     <div className="studio-photos">
       <p className="fine">
-        {assets.length} photos · {(used / 1048576).toFixed(1)} MB used. Photos are resized for fast pages before they’re stored. Videos aren’t hosted.
+        {photos.length} photos · {(used / 1048576).toFixed(1)} of 50 MB used. Photos are resized before they’re stored, with a smaller copy for phones. Videos aren’t hosted.
       </p>
-      <label className="btn btn-sm">
-        {state.busy ? 'Uploading…' : 'Upload photos'}
-        <input type="file" accept="image/*" multiple className="sr-only" onChange={pick} disabled={state.busy} />
-      </label>
+      <div className="studio-photo-actions">
+        <label className="btn btn-sm">
+          {state.busy && state.busy.startsWith('Uploading') ? state.busy : 'Upload photos'}
+          <input type="file" accept="image/*" multiple className="sr-only" onChange={pick} disabled={Boolean(state.busy)} />
+        </label>
+        {missing.length > 0 && (
+          <button type="button" className="btn btn-quiet btn-sm" onClick={makeCopies} disabled={Boolean(state.busy)}>
+            Make phone versions ({missing.length})
+          </button>
+        )}
+        <button type="button" className="link-btn" onClick={cleanup} disabled={Boolean(state.busy)}>
+          Remove unused photos
+        </button>
+      </div>
+      {state.busy && !state.busy.startsWith('Uploading') && (
+        <p className="fine" role="status">
+          {state.busy}
+        </p>
+      )}
+      {state.note && (
+        <p className="fine" role="status">
+          {state.note}
+        </p>
+      )}
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
         </p>
       )}
       <ul className="studio-thumbs studio-thumbs--list">
-        {assets.map((a) => (
+        {photos.map((a) => (
           <li key={a.id}>
             <img src={a.url} alt="" />
+            <span className="fine">{variants?.[a.id] ? 'Phone version ready' : 'No phone version'}</span>
             <button type="button" className="link-btn" onClick={() => remove(a.id)}>
               Remove
             </button>
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+// ---------- history ----------
+const REASON = { autosave: 'Saved while editing', published: 'Published', before_restore: 'Before a restore' }
+function HistoryPanel({ checkpoints, busy, onRestore }) {
+  const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return (
+    <div className="studio-history-panel">
+      <p className="fine">Earlier versions of your draft, saved automatically (the newest 20 are kept). Restoring one changes only your draft.</p>
+      {busy && <p className="fine">Waiting for your latest changes to save…</p>}
+      {!checkpoints.length && <p className="fine">No earlier versions yet. One is saved every 10 minutes while you edit, and when you publish.</p>}
+      <ol className="studio-sections">
+        {checkpoints.map((c) => (
+          <li key={c.id}>
+            <span>
+              <strong>{when(c.createdAt)}</strong>
+              <span className="fine"> · {REASON[c.reason] || 'Saved'} · {c.pages} page{c.pages === 1 ? '' : 's'}</span>
+            </span>
+            <button type="button" className="link-btn" disabled={busy} onClick={() => onRestore(c.id)}>
+              Restore
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

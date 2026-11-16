@@ -232,6 +232,11 @@ export function validateContent(body, approvedClaims = [], assetIds = null, { pr
   if (c.seoDescription.length > LIMITS.seoDescription) errors.push('seoDescription')
   if (!c.redirects.length) delete c.redirects // older content has none: keep drafts and live versions comparable
   else if (c.redirects.length > MAX_REDIRECTS || c.redirects.some((r) => !REDIRECT_FROM.test(r.from) || !REDIRECT_TARGETS.includes(r.to)) || new Set(c.redirects.map((r) => r.from)).size !== c.redirects.length) errors.push('redirects')
+  // Phone-sized copies of owner photos ({ photoId: smallId }, both this business's photos): offered to small screens.
+  const variants = Object.entries(b.variants && typeof b.variants === 'object' ? b.variants : {})
+    .filter(([k, v]) => ASSET_RE.test(k) && ASSET_RE.test(String(v)) && k !== v && (!assetIds || (assetIds.has(k) && assetIds.has(v))))
+    .slice(0, 120)
+  if (variants.length) c.variants = Object.fromEntries(variants)
   // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
   // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
   if (designed) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, legacyServices: prior?.length ? prior : services, claims: approvedClaims }).spec

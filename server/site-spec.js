@@ -152,6 +152,14 @@ export function validateSpec(raw, ctx = {}) {
     }
     return s
   }
+  const framing = (s) => {
+    const out = {}
+    const f = Array.isArray(s.imageFocus) && s.imageFocus.length === 2 ? s.imageFocus.map((n) => Math.round(clamp(n, 0, 100, 50))) : null
+    if (f && (f[0] !== 50 || f[1] !== 50)) out.imageFocus = f
+    const a = pick(s.imageAspect, ENUM.aspect, 'auto')
+    if (a !== 'auto') out.imageAspect = a
+    return out
+  }
   const img = (v, where) => {
     if (v == null || v === '' || v === 'none') return null
     const s = String(v)
@@ -263,6 +271,9 @@ export function validateSpec(raw, ctx = {}) {
         text: txt(s.text, LIMITS.text, `${where}.text`, true),
         // Owner-hidden (kept in the draft, left out of the published page; the editor shows it dimmed).
         ...(s.hidden === true ? { hidden: true } : {}),
+        // Photo framing (opening, photo-and-text, booking banner): the point to keep in view and the shape to crop to.
+        // Stored only when changed, so existing designs keep exactly the same data.
+        ...(['hero', 'imageText', 'cta'].includes(s.type) ? framing(s) : {}),
       }
       if (base.background === 'image' && !base.backgroundImage) base.background = 'ink'
       const items = (max) => arr(s.items).slice(0, max)

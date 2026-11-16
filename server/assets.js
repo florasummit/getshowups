@@ -10,7 +10,8 @@ import { specImages } from './site-spec.js'
 // row limit and 10 GB database cap are why the per-website budget is 50 MB, not the 250 MB proposed for R2. Moving
 // photos to R2 (Cloudflare, needs a bucket binding = production change with approval) would allow a larger budget.
 export const MAX_BYTES = 1_000_000
-export const MAX_ASSETS = 60
+// 120 files: each photo may have a phone-sized copy (≤800 px, ~60–120 KB) next to it.
+export const MAX_ASSETS = 120
 export const MAX_TOTAL_BYTES = 50 * 1024 * 1024
 
 export function sniffImage(bytes) {
@@ -34,20 +35,61 @@ export async function saveAsset(db, customerId, bytes, now = Date.now()) {
   return { ok: true, asset: { id, url: `/site-assets/${id}`, size: bytes.length } }
 }
 
-// Removes one of the business's photos, only if nothing recoverable still shows it: the draft, the live version, any
-// saved (published) version, or an AI designer turn that Undo can bring back. Returns { ok } or { error: 'in_use' }.
-export async function deleteAsset(db, customerId, id) {
+// Every photo something recoverable shows: the draft, the live version, any saved (published) version, an AI designer
+// turn Undo can bring back, or a draft checkpoint. Each is read as content (usedBy), so a photo merely named in a copy
+// map (content.variants) without being shown doesn't count.
+export async function photosInUse(db, customerId) {
+  const used = new Set()
+  const add = (content) => {
+    for (const id of usedBy(content)) used.add(id)
+  }
+  const parse = (v) => {
+    try {
+      return typeof v === 'string' ? JSON.parse(v) : v
+    } catch {
+      return null
+    }
+  }
+  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
+  if (w) add(parse(w.draft))
+  add((await liveContent(db, customerId))?.content)
+  const versions = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1').bind(customerId).all()
+  for (const v of versions.results) add(parse(v.content))
+  const kept = await db
+    .prepare("SELECT json_extract(content, '$.site') AS site, json_extract(content, '$.previous') AS previous, json_extract(content, '$.draft') AS draft FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') IN ('designer', 'checkpoint')")
+    .bind(customerId)
+    .all()
+  for (const r of kept.results) {
+    add({ site: parse(r.site) })
+    add({ site: parse(r.previous) })
+    add(parse(r.draft))
+  }
+  return used
+}
+
+// Removes one of the business's photos, only if nothing recoverable still shows it. Returns { ok } or { error: 'in_use' }.
+export async function deleteAsset(db, customerId, id, inUse = null) {
   if (!/^[a-f0-9]{32}$/.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
   const row = await db.prepare('SELECT id FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
   if (!row) return { ok: false, httpStatus: 404, error: 'not_found' }
-  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
-  if (w && usedBy(JSON.parse(w.draft || '{}')).has(id)) return { ok: false, httpStatus: 409, error: 'in_use' }
-  if (usedBy((await liveContent(db, customerId))?.content).has(id)) return { ok: false, httpStatus: 409, error: 'in_use' }
-  const versions = await db.prepare('SELECT 1 AS x FROM website_versions WHERE customer = ?1 AND instr(content, ?2) > 0 LIMIT 1').bind(customerId, id).first()
-  const turns = await db.prepare("SELECT 1 AS x FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') = 'designer' AND instr(content, ?2) > 0 LIMIT 1").bind(customerId, id).first()
-  if (versions || turns) return { ok: false, httpStatus: 409, error: 'in_use' }
+  if ((inUse || (await photosInUse(db, customerId))).has(id)) return { ok: false, httpStatus: 409, error: 'in_use' }
   await db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).run()
   return { ok: true }
+}
+
+// Removes every photo of this business that nothing recoverable uses. Returns { removed, kept, bytesFreed }.
+export async function cleanupAssets(db, customerId) {
+  const inUse = await photosInUse(db, customerId)
+  const { results } = await db.prepare('SELECT id, size FROM website_assets WHERE customer = ?1').bind(customerId).all()
+  let removed = 0
+  let bytesFreed = 0
+  for (const a of results) {
+    if (inUse.has(a.id)) continue
+    await db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(a.id, customerId).run()
+    removed++
+    bytesFreed += a.size || 0
+  }
+  return { removed, kept: results.length - removed, bytesFreed }
 }
 
 export async function listAssets(db, customerId) {
@@ -58,7 +100,12 @@ export async function listAssets(db, customerId) {
 // D1 may return a BLOB as an ArrayBuffer, a typed array or a plain number array.
 export const blobBytes = (v) => (v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v) : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : Uint8Array.from(v || []))
 
-export const usedBy = (content) => new Set([content?.logo, content?.hero, ...(content?.photos || []), ...specImages(content?.site)].filter(Boolean))
+// Photos a piece of content shows, including the phone-sized copies of the ones it uses (content.variants).
+export const usedBy = (content) => {
+  const used = new Set([content?.logo, content?.hero, ...(content?.photos || []), ...specImages(content?.site)].filter(Boolean))
+  for (const [id, small] of Object.entries(content?.variants || {})) if (used.has(id)) used.add(small)
+  return used
+}
 
 // Returns the asset row if `viewerCustomer` owns it, or if its business's live site uses it.
 export async function readAsset(db, id, viewerCustomer = null) {

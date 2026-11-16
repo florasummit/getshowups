@@ -92,7 +92,7 @@ export function renderSite(biz, content, opts = {}) {
   // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
   // AI-designed sites (v2 spec). Names and prices come from this content's services; towns/phone from records.
   // AI-designed sites show the public brand ("PoolThru", not the legal "Poolthru LLC"); older renderers are unchanged.
-  if (content.site) return renderV2({ ...biz, name: displayBrand(biz.name, content), legalName: biz.name, services: content.services || [], logo: content.logo || null }, content.site, opts)
+  if (content.site) return renderV2({ ...biz, name: displayBrand(biz.name, content), legalName: biz.name, services: content.services || [], logo: content.logo || null, variants: content.variants || null }, content.site, opts)
   if (content.design) return renderDesigned(biz, content, opts)
   const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = opts
   const c = content
