@@ -10,7 +10,8 @@ const FAIL = { 503: 'Our website designer is busy. Please try again in a minute.
 // Errors from the business's own Claude/OpenAI key, in plain words.
 const OWN_KEY = {
   invalid_key: 'Your AI API key isn’t working any more. Replace it under “Your own AI key”, or remove it to use the included writer.',
-  provider_rejected: 'Your AI provider declined the request. Check that your API account has credit and billing set up.',
+  provider_billing: 'Your AI provider account has no credit or has hit its spending limit. Add credit in your provider’s billing settings, then try again. Waiting won’t fix this.',
+  provider_rejected: 'Your AI provider couldn’t accept this request. Please try again later; if it keeps happening, contact us.',
   provider_rate_limited: 'Your AI provider says you’ve hit its rate limit. Please wait a minute and try again.',
   ai_declined: 'The AI declined this request. Try describing the change differently.',
   ai_invalid_output: 'The AI’s answer couldn’t be used. Please try again.',

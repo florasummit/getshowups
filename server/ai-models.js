@@ -121,7 +121,7 @@ export async function reserveUsage(db, customer, provider, model, kind, worstUsd
 }
 
 // Errors that mean the provider refused the request before doing work (auth, bad request, rate limit): not billed.
-const NOT_BILLED = new Set(['invalid_key', 'provider_rejected', 'provider_rate_limited'])
+const NOT_BILLED = new Set(['invalid_key', 'provider_rejected', 'provider_rate_limited', 'provider_billing'])
 
 // After the request: the reservation becomes the estimated cost of the tokens the provider reported. With no usage report
 // (timeout, dropped connection) it keeps the worst case, because the provider may still have billed it.

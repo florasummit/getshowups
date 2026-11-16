@@ -186,7 +186,7 @@ async function runModel(env, msgs, schema) {
 
 // Own-key errors that mean the key itself is unusable: shown to the owner, and the key is marked so it isn't retried.
 const KEY_ERRORS = new Set(['invalid_key'])
-const OWN_KEY_HTTP = { model_unavailable: 409, no_tested_model: 409, budget_reached: 402, invalid_key: 400, provider_rejected: 402, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
+const OWN_KEY_HTTP = { model_unavailable: 409, no_tested_model: 409, budget_reached: 402, invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
 async function ownKey(env, customer, msgs, schema, now) {
   const cred = await credentialFor(env, customer.id)
   if (!cred) return null
@@ -195,6 +195,8 @@ async function ownKey(env, customer, msgs, schema, now) {
   if (!m.ok) return { ok: false, error: m.error }
   const r = await runWithOwnKey(env, { ...cred, model: m.model, maxOutput: m.maxOutput }, msgs, schema)
   await settleUsage(env.ONBOARDING_DB, m.reservation, cred.provider, r)
+  // Status and the provider's own error type/code only (identifiers, no message text): enough to diagnose without a retry.
+  if (!r.ok && r.detail) console.error('own-key request failed:', r.error, JSON.stringify(r.detail))
   if (!r.ok && KEY_ERRORS.has(r.error)) await markCredential(env, customer.id, 'invalid', now)
   return r
 }
