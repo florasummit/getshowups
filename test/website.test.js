@@ -98,6 +98,7 @@ beforeEach(() => {
     ADMIN_API_TOKEN: 'a'.repeat(40),
     WEBSITE_STUDIO_ENABLED: 'true', // Website Studio pilot (old-address redirects come from it)
     WEBSITE_STUDIO_BUSINESSES: 'pools',
+    WEBSITE_STUDIO_PUBLISH: 'true', // these tests publish redirects on purpose; the pilot's 'off' is tested in ai-designer
     ONBOARDING_DB: db,
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
   }

@@ -9,6 +9,9 @@ import WebsiteDesigner from './WebsiteDesigner.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+// Internal pilot: AI-designed sites (and imported old-address redirects) stay private until publishing them is approved.
+const STUDIO_PRIVATE = 'AI-designed websites stay private during the pilot: you can preview this one, but it can’t be published yet. Your live website hasn’t changed.'
+const studioOutput = (c) => Boolean(c && (c.site || c.redirects?.length))
 
 export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
   const [ok, setOk] = useState(false)
@@ -24,6 +27,8 @@ export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
           ? 'Connect your calendar and set your hours first, so customers can book.'
           : d.error === 'plan_required'
             ? 'Your plan isn’t active. Reactivate it in Settings to publish.'
+            : d.error === 'studio_publish_off'
+              ? STUDIO_PRIVATE
             : d.fields
               ? problemText(d.fields)
               : 'Couldn’t publish. Please try again.',
@@ -80,7 +85,7 @@ export default function WebsiteTab() {
     if (status === 200) {
       refresh(d)
       setMore({})
-    } else setMore({ error: 'Something went wrong. Please try again.' })
+    } else setMore({ error: d?.error === 'studio_publish_off' ? STUDIO_PRIVATE : 'Something went wrong. Please try again.' })
   }
 
   return (
@@ -98,7 +103,7 @@ export default function WebsiteTab() {
         )}
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
-          {!w.generated && !pending && !publishing && (!w.published || w.changed) && (
+          {!w.generated && !pending && !publishing && (!w.published || w.changed) && !(studioOutput(w.draft) && !data.studioPublish) && (
             <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
@@ -110,6 +115,7 @@ export default function WebsiteTab() {
           )}
         </div>
         {pending && <p className="fine">Keep or discard the new version below before publishing.</p>}
+        {studioOutput(w.draft) && !data.studioPublish && <p className="fine">{STUDIO_PRIVATE}</p>}
         {publishing && !pending && (
           <>
             <PublishBox

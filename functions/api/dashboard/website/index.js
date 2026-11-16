@@ -22,7 +22,7 @@ import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
-import { studioEnabledFor } from '../../../../server/website-studio.js'
+import { hasStudioOutput, studioEnabledFor, studioPublishAllowed } from '../../../../server/website-studio.js'
 
 // Outside the Website Studio pilot the owner can't introduce an AI-designed site or old-address redirects by hand-crafting
 // a save: those two fields keep what the stored draft already has (so nothing a former pilot business published is lost).
@@ -45,6 +45,7 @@ async function state(env, customer, email) {
   ])
   return {
     studio: studioEnabledFor(env, customer.id), // Website Studio internal pilot (server/website-studio.js)
+    studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (off in the pilot)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,
     hosting,
@@ -148,6 +149,8 @@ export async function onRequestPost({ request, env }) {
       const s = await state(env, customer, session.email)
       if (!s.ready) return json(409, { error: 'not_ready' })
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
+      // Internal pilot: AI-designed sites and Studio redirects stay private until publishing them is approved.
+      if (hasStudioOutput(content) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
       const version = await publish(db, customer.id, content)
       await track(env, 'website_published', { customer: customer.id, props: { version } })
       await recordEvent(db, { type: 'website.publish', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version } })
@@ -162,6 +165,10 @@ export async function onRequestPost({ request, env }) {
     if (action === 'restore') {
       const s = await state(env, customer, session.email)
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
+      if (!studioPublishAllowed(env)) {
+        const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customer.id, Number(body.version) || 0).first()
+        if (v && hasStudioOutput(JSON.parse(v.content))) return json(409, { error: 'studio_publish_off' })
+      }
       if (!(await restore(db, customer.id, body.version))) return json(404, { error: 'not_found' })
       await track(env, 'website_restored', { customer: customer.id, props: { version: body.version } })
       await recordEvent(db, { type: 'website.restore', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version: Number(body.version) || null } })

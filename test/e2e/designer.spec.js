@@ -39,6 +39,10 @@ test('owner designs the website in conversation: first design, revision, undo @m
   await expect(editor.getByRole('radiogroup', { name: /Style|Colour|Colours/ })).toHaveCount(0)
   await expect(editor.getByText('How you appear in Google')).toHaveCount(0)
   await expect(card.locator('.chip').first()).toHaveCSS('text-transform', 'none')
+  // Internal pilot (WEBSITE_STUDIO_PUBLISH unset): the AI design can be previewed but not published.
+  const status = page.locator('section[aria-label="Website status"]')
+  await expect(status.getByText('AI-designed websites stay private during the pilot')).toBeVisible()
+  await expect(status.getByRole('button', { name: /^Publish/ })).toHaveCount(0)
   // Revision in conversation.
   await card.getByLabel('Ask for a change').fill('Make it darker and more premium')
   await card.getByRole('button', { name: 'Send' }).click()

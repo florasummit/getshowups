@@ -5,6 +5,8 @@ Status as of 2026-11-16: one release candidate (`release/website-studio`, PRs #3
 `WEBSITE_STUDIO_BUSINESSES` (server/website-studio.js). Everyone else keeps today's website tools unchanged; their
 dashboard and onboarding don't show the import, the AI designer or the AI-key controls, and those routes are 404.
 Own-key requests never use Anthropic's server-side fallback: only the chosen/reserved model runs and is priced.
+During the pilot `WEBSITE_STUDIO_PUBLISH` stays unset: AI-designed sites (and imported old-address redirects) can be
+previewed but not published or restored live.
 
 ## Customer journeys
 

@@ -113,7 +113,7 @@ beforeEach(() => {
   kv = new Map()
   requests = []
   nextDesign = { reply: 'A calm, coastal design with a clear path to booking.', site: DESIGN() }
-  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon', ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
+  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon', WEBSITE_STUDIO_PUBLISH: 'true', ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')
   db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, updated_at) VALUES ('pools', 'c', 's', 'active', 1)").run()
@@ -278,6 +278,38 @@ test('Website Studio is an internal pilot: master switch AND an explicit busines
   assert.equal((await call(website, 'POST', { cookie: s, body: { action: 'save', content: { ...designed, redirects: [{ from: '/x', to: 'book' }] } } })).status, 200)
   const salon = (await call(website, 'GET', { cookie: s })).json.website.draft
   assert.deepEqual(['site' in salon, 'redirects' in salon], [false, false])
+})
+
+test('pilot: AI-designed sites stay private unless WEBSITE_STUDIO_PUBLISH is on (publish and restore refused; live site untouched)', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  // The business's current, non-AI website is live (version 1).
+  const plain = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: plain, confirm: true } })).status, 200)
+  const liveBefore = (await call(publicSite, 'GET', { params: { customer: 'pools' } })).text
+  // An AI design published while publishing was allowed (version 2), then the site is put back to version 1.
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const designed = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed, confirm: true } })).status, 200)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1 } })).status, 200)
+  // The pilot setting: switch unset.
+  delete env.WEBSITE_STUDIO_PUBLISH
+  const s = (await call(website, 'GET', { cookie: c })).json
+  assert.equal(s.studioPublish, false)
+  // Designing and previewing still work; the result can't go live, by publish or by restoring the AI version.
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website again' } })
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.ok(draft.site)
+  assert.match((await call(preview, 'GET', { cookie: c, url: `${ORIGIN}/api/dashboard/website/preview` })).text, /Clear water, every week\./, 'private preview works')
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: draft, confirm: true } })).json, { error: 'studio_publish_off' })
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 2 } })).json, { error: 'studio_publish_off' })
+  // Imported old-address redirects are Studio output too.
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, redirects: [{ from: '/x', to: 'book' }] }, confirm: true } })).json, { error: 'studio_publish_off' })
+  // The live website is exactly what it was; the AI pages don't exist publicly.
+  assert.equal((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, liveBefore)
+  assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 404)
+  // Ordinary website changes still publish.
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, headline: 'Still publishable' }, confirm: true } })).status, 200)
 })
 
 test('restoring an earlier AI-designed version brings back its pages and booking links, live and in the draft', async () => {

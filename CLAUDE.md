@@ -233,7 +233,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   WEBSITE_STUDIO_ENABLED AND WEBSITE_STUDIO_BUSINESSES (same shape as Ads; server/website-studio.js studioEnabledFor()):
   Website Studio internal pilot = own AI key, AI designer, website import (+ old-address redirects). Outside it: those
   routes are 404, the dashboard/onboarding don't offer them, a stored key is never used, and a save can't add or change
-  `site`/`redirects` (stored values kept). Published content is never gated. Turning one on in production requires approval.
+  `site`/`redirects` (stored values kept). Published content is never gated. WEBSITE_STUDIO_PUBLISH (off in the pilot):
+  unless 'true', content with an AI-designed `site` or `redirects` can't be published or restored (409
+  studio_publish_off); drafts/previews unaffected. Turning one on in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not

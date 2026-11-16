@@ -18,6 +18,13 @@ _Update at the end of every task. Newest first._
   (production's fallback, checked read-only); a dashboard save during rollback drops `site` and `redirects`.
 - One merge = one deploy: merging #37–#40 one by one would put three ungated intermediate states in production.
 - Unit 447/447, browser 79/79. Local journey re-run on the candidate (PoolThru in the local pilot): all steps pass.
+- Preflight (read-only, 2026-11-16): `poolthru-llc` = PoolThru (real, not test-marked; its one owner account is NOT the
+  GetShowUps owner's); `gsu-stripe-test-pools` = internal test business (test-marked, owned by the GetShowUps owner).
+  PoolThru's live website (v5, not AI) renders byte-identically with production code and this candidate (our address and
+  own domain); no booking/Ads/cron/messaging/billing/auth/domain code changes. D1 Time Travel bookmark recorded; production
+  deployment 1aff1e8f confirmed via `wrangler pages deployment list`.
+- WEBSITE_STUDIO_PUBLISH (off by default): AI-designed sites and Studio redirects can't be published or restored during
+  the pilot (409 studio_publish_off; dashboard explains it; drafts and previews work). Unit + browser tests. 448/448, 79/79.
 
 ## Website Studio customer-journey validation (2026-11-16) — #38 → #40, draft, NOT merged; no paid calls
 

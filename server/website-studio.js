@@ -18,3 +18,10 @@ export const studioBusinesses = (env) =>
 
 export const studioEnabledFor = (env, customerId) =>
   studioEnabled(env) && typeof customerId === 'string' && CUSTOMER_RE.test(customerId) && studioBusinesses(env).includes(customerId)
+
+// Publishing Studio output is a separate, later decision (owner, 2026-11-16: no public AI-designed website during the
+// internal pilot). Unless WEBSITE_STUDIO_PUBLISH is exactly 'true', content that carries an AI-designed site or
+// old-address redirects can't go live (publish or restore); drafts and private previews are unaffected. Content that was
+// already live is never taken down by this.
+export const studioPublishAllowed = (env) => env?.WEBSITE_STUDIO_PUBLISH === 'true'
+export const hasStudioOutput = (content) => Boolean(content && (content.site || content.redirects?.length))
