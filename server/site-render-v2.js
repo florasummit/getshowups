@@ -48,7 +48,8 @@ function image(ref, { alt = '', cls = '', sizes = '100vw', eager = false } = {})
   return s ? `<img class="${cls}" src="/site-stock/${s.file}" srcset="/site-stock/${s.id}-sm.jpg 900w, /site-stock/${s.file} 1600w" sizes="${sizes}" alt="${esc(alt || s.alt)}" ${lazy} decoding="async">` : ''
 }
 
-function css(t) {
+// composition: the page uses a composition section (its CSS is only sent when needed).
+function css(t, { composition = false } = {}) {
   const c = t.colors
   const pad = { compact: [40, 56, 72, 96], comfortable: [56, 80, 104, 136], airy: [72, 104, 136, 176] }[t.density]
   const fonts = [...new Set([t.headingFont, t.bodyFont])].map((f) => `@font-face{font-family:"${f}";src:url(/site-fonts/${f}.woff2) format("woff2");font-weight:100 900;font-display:swap}`).join('')
@@ -88,7 +89,7 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 .ico{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;color:var(--accent-text)}.bg-accent .ico,.bg-ink .ico{color:inherit}
 .nav{position:${'relative'};z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}.nav.sticky{position:sticky;top:0}.nav .wrap{display:flex;align-items:center;gap:24px;min-height:72px}
 .nav .brand{font:700 ${fs(0.6)}/1 var(--hf);color:var(--ink);text-decoration:none;letter-spacing:${t.headingTracking}em;${t.headingCase === 'upper' ? 'text-transform:uppercase;' : ''}}.nav ul{display:flex;gap:22px;list-style:none;margin:0;padding:0}.nav ul a{color:var(--ink);text-decoration:none;font-size:${fs(-0.3)}}.nav ul a[aria-current]{color:var(--accent-text)}
-.nav-left .brand,.nav-split .brand{margin-right:auto}.nav-center .wrap{justify-content:center;flex-wrap:wrap}.nav-center .brand{width:100%;text-align:center;padding-top:16px}.nav-split ul{flex:1;justify-content:center}.nav .btn{padding:10px 18px}
+.nav-left .brand,.nav-split .brand{margin-right:auto}.nav-center .wrap{justify-content:center;flex-wrap:wrap}.nav-center .brand{width:100%;text-align:center;padding-top:16px}.nav-split ul{flex:1;justify-content:center}.nav .btn{padding:10px 18px;min-height:44px}
 @media(max-width:820px){.nav ul{display:none}.nav .wrap{justify-content:space-between}}
 .hero{position:relative}.h-auto{min-height:0}.h-tall{min-height:min(calc(85vh - 72px),760px);min-height:min(calc(85svh - 72px),760px)}.h-screen{min-height:calc(100vh - 72px);min-height:calc(100svh - 72px)}.hero .wrap{display:grid;align-items:center;gap:clamp(28px,5vw,72px)}.hero.h-tall,.hero.h-screen{display:flex;flex-direction:column;justify-content:center;padding-block:clamp(32px,6vh,var(--py))}
 .hero p.sub{font-size:${fs(0.6)};max-width:620px}.al-center .hero-copy p.sub{margin-inline:auto}
@@ -114,9 +115,17 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 .steps-n{counter-reset:s;display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.steps-n .st{counter-increment:s}.steps-n .st::before{content:counter(s,decimal-leading-zero);display:block;font:600 ${fs(1.6)} var(--hf);color:var(--accent-text);margin-bottom:10px}
 .steps-t{border-left:2px solid var(--line);padding-left:28px;display:grid;gap:28px}.steps-t .st{position:relative}.steps-t .st::before{content:"";position:absolute;left:-36px;top:6px;width:14px;height:14px;border-radius:50%;background:var(--accent)}
 .faq details{border-top:1px solid var(--line);padding:20px 0}.faq details:last-child{border-bottom:1px solid var(--line)}.faq summary{cursor:pointer;font:600 ${fs(0.5)} var(--hf);list-style:none;display:flex;justify-content:space-between;gap:16px}.faq summary::after{content:"+";color:var(--accent-text)}.faq details[open] summary::after{content:"–"}.faq details p{margin:12px 0 0}
-.cta-card .wrap>div{background:var(--surface);border-radius:var(--r);padding:clamp(32px,5vw,64px)}.cta-split .wrap{display:grid;grid-template-columns:1.2fr .8fr;gap:48px;align-items:center}.cta-split img{border-radius:var(--r);width:100%;aspect-ratio:4/3;object-fit:cover}@media(max-width:760px){.cta-split .wrap{grid-template-columns:1fr}}
+.cta-card .wrap>div{background:var(--surface);color:var(--ink);border-radius:var(--r);padding:clamp(32px,5vw,64px)}.cta-card .wrap>div .muted{color:var(--muted);opacity:1}.cta-card .wrap>div .eyebrow{color:var(--accent-text);opacity:1}.cta-card .wrap>div .btn:not(.ghost){background:var(--accent);color:var(--on-accent);border-color:var(--accent)}.cta-split .wrap{display:grid;grid-template-columns:1.2fr .8fr;gap:48px;align-items:center}.cta-split img{border-radius:var(--r);width:100%;aspect-ratio:4/3;object-fit:cover}@media(max-width:760px){.cta-split .wrap{grid-template-columns:1fr}}
 .towns{display:flex;flex-wrap:wrap;gap:10px;list-style:none;padding:0;margin:24px 0 0}.towns li{border:1px solid var(--line);border-radius:999px;padding:8px 16px}.al-center .towns{justify-content:center}
 .foot{border-top:1px solid var(--line);padding:40px 0;font-size:${fs(-0.4)}}.foot .wrap{display:flex;flex-wrap:wrap;gap:16px 32px;justify-content:space-between;align-items:center}.foot a{color:inherit}.foot-statement .big{font:${t.headingWeight} ${fluid(3)}/1.05 var(--hf);margin-bottom:28px;width:100%}
+${composition ? `.zs-display{font-size:${fluid(7)};line-height:.96}.zs-xl{font-size:${fluid(5)};line-height:1.02}.zs-l{font-size:${fluid(3.4)}}.zs-m{font-size:${fs(0.6)}}.zs-s{font-size:${fs(-0.3)}}
+.comp .cg{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:clamp(14px,2vw,28px);align-items:start}.cb{position:relative;min-width:0}.cb p{margin:0}.cb .eyebrow{margin:0}
+.comp.h-tall,.comp.h-screen{display:flex;flex-direction:column;justify-content:center;padding-block:clamp(32px,6vh,var(--py))}
+.cm{position:relative;overflow:hidden;height:100%;min-height:160px}.cm img{width:100%;height:100%;object-fit:cover}.cm.shape-rounded{border-radius:var(--r)}.cm.shape-arch{border-radius:999px 999px var(--r) var(--r)}.cm.shape-circle{border-radius:50%}.cm.shape-rect img,.cm.shape-rounded img,.cm.shape-arch img,.cm.shape-circle img{border-radius:0}
+.cm.tr-tint::after,.cm.tr-duo::after,.cm.tr-scrim::after{content:"";position:absolute;inset:0;pointer-events:none}.cm.tr-tint::after{background:var(--accent);mix-blend-mode:multiply;opacity:.35}.cm.tr-duo img{filter:grayscale(1) contrast(1.1)}.cm.tr-duo::after{background:var(--accent);mix-blend-mode:screen;opacity:.55}.cm.tr-scrim::after{background:linear-gradient(180deg,transparent 35%,rgba(0,0,0,.6))}
+.mk{font:800 clamp(64px,14vw,240px)/.8 var(--hf);color:var(--line);user-select:none}
+@media(min-width:861px){.cb.over{color:#fff;text-shadow:0 1px 18px rgba(0,0,0,.35)}.cb.over .muted,.cb.over .eyebrow{color:#fff;opacity:.92}.cb.over .btn.ghost{color:#fff}.cm.under::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.15),rgba(0,0,0,.55))}.cb.raised{background:var(--bg);color:var(--ink);padding:clamp(16px,2.2vw,32px);border-radius:var(--r);box-shadow:0 12px 40px rgba(0,0,0,.12)}.bg-surface .cb.raised{background:var(--surface)}.cb.raised .muted{color:var(--muted)}}
+@media(max-width:860px){.comp .cg{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}}` : ''}
 .preview-bar{background:#fff4d6;color:#4a3800;text-align:center;font:500 14px system-ui;padding:8px}.skip{position:absolute;left:-999px}.skip:focus{left:16px;top:16px;z-index:99;background:var(--bg);padding:8px}
 ${motion}`
 }
@@ -140,12 +149,52 @@ export function renderV2(biz, spec, opts = {}) {
   const head = (s, tag = 'h2') => (s.heading || s.eyebrow || s.text ? `<div class="head">${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}${s.heading ? `<${tag} id="h-${esc(s.id)}">${esc(s.heading)}</${tag}>` : ''}${s.text ? `<div class="muted">${paras(s.text)}</div>` : ''}</div>` : '')
   const svc = (it) => biz.services?.[it.serviceIndex] || { name: '', price: '' }
   let first = true
+  // Placement rules for composition blocks, generated from validated numbers/enums only (section ids are slugs).
+  const blockCss = []
+  const ASPECT = { '1x1': '1/1', '4x5': '4/5', '3x4': '3/4', '4x3': '4/3', '3x2': '3/2', '16x9': '16/9', '21x9': '21/9' }
+  const composition = (s, cls) => {
+    // Desktop overlaps stay readable: text fully on a photo → white text over a darkening layer; text partly over a
+    // photo → a solid card behind it. Phones stack the blocks, so nothing overlaps there.
+    const media = s.blocks.filter((b) => b.kind === 'media')
+    const hit = (a, m) => a.col[0] < m.col[0] + m.col[1] && m.col[0] < a.col[0] + a.col[1] && a.row[0] < m.row[0] + m.row[1] && m.row[0] < a.row[0] + a.row[1] && a.z > m.z
+    const inside = (a, m) => a.col[0] >= m.col[0] && a.col[0] + a.col[1] <= m.col[0] + m.col[1] && a.row[0] >= m.row[0] && a.row[0] + a.row[1] <= m.row[0] + m.row[1]
+    const words = s.blocks.filter((b) => b.kind !== 'media' && b.kind !== 'mark')
+    const over = new Set(words.filter((b) => media.some((m) => hit(b, m) && inside(b, m))))
+    const raised = new Set(words.filter((b) => !over.has(b) && media.some((m) => hit(b, m))))
+    const under = new Set(media.filter((m) => [...over].some((b) => hit(b, m))))
+    const eager = first
+    let labelled = ''
+    const html = s.blocks
+      .map((b, i) => {
+        const sel = `#${s.id} .cg>.cb:nth-child(${i + 1})`
+        const box = b.kind === 'button' || b.kind === 'mark'
+        blockCss.push(`${sel}{grid-column:${b.col[0]} / span ${b.col[1]};grid-row:${b.row[0]} / span ${b.row[1]};z-index:${b.z};align-self:${b.kind === 'media' && b.aspect === 'auto' ? 'stretch' : b.y};justify-self:${box ? b.x : 'stretch'};text-align:${b.x === 'end' ? 'right' : b.x === 'center' ? 'center' : 'left'}}`)
+        if (b.kind === 'media') blockCss.push(`${sel} .cm${ASPECT[b.aspect] ? `{aspect-ratio:${ASPECT[b.aspect]}}` : '{min-height:320px}'}${sel} img{object-position:${b.focus[0]}% ${b.focus[1]}%}`)
+        blockCss.push(`@media(max-width:860px){${sel}{grid-column:span ${b.m.span};grid-row:auto;order:${b.m.order};text-align:${b.x === 'center' ? 'center' : 'left'}${b.m.hide ? ';display:none' : ''}}}`)
+        let inner = ''
+        if (b.kind === 'heading') {
+          const tag = first ? 'h1' : 'h2'
+          first = false
+          const hid = labelled ? '' : ` id="h-${esc(s.id)}"`
+          if (!labelled) labelled = `h-${s.id}`
+          inner = `<${tag}${hid} class="zs-${b.size}">${esc(b.text)}</${tag}>`
+        } else if (b.kind === 'text') inner = b.size === 's' ? `<p class="eyebrow">${esc(b.text)}</p>` : `<p class="zs-${b.size}${b.size === 'm' ? ' muted' : ''}">${esc(b.text)}</p>`
+        else if (b.kind === 'button') inner = `<a class="btn${b.secondary ? ' ghost' : ''}" href="${link(b.target)}">${esc(b.label)}</a>`
+        else if (b.kind === 'media') inner = `<div class="cm shape-${b.shape} tr-${b.treat}${under.has(b) ? ' under' : ''}">${image(b.image, { alt: b.alt, eager, sizes: `(max-width:860px) 100vw, ${Math.max(25, Math.round((b.col[1] / 12) * 100))}vw` })}</div>`
+        else inner = `<div class="mk" aria-hidden="true">${esc(b.text)}</div>`
+        return `<div class="cb${over.has(b) ? ' over' : raised.has(b) ? ' raised' : ''}">${inner}</div>`
+      })
+      .join('')
+    return `<section id="${esc(s.id)}" class="${cls} comp h-${s.height}"${labelled ? ` aria-labelledby="${esc(labelled)}"` : ''}><div class="wrap cg">${html}</div></section>`
+  }
 
   const section = (s) => {
     const cls = `sec sp-${s.spacing} bg-${s.background} al-${s.align} w-${s.width}${s.animate !== 'none' && spec.theme.motion !== 'none' ? ` anim-${s.animate}` : ''}`
     const bgImg = s.background === 'image' && s.backgroundImage ? `<div class="bgimg" aria-hidden="true">${image(s.backgroundImage)}</div>` : ''
     const open = (extra = '', label = true) => `<section id="${esc(s.id)}" class="${cls}${extra}"${label && s.heading ? ` aria-labelledby="h-${esc(s.id)}"` : ''}>${bgImg}`
     switch (s.type) {
+      case 'composition':
+        return composition(s, cls)
       case 'hero': {
         const tag = first ? 'h1' : 'h2'
         first = false
@@ -204,7 +253,7 @@ export function renderV2(biz, spec, opts = {}) {
   const title = pg.seoTitle || (pg.slug ? `${pg.navLabel} · ${biz.name}` : biz.name)
   const desc = pg.seoDescription || spec.pages[0].seoDescription || ''
   const schema = { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: biz.name, ...(canonical ? { url: canonical } : {}), ...(biz.phone ? { telephone: biz.phone } : {}), ...(biz.cities?.length ? { areaServed: biz.cities } : {}) }
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && canonical ? `<link rel="canonical" href="${esc(pg.slug ? `${canonical.replace(/\/$/, '')}/${pg.slug}` : canonical)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme)}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && canonical ? `<link rel="canonical" href="${esc(pg.slug ? `${canonical.replace(/\/$/, '')}/${pg.slug}` : canonical)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme, { composition: blockCss.length > 0 })}${blockCss.join("")}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
 }
 
 export { FONTS }

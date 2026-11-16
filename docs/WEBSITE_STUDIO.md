@@ -8,6 +8,11 @@ Own-key requests never use Anthropic's server-side fallback: only the chosen/res
 During the pilot `WEBSITE_STUDIO_PUBLISH` stays unset: AI-designed sites (and imported old-address redirects) can be
 previewed but not published or restored live.
 
+**Composition + design quality (2026-11-16, draft PR):** a `composition` section (blocks placed on a 12-column grid,
+phone layout derived) for the first screen and signature moments; invalid AI choices are reported, not silently made
+generic; design checks with at most one automatic revision (an unusable answer is an error, never a stand-in); raw
+answers kept redacted for 30 days; "Show me a different direction" (a fresh design that must differ; undo returns).
+
 ## Customer journeys
 
 All four journeys share one draft, editor, renderer, publishing flow, version history and hosting.

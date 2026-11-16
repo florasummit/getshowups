@@ -100,9 +100,18 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      security boundary: enums/clamps, AA contrast repair, own-or-stock images, links only book/page/section,
                      services/prices/towns/phone from records, claims + invented-number filter, limits. site-render-v2.js
                      renders it (escaped, no scripts but JSON-LD, CSS-only motion, multi-page: /p/<id>/<page>, domain /<page>)
-  ai-designer.js     Conversational designer on the owner's own key: one turn = one model call → { reply, site } →
-                     validateSpec → PRIVATE draft (undo keeps the previous design); imported text given as quoted data;
-                     turns in website_design_turns (0023). Route streams NDJSON progress (designer.js)
+                     'composition' section: ≤10 blocks (heading/text/button/media/mark) on a 12-col grid for the first
+                     screen + signature moments; phone layout derived (m.order/span/hide); text over photos made readable
+                     (white+scrim inside, raised card partly over; desktop only); CSS only from validated numbers/enums and
+                     only on pages that use it. Invalid model choices are REPORTED (invalid_choice/empty_block), never
+                     silently defaulted. Nav Book button always on. spec.direction = one-line art direction (not rendered).
+  ai-designer.js     Conversational designer on the owner's own key: one turn → { reply, site } → validateSpec →
+                     design-checks.js (hard: unusable → error ai_design_incomplete, nothing saved; soft: generic first
+                     screen / repeated sections / "different" not different) → at most ONE automatic revision (each call
+                     reserved against the monthly limit) → PRIVATE draft (undo keeps the previous design). Raw answers kept
+                     redacted in website_generations.content.raw, purged after 30 days (cron). design-blocks.js: the model's
+                     place/look token form. action 'different' = fresh design that must differ. Imported text = quoted
+                     data; turns in website_design_turns (0023). Route streams NDJSON progress (designer.js)
   site-design.js     The design system the AI chooses from: 8 palettes (AA-checked), 5 font pairings, 4 hero / 3
                      services / 3 about layouts, shapes, section order, image refs (asset:<id> | stock:<id>).
                      validateDesign(), presetDesigns(), diversify() (3 designs never share hero/palette/fonts)

@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: composition section + design quality (2026-11-16) — draft PR, NOT merged; no paid calls
+
+- PR #42 (hero/nav/phone headlines) merged and deployed (f8239b2, 05:02 UTC): PoolThru's live page hash unchanged,
+  booking 160 slots.
+- New: `composition` section type in v2 (server/site-spec.js + site-render-v2.js, string renderer kept): ≤10 blocks on a
+  12-column grid; phone layout derived; readable overlaps; CSS from validated values only, sent only when used.
+- Generic fallbacks: invalid choices and empty blocks are reported; server/design-checks.js decides (hard → one revision
+  → error `ai_design_incomplete`, nothing saved; soft → one revision → saved). Raw answers redacted, kept 30 days.
+- Art direction (`direction`), prompt guidance for compositions and phone order, "Show me a different direction".
+- Fixes: CTA card on an accent background now readable; nav Book button ≥44px.
+- Evidence: three directions with identical PoolThru info + photos (test/fixtures/design-directions.js) differ on
+  desktop and phone, incl. as neutral wireframes; responsive checks pass at 320/390/768/1024/1440; saved AI designs
+  render with identical page bodies (CSS: only the two fixes). Bundle +25 KB (+1.1%).
+- Found by the browser test: the Claude path converted twice and dropped composition buttons silently; fixed
+  (idempotent parsing, empty blocks reported) with a regression test.
+- Unit 463/463, browser 79/79. Next: paid validation (approval) — Anthropic grammar size + real AI compositions.
+
 ## AI-designed sites: hero height, nav and phone headline fixes (2026-11-16) — draft, NOT merged
 
 - Production pilot design (GPT-6.1 Sol): hero 1,054px tall on a 900px screen, 353px empty above the copy, headline at

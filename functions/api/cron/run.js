@@ -6,6 +6,7 @@ import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server
 import { processDueMessages } from '../../../server/messages.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
+import { purgeDesignerRaw } from '../../../server/ai-designer.js'
 import { queueOwnerNotices } from '../../../server/notify.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
@@ -56,6 +57,8 @@ export async function onRequestPost({ request, env }) {
       videos: await adsStep('videos', () => pollVideos(env)),
     }
     const domains = await adsStep('domains', () => checkDueDomains(env))
+    // Retention: private copies of raw AI design answers are removed after 30 days.
+    const designerRaw = await adsStep('designer raw', () => purgeDesignerRaw(env.ONBOARDING_DB))
     // Account deletions (only when ACCOUNT_DELETION_ENABLED='true'): retries due steps with backoff.
     // Canceled accounts past their 90-day recovery period enter deletion (only when deletion is enabled).
     const recovery = await adsStep('recovery', () => processRecoveryExpiries(env))
@@ -68,7 +71,7 @@ export async function onRequestPost({ request, env }) {
       const r = await auditCheckpoint(env.ONBOARDING_DB)
       return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
     })
-    return json(200, { messages, onboardingQueued, ownerNotices, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, recovery, deletions, reconcile, changes, audit })
+    return json(200, { messages, onboardingQueued, ownerNotices, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })
