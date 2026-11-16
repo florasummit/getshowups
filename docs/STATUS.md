@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: final live "different direction" test for PR #43 (2026-11-16) — $0.184 of $0.50; draft, NOT merged
+
+- Cap: actual settled spend in this test + the next request's worst case ≤ $0.50, checked before every request (the
+  product's own limit can't express a combined $0.50: $1 minimum, per provider). GPT ran first ($0.057 + $0.059 =
+  $0.116, revision included), then Claude ($0.068, no revision needed). Nothing blocked.
+- `same_lead` triggered LIVE on GPT: its first answer kept "Less upkeep. More pool time."; the revision request carried
+  the note and the saved design has a new headline ("Good days start with water."), lead photo, structure (one wide photo,
+  words inside), fonts (Syne/Inter) and palette (graphite/mint); no soft issues left. Claude's answer was different on
+  its own (collage, "Charleston pools, kept crystal clear", Syne/Inter, cobalt), so nothing triggered.
+- `buried_photo` did NOT trigger live (neither answer layered a card over most of a photo): untested live; covered by the
+  unit test built from GPT's earlier live layout.
+- Visual inspection found one more renderer defect, fixed + regression test: a solid button in a dark ("ink") section
+  took the section's light text colour (`.bg-ink a{color:inherit}` outranks `.btn`), so GPT's mint Book button read
+  white-on-mint. Now `.bg-ink .btn:not(.ghost)` keeps the button's own label colour.
+- Comparison sheet (full pages, desktop + phone, before/after per provider): scratchpad validation2/final-compare.png.
+- Unit 474/474, browser 79/79.
+
 ## Website Studio: live re-validation for PR #43 (2026-11-16) — both providers pass; $0.497 spent; draft, NOT merged
 
 - Claude compatibility call (approved, $0.40 cap, enforced in the harness as a worst-case-before-send guard): passed,

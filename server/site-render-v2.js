@@ -80,7 +80,7 @@ h1,h2,h3{font-family:var(--hf);font-weight:${t.headingWeight};letter-spacing:${t
 h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line-height:1.25}p{margin:0 0 1em}p:last-child{margin-bottom:0}
 .wrap{width:min(var(--max),100% - 40px);margin-inline:auto}.w-narrow .wrap{max-width:720px}.w-wide .wrap{width:min(var(--max),100% - 40px)}.w-full .wrap{width:100%;max-width:none;padding-inline:max(20px,(100% - var(--max)) / 2)}
 .sec{padding-block:var(--py)}.sp-s{--py:${pad[0]}px}.sp-m{--py:${pad[1]}px}.sp-l{--py:${pad[2]}px}.sp-xl{--py:${pad[3]}px}@media(max-width:700px){.sec{--py:${pad[0]}px}}
-.bg-bg{background:var(--bg)}.bg-surface{background:var(--surface)}.bg-accent{background:var(--accent);color:var(--on-accent)}.bg-accent a,.bg-ink a{color:inherit}.bg-ink{background:var(--ink);color:var(--bg)}
+.bg-bg{background:var(--bg)}.bg-surface{background:var(--surface)}.bg-accent{background:var(--accent);color:var(--on-accent)}.bg-accent a,.bg-ink a{color:inherit}.bg-ink .btn:not(.ghost){color:var(--on-accent)}.bg-ink{background:var(--ink);color:var(--bg)}
 .bg-ink .muted,.bg-accent .muted{color:inherit;opacity:.82}.bg-image{position:relative;color:#fff;isolation:isolate}.bg-image>.bgimg{position:absolute;inset:0;z-index:-2}.bg-image>.bgimg img{width:100%;height:100%;object-fit:cover}.bg-image::before{content:"";position:absolute;inset:0;background:#000;opacity:.55;z-index:-1}
 .al-center{text-align:center}.al-center .head{margin-inline:auto}.al-center .actions{justify-content:center}
 .eyebrow{font-size:${fs(-1)};letter-spacing:.14em;text-transform:uppercase;font-weight:600;color:var(--accent-text);margin:0 0 14px}.bg-accent .eyebrow,.bg-ink .eyebrow,.bg-image .eyebrow{color:inherit;opacity:.85}

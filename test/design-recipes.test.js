@@ -95,3 +95,19 @@ test('footer: a tagline that repeats the brand (any separator) loses it and star
   assert.match(simple, /© 2026 PoolThru · Pool care for life in the Lowcountry\.<\/span>/)
   assert.equal(simple.match(/PoolThru/g).length, 1, 'the brand once')
 })
+
+// Live GPT design, 2026-11-16: a light mint accent in a dark ("ink") section rendered the Book button's label in the
+// section's light text colour (`.bg-ink a{color:inherit}` outranks `.btn`), white on mint, unreadable.
+test('solid buttons keep their own label colour in dark sections', () => {
+  const raw = recipeSpec(RECIPES[1])
+  raw.theme = { colors: { bg: '#f4f7f5', surface: '#e6ece9', ink: '#182624', muted: '#4a5a57', accent: '#b8f3d6', onAccent: '#182624', line: '#d3ddd9' } }
+  raw.pages[0].sections[0].background = 'ink'
+  const { spec } = validateSpec(raw, CTX)
+  const html = renderV2({ id: 'pools', name: 'Pools', cities: ['Charleston'], phone: '', services: SERVICES }, spec, { bookUrl: '/book/pools', year: 2026 })
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+  const inherit = css.indexOf('.bg-ink a{color:inherit}')
+  const own = css.indexOf('.bg-ink .btn:not(.ghost){color:var(--on-accent)}')
+  assert.ok(inherit >= 0 && own > inherit, 'the button rule comes after (and outranks) the link rule')
+  assert.match(html, /--on-accent:#182624/)
+  assert.match(html, /<section id="top" class="[^"]*bg-ink[^"]*"[\s\S]*?<a class="btn" href="\/book\/pools"/)
+})
