@@ -109,6 +109,11 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      only), never by position: website.js assignServiceIds (kept / inherited by name from `prior` / new
                      random) and withServiceRefs (read-time, deterministic upgrade of pre-id drafts and versions). The
                      model still sees positions in FACTS.services; ai-designer.js servicesForModel converts at that edge.
+                     Owner editing (src/dashboard/SiteStudio.jsx): sections may be `hidden` (not rendered publicly; the
+                     first screen cannot be); contact `form` none|contact|quote posts to /api/site-form/<id>
+                     (server/site-form.js: signed render time + trap field + rate limits → createLead, the existing
+                     leads table); saves carry baseUpdatedAt (409 conflict, never a silent overwrite); live preview =
+                     POST /api/dashboard/website/preview (validated, nothing stored). Owners may have 10 pages (AI: 5).
   ai-designer.js     Conversational designer on the owner's own key: one turn → { reply, site } → validateSpec →
                      design-checks.js (hard: unusable → error ai_design_incomplete, nothing saved; soft: generic first
                      screen / repeated sections / "different" not different) → at most ONE automatic revision (each call

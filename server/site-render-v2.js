@@ -118,6 +118,8 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 .faq details{border-top:1px solid var(--line);padding:20px 0}.faq details:last-child{border-bottom:1px solid var(--line)}.faq summary{cursor:pointer;font:600 ${fs(0.5)} var(--hf);list-style:none;display:flex;justify-content:space-between;gap:16px}.faq summary::after{content:"+";color:var(--accent-text)}.faq details[open] summary::after{content:"–"}.faq details p{margin:12px 0 0}
 .cta-card .wrap>div{background:var(--surface);color:var(--ink);border-radius:var(--r);padding:clamp(32px,5vw,64px)}.cta-card .wrap>div .muted{color:var(--muted);opacity:1}.cta-card .wrap>div .eyebrow{color:var(--accent-text);opacity:1}.cta-card .wrap>div .btn:not(.ghost){background:var(--accent);color:var(--on-accent);border-color:var(--accent)}.cta-split .wrap{display:grid;grid-template-columns:1.2fr .8fr;gap:48px;align-items:center}.cta-split img{border-radius:var(--r);width:100%;aspect-ratio:4/3;object-fit:cover}@media(max-width:760px){.cta-split .wrap{grid-template-columns:1fr}}
 .towns{display:flex;flex-wrap:wrap;gap:10px;list-style:none;padding:0;margin:24px 0 0}.towns li{border:1px solid var(--line);border-radius:999px;padding:8px 16px}.al-center .towns{justify-content:center}
+.lead-form{margin-top:clamp(28px,4vw,44px);max-width:640px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--r);padding:clamp(20px,3vw,32px);text-align:left}.lead-form h3{margin:0 0 16px}.lf-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.lf-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;font-size:15px}.lf-field input,.lf-field textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:calc(var(--r) * .5);padding:12px 14px;width:100%}.lf-field input:focus-visible,.lf-field textarea:focus-visible{outline:3px solid var(--accent);outline-offset:1px}.lead-form .fine{font-size:13px;margin:4px 0 16px}.lead-form .muted{color:var(--muted)}.lf-error{color:#b42318;font-weight:600;margin:0 0 12px}.lf-done h3{margin-bottom:8px}.hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}.al-center .lead-form{margin-inline:auto}@media(max-width:600px){.lf-grid{grid-template-columns:1fr;gap:0}}
+.ge-hidden{position:relative;opacity:.4;outline:2px dashed #9aa4b2;outline-offset:-2px}.ge-hidden-label{position:absolute;z-index:5;top:8px;left:8px;margin:0;background:#1f2937;color:#fff;font:600 12px/1 system-ui;padding:6px 8px;border-radius:4px}
 .foot{border-top:1px solid var(--line);padding:40px 0;font-size:${fs(-0.4)}}.foot .wrap{display:flex;flex-wrap:wrap;gap:16px 32px;justify-content:space-between;align-items:center}.foot a{color:inherit}.foot-statement .big{font:${t.headingWeight} ${fluid(3)}/1.05 var(--hf);margin-bottom:28px;width:100%}
 ${composition ? `.zs-display{font-size:${fluid(7)};line-height:.96}.zs-xl{font-size:${fluid(5)};line-height:1.02}.zs-l{font-size:${fluid(3.4)}}.zs-m{font-size:${fs(0.6)}}.zs-s{font-size:${fs(-0.3)}}
 .comp .cg{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:clamp(14px,2vw,28px);align-items:start}.cb{position:relative;min-width:0}.cb p{margin:0}.cb .eyebrow{margin:0}
@@ -134,8 +136,10 @@ ${motion}`
 
 // biz: { id, name, phone, cities[], services[{name, price}], appointmentMode }
 // opts: { page (slug), pageBase ('' on the business's own domain, '/p/<id>' on ours), canonical, bookUrl, privacyUrl, preview, noindex, year }
+//       form: { action, token, state } where a contact/quote form posts (absent → forms show no fields, only booking)
+//       editing: the owner's editor preview (hidden sections shown dimmed and labelled; nothing else differs)
 export function renderV2(biz, spec, opts = {}) {
-  const { page = '', pageBase = '', canonical = null, bookUrl = '/book', privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = opts
+  const { page = '', pageBase = '', canonical = null, bookUrl = '/book', privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear(), form = null, editing = false } = opts
   const pg = spec.pages.find((p) => p.slug === page) || spec.pages[0]
   // pageBase: '' (own domain → /services), '/p/<id>' (→ /p/<id>/services) or a query prefix ending in '=' (private preview).
   const href = (slug) => (pageBase.endsWith('=') ? `${pageBase}${slug}` : slug ? `${pageBase}/${slug}` : pageBase || '/')
@@ -203,6 +207,21 @@ export function renderV2(biz, spec, opts = {}) {
     return `<section id="${esc(s.id)}" class="${cls} comp h-${s.height}${backdrop ? ' has-bd' : ''}"${labelled ? ` aria-labelledby="${esc(labelled)}"` : ''}><div class="wrap cg">${html}</div></section>`
   }
 
+  // Contact / quote-request form: plain HTML (business sites run no script), posted to GetShowUps, which validates it,
+  // stores the lead with the business's other leads and sends the visitor back here with ?sent=1 (or ?form=<error>).
+  // `website` is a trap field people never see; `t` is a signed render time (too fast or too old → refused).
+  const FORM_ERRORS = { invalid_name: 'Please enter your name.', invalid_email: 'Please enter a valid email address.', invalid_phone: 'Please enter a phone number we can reach you on.', invalid_need: 'Please tell us what you need.', invalid_zip: 'Please enter your ZIP code.', expired: 'That took a while, so the form was refreshed. Please send it again.', rate_limited: 'Too many messages in a short time. Please try again in a few minutes.', unavailable: 'We couldn’t send that right now. Please try again, or book online.' }
+  const leadForm = (s) => {
+    const quote = s.form === 'quote'
+    const done = form.state === 'sent'
+    const fid = `f-${s.id}`
+    const field = (name, label, type = 'text', extra = '') => `<label class="lf-field" for="${fid}-${name}"><span>${label}</span><input id="${fid}-${name}" name="${name}" type="${type}" ${extra}></label>`
+    const privacy = spec.pages.some((p) => p.slug === 'privacy') ? href('privacy') : privacyUrl
+    if (done) return `<div id="${fid}" class="lead-form lf-done" role="status"><h3>Thanks, your ${quote ? 'quote request' : 'message'} is on its way.</h3><p class="muted">${esc(biz.name)} will get back to you soon. If you’d like a time now, you can <a href="${esc(bookUrl)}">book online</a>.</p></div>`
+    const err = form.state && FORM_ERRORS[form.state] ? `<p class="lf-error" role="alert">${FORM_ERRORS[form.state]}</p>` : ''
+    return `<form id="${fid}" class="lead-form" method="post" action="${esc(form.action)}" aria-labelledby="${fid}-title"><h3 id="${fid}-title">${quote ? 'Request a quote' : 'Send a message'}</h3>${err}<input type="hidden" name="t" value="${esc(form.token)}"><input type="hidden" name="page" value="${esc(pg.slug)}"><input type="hidden" name="section" value="${esc(s.id)}"><input type="hidden" name="kind" value="${quote ? 'quote' : 'contact'}"><div class="lf-grid">${field('name', 'Your name', 'text', 'autocomplete="name" required maxlength="80"')}${field('email', 'Email', 'email', 'autocomplete="email" required maxlength="254"')}${field('phone', 'Phone', 'tel', 'autocomplete="tel" required maxlength="25"')}${field('zip', 'ZIP code', 'text', 'autocomplete="postal-code" inputmode="numeric" maxlength="10"')}</div><label class="lf-field" for="${fid}-need"><span>${quote ? 'What would you like a quote for?' : 'How can we help?'}</span><textarea id="${fid}-need" name="need" rows="4" required maxlength="500"></textarea></label><label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label><p class="fine muted">We use these details only to reply to your request. <a href="${esc(privacy)}">Privacy</a></p><button class="btn" type="submit">${quote ? 'Request a quote' : 'Send message'}</button></form>`
+  }
+
   const section = (s) => {
     const cls = `sec sp-${s.spacing} bg-${s.background} al-${s.align} w-${s.width}${s.animate !== 'none' && spec.theme.motion !== 'none' ? ` anim-${s.animate}` : ''}`
     const bgImg = s.background === 'image' && s.backgroundImage ? `<div class="bgimg" aria-hidden="true">${image(s.backgroundImage)}</div>` : ''
@@ -256,12 +275,16 @@ export function renderV2(biz, spec, opts = {}) {
       case 'area':
         return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Where we work' })}${biz.cities?.length ? `<ul class="towns">${biz.cities.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div></section>`
       case 'contact':
-        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Get in touch' })}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book online', target: 'book' })}${s.showPhone && biz.phone ? `<a class="btn ghost" href="tel:${esc(biz.phone.replace(/[^\d+]/g, ''))}">${esc(biz.phone)}</a>` : ''}</div></div></section>`
+        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Get in touch' })}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book online', target: 'book' })}${s.showPhone && biz.phone ? `<a class="btn ghost" href="tel:${esc(biz.phone.replace(/[^\d+]/g, ''))}">${esc(biz.phone)}</a>` : ''}</div>${s.form !== 'none' && form ? leadForm(s) : ''}</div></section>`
     }
     return ''
   }
 
-  const body = pg.sections.map(section).join('')
+  // Hidden sections are left out of the website; the owner's editor shows them dimmed so they can be shown again.
+  const body = pg.sections
+    .filter((s) => editing || !s.hidden)
+    .map((s) => (s.hidden ? `<div class="ge-hidden" data-hidden-section="${esc(s.id)}"><p class="ge-hidden-label">Hidden · not on your website</p>${section(s)}</div>` : section(s)))
+    .join('')
   const navLinks = spec.pages.length > 1 ? `<ul>${spec.pages.map((p) => `<li><a href="${esc(href(p.slug))}"${p.slug === pg.slug ? ' aria-current="page"' : ''}>${esc(p.navLabel)}</a></li>`).join('')}</ul>` : ''
   const nav = `<header class="nav nav-${spec.nav.layout}${spec.nav.sticky ? ' sticky' : ''}"><div class="wrap"><a class="brand" href="${esc(href(''))}">${esc(biz.name)}</a>${navLinks}${spec.nav.showBook ? `<a class="btn" href="${esc(bookUrl)}">${visit ? 'Book a visit' : 'Book'}</a>` : ''}</div></header>`
   // The footer names the brand once: a tagline that starts with the name again ("Poolthru LLC · Pool care…") loses it.
@@ -272,8 +295,37 @@ export function renderV2(biz, spec, opts = {}) {
   const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(tagline || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && tagline && !repeat ? ` · ${esc(tagline)}` : ''}</span><span><a href="${esc(privacyUrl)}">Privacy</a> · Website by GetShowUps</span></div></footer>`
   const title = pg.seoTitle || (pg.slug ? `${pg.navLabel} · ${biz.name}` : biz.name)
   const desc = pg.seoDescription || spec.pages[0].seoDescription || ''
-  const schema = { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: biz.name, ...(canonical ? { url: canonical } : {}), ...(biz.phone ? { telephone: biz.phone } : {}), ...(biz.cities?.length ? { areaServed: biz.cities } : {}) }
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && canonical ? `<link rel="canonical" href="${esc(pg.slug ? `${canonical.replace(/\/$/, '')}/${pg.slug}` : canonical)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme, { composition: blockCss.length > 0 })}${blockCss.join("")}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
+  // Absolute URLs (social previews, structured data) come from the canonical address; none in private previews.
+  const origin = canonical ? new URL(canonical).origin : null
+  const pageUrl = canonical ? (pg.slug ? `${canonical.replace(/\/$/, '')}/${pg.slug}` : canonical) : null
+  const ref = (r) => (r?.startsWith('asset:') ? `/site-assets/${r.slice(6)}` : r?.startsWith('stock:') && stockById(r.slice(6)) ? `/site-stock/${stockById(r.slice(6)).file}` : null)
+  const visible = pg.sections.filter((s) => !s.hidden)
+  // The page's lead photo for link previews: the first photo on the page, else the home page's.
+  const firstPhoto = (secs) => secs.flatMap((s) => [s.image, ...(s.images || []), s.backgroundImage, ...(s.blocks || []).filter((b) => b.kind === 'media').map((b) => b.image)]).find((r) => ref(r))
+  const shareImage = origin && ref(firstPhoto(visible) || firstPhoto(spec.pages[0].sections)) ? `${origin}${ref(firstPhoto(visible) || firstPhoto(spec.pages[0].sections))}` : null
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const faqs = visible.filter((s) => s.type === 'faq').flatMap((s) => s.items)
+  // Structured data: only facts from records (name, address on the web, phone, towns, confirmed hours) and the owner's
+  // own FAQ text; no ratings, reviews or prices are claimed.
+  const schema = [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: biz.name,
+      ...(canonical ? { url: canonical } : {}),
+      ...(shareImage ? { image: shareImage } : {}),
+      ...(biz.phone ? { telephone: biz.phone } : {}),
+      ...(biz.cities?.length ? { areaServed: biz.cities } : {}),
+      ...(biz.hours ? { openingHoursSpecification: [{ '@type': 'OpeningHoursSpecification', dayOfWeek: biz.hours.workdays.map((d) => DAYS[d]).filter(Boolean), opens: biz.hours.dayStart, closes: biz.hours.dayEnd }] } : {}),
+    },
+    ...(faqs.length ? [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map((f) => ({ '@type': 'Question', name: f.question, acceptedAnswer: { '@type': 'Answer', text: f.answer } })) }] : []),
+  ]
+  // Favicon: the business's logo, else a letter mark in its brand colour (never GetShowUps' icon on their site).
+  const faviconHref = biz.logo ? `/site-assets/${biz.logo}` : biz.id ? `/site-icon/${biz.id}.svg?c=${spec.theme.colors.accent.slice(1)}` : null
+  const social = pageUrl
+    ? `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(biz.name)}"><meta property="og:title" content="${esc(title)}">${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}<meta property="og:url" content="${esc(pageUrl)}">${shareImage ? `<meta property="og:image" content="${esc(shareImage)}"><meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}`
+    : ''
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : ''}${!preview ? social : ''}${faviconHref ? `<link rel="icon" href="${esc(faviconHref)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme, { composition: blockCss.length > 0 })}${blockCss.join("")}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
 }
 
 export { FONTS }

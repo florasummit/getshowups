@@ -7,6 +7,7 @@ import { siteOrigin } from '../server/auth.js'
 import { customerForHost } from '../server/domains.js'
 import { serveSite } from '../server/site-serve.js'
 import { liveContent } from '../server/website.js'
+import { testStatus } from '../server/testbusiness.js'
 import { htmlResponse, renderNotice } from '../server/site-render.js'
 
 export function isOwnHost(host, env) {
@@ -39,9 +40,17 @@ export async function onRequest(context) {
   const p = url.pathname
   if (p === '/.well-known/getshowups-site') return new Response(site.verify_token.slice(0, 12), { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } })
   if (p === '/' || p === '/index.html') return serveSite(env, request, site.customer)
-  if (p.startsWith('/site-assets/') || p.startsWith('/site-stock/') || p.startsWith('/site-fonts/')) return next()
+  if (p.startsWith('/site-assets/') || p.startsWith('/site-stock/') || p.startsWith('/site-fonts/') || p.startsWith('/site-icon/')) return next()
   if (p === '/robots.txt') return text(`User-agent: *\nAllow: /\nSitemap: https://${host}/sitemap.xml\n`)
-  if (p === '/sitemap.xml') return text(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://${host}/</loc></url></urlset>\n`, 'application/xml')
+  if (p === '/sitemap.xml') {
+    // Every page of the published site (AI-designed sites can have several); test businesses are never listed.
+    const live = await liveContent(env.ONBOARDING_DB, site.customer).catch(() => null)
+    const test = (await testStatus(env, site.customer).catch(() => ({ test: true }))).test
+    const slugs = test || !live ? [] : (live.content.site?.pages || [{ slug: '' }]).map((pg) => pg.slug)
+    const lastmod = live?.publishedAt ? `<lastmod>${new Date(live.publishedAt).toISOString().slice(0, 10)}</lastmod>` : ''
+    const urls = slugs.map((s) => `<url><loc>https://${host}/${s}</loc>${lastmod}</url>`).join('')
+    return text(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>\n`, 'application/xml')
+  }
   if (p === '/favicon.svg' || p === '/favicon.ico') return next()
   if (p.startsWith('/dashboard') || p.startsWith('/book/')) return Response.redirect(`${siteOrigin(env)}${p}${url.search}`, 302)
   const live = await liveContent(env.ONBOARDING_DB, site.customer).catch(() => null)

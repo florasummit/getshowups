@@ -19,6 +19,7 @@ import * as importRoute from '../functions/api/dashboard/website/import.js'
 import { studioAccess, studioEnabled, studioSchemaReady } from '../server/website-studio.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as publicPage from '../functions/p/[customer]/[page].js'
+import * as assetsRoute from '../functions/api/dashboard/website/assets.js'
 
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -59,6 +60,7 @@ async function cookieFor(email) {
 async function call(mod, method, { cookie, body, origin = ORIGIN, url = `${ORIGIN}/x`, params } = {}) {
   const h = {}
   if (cookie) h.Cookie = cookie
+  if (body) h['Content-Type'] = 'application/json' // as the dashboard sends it (src/lib/api.js)
   if (method === 'POST' && origin) h.Origin = origin
   const res = await mod[method === 'GET' ? 'onRequestGet' : 'onRequestPost']({ request: new Request(url, { method, headers: h, body: body && JSON.stringify(body) }), env, params })
   const text = await res.text()
@@ -174,7 +176,11 @@ test('spec validation is the security boundary: claims, invented numbers, links,
   assert.deepEqual(home.sections.find((s) => s.type === 'gallery').images, ['asset:' + 'a'.repeat(32)], 'gallery = own photos only')
   assert.deepEqual(home.sections.find((s) => s.type === 'services').items.map((x) => x.serviceIndex), [0, 1, 2], 'unknown service dropped; every service shown')
   assert.ok(!home.sections.some((s) => s.type === 'script'))
-  assert.deepEqual(spec.pages.map((p) => p.slug), ['', 'services', 'p1'], 'reserved/duplicate slugs refused; the 5-page cap applies to what the model sent')
+  assert.deepEqual(spec.pages.map((p) => p.slug), ['', 'services', 'p1', 'p2', 'p3', 'p4'], 'reserved/duplicate slugs refused')
+  // The page cap (10: owners add pages; the AI is asked for at most 5) applies to whatever is sent.
+  const many = validateSpec({ pages: Array.from({ length: 14 }, (_, i) => ({ slug: i ? `page-${i}` : '', navLabel: `P${i}`, sections: [{ type: i ? 'text' : 'hero', heading: 'Heading', body: 'Some words.' }] })) }, { assetIds: new Set(), services: [], claims: [] })
+  assert.equal(many.spec.pages.length, 10)
+  assert.ok(many.warnings.some((w) => w.where === 'pages' && w.reason === 'limit'))
   assert.ok(contrast(spec.theme.colors.ink, spec.theme.colors.bg) >= 7)
   assert.ok(contrast(spec.theme.colors.muted, spec.theme.colors.bg) >= 4.5)
   assert.ok(contrast(spec.theme.colors.onAccent, spec.theme.colors.accent) >= 4.5)
@@ -186,7 +192,7 @@ test('spec validation is the security boundary: claims, invented numbers, links,
   assert.equal(html.match(/<script/g).length, 1)
   assert.match(html, /<script type="application\/ld\+json">/)
   assert.ok(!html.includes('evil.example'))
-  assert.ok([...html.matchAll(/href="([^"]+)"/g)].every((m) => /^(https:\/\/getshowups\.com\/book\/pools|\/p\/pools(\/[a-z0-9-]+)?|#[a-z0-9-]+|\/privacy)$/.test(m[1])), 'only booking, own pages, anchors, privacy')
+  assert.ok([...html.matchAll(/href="([^"]+)"/g)].every((m) => /^(https:\/\/getshowups\.com\/book\/pools|\/p\/pools(\/[a-z0-9-]+)?|#[a-z0-9-]+|\/privacy|\/site-icon\/pools\.svg\?c=[0-9a-f]{6})$/.test(m[1])), 'only booking, own pages, anchors, privacy, the site icon')
 })
 
 test('designer: needs the owner’s own key; one turn streams progress, designs the site, and saves it as the PRIVATE draft', async () => {
@@ -986,4 +992,88 @@ test('service ids exist only on AI-designed content; the model works with positi
   // A reference to a service that no longer exists is dropped, never re-pointed.
   const gone = validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceId: 'zz9', text: 'old' }] }] }] }, { assetIds: new Set(), services, claims: [] }).spec
   assert.deepEqual(gone.pages[0].sections[1].items.map((x) => [x.serviceId, x.text]), [['s1', ''], ['vq2', '']])
+})
+
+// ---- Website Studio editor (2026-11-16): direct editing without AI. ----
+test('editor: saves are conflict-safe (a newer draft from another tab or the AI designer is never overwritten silently)', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const first = (await call(website, 'GET', { cookie: c })).json.website
+  const edit = (w, heading) => ({ ...w.draft, site: { ...w.draft.site, pages: w.draft.site.pages.map((p, i) => (i ? p : { ...p, sections: p.sections.map((s, j) => (j ? s : { ...s, heading })) })) } })
+  // Tab A saves on top of what it loaded.
+  const a = await call(website, 'POST', { cookie: c, body: { action: 'save', content: edit(first, 'Edited in tab A'), baseUpdatedAt: first.updatedAt } })
+  assert.equal(a.status, 200)
+  assert.ok(a.json.website.updatedAt > first.updatedAt)
+  // Tab B still holds the old version: refused with the latest state, nothing written.
+  const b = await call(website, 'POST', { cookie: c, body: { action: 'save', content: edit(first, 'Edited in tab B'), baseUpdatedAt: first.updatedAt } })
+  assert.deepEqual([b.status, b.json.error], [409, 'conflict'])
+  assert.equal(b.json.website.draft.site.pages[0].sections[0].heading, 'Edited in tab A')
+  // The owner chooses "keep my version": saved.
+  const kept = await call(website, 'POST', { cookie: c, body: { action: 'save', content: edit(first, 'Edited in tab B'), baseUpdatedAt: first.updatedAt, force: true } })
+  assert.equal(kept.status, 200)
+  assert.equal(kept.json.website.draft.site.pages[0].sections[0].heading, 'Edited in tab B')
+  // A save from the current version goes through; the AI designer's change moves the version on (the editor reloads it).
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: edit(kept.json.website, 'Third'), baseUpdatedAt: kept.json.website.updatedAt } })).status, 200)
+  const now = (await call(website, 'GET', { cookie: c })).json.website
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it warmer' } })
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: edit(now, 'Stale'), baseUpdatedAt: now.updatedAt } })).status, 409)
+})
+
+test('editor: live preview of unsaved changes (validated like a save, nothing stored); hidden sections dimmed in the editor, absent from the site', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const w = (await call(website, 'GET', { cookie: c })).json.website
+  const draft = structuredClone(w.draft)
+  draft.site.pages[0].sections[1].hidden = true
+  draft.site.pages[0].sections[0].heading = 'Rated 5 stars by 200 customers'
+  const p = await call(preview, 'POST', { cookie: c, body: { content: draft, page: '' } })
+  assert.equal(p.status, 200)
+  assert.match(p.json.html, /<div class="ge-hidden" data-hidden-section="why">/)
+  assert.ok(p.json.removed.some((r) => r.reason === 'claim'), 'the editor is told why text changed')
+  assert.match(p.json.html, /href="#page=services"/, 'page links stay inside the editor')
+  assert.equal(JSON.stringify((await call(website, 'GET', { cookie: c })).json.website.draft), JSON.stringify(w.draft), 'nothing stored')
+  // Same-origin only; Studio only; signed in only.
+  assert.equal((await call(preview, 'POST', { cookie: c, origin: 'https://evil.example', body: { content: draft } })).status, 403)
+  assert.equal((await call(preview, 'POST', { body: { content: draft } })).status, 401)
+  env.WEBSITE_STUDIO_ENABLED = 'false'
+  assert.equal((await call(preview, 'POST', { cookie: c, body: { content: draft } })).status, 404)
+  env.WEBSITE_STUDIO_ENABLED = 'true'
+  // Saved and published: the hidden section is not on the website; the first screen can't be hidden.
+  draft.site.pages[0].sections[0].heading = 'Clear water, every week.'
+  draft.site.pages[0].sections[0].hidden = true
+  const saved = (await call(website, 'POST', { cookie: c, body: { action: 'save', content: draft } })).json.website.draft
+  assert.equal(saved.site.pages[0].sections[0].hidden, undefined)
+  assert.equal(saved.site.pages[0].sections[1].hidden, true)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: saved, confirm: true } })).status, 200)
+  const live = (await call(publicSite, 'GET', { params: { customer: 'pools' } })).text
+  assert.doesNotMatch(live, /id="why"/)
+  assert.doesNotMatch(live, /class="ge-hidden"/)
+})
+
+test('photos: removing one that the draft, live site, a saved version or an AI undo still uses is refused; unused ones go; other businesses can’t touch them; storage quota', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const s = await cookieFor('owner@salon.example')
+  const del = (cookie, id) => call(assetsRoute, 'POST', { cookie, body: { action: 'delete', id } })
+  const used = 'a'.repeat(32)
+  // In the draft (the seeded draft's hero) → refused.
+  db.sql.prepare("INSERT OR IGNORE INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'pools', 'image/jpeg', x'ffd8ff', 3, 1)").run(used)
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, hero: used } } })
+  assert.deepEqual([(await del(c, used)).status, (await del(c, used)).json.error], [409, 'in_use'])
+  // Only in a saved (published) version → still refused.
+  await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...draft, hero: used }, confirm: true } })
+  await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...draft, hero: null }, confirm: true } })
+  assert.equal((await del(c, used)).status, 409)
+  // Unused → removed. Another business's photo → not found (and it stays).
+  const spare = 'b'.repeat(32)
+  db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'pools', 'image/jpeg', x'ffd8ff', 3, 1)").run(spare)
+  assert.equal((await del(s, spare)).status, 404)
+  assert.equal((await del(c, spare)).status, 200)
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM website_assets WHERE id = ?').get(spare).n, 0)
+  // Storage quota: over 50 MB in total is refused with a clear code (existing photos and pages untouched).
+  db.sql.prepare("INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES (?, 'pools', 'image/jpeg', x'ffd8ff', ?, 1)").run('c'.repeat(32), 50 * 1024 * 1024 - 10)
+  const { saveAsset } = await import('../server/assets.js')
+  assert.deepEqual(await saveAsset(db, 'pools', new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), { ok: false, httpStatus: 409, error: 'quota' })
 })

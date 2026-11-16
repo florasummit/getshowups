@@ -29,7 +29,7 @@ export async function uploadImage(file, kind) {
     const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type }, body: blob })
     const data = await res.json().catch(() => ({}))
     if (res.status === 201) return { asset: data.asset }
-    return { error: data.error === 'too_many' ? 'You’ve reached the photo limit. Remove one first.' : 'Upload failed. Please try again.' }
+    return { error: data.error === 'too_many' ? 'You’ve reached the photo limit (60). Remove one first.' : data.error === 'quota' ? 'You’ve used your 50 MB of photo storage. Remove photos you no longer use first.' : 'Upload failed. Please try again.' }
   } catch {
     return { error: 'Upload failed. Please try again.' }
   }

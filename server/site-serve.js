@@ -9,6 +9,7 @@ import { hitByIp } from './ratelimit.js'
 import { hostingStatus, isHosted, liveContent } from './website.js'
 import { connectedHost } from './domains.js'
 import { carryQuery, htmlResponse, renderNotice, renderSite } from './site-render.js'
+import { formToken } from './site-form.js'
 
 const unavailable = () => htmlResponse(404, renderNotice('This website isn’t available', 'Check the address and try again.'), { cache: 'no-store' })
 
@@ -28,7 +29,9 @@ export async function siteBusinessInfo(db, customer) {
       return []
     }
   })()
-  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities }
+  // Hours: the owner's confirmed booking hours (structured data only; never shown as a promise of availability).
+  const hours = customer.hoursConfirmed && customer.workdays?.length ? { dayStart: customer.dayStart, dayEnd: customer.dayEnd, workdays: customer.workdays } : null
+  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities, hours }
 }
 
 // page: a page slug of an AI-designed (multi-page) site; '' is the home page. Unknown pages are "not available".
@@ -50,7 +53,12 @@ export async function serveSite(env, request, id, page = '') {
     const bookUrl = `${origin}/book/${customer.id}${carryQuery(request.url)}`
     // Test businesses (admin-marked) are published for checks only: never indexed (fails closed via testStatus).
     const noindex = (await testStatus(env, customer.id)).test
-    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}` }), { noindex })
+    // Contact/quote forms (server/site-form.js): where they post, a signed render time, and the result of a send.
+    const q = new URL(request.url).searchParams
+    const state = q.get('sent') === '1' ? 'sent' : /^[a-z_]{3,24}$/.test(q.get('form') || '') ? q.get('form') : null
+    const form = { action: `${origin}/api/site-form/${customer.id}`, token: await formToken(env, customer.id), state }
+    // A page showing a send result is personal to that visitor: not cached.
+    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form }), { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })

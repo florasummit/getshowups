@@ -293,7 +293,7 @@ Truth rules (mandatory; anything that breaks them is removed before the owner se
 - Links: only "book", "page:<slug>" and "section:<id>". No URLs.
 - When revising: change what the owner asked, keep everything else the same, and return the complete site.
 
-Options: section types ${SECTION_TYPES.join(', ')}; icons ${ICONS.join(', ')}; fonts ${Object.entries(FONTS).map(([k, f]) => `${k} (${f.kind})`).join(', ')} (body font cannot be a display font). Limits: up to ${LIMITS.pages} pages, ${LIMITS.sectionsPerPage} sections per page; headings up to ${LIMITS.heading} characters; section text up to ${LIMITS.text}; body up to ${LIMITS.body}; item text up to ${LIMITS.itemText}. Theme ranges: headingWeight 300-900, headingTracking -0.06 to 0.12 (em), baseSize 15-20 (px), scale 1.12-1.6, lineHeight 1.35-1.85, radius 0-40, maxWidth 960-1440, overlay 0-0.85, columns 1-4.`
+Options: section types ${SECTION_TYPES.join(', ')}; icons ${ICONS.join(', ')}; fonts ${Object.entries(FONTS).map(([k, f]) => `${k} (${f.kind})`).join(', ')} (body font cannot be a display font). Limits: up to ${LIMITS.aiPages} pages, ${LIMITS.sectionsPerPage} sections per page; headings up to ${LIMITS.heading} characters; section text up to ${LIMITS.text}; body up to ${LIMITS.body}; item text up to ${LIMITS.itemText}. Theme ranges: headingWeight 300-900, headingTracking -0.06 to 0.12 (em), baseSize 15-20 (px), scale 1.12-1.6, lineHeight 1.35-1.85, radius 0-40, maxWidth 960-1440, overlay 0-0.85, columns 1-4.`
 
 // Facts + images for this business, from records (never from the client).
 export async function designContext(env, customer) {

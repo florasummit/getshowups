@@ -2,6 +2,35 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio completion: direct editing, pages, forms, SEO, media (2026-11-16) — feature/studio-editor; no paid calls
+
+- Editor (src/dashboard/SiteStudio.jsx) for AI-designed sites (Studio access): click anything in the live preview to
+  edit that section (headings, text, buttons + destinations, photos + alt, services/prices/descriptions, FAQ, steps,
+  highlights, gallery, contact form); section list (move, hide/show, duplicate, remove, add from 10 types); pages (add
+  About/Services/one service/Service area/Contact/FAQ/Privacy from the business's own details, menu order, menu name,
+  Google title/description, delete); look (background tone, brand colour, 7 approved font pairs, buttons, corners,
+  footer); photos (upload ≤10 MB originals, resized in the browser; remove only if nothing recoverable uses it).
+  No AI call for any of it. Preview = POST /api/dashboard/website/preview (validated like a save, nothing stored).
+- Persistence: debounced autosave, server-confirmed status, retries with backoff, local copy of unsaved edits offered
+  after a reload, undo/redo (50 steps), optimistic concurrency (baseUpdatedAt → 409 conflict with "load latest / keep
+  mine"; saveDraft { expect }). One editor per draft (the older form is hidden for AI-designed Studio sites).
+- Spec: sections `hidden` (left out of the site, dimmed in the editor; the first screen can't be hidden), contact
+  `form` none|contact|quote, owner page cap 10 (the AI is still asked for ≤5), 160 KB spec.
+- Forms (server/site-form.js, POST /api/site-form/<id>): plain HTML (no script), CSP form-action 'self' + GetShowUps,
+  trap field, signed render time (3 s–24 h, HMAC, no storage), rate limits per IP and business, validateLead + createLead
+  (the existing leads table, owner notices and follow-up scheduling; no second lead store), 303 back to the page with
+  ?sent=1 / ?form=<reason> (result pages not cached).
+- SEO: canonical per page, Open Graph + Twitter card with the page's photo, per-site favicon (logo or /site-icon/<id>.svg
+  letter mark), LocalBusiness with confirmed hours + FAQPage JSON-LD, sitemap with every published page (+lastmod).
+- Media (server/assets.js): 60 photos / 50 MB per website in D1 (2 MB row limit, 10 GB database: 250 MB needs R2 =
+  bucket binding, production change with approval); quota error; delete refused while the draft, live site, any
+  saved version or an AI undo uses the photo.
+- Tests: unit 483/483 (conflicts, preview, hidden, forms incl. bots/expired/forged/cross-business tokens, sitemap, SEO,
+  favicon, photo protection/quota, isolation); browser 83/83 (editor desktop + phone, keyboard reachability, two-tab
+  conflict; desktop/phone runs use their own seeded businesses). PoolThru acceptance (real content and photos, LOCAL
+  server with publishing enabled only there): 22/22 incl. form → lead stored, publish, booking links, second-business
+  isolation. Production publishing remains off.
+
 ## Website Studio for every eligible business (2026-11-16) — feature/studio-access; no paid calls
 
 - Root cause (PoolThru saw no Claude/OpenAI controls after #43): Studio was an internal pilot behind

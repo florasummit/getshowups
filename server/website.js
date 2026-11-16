@@ -319,9 +319,20 @@ async function ensureRow(db, customerId, content, now) {
     .run()
 }
 
-export async function saveDraft(db, customerId, content, now = Date.now()) {
+// `expect`: the draft's updated_at the editor last saw (optimistic concurrency). When given, the draft is replaced only if
+// nobody changed it since (another tab, the AI designer, an import); otherwise nothing is written and { conflict: true }
+// comes back, so newer work is never silently overwritten. Without `expect` (AI designer, import, older pages) it saves.
+export async function saveDraft(db, customerId, content, now = Date.now(), { expect } = {}) {
   await ensureRow(db, customerId, content, now)
-  await db.prepare('UPDATE websites SET draft = ?2, updated_at = ?3 WHERE customer = ?1').bind(customerId, JSON.stringify(content), now).run()
+  // Strictly later than the last save, so two quick saves never share a version stamp.
+  const row = await db.prepare('SELECT updated_at FROM websites WHERE customer = ?1').bind(customerId).first()
+  const at = Math.max(now, (row?.updated_at ?? 0) + 1)
+  if (Number.isFinite(expect)) {
+    const r = await db.prepare('UPDATE websites SET draft = ?2, updated_at = ?3 WHERE customer = ?1 AND updated_at = ?4').bind(customerId, JSON.stringify(content), at, expect).run()
+    return (r?.meta?.changes ?? r?.changes) ? { ok: true, updatedAt: at } : { ok: false, conflict: true }
+  }
+  await db.prepare('UPDATE websites SET draft = ?2, updated_at = ?3 WHERE customer = ?1').bind(customerId, JSON.stringify(content), at).run()
+  return { ok: true, updatedAt: at }
 }
 
 // Publishes `content` as a new version and makes it live.

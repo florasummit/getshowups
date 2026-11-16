@@ -6,6 +6,7 @@ import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteDesigner from './WebsiteDesigner.jsx'
+import SiteStudio from './SiteStudio.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -222,13 +223,22 @@ export default function WebsiteTab() {
 
       {!w.generated && (
         <>
-          <section className="site-preview-wrap" aria-label="Preview">
-            <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
-          </section>
-          <section className="card site-editor" aria-label="Edit website">
-            <h2 className="card-title">Edit text and photos</h2>
-            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? (data.studio ? 'studio' : 'locked') : false} />
-          </section>
+          {designed && data.studio ? (
+            // Website Studio editor: edit the AI-designed site directly (no AI), with live preview and autosave.
+            <SiteStudio key={editorKey} website={w} assets={data.assets} brand={data.brand} visit={data.visit} onSaved={refresh} />
+          ) : (
+            <section className="site-preview-wrap" aria-label="Preview">
+              <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
+            </section>
+          )}
+          {/* One editor per draft: the Studio editor (above) replaces this form for AI-designed sites, so two autosaving
+              copies can't overwrite each other. */}
+          {!(designed && data.studio) && (
+            <section className="card site-editor" aria-label="Edit website">
+              <h2 className="card-title">Edit text and photos</h2>
+              <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? 'locked' : false} />
+            </section>
+          )}
         </>
       )}
 

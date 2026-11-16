@@ -6,8 +6,9 @@ import { useSession } from './helpers.js'
 
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 
-test('owner designs the website in conversation: first design, revision, undo @mobile', async ({ page, context }) => {
-  await useSession(context, fixtures.E2E_DESIGN_SESSION_TOKEN)
+test('owner designs the website in conversation: first design, revision, undo @mobile', async ({ page, context }, info) => {
+  // Each browser project designs its own business (the desktop and phone runs happen at the same time).
+  await useSession(context, info.project.name === 'mobile' ? fixtures.E2E_DESIGN_M_SESSION_TOKEN : fixtures.E2E_DESIGN_SESSION_TOKEN)
   await page.goto('/dashboard/website')
   const card = page.locator('.card', { has: page.getByRole('heading', { name: 'AI designer' }) })
   // Without a key the designer explains itself and asks for one (a previous viewport's run may have connected it).
@@ -28,16 +29,15 @@ test('owner designs the website in conversation: first design, revision, undo @m
   await card.getByLabel(/Describe your website|Ask for a change/).fill('Modern and premium, booking front and centre')
   await card.getByRole('button', { name: /Design my website|Send/ }).click()
   await expect(card.getByText('A fresh coastal design with booking up front.').or(card.getByText('Darker and more premium, with a serif headline.')).first()).toBeVisible({ timeout: 30_000 })
-  const frame = page.frameLocator('iframe[title="Website preview"]')
+  const frame = page.frameLocator('iframe[title="Editable website preview"]')
   await expect(frame.getByRole('heading', { level: 1 })).toHaveText(/Clear water, every week\.|Quietly perfect pools\./)
   // An AI-designed draft: the older template tools (which would replace it) are gone, the preview follows the designer,
   // and the editor keeps only what the design uses (no style/colour/logo/Google controls that would change nothing).
   await expect(page.locator('section[aria-label="Create with AI"]')).toHaveCount(0)
   await expect(page.getByText('Your own AI key (optional)')).toHaveCount(0)
-  const editor = page.locator('section[aria-label="Edit website"]')
-  await expect(editor.getByText('Your website was designed with the AI designer')).toBeVisible()
-  await expect(editor.getByRole('radiogroup', { name: /Style|Colour|Colours/ })).toHaveCount(0)
-  await expect(editor.getByText('How you appear in Google')).toHaveCount(0)
+  // The Website Studio editor takes over (one editor per draft): the older text-and-photos form is gone.
+  await expect(page.locator('section[aria-label="Website Studio editor"]')).toBeVisible()
+  await expect(page.locator('section[aria-label="Edit website"]')).toHaveCount(0)
   await expect(card.locator('.chip').first()).toHaveCSS('text-transform', 'none')
   // Internal pilot (WEBSITE_STUDIO_PUBLISH unset): the AI design can be previewed but not published.
   const status = page.locator('section[aria-label="Website status"]')
