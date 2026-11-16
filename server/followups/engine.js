@@ -122,7 +122,11 @@ async function leadForPhone(db, customer, phone) {
 }
 
 // One inbound text (already signature-checked). Idempotent per provider message id. Returns { ok, duplicate?, action }.
-export async function handleInbound(env, { from, to, body, providerId, messagingService }, now = Date.now()) {
+// optOutType: Twilio's OptOutType (STOP | START | HELP) when the provider's keyword handling (default or Advanced
+// Opt-Out) already recognised the keyword AND answered it. Twilio's verdict wins over our own keyword list, and we never
+// send a second answer to a keyword the provider already answered.
+const PROVIDER_KEYWORDS = { STOP: 'stop', START: 'start', HELP: 'help' }
+export async function handleInbound(env, { from, to, body, providerId, messagingService, optOutType }, now = Date.now()) {
   const db = env.ONBOARDING_DB
   if (!(await followupsReady(db))) return fail(503, 'not_ready')
   const customerId = await businessForSender(db, { to, messagingService })
@@ -155,7 +159,8 @@ export async function handleInbound(env, { from, to, body, providerId, messaging
     .run()
   if (!(ins?.meta?.changes > 0)) return ok({ duplicate: true, action: 'duplicate' })
 
-  const c = classify(text)
+  const providerKind = PROVIDER_KEYWORDS[String(optOutType || '').toUpperCase()] || null
+  const c = providerKind ? { kind: providerKind } : classify(text)
   const biz = { name: (await db.prepare('SELECT name FROM customers WHERE id = ?1').bind(customerId).first())?.name || 'The business', phone: (await getProfile(db, customerId).catch(() => null))?.phone || '' }
   const stage = (s) => db.prepare("UPDATE lead_threads SET stage = CASE WHEN stage IN ('booked', 'opted_out') AND ?3 = 'replied' THEN stage ELSE ?3 END, last_inbound_at = ?4, updated_at = ?4 WHERE lead_id = ?1 AND customer = ?2").bind(lead.id, customerId, s, now).run()
   const event = (type, details = {}) => recordEvent(db, { type, actor: 'system:twilio', customer: customerId, capability: 'followups.sms_inbound', resource: { type: 'lead', id: lead.id }, outcome: 'success', details, at: now })
@@ -177,12 +182,12 @@ export async function handleInbound(env, { from, to, body, providerId, messaging
     if (hash) await db.prepare("DELETE FROM message_optouts WHERE customer = ?1 AND channel = 'sms' AND address_hash = ?2 AND source = 'carrier_stop'").bind(customerId, hash).run()
     await db.prepare("UPDATE lead_threads SET stage = CASE WHEN stage = 'opted_out' THEN 'replied' ELSE stage END, last_inbound_at = ?3, updated_at = ?3 WHERE lead_id = ?1 AND customer = ?2").bind(lead.id, customerId, now).run()
     await event('sms.opt_in', { via: 'start' })
-    await queue(db, { customer: customerId, leadId: lead.id, channel: 'sms', author: 'system', body: startText(biz), id: `start:${msgId}`, direct: true }, now)
+    if (!providerKind) await queue(db, { customer: customerId, leadId: lead.id, channel: 'sms', author: 'system', body: startText(biz), id: `start:${msgId}`, direct: true }, now)
     return ok({ action: 'started' })
   }
   await stage('replied')
   if (c.kind === 'help') {
-    await queue(db, { customer: customerId, leadId: lead.id, channel: 'sms', author: 'system', body: helpText(biz), id: `help:${msgId}`, direct: true }, now)
+    if (!providerKind) await queue(db, { customer: customerId, leadId: lead.id, channel: 'sms', author: 'system', body: helpText(biz), id: `help:${msgId}`, direct: true }, now)
     return ok({ action: 'help' })
   }
   if (c.kind === 'human') {

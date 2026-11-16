@@ -2,6 +2,37 @@
 
 _Update at the end of every task. Newest first._
 
+## Texting onboarding: opt-in before approval, A2P registration prep (2026-11-16) — fix/a2p-onboarding
+
+**Production now**: release e2cde29 (PR #50) + this PR once merged; migration 0024 APPLIED 2026-11-16 (founder approval):
+4 tables + 5 indexes verified; existing leads/appointments/messages/outbox/opt-outs/consents unchanged (counts
+identical). Production test on the sandboxed `gsu-journey-test` (fake example.invalid lead): conversation record
+created, follow-ups scheduled, booking → stage booked, retry 409, wrong token / other business 404, confirmation
+`test_mode` (not a test recipient), first follow-up `not_needed` after booking. That test lead + its 19 Nov 14:00 UTC
+booking + calendar event remain (test business). Logs: cron 200, no errors. Switches: MESSAGES_LIVE off, SMS_LIVE /
+FOLLOWUP_AI / TWILIO_* not set. No Twilio account configured, no registration submitted, no number bought.
+
+- Fixed the circular dependency: the texting box needed provider approval, but carriers review the live opt-in BEFORE
+  approving. Now offerSmsFor(): shown (and consent accepted) once the owner approved submitting the registration
+  (status ready/pending/approved; rejected/suspended/kill switch hide it). Texts still need the provider's approval +
+  own sender + SMS_LIVE. Consent can no longer be recorded through the API where the box isn't offered.
+- /sms-terms/<id>: public opt-in evidence (both boxes, exact wording, unchecked, inactive), booking link, who sends.
+  Website-form box now also links Privacy. Privacy policy: "or text the business first", HELP, 12-month inbox retention.
+- Registration content shown to the owner and used for the campaign: description, message flow (every opt-in path,
+  public URLs, both box wordings), 4 samples = the real templates with [variables] and real links (no "…").
+- Twilio keyword handling: OptOutType (STOP/START/HELP) from Twilio wins; we never send a second answer to a keyword
+  Twilio answered (previously START/HELP would have been answered twice under Twilio's default handling).
+- docs/A2P_REGISTRATION.md: ISV path (Primary profile "ISV Reseller or Partner" → per-business Secondary profile →
+  brand → campaign), brand type per business (EIN → Low-Volume Standard; no EIN → sole prop, API-only for ISVs, not
+  supported by our manual flow yet), PoolThru checklist, fees (usage verified; registration fees ESTIMATES), review,
+  pre-approval testing, controlled website-form acknowledgment test on gsu-journey-test.
+- Decision pending (founder, before the 3rd business): Twilio prefers a subaccount per business; we run one account
+  with a Messaging Service per business (supported, riskier). Subaccounts need per-business credentials (not built).
+- Remaining dependencies, in order (each needs approval): Twilio account upgrade + secrets → GetShowUps Primary
+  Customer Profile → PoolThru owner approves its registration in Follow-ups → Texting → admin submits brand +
+  campaign (fees) → record pending/approved in /admin → buy number + Messaging Service → test recipients → SMS_LIVE.
+  Customer emails stay test-only until MESSAGES_LIVE (approval). Assistant: FOLLOWUP_AI (approval).
+
 ## Post-Build-49 checks (2026-11-16) — fix/quiet-hours-order; no migration
 
 - PoolThru /p/poolthru-llc 404: NOT the release. audit_log seq 53 `website.unpublish` by an owner session at 20:00:52
@@ -14,7 +45,7 @@ _Update at the end of every task. Newest first._
 - Runbook: production D1 is `getshowups-onboarding` (docs/TEXTING_ACTIVATION.md said ONBOARDING_DB, the binding).
 - 0024 re-reviewed: 4 tables + 5 indexes, all IF NOT EXISTS, no ALTER/DROP/UPDATE/DELETE/INSERT; none exist in prod.
 
-## Build 49: follow-up engine, two-way texts, A2P 10DLC readiness (2026-11-16) — feature/followups; migration 0024 (NOT applied)
+## Build 49: follow-up engine, two-way texts, A2P 10DLC readiness (2026-11-16) — PR #49 (b5a7f86); migration 0024 applied 2026-11-16
 
 - One engine for every eligible business (server/followups/): source adapter (website_form, booking_page, sms; ready
   for google_ads/gbp/call) → consent → immediate acknowledgment (website forms) → conversation → booking → follow-ups
@@ -28,8 +59,7 @@ _Update at the end of every task. Newest first._
   registration (details + explicit approval). Website forms and booking page offer the texting box only when ready;
   public /sms-terms/<id>. Admin: counts, failures, stuck work, spikes, costs, registrations, record provider status.
 - Tests: unit 509 (19 new follow-up tests), browser Follow-ups journey on desktop + phone.
-- **Needs approval**: apply 0024 in production; then docs/TEXTING_ACTIVATION.md (Twilio account, registrations, numbers,
-  SMS_LIVE, FOLLOWUP_AI + AI binding). Live texting stays off until then.
+- 0024 applied 2026-11-16 (founder approval). Remaining activation: see the A2P onboarding entry above.
 
 ## Website Studio UX overhaul (2026-11-16) — feature/studio-ux; no migration, no paid calls
 

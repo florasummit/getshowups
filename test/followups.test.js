@@ -211,12 +211,30 @@ test('preferences: no acknowledgment and no nudges → nothing scheduled; bookin
 
 // ---------- texting readiness ----------
 
-test('texting-ready but registration not approved → no text, no consent box; approved + consent → text from the business sender', async () => {
+test('consent box before approval (carriers review it), but never a text before the provider approves; approved → text from the business sender', async () => {
   await seed('alpha')
   withEmail()
   withTwilio()
+  const offer = async () => (await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).json().offerSms
+  // No registration, details only, or not yet approved by the owner → no box, and consent sent anyway is NOT recorded.
+  assert.equal(await offer(), false)
+  const sneaky = (await bookingLead('alpha', { smsConsent: true, email: 'sneaky@example.net', phone: '843-555-0166' })).json().leadId
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM sms_consents WHERE lead_id = ?').get(sneaky).n, 0, 'consent only where the box is offered')
+  db.sql.prepare("INSERT INTO sms_registrations (customer, legal_name, status, updated_at) VALUES ('alpha', 'x', 'ready', 1)").run()
+  assert.equal(await offer(), false, 'details saved but the owner has not approved submission')
+  // Owner approved submission → box shown (status ready, then pending with the provider), still no texts.
+  db.sql.prepare("UPDATE sms_registrations SET approved_at = 1 WHERE customer = 'alpha'").run()
+  assert.equal(await offer(), true)
   register('alpha', 'pending')
-  assert.equal((await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).json().offerSms, false)
+  assert.equal(await offer(), true, 'carriers review the live opt-in while the registration is pending')
+  env.MESSAGING_KILL_SWITCH = 'true'
+  assert.equal(await offer(), false, 'kill switch closes it')
+  delete env.MESSAGING_KILL_SWITCH
+  for (const s of ['rejected', 'suspended']) {
+    db.sql.prepare('UPDATE sms_registrations SET status = ? WHERE customer = ?').run(s, 'alpha')
+    assert.equal(await offer(), false, `${s} closes it`)
+  }
+  register('alpha', 'pending')
   assert.deepEqual(smsReadiness(env, db.sql.prepare('SELECT * FROM sms_registrations').get()).reasons, ['registration_pending'])
   const l = await smsConsentLead()
   await processDueMessages(env, Date.now() + 16 * MIN)
@@ -572,6 +590,34 @@ test('texting registration: owner details validated, explicit approval required;
   assert.match(terms.text, /Reply <strong>STOP<\/strong>/)
   assert.match(terms.text, /not shared with or sold to third parties/)
   assert.doesNotMatch(terms.text, /<script/i)
+  // Opt-in evidence carriers can open without signing in: both boxes, unchecked and inactive, with their exact wording.
+  assert.equal((terms.text.match(/<input type="checkbox" disabled>/g) || []).length, 2)
+  assert.doesNotMatch(terms.text, /<input[^>]*\schecked/)
+  assert.match(terms.text, /Text me about this appointment \(confirmation and reminders\) from alpha Co via GetShowUps\. Message frequency varies\. Msg &amp; data rates may apply\. Reply STOP to opt out, HELP for help\. Not required to book\./)
+  assert.match(terms.text, /Text me about my request from alpha Co via GetShowUps\./)
+  // The owner sees the exact description, opt-in flow and samples carriers will see (real links, [variables]).
+  assert.match(view.messageFlow, /https:\/\/getshowups\.com\/book\/alpha/)
+  assert.match(view.messageFlow, /sms-terms\/alpha/)
+  assert.ok(view.samples.length >= 2 && view.samples.every((x) => x.startsWith('alpha Co:') && /Reply STOP/.test(x)))
+  assert.ok(view.samples.every((x) => !x.includes('…')), 'no placeholder ellipses')
+})
+
+test('Twilio already answered a keyword (OptOutType): its verdict wins and we never send a second answer', async () => {
+  await seed('alpha')
+  withTwilio()
+  register('alpha', 'approved')
+  const l = await smsConsentLead()
+  await inbound({ From: PHONE, To: SENDER.alpha, Body: 'info', MessageSid: 'SMk1', OptOutType: 'HELP' })
+  await inbound({ From: PHONE, To: SENDER.alpha, Body: 'arret', MessageSid: 'SMk2', OptOutType: 'STOP' })
+  assert.equal(thread(l).stage, 'opted_out', "a keyword only Twilio knows still stops everything here")
+  await inbound({ From: PHONE, To: SENDER.alpha, Body: 'unstop', MessageSid: 'SMk3', OptOutType: 'START' })
+  await sendQueued(env, Date.now() + MIN)
+  assert.equal(threadMsgs(l).filter((m) => m.direction === 'out').length, 0, 'no duplicate HELP/START reply')
+  assert.equal(sentSms().length, 0)
+  // Without OptOutType (provider left the keyword to us) our fixed HELP answer goes out once.
+  await text(PHONE, 'HELP', 'SMk4')
+  await sendQueued(env, Date.now() + MIN)
+  assert.equal(sentSms().length, 1)
 })
 
 // ---------- before the migration ----------

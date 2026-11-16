@@ -18,7 +18,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
     await recordEvent(env.ONBOARDING_DB, { type: 'sms.webhook_rejected', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'webhook', id: 'inbound' }, outcome: 'failure', details: { reason: 'bad_signature' } })
     return new Response('Forbidden', { status: 403 })
   }
-  const r = await handleInbound(env, { from: params.get('From'), to: params.get('To'), body: params.get('Body') || '', providerId: params.get('MessageSid'), messagingService: params.get('MessagingServiceSid') })
+  const r = await handleInbound(env, { from: params.get('From'), to: params.get('To'), body: params.get('Body') || '', providerId: params.get('MessageSid'), messagingService: params.get('MessagingServiceSid'), optOutType: params.get('OptOutType') })
   if (!r.ok) return new Response('Unavailable', { status: 503 }) // Twilio retries; the MessageSid keeps it idempotent
   // Answer now (in the background); the 5-minute cron is the safety net.
   if (r.action && r.action !== 'duplicate') {

@@ -9,6 +9,7 @@ import { track } from './events.js'
 import { verifyLinkToken } from './links.js'
 import { scheduleAfterVisitMessage, scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
 import { ingestLead, markStage } from './followups/engine.js'
+import { offerSmsFor } from './followups/settings.js'
 import { isTestLead } from './testdata.js'
 
 export const BOOKING_DAYS = 14
@@ -83,6 +84,8 @@ export async function createLead(env, customer, lead, now = Date.now()) {
     )
     .bind(id, customer.id, lead.name, lead.email, lead.phone, lead.need, lead.zip, qualified ? 'new' : 'unqualified', await sha256Hex(token), now)
   const a = lead.address
+  // Consent is recorded only where the texting box is offered (a request can't add consent the page never asked for).
+  const smsConsent = Boolean(lead.smsConsent) && (await offerSmsFor(env, customer))
   await db.batch([
     insertLead,
     ...(a
@@ -92,14 +95,14 @@ export async function createLead(env, customer, lead, now = Date.now()) {
             .bind(id, customer.id, a.street, a.unit, a.city, a.state, a.zip, now),
         ]
       : []),
-    ...(lead.smsConsent
+    ...(smsConsent
       ? [db.prepare('INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES (?1, ?2, ?3, ?4)').bind(id, customer.id, lead.smsWording || SMS_CONSENT_WORDING, now)]
       : []),
   ])
   await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified }, at: now })
   const source = lead.source || 'booking_page'
   await ingestLead(env, customer.id, id, source, now)
-  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent: lead.smsConsent, source }, now)
+  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent, source }, now)
   return { id, token, qualified }
 }
 

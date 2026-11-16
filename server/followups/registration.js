@@ -18,12 +18,19 @@ export const BUSINESS_TYPES = ['sole_proprietor', 'llc', 'corporation', 'partner
 export const PROVIDER_STATUSES = ['pending', 'approved', 'rejected', 'suspended']
 export const ATTESTATION =
   'I confirm these business details are accurate, that I am authorized to register this business for text messaging, that GetShowUps may submit this registration to its messaging provider and carriers on my behalf, and that we will only text people who asked us to, as described.'
+const ORIGIN = 'https://getshowups.com'
+// Campaign description (what carriers read first): who texts whom, why, and that nothing is marketing.
 export const USE_CASE = (name) =>
-  `${name} uses GetShowUps to reply to customers who contact it through its website or booking page and to send appointment confirmations and reminders. Customers opt in with an unchecked box on the form, can reply STOP to opt out and HELP for help. No marketing lists; no purchased numbers.`
-export const SAMPLES = (name) => [
-  `${name}: Hi Jamie, thanks for your message about pool cleaning. We'll be in touch soon, or pick a time: https://getshowups.com/book/… Reply STOP to opt out.`,
-  `${name}: you're booked for Tuesday, June 3 at 10:00 AM. Confirm you'll be there: https://getshowups.com/… Reply STOP to opt out.`,
-  `${name}: reminder of your appointment today at 10:00 AM. Reply STOP to opt out.`,
+  `${name} is a local service business. It uses GetShowUps to text customers who asked to be contacted: replies to their own enquiry from ${name}'s website form or booking page, appointment confirmations and reminders, and up to two reminders to pick a time if they haven't booked. Customers can also text ${name} with questions. No marketing, no purchased or shared lists.`
+// How people opt in (Twilio "message flow"): every opt-in path, with public URLs reviewers can open.
+export const MESSAGE_FLOW = (name, id) =>
+  `Customers opt in on ${name}'s public booking page (${ORIGIN}/book/${id}) or website contact form by checking an optional, unchecked box. Booking page: "Text me about this appointment (confirmation and reminders) from ${name} via GetShowUps. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. Not required to book." Website form: "Text me about my request from ${name} via GetShowUps. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help. Not required." Both link to the texting terms (${ORIGIN}/sms-terms/${id}, which shows the boxes) and the privacy policy (${ORIGIN}/privacy). Texting is never required to book or to get a reply. A customer who texts ${name}'s number first also opts in to replies. Consent is never asked for by text. Reply STOP to opt out, HELP for help.`
+// Samples = the real templates (server/messages.js, server/followups/assistant.js) with [variables].
+export const SAMPLES = (name, id) => [
+  `${name}: Hi [first name], thanks for your message about "[their request]". We'll be in touch soon, or pick a time: ${ORIGIN}/book/${id}?lead=[id]&k=[key] Reply STOP to opt out.`,
+  `${name}: you're booked for [day, date] at [time]. Confirm you'll be there: ${ORIGIN}/api/appointment/confirm?a=[id]&k=[key] Reply STOP to opt out.`,
+  `${name}: reminder of your appointment [tomorrow at 10:00 AM]. Reply STOP to opt out.`,
+  `${name}: whenever you're ready, pick a time here: ${ORIGIN}/book/${id}?lead=[id]&k=[key] Reply STOP to opt out.`,
 ]
 
 const clean = (v, max) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
@@ -58,7 +65,7 @@ export async function getRegistration(db, customer) {
 }
 
 // The owner's view: facts (their own), status, and the next step in plain words. Never the sender credentials.
-export function registrationView(r, name) {
+export function registrationView(r, name, id) {
   const facts = r && r.legal_name ? { legalName: r.legal_name, businessType: r.business_type, ein: r.ein ? `•••${String(r.ein).slice(-4)}` : '', address: r.address, website: r.website, contactName: r.contact_name, contactEmail: r.contact_email, contactPhone: r.contact_phone } : null
   const status = r?.status || 'not_configured'
   const next =
@@ -77,7 +84,9 @@ export function registrationView(r, name) {
     facts,
     hasSender: Boolean(r?.messaging_service || r?.sender_phone),
     useCase: USE_CASE(name),
-    samples: SAMPLES(name),
+    messageFlow: MESSAGE_FLOW(name, id),
+    samples: SAMPLES(name, id),
+    termsUrl: `${ORIGIN}/sms-terms/${id}`,
     attestation: ATTESTATION,
   }
 }
@@ -106,7 +115,7 @@ export async function approveSubmission(db, customer, name, ownerEmail, now = Da
   const ref = `ref:${(await sha256Hex(String(ownerEmail).toLowerCase())).slice(0, 16)}`
   await db
     .prepare("UPDATE sms_registrations SET approved_by = ?2, approved_at = ?3, use_case = ?4, sample_messages = ?5, updated_at = ?3 WHERE customer = ?1 AND status = 'ready'")
-    .bind(customer, ref, now, USE_CASE(name), JSON.stringify(SAMPLES(name)))
+    .bind(customer, ref, now, USE_CASE(name), JSON.stringify(SAMPLES(name, customer)))
     .run()
   await recordEvent(db, { type: 'sms.registration_approved_by_owner', actorType: 'owner', actor: ownerEmail, customer, capability: 'followups.registration', resource: { type: 'sms_registration', id: customer }, outcome: 'success', details: { attestation: 'v1' }, at: now })
   return { ok: true }

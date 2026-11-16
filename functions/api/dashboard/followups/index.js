@@ -36,7 +36,7 @@ export async function onRequestGet({ request, env }) {
         assistant: followupAiOn(env) && assistantConfigured(env),
         paused: killSwitch(env),
       },
-      texting: registrationView(reg, session.customer.name),
+      texting: registrationView(reg, session.customer.name, session.customer.id),
       counts,
       threads,
     })
