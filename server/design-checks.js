@@ -15,6 +15,19 @@ export function firstScreenSignature(spec) {
   return `${s.type}:${shape}|${spec.theme?.headingFont}|${spec.theme?.colors?.bg}`
 }
 
+// The first screen's structure, independent of left/right mirroring, fonts and colours: section shape, which kinds of
+// blocks, how much of the width photos take, whether text sits over a photo, the headline's scale.
+export function firstScreenStructure(spec) {
+  const s = spec?.pages?.[0]?.sections?.[0]
+  if (!s) return ''
+  if (s.type !== 'composition') return `${s.type}:${s.layout}:${s.height}`
+  const media = s.blocks.filter((b) => b.kind === 'media')
+  const width = media.reduce((n, b) => n + b.col[1], 0)
+  const overlap = s.blocks.some((b) => b.kind !== 'media' && b.z > 0 && media.some((m) => b.col[0] < m.col[0] + m.col[1] && m.col[0] < b.col[0] + b.col[1] && b.row[0] < m.row[0] + m.row[1] && m.row[0] < b.row[0] + b.row[1]))
+  const heading = s.blocks.find((b) => b.kind === 'heading')
+  return `composition:${s.height}:photos${media.length}:${width >= 10 ? 'wide' : width >= 5 ? 'half' : width ? 'small' : 'none'}:${overlap ? 'overlap' : 'side'}:${heading?.size || '-'}:${s.blocks.some((b) => b.kind === 'mark') ? 'mark' : ''}`
+}
+
 export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 'design' }) {
   const hard = []
   const soft = []
@@ -41,10 +54,9 @@ export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 
       break
     }
   }
-  if (mode === 'different' && previous) {
-    const same = firstScreenSignature(spec) === firstScreenSignature(previous) || (spec.theme?.headingFont === previous.theme?.headingFont && spec.theme?.colors?.bg === previous.theme?.colors?.bg)
-    if (same) soft.push('same_direction')
-  }
+  // A different direction needs a different first-screen STRUCTURE: mirroring it or changing fonts/colours isn't one
+  // (live GPT answer 2026-11-16: the "different" design was the first one flipped left-to-right with a serif).
+  if (mode === 'different' && previous && firstScreenStructure(spec) === firstScreenStructure(previous)) soft.push('same_direction')
   const info = spec?.direction ? [] : ['no_direction']
   const NOTE = {
     too_few_sections: 'The home page needs a complete design (several sections), not one or two.',

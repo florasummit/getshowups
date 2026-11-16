@@ -151,3 +151,40 @@ test('raw model answers are redacted before they are kept', () => {
   assert.match(r, /\[email\].*\[number\].*\[url\].*\[secret\]/)
   assert.equal(redactRaw({ x: 'y'.repeat(100) }, 40).length, 40)
 })
+
+test('regression: the centered navigation keeps Book on the same line (desktop: logo centred, Book right, links below; phones: logo left, Book right)', () => {
+  const two = { ...directions(PHOTOS).collage }
+  two.pages = [...two.pages, { slug: 'services', navLabel: 'Services', sections: [{ type: 'services', id: 'svc', layout: 'list', items: [] }] }]
+  const html = render(validateSpec(two, CTX).spec)
+  assert.match(html, /<header class="nav nav-center[^"]*"><div class="wrap"><a class="brand"[^>]*>Pools<\/a><ul>.*<\/ul><a class="btn"/)
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'))
+  assert.match(css, /\.nav-center \.wrap\{display:grid;grid-template-columns:1fr auto 1fr;/)
+  assert.match(css, /\.nav-center \.brand\{grid-column:2;grid-row:1;text-align:center\}\.nav-center \.btn\{grid-column:3;grid-row:1;justify-self:end\}\.nav-center ul\{grid-column:1\/-1;grid-row:2;justify-content:center\}/)
+  assert.doesNotMatch(css, /\.nav-center \.brand\{width:100%/, 'the logo no longer takes the whole row (which pushed Book below it)')
+  assert.match(css, /@media\(max-width:820px\)\{[^@]*\.nav-center \.wrap\{grid-template-columns:1fr auto;padding-block:0\}\.nav-center \.brand\{grid-column:1;text-align:left\}\.nav-center \.btn\{grid-column:2\}/)
+})
+
+test('Claude compact encoding: composition blocks ride in items and survive the round trip; tolerant size tokens', async () => {
+  const { toCompact, fromCompact } = await import('../server/ai-designer.js')
+  const spec = validateSpec(directions(PHOTOS).collage, CTX).spec
+  const compact = toCompact(spec)
+  const sec = compact.pages[0].sections[0]
+  assert.ok(!('blocks' in sec) && sec.items.length === spec.pages[0].sections[0].blocks.length)
+  assert.equal(compact.name, spec.direction)
+  const back = validateSpec(fromCompact(compact), CTX)
+  assert.deepEqual(back.spec.pages[0].sections[0].blocks, spec.pages[0].sections[0].blocks)
+  assert.equal(back.spec.direction, spec.direction)
+  const { parseBlock } = await import('../server/design-blocks.js')
+  for (const look of ['size display', 'size-display', 'display']) assert.deepEqual([parseBlock({ kind: 'heading', place: 'c1/6', look, text: 'x' }).size, parseBlock({ kind: 'heading', place: 'c1/6', look, text: 'x' }).invalid], ['display', undefined])
+})
+
+test('a different direction must change the first-screen structure: a mirrored, recoloured copy is still the same direction', async () => {
+  const { firstScreenStructure } = await import('../server/design-checks.js')
+  const a = validateSpec(directions(PHOTOS).editorial, CTX).spec
+  const mirror = structuredClone(a)
+  for (const b of mirror.pages[0].sections[0].blocks) b.col = [13 - b.col[0] - b.col[1] + 1, b.col[1]]
+  mirror.theme.headingFont = a.theme.headingFont === 'fraunces' ? 'syne' : 'fraunces'
+  assert.equal(firstScreenStructure(mirror), firstScreenStructure(a))
+  assert.notEqual(firstScreenStructure(validateSpec(directions(PHOTOS).poster, CTX).spec), firstScreenStructure(a))
+  assert.notEqual(firstScreenStructure(validateSpec(directions(PHOTOS).collage, CTX).spec), firstScreenStructure(a))
+})

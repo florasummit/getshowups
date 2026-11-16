@@ -32,6 +32,8 @@ export function parseBlock(b) {
   for (const tok of String(b.look || '').toLowerCase().split(/\s+/).filter(Boolean)) {
     let x
     if (SIZES.has(tok)) out.size = tok
+    else if (tok === 'size') continue // "size display" (live GPT answer, 2026-11-16): the value is the next token
+    else if ((x = tok.match(/^size-([a-z]+)$/)) && SIZES.has(x[1])) out.size = x[1]
     else if ((x = tok.match(/^aspect-([0-9x]+|auto)$/)) && ASPECTS.has(x[1])) out.aspect = x[1]
     else if ((x = tok.match(/^focus-(\d{1,3})-(\d{1,3})$/))) out.focus = [Number(x[1]), Number(x[2])]
     else if ((x = tok.match(/^shape-([a-z]+)$/)) && SHAPES.has(x[1])) out.shape = x[1]
@@ -60,3 +62,20 @@ export function blockToModel(b) {
 // The composition section of a validated spec in the shape the model reads (for revisions).
 export const sectionBlocksToModel = (s) => (s?.type === 'composition' ? { ...s, blocks: (s.blocks || []).map(blockToModel) } : s)
 export const sectionBlocksFromModel = (s) => (s && typeof s === 'object' && Array.isArray(s.blocks) ? { ...s, blocks: s.blocks.map(parseBlock) } : s)
+
+// Claude's compact answer carries composition blocks in the section's existing `items` list (no new schema fields: the
+// compact schema must stay the size Anthropic compiled live; adding a `blocks` array was refused as "compiled grammar is
+// too large", 2026-11-16). item.title = "<kind> <place and look tokens>", item.text = the words / button label / photo alt,
+// item.image = the photo ref (media) or the link target (button).
+const PLACE = /^(c\d{1,2}\/\d{1,2}|r\d\/\d|z\d|x-[a-z]+|y-[a-z]+)$/
+export function itemToBlock(x) {
+  if (!x || typeof x !== 'object') return x
+  const [kind = '', ...tokens] = String(x.title || '').trim().toLowerCase().split(/\s+/)
+  const place = tokens.filter((t) => PLACE.test(t)).join(' ')
+  const look = tokens.filter((t) => !PLACE.test(t)).join(' ')
+  return parseBlock({ kind, place, look, text: x.text, image: kind === 'media' ? x.image : '', target: kind === 'button' ? x.image || 'book' : '' })
+}
+export function blockToItem(b) {
+  const m = blockToModel(b)
+  return { serviceIndex: -1, icon: '', title: [m.kind, m.place, m.look].filter(Boolean).join(' '), text: m.text, image: b.kind === 'media' ? m.image : b.kind === 'button' ? m.target : '' }
+}

@@ -450,7 +450,7 @@ test('show me a different direction: a fresh design that must move away from the
   assert.doesNotMatch(first, /CURRENT_SITE/, 'a fresh design, not a revision of the current one')
   assert.match(requests[2].body.messages[0].content, /meant to be a different direction/)
   const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
-  assert.deepEqual([draft.site.name, draft.site.pages[0].sections[0].type, draft.site.direction], ['Poster', 'composition', 'Loud typographic poster'])
+  assert.deepEqual([draft.site.name, draft.site.pages[0].sections[0].type, draft.site.direction], ['Loud typographic poster', 'composition', 'Loud typographic poster'])
   const g = (await call(designer, 'GET', { cookie: c })).json
   assert.equal(g.direction, 'Loud typographic poster')
   assert.deepEqual(g.turns.map((t) => t.text).slice(-2), ['Show me a different direction', 'A loud typographic poster.'])
@@ -659,10 +659,12 @@ test('regression (live test 2026-11-15): full-width sections keep their backgrou
   assert.match(css, /\.l-overlay \.hero-bg\{position:absolute;inset:0\}/)
 })
 
-test('option B: Claude gets the compact section shape (14 fields incl. composition blocks, within limits); OpenAI keeps the standard one', async () => {
+test('option B: Claude gets the compact section shape (13 fields: composition blocks ride in items, the design idea in name; live grammar limit); OpenAI keeps the standard one', async () => {
   assert.deepEqual(anthropicSchemaProblems(COMPACT_DESIGN_SCHEMA), [])
   const sec = (sch) => sch.properties.site.properties.pages.items.properties.sections.items.properties
-  assert.deepEqual(Object.keys(sec(COMPACT_DESIGN_SCHEMA)), ['type', 'id', 'style', 'eyebrow', 'heading', 'text', 'body', 'layout', 'images', 'imageAlt', 'options', 'buttons', 'items', 'blocks'])
+  assert.deepEqual(Object.keys(sec(COMPACT_DESIGN_SCHEMA)), ['type', 'id', 'style', 'eyebrow', 'heading', 'text', 'body', 'layout', 'images', 'imageAlt', 'options', 'buttons', 'items'])
+  assert.ok(!('direction' in COMPACT_DESIGN_SCHEMA.properties.site.properties), 'the compact schema keeps the size Anthropic compiled live')
+  assert.ok('direction' in DESIGN_SCHEMA.properties.site.properties)
   assert.equal(Object.keys(sec(DESIGN_SCHEMA)).length, 29)
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')

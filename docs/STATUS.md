@@ -2,6 +2,21 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: paid validation of PR #43 (2026-11-16) — owner-approved, $5 cap; spent $0.147
+
+- Claude Sonnet 5.5: STOPPED at turn 1. Anthropic refused the schema ("compiled grammar is too large"; $0, request
+  req_011Ch64roW2E444i4ZRqLVbx). Fixed: Claude's compact schema is back to main's 58 properties (the size that compiled
+  live): composition blocks ride in `items` (title = kind + place/look tokens), the design idea in `name`. NOT re-verified
+  live (stop rule); needs one approved Claude call before merge.
+- GPT-6.1 Sol: 3/3 turns ok, no revisions, $0.0437 + $0.0466 + $0.0568 = $0.147. Found and fixed: "size display" tokens
+  reported invalid (now accepted); a 184-char design idea was dropped (now shortened); the "different" design was the
+  first one mirrored with a serif (check now compares first-screen structure, so it would get the one revision).
+- Visual verdict: clean, legible, booking prominent on phones, but generic: all three first screens are photo + headline
+  side by side; the model used none of the overlap/scale/mark/treatment controls; below the fold is presets; the brand
+  shows as "Poolthru LLC" (record name), footer repeats it. Not "professionally art-directed" yet.
+- Centered nav fixed (logo centred, Book right, links below; phones: logo left, Book right) + regression test.
+- Unit 466/466, browser 79/79. Next: owner review; prompt work for bolder compositions needs another paid run.
+
 ## Website Studio: composition section + design quality (2026-11-16) — draft PR, NOT merged; no paid calls
 
 - PR #42 (hero/nav/phone headlines) merged and deployed (f8239b2, 05:02 UTC): PoolThru's live page hash unchanged,

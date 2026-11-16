@@ -15,7 +15,7 @@ import { brandName, loadWebsite, saveDraft, validateContent } from './website.js
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
-import { blockToModel, parseBlock, sectionBlocksFromModel, sectionBlocksToModel } from './design-blocks.js'
+import { blockToItem, itemToBlock, sectionBlocksFromModel, sectionBlocksToModel } from './design-blocks.js'
 import { checkDesign, firstScreenSignature, redactRaw } from './design-checks.js'
 
 // No union types: Anthropic's structured outputs allow at most 16 union-typed parameters (anyOf / type arrays) per
@@ -49,7 +49,7 @@ const BLOCK = {
   properties: {
     kind: T('heading | text | button | media | mark'),
     place: T('"c<col 1-12>/<span> r<row 1-6>/<span> z<0-2>" plus optional x-start|x-center|x-end and y-start|y-center|y-end|y-stretch, e.g. "c1/7 r2/1 z1 y-end"'),
-    look: T('space-separated: size display|xl|l|m|s; media: aspect-1x1|4x5|3x4|4x3|3x2|16x9|21x9|auto, focus-<x%>-<y%>, shape-rect|shape-rounded|shape-arch|shape-circle, tint|duo|scrim; button: secondary; phone: m-order-<n>, m-span-<1-4>, m-hide (media/mark only)'),
+    look: T('space-separated: one type-size word (display|xl|l|m|s, e.g. "display"); media: aspect-1x1|4x5|3x4|4x3|3x2|16x9|21x9|auto, focus-<x%>-<y%>, shape-rect|shape-rounded|shape-arch|shape-circle, tint|duo|scrim; button: secondary; phone: m-order-<n>, m-span-<1-4>, m-hide (media/mark only)'),
     text: T('heading/text words, button label, photo alt text, or a mark (1–3 letters/symbols, or the number of services)'),
     image: T('media only: an image ref from IMAGES; "" otherwise'),
     target: T('button only: "book", "page:<slug>" or "section:<id>"; "" otherwise'),
@@ -136,10 +136,9 @@ const COMPACT_SECTION = {
     buttons: { type: 'array', items: { type: 'object', properties: { label: S, target: { type: 'string', description: '"book", "page:<slug>" ("page:" for home) or "section:<section id>"' } } }, description: 'hero: [main, optional secondary]; imageText/cta: [one]; [] otherwise' },
     items: {
       type: 'array',
-      description: 'services/features/steps/faq entries; [] otherwise. faq: title = question, text = answer',
+      description: 'services/features/steps/faq entries; composition: its blocks (up to 10); [] otherwise. faq: title = question, text = answer. composition block: title = "<kind> <place tokens> <look tokens>" (kind heading|text|button|media|mark; place c<col>/<span> r<row>/<span> z<0-2> x-…|y-…; look display|xl|l|m|s aspect-… focus-x-y shape-… tint|duo|scrim secondary m-order-n m-span-n m-hide), text = the words / button label / photo alt, image = the photo ref (media) or link target (button)',
       items: { type: 'object', properties: { serviceIndex: { type: 'integer', description: 'services only: index into facts.services; -1 otherwise' }, icon: T(`one of: ${ICONS.join(' | ')} — or ""`), title: T(), text: T(), image: T() } },
     },
-    blocks: { type: 'array', items: BLOCK, description: 'composition sections only: up to 10 blocks; [] otherwise' },
   },
 }
 
@@ -172,13 +171,15 @@ function sectionFromCompact(c) {
   s.lead = opts.includes('lead')
   s.showPrices = !opts.includes('no-prices')
   s.showPhone = opts.includes('phone')
-  if (Array.isArray(c.items)) s.items = c.items.map((x) => (c.type === 'faq' ? { question: x?.title, answer: x?.text } : { serviceIndex: x?.serviceIndex, icon: x?.icon, title: x?.title, text: x?.text, image: x?.image }))
-  if (c.type === 'composition' && Array.isArray(c.blocks)) s.blocks = c.blocks.map(parseBlock)
+  if (c.type === 'composition') s.blocks = (Array.isArray(c.items) ? c.items : []).map(itemToBlock)
+  else if (Array.isArray(c.items)) s.items = c.items.map((x) => (c.type === 'faq' ? { question: x?.title, answer: x?.text } : { serviceIndex: x?.serviceIndex, icon: x?.icon, title: x?.title, text: x?.text, image: x?.image }))
   return s
 }
 export function fromCompact(site) {
   if (!site || typeof site !== 'object') return site
-  return { ...site, pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(sectionFromCompact) : p.sections } : p)) : site.pages }
+  // The compact answer's `name` carries the one-line art direction (no extra schema field; see design-blocks.js).
+  const idea = typeof site.name === 'string' ? site.name.replace(/\s+/g, ' ').trim() : ''
+  return { ...site, direction: site.direction ?? idea, name: idea.length > 40 ? idea.slice(0, 40).replace(/\s+\S*$/, '') : idea, pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(sectionFromCompact) : p.sections } : p)) : site.pages }
 }
 // Standard (validated) → compact, so Claude revises the current design in the shape it answers in.
 function sectionToCompact(s) {
@@ -198,23 +199,24 @@ function sectionToCompact(s) {
     imageAlt: s.imageAlt || '',
     options: opts.join(' '),
     buttons,
-    items: (s.items || []).map((x) => (s.type === 'faq' ? { serviceIndex: -1, icon: '', title: x.question || '', text: x.answer || '', image: '' } : { serviceIndex: Number.isInteger(x.serviceIndex) ? x.serviceIndex : -1, icon: x.icon || '', title: x.title || '', text: x.text || '', image: x.image || '' })),
-    blocks: (s.blocks || []).map(blockToModel),
+    items: s.type === 'composition' ? (s.blocks || []).map(blockToItem) : (s.items || []).map((x) => (s.type === 'faq' ? { serviceIndex: -1, icon: '', title: x.question || '', text: x.answer || '', image: '' } : { serviceIndex: Number.isInteger(x.serviceIndex) ? x.serviceIndex : -1, icon: x.icon || '', title: x.title || '', text: x.text || '', image: x.image || '' })),
   }
 }
-export const toCompact = (site) => (site && Array.isArray(site.pages) ? { ...site, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionToCompact) })) } : site)
+export const toCompact = (site) => (site && Array.isArray(site.pages) ? { ...site, name: site.direction || site.name, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionToCompact) })) } : site)
 // Standard shape for revisions (OpenAI): composition blocks back in the token form the model writes.
 export const toStandard = (site) => (site && Array.isArray(site.pages) ? { ...site, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionBlocksToModel) })) } : site)
 
-const designSchema = (section) => strictSchema({
+const designSchema = (section, { compact = false } = {}) => strictSchema({
   type: 'object',
   properties: {
     reply: { type: 'string', description: 'One to three sentences to the owner: the design idea, or what you changed' },
     site: {
       type: 'object',
       properties: {
-        name: S,
-        direction: { type: 'string', description: 'The design idea in one line (art direction): concept, type, palette, composition — e.g. "Quiet coastal editorial: oversized serif over a large photo, sand and deep teal"' },
+        // Claude (compact): the art direction rides in `name` (its schema keeps the live-compiled size). OpenAI: its own field.
+        ...(compact
+          ? { name: { type: 'string', description: 'The design idea in one line, at most 160 characters (art direction): concept, type, palette, composition' } }
+          : { name: S, direction: { type: 'string', description: 'The design idea in one line, at most 160 characters (art direction): concept, type, palette, composition — e.g. "Quiet coastal editorial: oversized serif over a large photo, sand and deep teal"' } }),
         theme: {
           type: 'object',
           properties: {
@@ -243,7 +245,7 @@ const designSchema = (section) => strictSchema({
 })
 // OpenAI: the standard shape (live-tested 2026-11-15). Claude: the compact shape (its grammar compiler's size limit).
 export const DESIGN_SCHEMA = designSchema(SECTION)
-export const COMPACT_DESIGN_SCHEMA = designSchema(COMPACT_SECTION)
+export const COMPACT_DESIGN_SCHEMA = designSchema(COMPACT_SECTION, { compact: true })
 
 const SYSTEM = `You are the senior web designer at GetShowUps. You design complete, original, polished websites for small local service businesses, and you revise them in conversation with the owner. Your output is a design specification (JSON) that our renderer turns into a fast, accessible, mobile-first website. You decide the art direction and the composition: which pages exist, which sections each page has and in what order, every section's layout, alignment, width, spacing, background and imagery, and the theme (an original colour palette in hex, a font pairing, type scale, heading weight/case/tracking, line height, corner radius, density, button style and motion). You write every word.
 

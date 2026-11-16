@@ -425,7 +425,8 @@ export function validateSpec(raw, ctx = {}) {
     version: SPEC_VERSION,
     name: txt(r.name, LIMITS.name, 'name') || 'Custom design',
     // The design idea in one line (art direction), as the AI committed to it. Shown to the owner, never rendered.
-    direction: txt(r.direction, LIMITS.direction, 'direction'),
+    // Over-long → shortened at a word boundary (it's a note to the owner, not page content), then the usual gates.
+    direction: txt(((d) => (d.length > LIMITS.direction ? d.slice(0, LIMITS.direction).replace(/\s+\S*$/, '').replace(/[,;:\s]+$/, '') : d))(clean(r.direction)), LIMITS.direction, 'direction'),
     theme,
     nav: { layout: choose(r.nav?.layout, ENUM.navLayout, 'left', 'nav.layout'), sticky: bool(r.nav?.sticky, true), showBook: true },
     footer: { layout: choose(r.footer?.layout, ENUM.footerLayout, 'simple', 'footer.layout'), text: txt(r.footer?.text, LIMITS.footer, 'footer.text') },
