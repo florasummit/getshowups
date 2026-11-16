@@ -1,9 +1,10 @@
 # Texting and follow-ups: activation runbook
 
 Build 49 deployed the follow-up engine, two-way texting, the assistant and A2P 10DLC tracking with **live texting
-off**. Nothing below has been done; each step needs the approval noted. Steps are in order.
+off**. Step 0 is done (2026-11-16); nothing else below has been done. Each step needs the approval noted, in order.
+Registration details (ISV profile, brand types, campaign fields, fees, review): docs/A2P_REGISTRATION.md.
 
-## 0. Database (approval: production migration)
+## 0. Database — DONE 2026-11-16 (approved; 4 tables + 5 indexes verified, existing data unchanged)
 
 ```
 npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0024_followups.sql
@@ -22,16 +23,21 @@ conversations appear in the dashboard. Email still follows `MESSAGES_LIVE` (test
 3. Webhooks, on each business's Messaging Service (step 3) → Integration:
    - Incoming messages: `https://getshowups.com/api/sms/twilio/inbound` (HTTP POST). Status callbacks are set per
      message by GetShowUps.
-   - Advanced Opt-Out: keep STOP handling on (Twilio sends the STOP confirmation). Turn the default HELP auto-reply
-     **off** (GetShowUps sends the business-specific HELP answer).
+   - Opt-out: **enable Advanced Opt-Out** on the Messaging Service (Opt-out tab; only Twilio support can turn it off
+     again) with the business's HELP text (docs/A2P_REGISTRATION.md). Twilio then answers STOP/START/HELP and tells
+     us (`OptOutType`); GetShowUps records it and never sends a second answer. Plain default handling also
+     auto-replies but may not send `OptOutType`, which would make START/HELP answered twice.
 
 ## 2. Per business: registration (A2P 10DLC)
 
 1. The owner opens Follow-ups → Texting → **Start texting registration**, enters the business details and approves
    submission (the attestation is stored with time and an owner reference). We never fill this in for them.
-2. A platform admin submits in Twilio (Trust Hub: customer profile → A2P brand → campaign, use case "Customer care /
-   Account notifications", samples and use-case text exactly as shown to the owner; opt-in proof URL =
-   `https://getshowups.com/sms-terms/<business id>`, plus the business's booking page). Cost: brand + campaign fees
+   From then on the optional texting box is shown on the booking page and website forms (carriers review the live
+   opt-in before approving); consent is recorded, but no text is sent before the provider approves. A rejected or
+   suspended registration, or the kill switch, hides the box again.
+2. A platform admin submits in Twilio (secondary customer profile → brand → campaign; brand type per business:
+   docs/A2P_REGISTRATION.md; description, message flow and samples exactly as shown to the owner; opt-in evidence URL =
+   `https://getshowups.com/sms-terms/<business id>` (both boxes, exact wording), plus the business's booking page). Cost: brand + campaign fees
    (approval: spend).
 3. In /admin → Follow-ups and texting → **Record**: status `pending` after submitting; later `approved` or `rejected`
    (with Twilio's reason) **only as Twilio reports it**.
@@ -41,7 +47,7 @@ conversations appear in the dashboard. Email still follows `MESSAGES_LIVE` (test
 1. Buy a 10DLC number for the business and put it in a Messaging Service linked to the approved campaign.
 2. /admin → Record → Messaging Service SID (`MG…`) and/or sender number (`+1…`). One business per sender.
 
-The business can now text **test recipients** (`MESSAGE_TEST_RECIPIENTS`) — verify end to end: form with the texting box
+Only after the campaign is approved (no A2P traffic before), the business can text **test recipients** (`MESSAGE_TEST_RECIPIENTS`) — verify end to end: form with the texting box
 → acknowledgment text → reply → assistant/fixed answer → STOP → no more texts.
 
 ## 4. Live switches (approval each)

@@ -488,6 +488,8 @@ function Texting({ texting: t, channels, onSaved }) {
           <h3>Review and approve</h3>
           <p className="fine">What carriers will see:</p>
           <p>{t.useCase}</p>
+          <p className="fine">How customers agree to texts:</p>
+          <p>{t.messageFlow}</p>
           <p className="fine">Example messages:</p>
           <ul className="fu-samples">
             {t.samples.map((x) => (
@@ -498,12 +500,16 @@ function Texting({ texting: t, channels, onSaved }) {
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
             <span>{t.attestation}</span>
           </label>
+          <p className="fine">
+            Once you approve, the optional texting box appears on your booking page and website forms so carriers can review it. No texts are sent until
+            carriers approve your registration. <a href={t.termsUrl}>Your texting terms</a>
+          </p>
           <button type="button" className="btn btn-primary btn-sm" disabled={!agree} onClick={approve}>
             Approve submission
           </button>
         </div>
       )}
-      {t.status === 'ready' && t.approvedAt && <p className="fine">Thanks — GetShowUps will submit your registration to the carriers and update this status.</p>}
+      {t.status === 'ready' && t.approvedAt && <p className="fine">Thanks. The texting box is now on your booking page and website forms. GetShowUps will submit your registration to the carriers and update this status; no texts go out before carriers approve.</p>}
       {msg && <p className="form-error">{msg}</p>}
     </section>
   )

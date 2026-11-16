@@ -109,6 +109,29 @@ export function smsReadiness(env, reg) {
   return { ok: reasons.length === 0, reasons, sender: reg ? { messagingService: reg.messaging_service || null, from: reg.sender_phone || null } : null }
 }
 
+// May the texting box be OFFERED (and consent recorded)? Carriers review the live opt-in BEFORE they approve a
+// registration, so the box can't wait for approval. It opens once the owner has explicitly approved submission of the
+// registration (details + attestation) and stays open while the provider reviews it and after approval. It closes for
+// a rejected or suspended registration and with the kill switch. Collecting consent sends nothing: texts still need
+// smsReadiness() above (provider approval + the business's own sender + SMS_LIVE for real recipients).
+export const CONSENT_STATUSES = ['ready', 'pending', 'approved']
+export function smsConsentOpen(env, reg) {
+  return !killSwitch(env) && Boolean(reg?.approved_at) && CONSENT_STATUSES.includes(reg?.status)
+}
+export async function smsConsentOpenFor(env, customerId) {
+  if (!CUSTOMER_RE.test(customerId || '') || !(await followupsReady(env.ONBOARDING_DB))) return false
+  try {
+    return smsConsentOpen(env, await registrationOf(env.ONBOARDING_DB, customerId))
+  } catch {
+    return false
+  }
+}
+
+// The ONE rule for showing the texting box (booking page, website forms) and for accepting consent from them.
+export async function offerSmsFor(env, customer) {
+  return Boolean(customer?.automations) && (await smsConsentOpenFor(env, customer?.id))
+}
+
 export async function smsReadyFor(env, customerId) {
   if (!CUSTOMER_RE.test(customerId || '') || !(await followupsReady(env.ONBOARDING_DB))) return { ok: false, reasons: ['setup_pending'], sender: null }
   try {

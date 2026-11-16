@@ -82,7 +82,7 @@ const withEmail = () => Object.assign(env, { RESEND_API_KEY: 're_SECRET', EMAIL_
 const withSms = () => {
   Object.assign(env, { TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tw_SECRET', TWILIO_MESSAGING_SERVICE_SID: 'MG123', MESSAGES_LIVE: 'true', SMS_LIVE: 'true' })
   const now = Date.now()
-  db.sql.prepare("INSERT OR IGNORE INTO sms_registrations (customer, status, messaging_service, updated_at) SELECT id, 'approved', 'MG123', ?1 FROM customers").run(now)
+  db.sql.prepare("INSERT OR IGNORE INTO sms_registrations (customer, status, approved_at, messaging_service, updated_at) SELECT id, 'approved', ?1, 'MG123', ?1 FROM customers").run(now)
   db.sql.prepare('INSERT OR IGNORE INTO followup_settings (customer, quiet_start, quiet_end, updated_at) SELECT id, 0, 0, ?1 FROM customers').run(now)
 }
 

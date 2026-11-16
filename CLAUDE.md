@@ -210,8 +210,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   business; confirmations/reminders still go. Stored as hashes only. Before 0014 is applied, nothing is suppressed wrongly;
   any other lookup error skips the follow-up (`optout_unknown`, fails closed). Apply 0014 before deploying (else unsubscribe → 503).
 - Never mark an email or text as sent unless the provider accepted it. Due messages without a provider are skipped
-  (`no_provider`), never sent later in a burst. Texts only with recorded consent (sms_consents); consent is offered only
-  when SMS is configured. Messages to leads re-check relevance at send time (`skipReason()`).
+  (`no_provider`), never sent later in a burst. Texts only with recorded consent (sms_consents); the texting box is offered
+  (and consent accepted) only via offerSmsFor(): automations on, owner approved submitting the texting registration,
+  status ready/pending/approved, kill switch off (carriers review the live opt-in BEFORE approval; collecting consent
+  sends nothing). Messages to leads re-check relevance at send time (`skipReason()`).
 - Launch gate fails closed: unless `MESSAGES_LIVE` is exactly `true`, email/SMS go only to `MESSAGE_TEST_RECIPIENTS`
   (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval.
 - Never store card data or invent prices
@@ -340,7 +342,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   and recipientAllowed with testOnly = test business OR SMS_LIVE !== 'true'. SMS_LIVE, FOLLOWUP_AI (assistant on the
   included model) and MESSAGES_LIVE need approval. Automatic texts respect quiet hours (moved to morning); direct
   answers within 30 min may go. Limits: 3 automatic texts/person/day, 6 assistant answers/person/day, 300 texts and
-  $0.20 assistant cost per business/day. STOP (carrier keywords incl. CANCEL) suppresses immediately (queued and
+  $0.20 assistant cost per business/day. Twilio's OptOutType (STOP/START/HELP) wins over our keyword list and we never send a second answer to a keyword
+  Twilio answered. STOP (carrier keywords incl. CANCEL) suppresses immediately (queued and
   scheduled texts retired, provider confirms); START resubscribes; HELP and human requests get fixed replies; a
   cancel request gets the person's own signed cancel link (never cancels by itself). Owner pause stops every automatic
   message incl. fixed answers (owner is asked). Webhooks: Twilio signature required; MessageSid unique; status updates

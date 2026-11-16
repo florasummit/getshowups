@@ -27,5 +27,5 @@ export async function onRequestPost({ request, env }) {
     r = await approveSubmission(db, id, session.customer.name, session.email)
   } else return json(400, { error: 'invalid_request' })
   if (!r.ok) return json(r.httpStatus, { error: r.error })
-  return json(200, { texting: registrationView(await getRegistration(db, id), session.customer.name) })
+  return json(200, { texting: registrationView(await getRegistration(db, id), session.customer.name, id) })
 }

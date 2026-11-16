@@ -2,7 +2,7 @@
 // exactly what the product does with Google user data. Keep it in sync with server/ behaviour.
 import '../app.css'
 
-const UPDATED = 'November 13, 2026'
+const UPDATED = 'November 16, 2026'
 
 export default function Privacy() {
   return (
@@ -46,8 +46,10 @@ export default function Privacy() {
           <strong>Appointment messages:</strong> if the business has automatic messages turned on, we email you on its
           behalf about your request and appointment: a reminder to pick a time if you haven’t booked, a booking
           confirmation, reminders before the appointment with a link to confirm you’ll attend, and an invitation to
-          rebook if the appointment was missed. We send text messages only if you tick the box to receive them; you can
-          reply STOP to any text to opt out. We record whether each message was sent and whether you confirmed.
+          rebook if the appointment was missed. We send text messages only if you tick the box to receive them or text the business first; you can
+          reply STOP to any text to opt out and HELP for help. We record whether each message was sent and whether you confirmed. Texts
+          you exchange with the business, and the emails we send you on its behalf, are kept for the business’s inbox for up to
+          12 months and then deleted.
         </li>
         <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
