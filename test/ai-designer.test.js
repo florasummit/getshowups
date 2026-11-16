@@ -328,6 +328,35 @@ test('regression (live test 2026-11-15): the design schema compiles under Anthro
   assert.ok(objects.every((o) => o.additionalProperties === false && o.required.length === Object.keys(o.properties).length))
 })
 
+test('regression (live test 2026-11-15, "compiled grammar is too large"): choices are described strings, not enums', () => {
+  const enums = []
+  const walk = (s, path) => {
+    if (!s || typeof s !== 'object') return
+    if (Array.isArray(s.enum)) enums.push(path)
+    for (const [k, v] of Object.entries(s)) walk(v, `${path}.${k}`)
+  }
+  walk(DESIGN_SCHEMA, '$')
+  assert.deepEqual(enums, ['$.properties.site.properties.pages.items.properties.sections.items.properties.type'], 'only the structural section type stays an enum')
+  // The allowed values are still told to the model.
+  const theme = DESIGN_SCHEMA.properties.site.properties.theme.properties
+  assert.match(theme.headingFont.description, /exactly one of: .*syne/)
+  assert.match(DESIGN_SCHEMA.properties.site.properties.pages.items.properties.sections.items.properties.items.items.properties.icon.description, /exactly one of: .*water.*or "" if not used/)
+})
+
+test('values outside the allowed lists never reach a site: validateSpec repairs each to its safe default', () => {
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const bad = DESIGN()
+  bad.theme = { ...bad.theme, headingFont: 'comic-sans', bodyFont: 'syne', headingCase: 'SHOUT', density: 'huge', buttons: 'blink', motion: 'wild' }
+  bad.nav = { ...bad.nav, layout: 'diagonal' }
+  bad.footer = { ...bad.footer, layout: 'marquee' }
+  bad.pages[0].sections[1] = { ...bad.pages[0].sections[1], background: 'neon', spacing: 'xxl', align: 'justify', width: 'infinite', animate: 'spin', items: [{ icon: 'skull', title: 'Balanced water', text: 'Tested at every visit.' }] }
+  const { spec } = validateSpec(fromStrict(bad), opts)
+  assert.deepEqual([spec.theme.headingFont, spec.theme.bodyFont, spec.theme.headingCase, spec.theme.density, spec.theme.buttons, spec.theme.motion], ['space-grotesk', 'inter', 'none', 'comfortable', 'solid', 'subtle'])
+  assert.deepEqual([spec.nav.layout, spec.footer.layout], ['left', 'simple'])
+  const s = spec.pages[0].sections.find((x) => x.type === 'features')
+  assert.deepEqual([s.background, s.spacing, s.align, s.width, s.animate, s.items[0].icon], ['bg', 'l', 'left', 'normal', 'none', null])
+})
+
 test('"not used" values from the strict schema mean exactly what missing fields meant: same validated site', () => {
   // The same design as a strict-schema answer: every section/item key present, unused ones as "", [], -1/0, empty buttons.
   const SECTION = DESIGN_SCHEMA.properties.site.properties.pages.items.properties.sections.items.properties

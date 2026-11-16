@@ -15,6 +15,11 @@ _Update at the end of every task. Newest first._
   shown as a rate limit. Fixed: openAiError/claudeError → provider_billing (402, released, not retried); provider
   status/type/code kept on events/logs (identifiers only).
 - Next: fund the OpenAI API account; re-run the same approved test (approval needed).
+- Second live run (keys recovered into Keychain, read with --keychain): Claude 400 "The compiled grammar is too large …
+  Simplify your tool schemas" (req_011Ch5gsxM43xB4hLPaicRSF) — so removing unions was necessary but not sufficient.
+  OpenAI 429 credit_balance_exhausted again (the key's organization has no credit). $0, 0 tokens.
+- Fix A (owner-approved): choices are described strings, not enums (18 enums → 1: section type). validateSpec already
+  enforces every list with a safe default (test). Grammar size can't be measured locally; needs a live call to confirm.
 
 ## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
 

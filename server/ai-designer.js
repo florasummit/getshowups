@@ -22,7 +22,12 @@ import { recordEvent } from './auditlog.js'
 // fromStrict() turns those back into missing fields before validateSpec, which then applies its usual defaults.
 const S = { type: 'string' }
 const T = (description = '"" if not used') => ({ type: 'string', description })
-const E = (values) => ({ type: 'string', enum: ['', ...values], description: '"" if not used' })
+// Choices are plain strings with the allowed values in the description, not JSON-schema enums: Anthropic compiles the
+// schema into a grammar and refused ours as too large (HTTP 400 "The compiled grammar is too large", live test
+// 2026-11-15), and enums are a large part of a grammar. validateSpec checks every one of these fields against its list
+// (pick() with a safe default), so nothing outside the list can reach a site. Section `type` stays an enum (structural).
+const C = (values, note = '') => ({ type: 'string', description: `exactly one of: ${values.join(' | ')}${note}` })
+const E = (values) => C(values, ' — or "" if not used')
 const CTA = { type: 'object', description: 'label "" if this section has no such button', properties: { label: S, target: { type: 'string', description: '"book", "page:<slug>" ("page:" for home) or "section:<section id>"' } } }
 const ITEM = {
   type: 'object',
@@ -41,12 +46,12 @@ const SECTION = {
   properties: {
     type: { type: 'string', enum: SECTION_TYPES },
     id: { type: 'string', description: 'kebab-case, unique on the site' },
-    background: { type: 'string', enum: ['bg', 'surface', 'accent', 'ink', 'image'] },
+    background: C(['bg', 'surface', 'accent', 'ink', 'image']),
     backgroundImage: T(),
-    spacing: { type: 'string', enum: ['s', 'm', 'l', 'xl'] },
-    align: { type: 'string', enum: ['left', 'center'] },
-    width: { type: 'string', enum: ['narrow', 'normal', 'wide', 'full'] },
-    animate: { type: 'string', enum: ['none', 'fade', 'rise'] },
+    spacing: C(['s', 'm', 'l', 'xl']),
+    align: C(['left', 'center']),
+    width: C(['narrow', 'normal', 'wide', 'full']),
+    animate: C(['none', 'fade', 'rise']),
     eyebrow: T(),
     heading: T(),
     text: T(),
@@ -104,23 +109,23 @@ export const DESIGN_SCHEMA = strictSchema({
           type: 'object',
           properties: {
             colors: { type: 'object', properties: Object.fromEntries(['bg', 'surface', 'ink', 'muted', 'accent', 'onAccent', 'line'].map((k) => [k, { type: 'string', description: '#rrggbb' }])) },
-            headingFont: { type: 'string', enum: Object.keys(FONTS) },
-            bodyFont: { type: 'string', enum: Object.keys(FONTS).filter((k) => FONTS[k].kind !== 'display') },
+            headingFont: C(Object.keys(FONTS)),
+            bodyFont: C(Object.keys(FONTS).filter((k) => FONTS[k].kind !== 'display')),
             headingWeight: { type: 'integer' },
-            headingCase: { type: 'string', enum: ['none', 'upper'] },
+            headingCase: C(['none', 'upper']),
             headingTracking: { type: 'number' },
             baseSize: { type: 'number' },
             scale: { type: 'number' },
             lineHeight: { type: 'number' },
             radius: { type: 'integer' },
-            density: { type: 'string', enum: ['compact', 'comfortable', 'airy'] },
+            density: C(['compact', 'comfortable', 'airy']),
             maxWidth: { type: 'integer' },
-            buttons: { type: 'string', enum: ['solid', 'outline', 'pill', 'underline'] },
-            motion: { type: 'string', enum: ['none', 'subtle', 'expressive'] },
+            buttons: C(['solid', 'outline', 'pill', 'underline']),
+            motion: C(['none', 'subtle', 'expressive']),
           },
         },
-        nav: { type: 'object', properties: { layout: { type: 'string', enum: ['left', 'center', 'split'] }, sticky: { type: 'boolean' }, showBook: { type: 'boolean' } } },
-        footer: { type: 'object', properties: { layout: { type: 'string', enum: ['simple', 'columns', 'statement'] }, text: T() } },
+        nav: { type: 'object', properties: { layout: C(['left', 'center', 'split']), sticky: { type: 'boolean' }, showBook: { type: 'boolean' } } },
+        footer: { type: 'object', properties: { layout: C(['simple', 'columns', 'statement']), text: T() } },
         pages: { type: 'array', items: { type: 'object', properties: { slug: S, navLabel: S, seoTitle: S, seoDescription: S, sections: { type: 'array', items: SECTION } } } },
       },
     },
