@@ -508,6 +508,23 @@ test('regression (live test 2026-11-15, "compiled grammar is too large"): choice
   assert.match(DESIGN_SCHEMA.properties.site.properties.pages.items.properties.sections.items.properties.items.items.properties.icon.description, /exactly one of: .*water.*or "" if not used/)
 })
 
+test('regression (pilot design 2026-11-16): a tall hero fits the first screen below the nav; its height is counted once; Book sits right', () => {
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const { spec } = validateSpec(fromStrict(DESIGN()), opts)
+  const css = renderV2({ id: 'pools', name: 'Pools', cities: ['Charleston'], phone: '' }, spec, { page: '', pageBase: '/p/pools/', bookUrl: '/book/pools', year: 2026 }).match(/<style>([\s\S]*?)<\/style>/)[1]
+  // Was: the inner container inherited the section's min-height, so section padding was added on top (1,054px hero on a
+  // 900px screen, headline at y=462, 353px empty above it).
+  assert.doesNotMatch(css, /min-height:inherit/)
+  assert.match(css, /\.h-tall\{min-height:min\(calc\(85vh - 72px\),760px\);min-height:min\(calc\(85svh - 72px\),760px\)\}/, 'below the 72px nav, small-viewport units on phones')
+  assert.match(css, /\.h-screen\{min-height:calc\(100vh - 72px\);min-height:calc\(100svh - 72px\)\}/)
+  assert.match(css, /\.hero\.h-tall,\.hero\.h-screen\{display:flex;flex-direction:column;justify-content:center;padding-block:clamp\(32px,6vh,var\(--py\)\)\}/, 'one box: padding inside the height, capped')
+  assert.match(css, /\.nav-left \.brand,\.nav-split \.brand\{margin-right:auto\}/, 'the Book button is pushed right even without page links')
+  // Display headings shrink with the phone: both ends of the fluid size are capped by the viewport width (a 1.5 scale
+  // with an uppercase display font rendered a ~120px headline on a 390px screen), and an overlong word may wrap.
+  assert.match(css, /h1\{font-size:clamp\(min\([\d.]+px, 11vw\), [\d.]+vw \+ [\d.]+px, min\([\d.]+px, 11vw\)\)\}/)
+  assert.match(css, /h1,h2,h3\{[^}]*overflow-wrap:break-word/)
+})
+
 test('wide sections share the header/footer content edge (no extra width that pushed them left of the header)', () => {
   const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
   const { spec } = validateSpec(fromStrict(DESIGN()), opts)
