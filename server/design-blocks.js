@@ -79,3 +79,55 @@ export function blockToItem(b) {
   const m = blockToModel(b)
   return { serviceIndex: -1, icon: '', title: [m.kind, m.place, m.look].filter(Boolean).join(' '), text: m.text, image: b.kind === 'media' ? m.image : b.kind === 'button' ? m.target : '' }
 }
+
+// First-screen recipes taught to the model (the prompt prints them; test/design-recipes.test.js validates and renders
+// each one, so the prompt never teaches something the validator or the balance check would refuse). Text in <…> is a
+// placeholder the model writes. They are starting points: the model varies placement, sizes and proportions.
+export const RECIPES = [
+  {
+    name: 'Headline over a large photo (editorial)',
+    note: 'a big photo on the right two-thirds; a display headline card overlapping its left edge',
+    blocks: [
+      { kind: 'text', place: 'c1/4 r1/1 z1', look: 's m-order-1', text: '<eyebrow: what + where>' },
+      { kind: 'heading', place: 'c1/7 r2/2 z2 y-center', look: 'display m-order-2', text: '<4-7 word headline>' },
+      { kind: 'media', place: 'c5/8 r1/5 z0', look: 'aspect-4x3 focus-50-45 m-order-5', image: '<owner photo>', text: '<alt>' },
+      { kind: 'text', place: 'c1/4 r4/1 z1', look: 'm m-order-3', text: '<one or two sentences>' },
+      { kind: 'button', place: 'c1/3 r5/1 z1', look: 'm-order-4', text: '<Book …>', target: 'book' },
+    ],
+  },
+  {
+    name: 'Full-bleed photo with the words inside it (immersive)',
+    note: 'one photo across the whole width; headline, line and button set inside it (white over a darkening layer)',
+    blocks: [
+      { kind: 'media', place: 'c1/12 r1/5 z0 y-stretch', look: 'aspect-21x9 scrim m-order-4', image: '<owner photo>', text: '<alt>' },
+      { kind: 'heading', place: 'c2/8 r2/2 z1 y-end', look: 'display m-order-1', text: '<4-7 word headline>' },
+      { kind: 'text', place: 'c2/5 r4/1 z1', look: 'm m-order-2', text: '<one sentence>' },
+      { kind: 'button', place: 'c2/3 r5/1 z1', look: 'm-order-3', text: '<Book …>', target: 'book' },
+    ],
+  },
+  {
+    name: 'Type poster',
+    note: 'the headline is the hero, across most of the width; a large mark; one wide, short photo band below',
+    blocks: [
+      { kind: 'mark', place: 'c10/3 r1/1 z0 x-end', look: 'display m-hide', text: '<number of services, e.g. 03>' },
+      { kind: 'heading', place: 'c1/11 r1/2 z1 y-end', look: 'display m-order-1', text: '<4-7 word headline>' },
+      { kind: 'text', place: 'c1/5 r3/1 z1', look: 'm m-order-2', text: '<one or two sentences>' },
+      { kind: 'button', place: 'c7/3 r3/1 z1 y-center', look: 'm-order-3', text: '<Book …>', target: 'book' },
+      { kind: 'media', place: 'c1/12 r4/1 z0', look: 'aspect-21x9 focus-50-60 m-order-4', image: '<owner photo>', text: '<alt>' },
+    ],
+  },
+  {
+    name: 'Collage',
+    note: 'two or three photos at different sizes, a headline card overlapping where they meet',
+    blocks: [
+      { kind: 'media', place: 'c1/5 r1/4 z0', look: 'aspect-1x1 m-order-1 m-span-2', image: '<owner photo 1>', text: '<alt>' },
+      { kind: 'media', place: 'c9/4 r1/2 z0', look: 'aspect-4x3 shape-rounded m-order-2 m-span-2', image: '<owner photo 2>', text: '<alt>' },
+      { kind: 'heading', place: 'c5/6 r2/2 z2 y-center', look: 'xl m-order-3', text: '<4-7 word headline>' },
+      { kind: 'media', place: 'c9/4 r3/2 z0', look: 'aspect-4x3 m-order-6 m-hide', image: '<owner photo 3>', text: '<alt>' },
+      { kind: 'text', place: 'c6/3 r4/1 z1', look: 'm m-order-4', text: '<one sentence>' },
+      { kind: 'button', place: 'c6/3 r5/1 z1', look: 'm-order-5', text: '<Book …>', target: 'book' },
+    ],
+  },
+]
+export const recipesText = () =>
+  RECIPES.map((r, i) => `${String.fromCharCode(65 + i)}. ${r.name}: ${r.note}\n${r.blocks.map((b) => `   ${b.kind} | ${b.place} | ${b.look} | ${b.kind === 'media' ? b.image : b.kind === 'button' ? `"${b.text}" → ${b.target}` : b.text}`).join('\n')}`).join('\n')

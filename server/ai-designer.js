@@ -11,11 +11,11 @@ import { FONTS, ICONS, LIMITS, SECTION_TYPES, validateSpec } from './site-spec.j
 import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
-import { brandName, loadWebsite, saveDraft, validateContent } from './website.js'
+import { displayBrand, loadWebsite, saveDraft, validateContent } from './website.js'
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
-import { blockToItem, itemToBlock, sectionBlocksFromModel, sectionBlocksToModel } from './design-blocks.js'
+import { blockToItem, itemToBlock, recipesText, sectionBlocksFromModel, sectionBlocksToModel } from './design-blocks.js'
 import { checkDesign, firstScreenSignature, redactRaw } from './design-checks.js'
 
 // No union types: Anthropic's structured outputs allow at most 16 union-typed parameters (anyOf / type arrays) per
@@ -252,9 +252,15 @@ const SYSTEM = `You are the senior web designer at GetShowUps. You design comple
 Design like a top agency would for this specific business, not like a template:
 - Start from the business, its customers and its town. Choose a clear art direction and carry it through: palette, type, composition and copy should feel like one idea.
 - Make deliberate, varied compositions: contrast large and small type, full-bleed and contained sections, image-led and text-led sections, light and dark backgrounds. Avoid repeating the same section shape back to back.
-- Commit to one art direction and state it in "direction" (one line): the idea, the type pairing, the palette, the composition. A "different direction" means a different first screen, type pairing and palette, not a recolour.
-- The first screen is the most important decision. Compose it deliberately, usually as a "composition" section (or a specific hero layout); never leave it to a default.
-- "composition" sections place up to 10 blocks (heading, text, button, media, mark) on a 12-column grid, rows 1–6. Use scale and placement: an oversized headline overlapping a large photo (higher z), a type-only poster with a large mark, a collage of photos at different sizes with a headline card, a narrow text column beside a tall image. Text fully inside a photo becomes white over a darkening layer; text partly over a photo gets a solid card. Plan the phone too: m-order sets the phone reading order and m-span the width on its 4-column grid, so the phone's first screen also has a clear idea (e.g. photos first for a collage). Use compositions for the first screen and at most two signature moments (a photo band, a statement); use the other section types for services, steps, FAQ, area and contact.
+- Commit to one art direction and state it in "direction" (one line, at most 160 characters; where the schema has no "direction" field, put it in "name"): the idea, the type pairing, the palette, the composition. A "different direction" means a different first screen, type pairing and palette, not a recolour.
+- The first screen is the most important decision and it must not look like a template. The safe default (one photo on one side, the headline and a button on the other, nothing overlapping) is NOT acceptable for a new design: it is what every template does. Build the first screen as a "composition" section from one of the FIRST-SCREEN RECIPES below (adapt placement, sizes and proportions to the business and the photos), or something at least as bold.
+- Composition blocks are written as kind | place | look | text. place: c<start column>/<columns> (12 columns) r<start row>/<rows> (rows 1-6) z<layer 0-2> and optional x-start|center|end, y-start|center|end|stretch. look: one type size (display|xl|l|m|s), and for photos aspect-<1x1|4x5|3x4|4x3|3x2|16x9|21x9>, focus-<x%>-<y%>, shape-<rect|rounded|arch|circle>, tint|duo|scrim; secondary (second button); m-order-<n> (phone reading order), m-span-<1-4> (phone width of 4 columns), m-hide (photos and marks only). Text fully inside a photo turns white over a darkening layer; text partly over a photo gets a solid card.
+- Craft rules for compositions: stacked blocks share the same left column edge (never miss by one column); size rows so neighbouring columns end together, or make the open side clearly deliberate; the headline is 4-7 words and display or xl; keep the paragraph short (one or two sentences). Plan the phone: m-order gives the phone a clear first screen (headline and Book button early; for a collage, photos first is fine).
+- Photography: lead with the strongest owner photo for the idea (a calm water detail for an editorial, a wide scene for an immersive photo); use 2-3 photos in a collage; don't use the same photo twice on a page; set focus so the subject stays in frame. A different direction should lead with a different photo, or be type-led.
+- Beyond the first screen, use one more composition as a signature moment (a photo band, a statement with a mark, a two-photo spread) and the other section types for services, steps, FAQ, area and contact. Alternate backgrounds deliberately (at most one strong accent or dark section in a row) and vary section shapes.
+
+FIRST-SCREEN RECIPES (kind | place | look | text):
+${recipesText()}
 - Every page shows a Book button in the navigation automatically; still give the first screen its own booking button.
 - Use the owner's own photos where they fit best (asset:...). Use stock photos only where an owner photo doesn't fit, never in a gallery, and never as proof of the business's own work.
 - Make booking the obvious next step on every page (the "book" target). Keep forms and friction away: booking happens on our booking page.
@@ -262,6 +268,7 @@ Design like a top agency would for this specific business, not like a template:
 - 1 to 4 pages. A small business usually needs Home plus Services and/or About; only add a page when there's real content for it. Home: 5 to 9 sections. Other pages: 3 to 7.
 
 Truth rules (mandatory; anything that breaks them is removed before the owner sees it):
+- Call the business by FACTS.brandName, spelled exactly as given (it is the public brand; businessName is the legal name and never appears on the site).
 - Facts come ONLY from FACTS (business details and services from our records) and the owner's own words in the conversation. Never invent prices, numbers, years in business, ratings, reviews, testimonials, awards, guarantees, licences, insurance, certifications, team size or response times.
 - Services: refer to them by serviceIndex (an index into FACTS.services). Their names and prices are shown from records automatically; write only the description text. Show every service.
 - Service area towns are shown from records by an "area" section; the phone number only by a "contact" section with the phone shown (showPhone, or option "phone"; only if the owner wants it shown).
@@ -290,7 +297,7 @@ export async function designContext(env, customer) {
   const assetIds = new Set(assets.results.map((a) => a.id).filter((id) => id !== draft.logo))
   const facts = {
     businessName: customer.name,
-    brandName: brandName(customer.name),
+    brandName: displayBrand(customer.name, draft),
     whatTheyDo: profile?.industry || null,
     ownDescription: profile?.description || null,
     services: services.map((s, i) => ({ serviceIndex: i, name: s.name, price: s.price || null, ownDescription: draft.services[i]?.description || null })),
@@ -407,7 +414,7 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   // Claude answers (and revises) in the compact section shape; OpenAI in the standard one.
   const compact = cred.provider === 'anthropic'
   const shape = (site) => (compact ? toCompact(site) : toStandard(site))
-  const away = different ? `\n\nMOVE AWAY FROM the current direction and design something genuinely different (a new first screen, type pairing and palette; not a recolour). Current direction: "${current.direction || current.name}"; first screen ${firstScreenSignature(current)}.` : ''
+  const away = different ? `\n\nMOVE AWAY FROM the current direction and design something genuinely different: a first screen from a DIFFERENT recipe than the current one, led by a different photo (or type-led), with a new type pairing and palette. Mirroring or recolouring the current design is not different. Current direction: "${current.direction || current.name}"; first screen ${firstScreenSignature(current)}.` : ''
   const call = cred.provider === 'anthropic' ? callClaude : callOpenAI
   const attempts = []
   let prompt = userPrompt(ctx, history, different ? null : shape(current), text) + away
@@ -430,8 +437,8 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
       return { ok: false, httpStatus: { invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
     }
     const answer = fromStrict(compact ? fromCompact(r.raw?.site) : r.raw?.site)
-    const { spec, warnings } = validateSpec(answer, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: brandName(customer.name) })
-    const report = checkDesign({ raw: answer, spec, warnings, previous: different ? current : null, mode: different ? 'different' : 'design' })
+    const { spec, warnings } = validateSpec(answer, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: ctx.facts?.brandName || customer.name })
+    const report = checkDesign({ raw: answer, spec, warnings, previous: different ? current : null, mode: different ? 'different' : 'design', fresh: !current || different })
     attempts.push({ r, spec, warnings, report, ms: Date.now() - t0 })
     if (!report.hard.length && !report.soft.length) break
     if (attempt === 0) prompt = `${userPrompt(ctx, history, shape(spec), text)}${away}\n\nQUALITY CHECK of your previous answer (it is CURRENT_SITE above). Fix these and return the complete site:\n- ${report.notes.join('\n- ')}`

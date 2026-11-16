@@ -249,7 +249,11 @@ export function renderV2(biz, spec, opts = {}) {
   const body = pg.sections.map(section).join('')
   const navLinks = spec.pages.length > 1 ? `<ul>${spec.pages.map((p) => `<li><a href="${esc(href(p.slug))}"${p.slug === pg.slug ? ' aria-current="page"' : ''}>${esc(p.navLabel)}</a></li>`).join('')}</ul>` : ''
   const nav = `<header class="nav nav-${spec.nav.layout}${spec.nav.sticky ? ' sticky' : ''}"><div class="wrap"><a class="brand" href="${esc(href(''))}">${esc(biz.name)}</a>${navLinks}${spec.nav.showBook ? `<a class="btn" href="${esc(bookUrl)}">${visit ? 'Book a visit' : 'Book'}</a>` : ''}</div></header>`
-  const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(spec.footer.text || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && spec.footer.text ? ` · ${esc(spec.footer.text)}` : ''}</span><span><a href="${esc(privacyUrl)}">Privacy</a> · Website by GetShowUps</span></div></footer>`
+  // The footer names the brand once: a tagline that starts with the name again ("Poolthru LLC · Pool care…") loses it.
+  const names = [biz.name, biz.legalName].filter(Boolean).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const tagline = (spec.footer.text || '').replace(new RegExp(`^(?:${names})(?:[,\\s]+(?:llc|inc|ltd|co)\\.?)?\\s*[·|:,–—-]\\s*`, 'i'), '').trim()
+  const repeat = new RegExp(`^(?:${names})\\.?$`, 'i').test(tagline)
+  const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(tagline || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && tagline && !repeat ? ` · ${esc(tagline)}` : ''}</span><span><a href="${esc(privacyUrl)}">Privacy</a> · Website by GetShowUps</span></div></footer>`
   const title = pg.seoTitle || (pg.slug ? `${pg.navLabel} · ${biz.name}` : biz.name)
   const desc = pg.seoDescription || spec.pages[0].seoDescription || ''
   const schema = { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: biz.name, ...(canonical ? { url: canonical } : {}), ...(biz.phone ? { telephone: biz.phone } : {}), ...(biz.cities?.length ? { areaServed: biz.cities } : {}) }

@@ -2,7 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
-## Website Studio: paid validation of PR #43 (2026-11-16) — owner-approved, $5 cap; spent $0.147
+## Website Studio: design quality pass for PR #43 (2026-11-16) — paid re-validation BLOCKED (Keychain), $0 spent
+
+- Root cause of generic AI first screens: the prompt described composition options abstractly and nothing pushed back
+  on the safe split. Now: four FIRST-SCREEN RECIPES in the exact token form (server/design-blocks.js RECIPES: editorial
+  overlap, immersive full-bleed, type poster, collage; each validated + rendered by test/design-recipes.test.js and
+  inspected visually with PoolThru's photos), craft rules (alignment, rows ending together, photo choice, a different
+  direction leads with a different photo), and a soft check `conventional_first_screen` (new designs only, never owner
+  revisions) that asks for the one revision.
+- Balance check (server/design-checks.js layoutComposition/compositionBalance): estimated desktop layout → mostly_empty,
+  empty_band (≥3 columns), misaligned (stacked edges off by one column; layered cards exempt). Showcases pass; the live
+  GPT signature section is flagged. Soft → one revision.
+- Brand: AI-designed sites show displayBrand() (legal suffix removed, the owner's own spelling from their reviewed text:
+  "PoolThru"); footer names it once. Legacy renderers unchanged.
+- Claude compatibility call (approved, $0.40 cap) NOT made: reading the key from Keychain timed out twice (an access
+  prompt on the Mac waiting for Allow). No request sent. Next: owner clicks Allow, then the compatibility call, then
+  the three-turn validation for both providers.
+- Unit 470/470, browser 79/79.
 
 - Claude Sonnet 5.5: STOPPED at turn 1. Anthropic refused the schema ("compiled grammar is too large"; $0, request
   req_011Ch64roW2E444i4ZRqLVbx). Fixed: Claude's compact schema is back to main's 58 properties (the size that compiled

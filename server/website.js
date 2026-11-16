@@ -37,6 +37,21 @@ const cleanPara = (s) =>
 
 // Brand name for headlines: the business name without a legal suffix ("Poolthru LLC" → "Poolthru").
 export const brandName = (name) => String(name || '').replace(/[,\s]+(l\.?l\.?c\.?|inc\.?|incorporated|corp\.?|corporation|ltd\.?|pllc|llp)$/i, '').trim() || String(name || '')
+// The public brand as the owner writes it: the name without a legal suffix, in the spelling the owner's own reviewed
+// website text uses most (records say "Poolthru LLC"; their site says "PoolThru"). Never invents a name: only a
+// different capitalisation of the same letters is taken from the content.
+export function displayBrand(name, content) {
+  const base = brandName(name)
+  if (!base || !content) return base
+  const text = [content.headline, content.intro, content.about, content.seoTitle, content.seoDescription].filter((x) => typeof x === 'string').join(' \n ')
+  const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const counts = new Map()
+  for (const m of text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, 'giu'))) counts.set(m[0], (counts.get(m[0]) || 0) + 1)
+  let best = base
+  // All-caps is styling (a heading in capitals), not the brand's spelling.
+  for (const [v, n] of counts) if (v !== v.toUpperCase() && n > (counts.get(best) || 0)) best = v
+  return best
+}
 
 function legacyContent(landing) {
   return {
