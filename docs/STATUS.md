@@ -2,6 +2,17 @@
 
 _Update at the end of every task. Newest first._
 
+## AI-designed sites: hero height, nav and phone headline fixes (2026-11-16) — draft, NOT merged
+
+- Production pilot design (GPT-6.1 Sol): hero 1,054px tall on a 900px screen, 353px empty above the copy, headline at
+  y=462. Cause: the hero's inner container inherited the section's min-height, so section padding was added on top,
+  and "tall" ignored the nav. Fixed: one flex box, height measured below the 72px nav (svh), padding capped. Now 693px,
+  headline at y=281. Phones unchanged (content-sized).
+- One-page sites put the nav's Book button next to the logo (no links to push it). Fixed.
+- Large type scales or wide display fonts ran headlines off a 390px screen (preferred fluid size ≈120px). Both ends of
+  the fluid size are now capped by viewport width; overlong words may wrap. Desktop sizes unchanged.
+- Diagnosis of "generic designs" and the architecture proposal: in the owner report (awaiting approval).
+
 ## Website Studio release candidate (2026-11-16) — `release/website-studio` (= #37–#40 + below), draft, NOT merged
 
 - Production verified READ-ONLY (schema names from sqlite_master, no rows): every table/index/trigger of migrations
