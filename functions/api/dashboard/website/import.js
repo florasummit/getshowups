@@ -8,10 +8,13 @@ import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { track } from '../../../../server/events.js'
 import { applyImport, latestImport, runImport } from '../../../../server/website-import.js'
+import { studioEnabledFor } from '../../../../server/website-studio.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
+  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
+  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   try {
     return json(200, { import: await latestImport(env.ONBOARDING_DB, session.customer.id) })
   } catch (err) {
@@ -23,6 +26,8 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
+  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
+  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
   const body = await request.json().catch(() => null)
   const id = session.customer.id
   try {

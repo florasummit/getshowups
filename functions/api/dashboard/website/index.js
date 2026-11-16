@@ -22,6 +22,16 @@ import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
+import { studioEnabledFor } from '../../../../server/website-studio.js'
+
+// Outside the Website Studio pilot the owner can't introduce an AI-designed site or old-address redirects by hand-crafting
+// a save: those two fields keep what the stored draft already has (so nothing a former pilot business published is lost).
+async function guardStudioFields(env, customer, content) {
+  if (studioEnabledFor(env, customer.id) || !content || typeof content !== 'object') return content
+  const { site: _s, redirects: _r, ...rest } = content
+  const current = (await loadWebsite(env.ONBOARDING_DB, customer)).draft
+  return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
+}
 
 async function state(env, customer, email) {
   const db = env.ONBOARDING_DB
@@ -31,9 +41,10 @@ async function state(env, customer, email) {
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),
-    credentialView(env, customer.id).catch(() => null), // before migration 0022: no own key
+    studioEnabledFor(env, customer.id) ? credentialView(env, customer.id).catch(() => null) : null, // pilot only; before 0022: none
   ])
   return {
+    studio: studioEnabledFor(env, customer.id), // Website Studio internal pilot (server/website-studio.js)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,
     hosting,
@@ -127,7 +138,7 @@ export async function onRequestPost({ request, env }) {
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'save' || action === 'publish') {
-      const [errors, content] = validateContent(body.content, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
+      const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       if (action === 'save') {
         await saveDraft(db, customer.id, content)

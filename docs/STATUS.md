@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio release candidate (2026-11-16) — `release/website-studio` (= #37–#40 + below), draft, NOT merged
+
+- Production verified READ-ONLY (schema names from sqlite_master, no rows): every table/index/trigger of migrations
+  0001–0020 exists (incl. both audit_log triggers); nothing outside the migrations; 0021–0023 absent. Production code:
+  main e3af1fc, Pages deployment 1aff1e8f (from build.json + the commit's Pages check).
+- No server-side fallback for own-key requests (owner decision): only the chosen/reserved model runs; usage is recorded
+  and priced as that model even if a response names another. Regression test (one request, no `fallbacks`, no fallback
+  beta header, Sonnet prices on an "Opus" response, refusal not re-run). Ads strategy (GetShowUps' key) unchanged.
+- Internal pilot gate: WEBSITE_STUDIO_ENABLED + WEBSITE_STUDIO_BUSINESSES (server/website-studio.js). Tests: switch,
+  routes 404, no key use, no hand-crafted site/redirects, published sites keep serving; browser: non-pilot sees nothing.
+- Restore of an earlier AI-designed version (pages + booking links, live + draft): regression test.
+- Rollback measured with production code on Claude's real PoolThru design: renders the older template from the same
+  content (imported headline; booking link intact); extra pages (/p/<id>/services) show the GetShowUps marketing page
+  (production's fallback, checked read-only); a dashboard save during rollback drops `site` and `redirects`.
+- One merge = one deploy: merging #37–#40 one by one would put three ungated intermediate states in production.
+- Unit 447/447, browser 79/79. Local journey re-run on the candidate (PoolThru in the local pilot): all steps pass.
+
 ## Website Studio customer-journey validation (2026-11-16) — #38 → #40, draft, NOT merged; no paid calls
 
 - Walked the whole PoolThru journey in a real browser, UI only, on a local build (throwaway DB; local stand-ins for

@@ -130,4 +130,6 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding SITE_IMPORT_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding ACCOUNT_DELETION_ENABLED=true \
+  --binding WEBSITE_STUDIO_ENABLED=true \
+  --binding WEBSITE_STUDIO_BUSINESSES="$E2E_ADS_CUSTOMER,$E2E_DESIGN_CUSTOMER" \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN"

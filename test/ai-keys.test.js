@@ -73,7 +73,7 @@ beforeEach(() => {
   }
   // GetShowUps has tested these end to end (the registry is editable without a deployment).
   testedModels(['claude-opus-5-5', 'claude-haiku-5-5', 'gpt-4o-mini'])
-  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
+  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon', ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')
   origFetch = globalThis.fetch
@@ -147,7 +147,7 @@ test('API: validated before storing, never returned, owner-only, isolated, remov
   assert.equal((await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })).status, 429)
 })
 
-test('generation with the own Claude key: Opus 5.5 + strict JSON schema + refusal fallback; output still filtered; billed to the owner, not us', async () => {
+test('generation with the own Claude key: Opus 5.5 + strict JSON schema, no server-side fallback; output still filtered; billed to the owner, not us', async () => {
   const c = await cookieFor('owner@pools.example')
   await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY } })
   const r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
@@ -156,7 +156,8 @@ test('generation with the own Claude key: Opus 5.5 + strict JSON schema + refusa
   const req = calls.find((x) => x.path === '/v1/messages')
   assert.ok(req.headers['x-api-key'] === CLAUDE_KEY || req.headers.authorization === `Bearer ${CLAUDE_KEY}`, 'sent with the business’s own key')
   assert.equal(req.body.model, 'claude-opus-5-5')
-  assert.equal(req.body.fallbacks, 'default')
+  assert.equal(req.body.fallbacks, undefined, 'no server-side fallback (owner decision 2026-11-16)')
+  assert.ok(!String(req.headers['anthropic-beta'] || '').includes('server-side-fallback'))
   assert.equal(req.body.output_config.format.type, 'json_schema')
   assert.equal(req.body.output_config.format.schema.additionalProperties, false)
   assert.deepEqual(req.body.output_config.format.schema.required.sort(), Object.keys(schemaFor([]).properties).sort())
@@ -278,7 +279,7 @@ test('the chosen model is used and kept; Auto picks only tested models within th
   await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-sonnet-5-5' } })
   await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   let req = calls.findLast((x) => x.path === '/v1/messages')
-  assert.deepEqual([req.body.model, req.body.fallbacks], ['claude-sonnet-5-5', 'default'], 'manual choice (untested but supported) is honoured')
+  assert.deepEqual([req.body.model, req.body.fallbacks], ['claude-sonnet-5-5', undefined], 'manual choice (untested but supported) is honoured, never substituted')
   // Retired at the provider: reported and refused, never swapped.
   accounts.anthropic = accounts.anthropic.filter((id) => id !== 'claude-sonnet-5-5')
   await call(aiKey, 'POST', { cookie: c, body: { action: 'refresh' } })
@@ -302,7 +303,7 @@ test('the chosen model is used and kept; Auto picks only tested models within th
   await call(aiKey, 'POST', { cookie: c, body: { action: 'budget', cents: 5000 } })
   await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
   assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.model, 'claude-haiku-5-5', 'stays on the cheaper pick')
-  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.fallbacks, undefined, 'no refusal fallback for Haiku')
+  assert.equal(calls.findLast((x) => x.path === '/v1/messages').body.fallbacks, undefined, 'no refusal fallback')
   // Untested models are never Auto picks.
   db.sql.prepare("UPDATE ai_model_registry SET status = 'supported'").run()
   db.sql.prepare("UPDATE ai_credentials SET auto_model = NULL").run()

@@ -13,7 +13,7 @@ import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
 import { brandName, loadWebsite, saveDraft, validateContent } from './website.js'
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
-import { MAX_OUTPUT, claudeFallbackFor, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
+import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
 
 // No union types: Anthropic's structured outputs allow at most 16 union-typed parameters (anyOf / type arrays) per
@@ -301,7 +301,7 @@ async function callClaude(env, apiKey, model, prompt, { effort, onProgress, maxO
     const stream = client.beta.messages.stream({
       model,
       max_tokens: maxOutput,
-      ...claudeFallbackFor(model),
+      // No server-side fallback (owner decision 2026-11-16): a refused request is reported, never re-run on another model.
       output_config: { effort, format: { type: 'json_schema', schema: COMPACT_DESIGN_SCHEMA } },
       system: SYSTEM,
       messages: [{ role: 'user', content: prompt }],
@@ -317,7 +317,8 @@ async function callClaude(env, apiKey, model, prompt, { effort, onProgress, maxO
     if (msg.stop_reason === 'max_tokens') return { ok: false, error: 'ai_invalid_output', usage }
     const text = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
     try {
-      return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${msg.model || model}` }
+      // Recorded and priced as the model we asked for (and reserved the budget for), whatever the response calls itself.
+      return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${model}` }
     } catch {
       return { ok: false, error: 'ai_invalid_output', usage }
     }
@@ -343,7 +344,7 @@ async function callOpenAI(env, apiKey, model, prompt, { onProgress, maxOutput = 
     if (ch?.message?.refusal) return { ok: false, error: 'ai_declined', usage }
     if (ch?.finish_reason === 'length') return { ok: false, error: 'ai_invalid_output', usage }
     try {
-      return { ok: true, raw: JSON.parse(ch?.message?.content || ''), usage, model: `openai:${body?.model || model}` }
+      return { ok: true, raw: JSON.parse(ch?.message?.content || ''), usage, model: `openai:${model}` }
     } catch {
       return { ok: false, error: 'ai_invalid_output', usage }
     }

@@ -86,13 +86,12 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // Website: written from the answers in one AI request (local stand-in), design chosen, private until published.
-  // Three ways in (create new · bring my current website · skip), one editor. The skip and import paths are shown; this
-  // journey creates a new one.
+  // Ways in (create new · start from a design · skip), one editor; this journey creates a new one. "Bring my current
+  // website" is Website Studio (internal pilot): a new self-serve business is not in it, so it isn't offered.
   await expect(page.getByRole('heading', { name: 'Your website' })).toBeVisible()
   await page.getByLabel(/Skip for now/).check()
   await expect(page.getByRole('button', { name: 'Skip the website for now' })).toBeVisible()
-  await page.getByLabel(/Bring my current website/).check()
-  await expect(page.getByLabel('Your current website')).toBeVisible()
+  await expect(page.getByLabel(/Bring my current website/)).toHaveCount(0)
   // Start from a design: the professional layouts with the business details, no AI.
   await page.getByLabel(/Start from a design/).check()
   await page.getByRole('button', { name: 'Show me the designs' }).click()

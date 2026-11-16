@@ -5,7 +5,7 @@
 // Returns { ok: true, raw, usage: { input, output }, model } or { ok: false, error } with an allowlisted error code.
 import Anthropic from '@anthropic-ai/sdk'
 import { providerMock } from './ai-credentials.js'
-import { MAX_OUTPUT, claudeFallbackFor } from './ai-models.js'
+import { MAX_OUTPUT } from './ai-models.js'
 
 export const CLAUDE_MODEL = 'claude-opus-5-5'
 export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini'
@@ -60,7 +60,7 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL, maxOut
     response = await client.beta.messages.create({
       model,
       max_tokens: maxOutput,
-      ...claudeFallbackFor(model),
+      // No server-side fallback (owner decision 2026-11-16): a refused request is reported, never re-run on another model.
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: strictSchema(schema) } },
       system: msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n'),
       messages: msgs.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
@@ -73,7 +73,8 @@ async function runClaude(env, apiKey, msgs, schema, model = CLAUDE_MODEL, maxOut
   if (response.stop_reason === 'max_tokens') return { ok: false, error: 'ai_invalid_output', usage }
   const text = (response.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
   try {
-    return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${response.model || model}` }
+    // Recorded and priced as the model we asked for (and reserved the budget for), whatever the response calls itself.
+    return { ok: true, raw: JSON.parse(text), usage, model: `anthropic:${model}` }
   } catch {
     return { ok: false, error: 'ai_invalid_output', usage }
   }
@@ -99,7 +100,7 @@ async function runOpenAI(env, apiKey, msgs, schema, model = OPENAI_DEFAULT_MODEL
   if (choice?.message?.refusal) return { ok: false, error: 'ai_declined', usage }
   if (choice?.finish_reason === 'length') return { ok: false, error: 'ai_invalid_output', usage }
   try {
-    return { ok: true, raw: JSON.parse(choice?.message?.content || ''), usage, model: `openai:${body?.model || model}` }
+    return { ok: true, raw: JSON.parse(choice?.message?.content || ''), usage, model: `openai:${model}` }
   } catch {
     return { ok: false, error: 'ai_invalid_output', usage }
   }

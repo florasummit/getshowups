@@ -15,6 +15,8 @@ import * as designer from '../functions/api/dashboard/website/designer.js'
 import * as website from '../functions/api/dashboard/website/index.js'
 import * as preview from '../functions/api/dashboard/website/preview.js'
 import * as aiKeyRoute from '../functions/api/dashboard/ai-key.js'
+import * as importRoute from '../functions/api/dashboard/website/import.js'
+import { studioEnabledFor } from '../server/website-studio.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as publicPage from '../functions/p/[customer]/[page].js'
 
@@ -111,7 +113,7 @@ beforeEach(() => {
   kv = new Map()
   requests = []
   nextDesign = { reply: 'A calm, coastal design with a clear path to booking.', site: DESIGN() }
-  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
+  env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: `${ORIGIN}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: KEY, ADMIN_API_TOKEN: 'a'.repeat(40), WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon', ONBOARDING_DB: db, GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v) } }
   seed('pools', 'owner@pools.example')
   seed('salon', 'owner@salon.example')
   db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, updated_at) VALUES ('pools', 'c', 's', 'active', 1)").run()
@@ -123,11 +125,11 @@ beforeEach(() => {
     const u = new URL(req.url)
     if (u.hostname === 'api.anthropic.com' && u.pathname === '/v1/messages') {
       const body = await req.clone().json()
-      requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key') })
+      requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key'), beta: req.headers.get('anthropic-beta') })
       if (nextDesign instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
       if (nextDesign?.httpError) return Response.json({ type: 'error', error: { type: nextDesign.httpError.type, message: 'mock' } }, { status: nextDesign.httpError.status })
-      // Claude answers in the compact section shape.
-      return new Response(sse(JSON.stringify({ ...nextDesign, site: toCompact(nextDesign.site) })), { headers: { 'content-type': 'text/event-stream' } })
+      // Claude answers in the compact section shape. (The mock's message_start always names claude-opus-5-5.)
+      return new Response(sse(nextDesign.refusal ? '' : JSON.stringify({ ...nextDesign, site: toCompact(nextDesign.site) }), { stop: nextDesign.refusal ? 'refusal' : 'end_turn' }), { headers: { 'content-type': 'text/event-stream' } })
     }
     if (u.hostname === 'api.openai.com' && u.pathname === '/v1/chat/completions') {
       const body = await req.clone().json()
@@ -230,6 +232,119 @@ test('designer: needs the owner’s own key; one turn streams progress, designs 
   assert.deepEqual((await call(designer, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.turns, [])
 })
 
+test('Website Studio is an internal pilot: master switch AND an explicit business list; nobody else gets its routes, key or fields', async () => {
+  // The switch itself: exactly 'true', explicit ids only, no wildcard; empty → nobody.
+  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), true)
+  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'TRUE', WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), false)
+  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: '*' }, 'pools'), false)
+  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: '' }, 'pools'), false)
+  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), false)
+
+  // A pilot business designs and publishes; then the pilot is narrowed to nobody else and switched off for it.
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const designed = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed, confirm: true } })).status, 200)
+  const sent = requests.length
+  for (const off of [{ WEBSITE_STUDIO_ENABLED: undefined }, { WEBSITE_STUDIO_BUSINESSES: 'salon' }]) {
+    Object.assign(env, { WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon' }, off)
+    // Every Studio route is 404 (GET and POST): designer, own key, import.
+    for (const [mod, body] of [[designer, { action: 'message', message: 'x' }], [aiKeyRoute, { action: 'remove' }], [importRoute, { action: 'start', url: 'example.com', confirm: true }]]) {
+      assert.equal((await call(mod, 'GET', { cookie: c })).status, 404)
+      assert.equal((await call(mod, 'POST', { cookie: c, body })).status, 404)
+    }
+    const s = (await call(website, 'GET', { cookie: c })).json
+    assert.deepEqual([s.studio, s.aiKey], [false, null], 'no Studio flag, the stored key is not even shown')
+    // The older writer never uses the stored own key outside the pilot (template instead, no provider request).
+    const g = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+    assert.equal(g.json.generation?.source, 'template')
+    assert.equal(requests.length, sent, 'no request with the stored key')
+    // A hand-crafted save can neither add nor change the AI site or redirects; what was stored is kept.
+    const crafted = { ...designed, headline: 'Edited by hand', site: { ...designed.site, name: 'Crafted' }, redirects: [{ from: '/x', to: 'book' }] }
+    assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: crafted } })).status, 200)
+    const after = (await call(website, 'GET', { cookie: c })).json.website.draft
+    assert.deepEqual([after.headline, after.site.name, after.redirects], ['Edited by hand', designed.site.name, undefined])
+    // Published content is never gated: the live AI site (and its pages) keep serving.
+    const home = await call(publicSite, 'GET', { params: { customer: 'pools' } })
+    assert.equal(home.status, 200)
+    assert.match(home.text, /Clear water, every week\./)
+    assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
+  }
+  // A business never in the pilot cannot introduce an AI site by hand either.
+  env.WEBSITE_STUDIO_BUSINESSES = 'pools'
+  const s = await cookieFor('owner@salon.example')
+  db.sql.prepare('INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES (?, ?, NULL, NULL, 1)').run('salon', JSON.stringify({ ...designed, site: undefined }))
+  assert.equal((await call(website, 'POST', { cookie: s, body: { action: 'save', content: { ...designed, redirects: [{ from: '/x', to: 'book' }] } } })).status, 200)
+  const salon = (await call(website, 'GET', { cookie: s })).json.website.draft
+  assert.deepEqual(['site' in salon, 'redirects' in salon], [false, false])
+})
+
+test('restoring an earlier AI-designed version brings back its pages and booking links, live and in the draft', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  const bookLinks = (html) => [...html.matchAll(/href="([^"]*\/book\/[^"]*)"/g)].map((m) => m[1])
+  // v1: the two-page design (home + services).
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const v1 = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: v1, confirm: true } })).status, 200)
+  // v2: a one-page revision with another headline, published.
+  const one = DESIGN({ name: 'One page' })
+  one.pages = [{ ...one.pages[0], sections: [{ ...one.pages[0].sections[0], heading: 'Pools, simply.', secondaryCta: null }, one.pages[0].sections[2]] }]
+  nextDesign = { reply: 'One calm page.', site: one }
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it one page' } })
+  const v2 = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal(v2.site.pages.length, 1)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: v2, confirm: true } })).status, 200)
+  assert.match((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, /Pools, simply\./)
+  assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 404, 'v2 has no services page')
+  // Restore v1 (the first published version).
+  const versions = (await call(website, 'GET', { cookie: c })).json.website.versions
+  const first = Math.min(...versions.map((v) => v.version))
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: first } })).status, 200)
+  const home = await call(publicSite, 'GET', { params: { customer: 'pools' } })
+  assert.equal(home.status, 200)
+  assert.match(home.text, /Clear water, every week\./, 'v1 home is live again')
+  assert.match(home.text, /href="\/p\/pools\/services">Services/, 'v1 navigation is back')
+  const services = await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })
+  assert.equal(services.status, 200, 'v1 services page is live again')
+  assert.match(services.text, /\$280\+/)
+  // Booking links on every restored page go to this business's booking page (and nowhere else).
+  for (const html of [home.text, services.text]) {
+    const links = bookLinks(html)
+    assert.ok(links.length >= 1)
+    assert.ok(links.every((l) => l === 'https://getshowups.com/book/pools'), JSON.stringify(links))
+  }
+  // Editing continues from the restored version.
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual(draft.site, v1.site)
+})
+
+test('regression (owner decision 2026-11-16): no hidden model substitution or unexpected spending — no server-side fallback, one request, priced as the reserved model', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools', 'anthropic', 'claude-sonnet-5-5')
+  const r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.equal(events(r.text).at(-1).type, 'done')
+  assert.equal(requests.length, 1, 'exactly one provider request')
+  const req = requests[0]
+  assert.equal(req.body.model, 'claude-sonnet-5-5', 'the chosen model is the one requested')
+  assert.ok(!('fallbacks' in req.body), 'no server-side fallback parameter')
+  assert.ok(!String(req.beta || '').includes('server-side-fallback'), 'no server-side fallback beta header')
+  // The response claims another (pricier) model: it is still recorded and priced as the model the budget was reserved for.
+  const row = db.sql.prepare('SELECT model, state, input_tokens, output_tokens, cost_micros FROM ai_key_usage').get()
+  assert.deepEqual({ ...row }, { model: 'anthropic:claude-sonnet-5-5', state: 'settled', input_tokens: 4200, output_tokens: 6100, cost_micros: Math.ceil((4200 * 2 + 6100 * 10)) }, 'Sonnet 5.5 prices ($2/$10 per M), not Opus')
+  const gen = db.sql.prepare('SELECT model FROM website_generations ORDER BY created_at DESC LIMIT 1').get()
+  assert.equal(gen.model, 'anthropic:claude-sonnet-5-5')
+  // A refusal is reported to the owner, not re-run on another model; the draft is unchanged; no second request.
+  const before = (await call(website, 'GET', { cookie: c })).json.website.draft
+  nextDesign = { refusal: true }
+  const refused = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it darker' } })).text).at(-1)
+  assert.deepEqual([refused.type, refused.error], ['error', 'ai_declined'])
+  assert.equal(requests.length, 2, 'one request for the refused turn, no retry or substitute')
+  assert.equal(requests[1].body.model, 'claude-sonnet-5-5')
+  assert.deepEqual((await call(website, 'GET', { cookie: c })).json.website.draft, before)
+})
+
 test('regression (customer journey 2026-11-16): an older template/AI-writer version can never replace an AI-designed draft', async () => {
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')
@@ -300,7 +415,8 @@ test('OpenAI key: the same designer end to end (design → revision → publish)
   assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
   // Usage of both requests is on the ledger, priced via the snapshot the provider answered with.
   const usage = db.sql.prepare('SELECT model, kind, input_tokens, output_tokens, ok FROM ai_key_usage').all()
-  assert.deepEqual(usage.map((u) => [u.model, u.kind, u.ok]), [['openai:gpt-4o-mini-2024-07-18', 'designer', 1], ['openai:gpt-4o-mini-2024-07-18', 'designer', 1]])
+  // Recorded as the requested model (the response's dated snapshot name is not trusted for pricing or the ledger).
+  assert.deepEqual(usage.map((u) => [u.model, u.kind, u.ok]), [['openai:gpt-4o-mini', 'designer', 1], ['openai:gpt-4o-mini', 'designer', 1]])
   const k = (await call(aiKeyRoute, 'GET', { cookie: c })).json.key
   assert.equal(k.spentUsd, Math.round(((2 * 5000 * 0.15 + 2 * 7000 * 0.6) / 1e6) * 100) / 100)
 })

@@ -125,6 +125,11 @@ test('owner edits, previews and publishes the website; visitors book through it 
 test('changes stay private until published again; an earlier version can be restored', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
   await page.goto('/dashboard/website')
+  // Website Studio is an internal pilot: a business outside it sees no import, AI designer or AI-key controls.
+  await expect(page.getByLabel('Headline')).toBeVisible()
+  await expect(page.locator('section[aria-label="AI designer"], section[aria-label="Bring your current website"]')).toHaveCount(0)
+  await expect(page.getByLabel('API key')).toHaveCount(0)
+  expect((await page.request.get('/api/dashboard/website/designer')).status()).toBe(404)
   await page.getByLabel('Headline').fill('A brand new headline')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(page.getByText('you have changes that aren’t published yet')).toBeVisible()

@@ -520,7 +520,10 @@ function WebsiteStep({ onDone, back }) {
             ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you redesign it here.'],
             ['design', 'Start from a design', 'Choose one of our professional designs, filled in with your details. No AI needed.'],
             ['skip', 'Skip for now', 'Just use your booking link. You can create a website any time.'],
-          ].map(([value, label, hint]) => (
+          ]
+            // Bringing the current website is part of Website Studio (internal pilot).
+            .filter(([value]) => value !== 'import' || data.studio)
+            .map(([value, label, hint]) => (
             <label key={value} className="choice-card">
               <input type="radio" name="website-start" value={value} checked={mode === value} onChange={() => setState({ mode: value })} />
               <span>
@@ -541,7 +544,7 @@ function WebsiteStep({ onDone, back }) {
             }}
           />
         )}
-        {mode === 'import' && <WebsiteImport onApplied={reload} />}
+        {mode === 'import' && data.studio && <WebsiteImport onApplied={reload} />}
         {mode === 'design' && (
           <WebsiteGenerator
             templates

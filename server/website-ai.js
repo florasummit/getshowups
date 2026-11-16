@@ -7,6 +7,7 @@
 // (no invented years, ratings, prices or counts). Anything that fails falls back to the template text.
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
 import { credentialFor, markCredential } from './ai-credentials.js'
+import { studioEnabledFor } from './website-studio.js'
 import { runWithOwnKey } from './ai-providers.js'
 import { inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { brandName, generateContent, validateContent, LIMITS } from './website.js'
@@ -187,8 +188,10 @@ async function runModel(env, msgs, schema) {
 // Own-key errors that mean the key itself is unusable: shown to the owner, and the key is marked so it isn't retried.
 const KEY_ERRORS = new Set(['invalid_key'])
 const OWN_KEY_HTTP = { model_unavailable: 409, no_tested_model: 409, budget_reached: 402, invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
+// The own key is part of Website Studio (internal pilot): outside it, a stored key is never used.
+const studioKey = (env, customer) => (studioEnabledFor(env, customer.id) ? credentialFor(env, customer.id) : null)
 async function ownKey(env, customer, msgs, schema, now) {
-  const cred = await credentialFor(env, customer.id)
+  const cred = await studioKey(env, customer)
   if (!cred) return null
   // The owner's chosen model (or Auto's pick) from their account's catalog, within their monthly limit.
   const m = await resolveModel(env, customer.id, cred, { kind: 'writer', input: inputTokensFor(JSON.stringify(msgs), JSON.stringify(schema)) }, now)
@@ -323,7 +326,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
 export async function reviseWebsite(env, customer, draft, instruction, { now = Date.now() } = {}) {
   const ask = String(instruction ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
   if (!ask) return { ok: false, httpStatus: 400, error: 'instruction_required' }
-  const hasOwn = Boolean(await credentialFor(env, customer.id))
+  const hasOwn = Boolean(await studioKey(env, customer))
   if (!hasOwn && !aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
   const ctx = await context(env, customer)
   const { db, profile, claims, industry, allowedStock } = ctx

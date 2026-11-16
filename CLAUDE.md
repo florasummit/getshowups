@@ -92,7 +92,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      filter; designs repaired via site-design.js; stored in website_generations; template fallback
   ai-credentials.js  Bring-your-own Claude/OpenAI key (0022): validated read-only before storing; AES-GCM under an HKDF
                      subkey of TOKEN_ENCRYPTION_KEY bound to (customer, provider); only provider + last 4 ever returned
-  ai-providers.js    Own-key website writer: Claude (SDK, claude-opus-5-5, output_config json_schema, fallbacks default)
+  ai-providers.js    Own-key website writer: Claude (SDK, claude-opus-5-5, output_config json_schema; NO server-side fallback:
+                     the chosen/reserved model is the only one that runs, recorded and priced as that model)
                      or OpenAI (strict json_schema); same mergeGenerated/claims/number/design-repair pipeline; own-key
                      errors are reported (never a silent fallback); cost recorded as 0 (billed to the owner's account)
   site-spec.js       AI-designed sites, spec v2 (content.site): pages, composed sections, theme tokens. validateSpec() is the
@@ -228,8 +229,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
 - Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
   /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
-  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
-  in production requires approval.
+  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
+  WEBSITE_STUDIO_ENABLED AND WEBSITE_STUDIO_BUSINESSES (same shape as Ads; server/website-studio.js studioEnabledFor()):
+  Website Studio internal pilot = own AI key, AI designer, website import (+ old-address redirects). Outside it: those
+  routes are 404, the dashboard/onboarding don't offer them, a stored key is never used, and a save can't add or change
+  `site`/`redirects` (stored values kept). Published content is never gated. Turning one on in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not

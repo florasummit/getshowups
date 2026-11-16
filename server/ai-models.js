@@ -198,5 +198,5 @@ export async function resolveModel(env, customer, cred, kind = 'designer', now =
   if (pick.id !== row?.auto_model) await db.prepare('UPDATE ai_credentials SET auto_model = ?2, updated_at = ?3 WHERE customer = ?1').bind(customer, pick.id, now).run()
   return reserve(pick.id, true)
 }
-
-export const claudeFallbackFor = (id) => (/^claude-(opus-5|sonnet-5-5|fable-5)/.test(id) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {})
+// Own-key requests never use Anthropic's server-side refusal fallback (owner decision 2026-11-16): the model the owner
+// chose (or Auto reserved) is the only model that runs, so the reserved worst case is the most a request can cost.

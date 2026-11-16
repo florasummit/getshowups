@@ -127,6 +127,8 @@ export default function WebsiteTab() {
         )}
       </section>
 
+      {/* Website Studio (internal pilot, server/website-studio.js): import + AI designer only for businesses in it. */}
+      {data.studio && (
       <section className="card" aria-label="Bring your current website">
         <h2 className="card-title">Bring your current website</h2>
         <WebsiteImport
@@ -140,7 +142,9 @@ export default function WebsiteTab() {
           }}
         />
       </section>
+      )}
 
+      {data.studio && (
       <section className="card" aria-label="AI designer">
         <h2 className="card-title">AI designer</h2>
         <WebsiteDesigner
@@ -153,6 +157,7 @@ export default function WebsiteTab() {
           }}
         />
       </section>
+      )}
 
       {!designed && (
       <section className="card" aria-label="Create with AI">
@@ -214,7 +219,7 @@ export default function WebsiteTab() {
           </section>
           <section className="card site-editor" aria-label="Edit website">
             <h2 className="card-title">Edit text and photos</h2>
-            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed} />
+            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? (data.studio ? 'studio' : 'locked') : false} />
           </section>
         </>
       )}

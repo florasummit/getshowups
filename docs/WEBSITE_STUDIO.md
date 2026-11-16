@@ -1,6 +1,10 @@
 # Website Studio
 
-Status as of 2026-11-15, draft PRs #37 → #38 → #39 (stacked; not merged or deployed).
+Status as of 2026-11-16: one release candidate (`release/website-studio`, PRs #37–#40 combined), not merged or deployed.
+**Internal pilot only** (owner decision 2026-11-16): `WEBSITE_STUDIO_ENABLED=true` AND the business id listed in
+`WEBSITE_STUDIO_BUSINESSES` (server/website-studio.js). Everyone else keeps today's website tools unchanged; their
+dashboard and onboarding don't show the import, the AI designer or the AI-key controls, and those routes are 404.
+Own-key requests never use Anthropic's server-side fallback: only the chosen/reserved model runs and is priced.
 
 ## Customer journeys
 

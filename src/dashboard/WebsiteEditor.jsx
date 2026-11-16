@@ -200,7 +200,9 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
 
   return (
     <div className="editor">
-      {designed ? (
+      {designed === 'locked' ? (
+        <p className="fine editor-designed">Your website was designed with the AI designer. Services and prices show on it exactly as you enter them here.</p>
+      ) : designed ? (
         <p className="fine editor-designed">
           Your website was designed with the AI designer: ask it above to change the layout, colours, photos or wording. The details below are what it writes from.
           Services and prices show on your website exactly as you enter them here; other changes are used the next time you ask the designer.
