@@ -1,0 +1,37 @@
+{
+  "template": "clean",
+  "color": "ocean",
+  "headline": "Pool care in Charleston",
+  "intro": "Weekly pool care and one-time cleanings across Charleston.",
+  "about": "A small local team that keeps pools clean and balanced.",
+  "services": [
+    { "id": "s1", "name": "Weekly pool care", "price": "$280+", "description": "" },
+    { "id": "s2", "name": "One-time cleaning", "price": "$150+", "description": "" }
+  ],
+  "area": "Charleston, Mount Pleasant",
+  "highlights": [],
+  "logo": null,
+  "hero": null,
+  "photos": [],
+  "seoTitle": "Editor Pools",
+  "seoDescription": "Pool care in Charleston.",
+  "site": {
+    "version": 2,
+    "name": "Coastal",
+    "direction": "Calm coastal design",
+    "theme": { "colors": { "bg": "#f4f8f7", "surface": "#e3eeec", "ink": "#10292b", "muted": "#4b6466", "accent": "#0f5c63", "onAccent": "#ffffff", "line": "#cfdedb" }, "headingFont": "syne", "bodyFont": "manrope", "headingWeight": 700, "headingCase": "none", "headingTracking": -0.03, "baseSize": 17, "scale": 1.3, "lineHeight": 1.6, "radius": 18, "density": "airy", "maxWidth": 1240, "buttons": "solid", "motion": "none" },
+    "nav": { "layout": "left", "sticky": true, "showBook": true },
+    "footer": { "layout": "simple", "text": "Pool care across Charleston." },
+    "pages": [
+      { "slug": "", "navLabel": "Home", "seoTitle": "Pool care in Charleston", "seoDescription": "Weekly pool care across Charleston.", "sections": [
+        { "type": "hero", "id": "top", "layout": "split", "image": "stock:pool-water", "imageAlt": "A clean pool", "heading": "Clear water, every week.", "text": "Pool care for Charleston homes.", "primaryCta": { "label": "Book a visit", "target": "book" } },
+        { "type": "services", "id": "services", "heading": "Services", "layout": "rows", "showPrices": true, "items": [{ "serviceId": "s1", "text": "Skimming, brushing and balancing every week." }, { "serviceId": "s2", "text": "A single visit to get your pool ready." }] },
+        { "type": "cta", "id": "book-home", "background": "accent", "align": "center", "layout": "band", "heading": "Ready when you are.", "cta": { "label": "Book a visit", "target": "book" } }
+      ] },
+      { "slug": "about", "navLabel": "About", "seoTitle": "About | Editor Pools", "seoDescription": "Who we are.", "sections": [
+        { "type": "text", "id": "about-text", "heading": "About us", "body": "A small local team that keeps pools clean and balanced." },
+        { "type": "cta", "id": "book-about", "background": "accent", "align": "center", "layout": "band", "heading": "Book a visit", "cta": { "label": "Book a visit", "target": "book" } }
+      ] }
+    ]
+  }
+}

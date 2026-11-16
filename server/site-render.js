@@ -92,7 +92,7 @@ export function renderSite(biz, content, opts = {}) {
   // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
   // AI-designed sites (v2 spec). Names and prices come from this content's services; towns/phone from records.
   // AI-designed sites show the public brand ("PoolThru", not the legal "Poolthru LLC"); older renderers are unchanged.
-  if (content.site) return renderV2({ ...biz, name: displayBrand(biz.name, content), legalName: biz.name, services: content.services || [] }, content.site, opts)
+  if (content.site) return renderV2({ ...biz, name: displayBrand(biz.name, content), legalName: biz.name, services: content.services || [], logo: content.logo || null }, content.site, opts)
   if (content.design) return renderDesigned(biz, content, opts)
   const { canonical, bookUrl, privacyUrl = '/privacy', preview = false, noindex = false, year = new Date().getUTCFullYear() } = opts
   const c = content
@@ -171,13 +171,14 @@ export function renderNotice(title, text) {
 
 // Strict headers: no scripts at all on business sites, images only from this origin.
 // noindex: test businesses' public sites must never be indexed by search engines.
-export function htmlResponse(status, html, { preview = false, noindex = false, cache = 'public, max-age=60' } = {}) {
+// formAction: the origin a page's contact/quote forms post to (server/site-form.js); else forms are refused.
+export function htmlResponse(status, html, { preview = false, noindex = false, cache = 'public, max-age=60', formAction = null } = {}) {
   return new Response(html, {
     status,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': preview ? 'private, no-store' : cache,
-      'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors ${preview ? "'self'" : "'none'"}`,
+      'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action ${formAction ? `'self' ${formAction}` : "'none'"}; frame-ancestors ${preview ? "'self'" : "'none'"}`,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       ...((preview || noindex) && { 'X-Robots-Tag': 'noindex' }),

@@ -22,6 +22,9 @@ import * as domain from '../functions/api/dashboard/domain.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as siteAsset from '../functions/site-assets/[id].js'
 import * as middleware from '../functions/_middleware.js'
+import * as siteForm from '../functions/api/site-form/[customer].js'
+import * as siteIcon from '../functions/site-icon/[id].js'
+import { formToken } from '../server/site-form.js'
 import * as billing from '../functions/api/dashboard/billing.js'
 import * as outcome from '../functions/api/dashboard/outcome.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
@@ -774,4 +777,73 @@ test('ads: a click that lands on the website keeps its campaign through booking;
   // Tenant isolation: the other business sees only its own spend and no leads.
   const salon = (await call(overviewApi, 'GET', { cookie: salonCookie })).json.ads
   assert.deepEqual([salon.spendCents, salon.leads, salon.costPerBookingCents], [99900, 0, null])
+})
+
+// Website Studio completion (2026-11-16): a multi-page AI-designed site on a connected domain: every page in the sitemap,
+// social/SEO tags, its own favicon, and a working contact form that stores the lead with the business's other leads.
+test('connected domain, multi-page AI site: sitemap lists every page; SEO tags; own favicon; contact form stores the lead and returns to its page', async () => {
+  withProvider()
+  const c = await cookieFor('owner@pools.example')
+  const site = {
+    pages: [
+      { slug: '', navLabel: 'Home', seoTitle: 'Pool care in Charleston', seoDescription: 'Weekly pool care.', sections: [{ type: 'hero', id: 'top', heading: 'Clear water', image: 'stock:pool-water', primaryCta: { label: 'Book', target: 'book' } }, { type: 'faq', id: 'qs', heading: 'Questions', items: [{ question: 'How do I book?', answer: 'Online in a minute.' }] }] },
+      { slug: 'contact', navLabel: 'Contact', seoTitle: 'Contact | Pools', seoDescription: 'Send us a message.', sections: [{ type: 'contact', id: 'reach', heading: 'Contact us', form: 'quote' }] },
+    ],
+  }
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content({ site }), confirm: true } })).status, 200)
+  const d = (await call(domain, 'POST', { cookie: c, body: { action: 'connect', hostname: 'www.poolsco.com' } })).json.domain
+  dns.TXT['_getshowups.www.poolsco.com'] = [d.records[0].value]
+  await checkDomain(env, 'www.poolsco.com', { probe: probeFail })
+  dns.CNAME['www.poolsco.com'] = ['getshowups.pages.dev']
+  provider.domains.get('www.poolsco.com').status = 'active'
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeOk }), 'connected')
+  const run = async (url, init = {}) => {
+    const res = await middleware.onRequest({ request: new Request(url, init), env, next: async () => new Response('static') })
+    return { status: res.status, text: await res.text(), headers: res.headers }
+  }
+  const map = (await run('https://www.poolsco.com/sitemap.xml')).text
+  assert.deepEqual([...map.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]), ['https://www.poolsco.com/', 'https://www.poolsco.com/contact'])
+  assert.match(map, /<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/)
+
+  const home = await run('https://www.poolsco.com/')
+  assert.match(home.text, /<link rel="canonical" href="https:\/\/www\.poolsco\.com\/">/)
+  assert.match(home.text, /<meta property="og:title" content="Pool care in Charleston"><meta property="og:description" content="Weekly pool care\."><meta property="og:url" content="https:\/\/www\.poolsco\.com\/"><meta property="og:image" content="https:\/\/www\.poolsco\.com\/site-stock\//)
+  assert.match(home.text, /"@type":"FAQPage"/)
+  const icon = home.text.match(/<link rel="icon" href="(\/site-icon\/pools\.svg\?c=[0-9a-f]{6})">/)
+  assert.ok(icon, 'the business favicon, never GetShowUps’ icon')
+  assert.equal((await run(`https://www.poolsco.com${icon[1].replace(/&amp;/g, '&')}`)).text, 'static', 'served on the business domain')
+  const svg = await siteIcon.onRequestGet({ request: new Request(`https://www.poolsco.com${icon[1]}`), params: { id: 'pools.svg' } })
+  assert.equal(svg.headers.get('Content-Type'), 'image/svg+xml')
+  assert.match(await svg.text(), /^<svg [^>]+><rect [^>]+\/><text [^>]+>P<\/text><\/svg>$/)
+
+  const page = await run('https://www.poolsco.com/contact')
+  assert.match(page.text, /<link rel="canonical" href="https:\/\/www\.poolsco\.com\/contact">/)
+  assert.match(page.text, /<form id="f-reach" class="lead-form" method="post" action="https:\/\/getshowups\.com\/api\/site-form\/pools"/)
+  assert.match(page.headers.get('Content-Security-Policy'), /form-action 'self' https:\/\/getshowups\.com;/)
+
+  // A visitor sends the quote form (the signed render time must be at least a few seconds old).
+  const post = async (fields, t) => {
+    const body = new URLSearchParams({ t: t ?? (await formToken(env, 'pools', Date.now() - 10_000)), page: 'contact', section: 'reach', kind: 'quote', website: '', ...fields })
+    const res = await siteForm.onRequestPost({ request: new Request('https://getshowups.com/api/site-form/pools', { method: 'POST', body, headers: { 'CF-Connecting-IP': `198.51.100.${Math.floor(Math.random() * 200)}` } }), env, params: { customer: 'pools' } })
+    return { status: res.status, location: res.headers.get('Location') }
+  }
+  const leads = () => db.sql.prepare("SELECT customer, name, email, need FROM leads WHERE customer = 'pools' ORDER BY created_at").all()
+  const before = leads().length
+  const ok = await post({ name: 'Dana Shore', email: 'dana@example.net', phone: '(843) 555-0199', zip: '29401', need: 'Weekly cleaning for a small pool' })
+  assert.deepEqual(ok, { status: 303, location: 'https://www.poolsco.com/contact?sent=1#f-reach' })
+  assert.deepEqual({ ...leads().at(-1) }, { customer: 'pools', name: 'Dana Shore', email: 'dana@example.net', need: 'Quote request: Weekly cleaning for a small pool' })
+  const sent = await run('https://www.poolsco.com/contact?sent=1')
+  assert.match(sent.text, /Thanks, your quote request is on its way\./)
+  assert.equal(sent.headers.get('Cache-Control'), 'no-store', 'a personal result page is not cached')
+  // Errors return to the form with the reason; a bot (trap field) is told "sent" and nothing is stored; old/forged
+  // render times are refused.
+  assert.equal((await post({ name: 'Dana', email: 'not-an-email', phone: '8435550199', need: 'Hi there' })).location, 'https://www.poolsco.com/contact?form=invalid_email#f-reach')
+  assert.match((await run('https://www.poolsco.com/contact?form=invalid_email')).text, /<p class="lf-error" role="alert">Please enter a valid email address\.<\/p>/)
+  assert.equal((await post({ name: 'Bot', email: 'bot@example.net', phone: '8435550199', need: 'Buy now', website: 'http://spam.example' })).location, 'https://www.poolsco.com/contact?sent=1#f-reach')
+  assert.equal((await post({ name: 'Late', email: 'late@example.net', phone: '8435550199', need: 'Hello' }, await formToken(env, 'pools', Date.now() - 2 * 86_400_000))).location, 'https://www.poolsco.com/contact?form=expired#f-reach')
+  assert.equal((await post({ name: 'Fast', email: 'fast@example.net', phone: '8435550199', need: 'Hello' }, await formToken(env, 'pools', Date.now()))).location, 'https://www.poolsco.com/contact?form=expired#f-reach')
+  assert.equal((await post({ name: 'Forged', email: 'f@example.net', phone: '8435550199', need: 'Hello' }, `${Date.now() - 10_000}.${'A'.repeat(43)}`)).location, 'https://www.poolsco.com/contact?form=expired#f-reach')
+  assert.equal(leads().length, before + 1, 'only the real request was stored')
+  // A token for one business doesn't work for another.
+  assert.equal((await post({ name: 'Cross', email: 'x@example.net', phone: '8435550199', need: 'Hello' }, await formToken(env, 'salon', Date.now() - 10_000))).location, 'https://www.poolsco.com/contact?form=expired#f-reach')
 })

@@ -32,7 +32,7 @@ export const ICONS = ['water', 'drop', 'leaf', 'sun', 'snow', 'calendar', 'clock
 // 'composition': a free 12-column arrangement of a few blocks (heading, text, button, media, mark) for the first screen
 // and signature moments. The model places blocks; the renderer derives phone layouts and keeps overlaps readable.
 export const SECTION_TYPES = ['hero', 'composition', 'text', 'services', 'features', 'imageText', 'gallery', 'steps', 'faq', 'cta', 'area', 'contact']
-export const LIMITS = { pages: 5, sectionsPerPage: 12, sections: 36, items: 10, blocks: 10, galleryImages: 12, specBytes: 80_000, heading: 120, eyebrow: 60, text: 900, body: 2400, label: 32, itemTitle: 80, itemText: 400, navLabel: 24, seoTitle: 70, seoDescription: 160, footer: 200, alt: 140, name: 40, direction: 160 }
+export const LIMITS = { pages: 10, aiPages: 5, sectionsPerPage: 12, sections: 60, items: 10, blocks: 10, galleryImages: 12, specBytes: 160_000, heading: 120, eyebrow: 60, text: 900, body: 2400, label: 32, itemTitle: 80, itemText: 400, navLabel: 24, seoTitle: 70, seoDescription: 160, footer: 200, alt: 140, name: 40, direction: 160 }
 
 const ENUM = {
   headingCase: ['none', 'upper'],
@@ -261,6 +261,8 @@ export function validateSpec(raw, ctx = {}) {
         heading: txt(s.heading, LIMITS.heading, `${where}.heading`),
         eyebrow: txt(s.eyebrow, LIMITS.eyebrow, `${where}.eyebrow`),
         text: txt(s.text, LIMITS.text, `${where}.text`, true),
+        // Owner-hidden (kept in the draft, left out of the published page; the editor shows it dimmed).
+        ...(s.hidden === true ? { hidden: true } : {}),
       }
       if (base.background === 'image' && !base.backgroundImage) base.background = 'ink'
       const items = (max) => arr(s.items).slice(0, max)
@@ -398,7 +400,8 @@ export function validateSpec(raw, ctx = {}) {
           out = { ...base }
           break
         case 'contact':
-          out = { ...base, showPhone: bool(s.showPhone) }
+          // `form`: a contact or quote-request form (no script; posts to GetShowUps, which stores the lead).
+          out = { ...base, showPhone: bool(s.showPhone), form: pick(s.form, ['none', 'contact', 'quote'], 'none') }
           break
       }
       if (out) {
@@ -420,14 +423,18 @@ export function validateSpec(raw, ctx = {}) {
   }
   // Every site has a home page with a hero, and a way to book on every page.
   if (!outPages.length || outPages[0].slug !== '') outPages.unshift({ slug: '', navLabel: 'Home', seoTitle: '', seoDescription: '', sections: [] })
-  // The home page opens with a hero or a composition that has a heading (its first screen).
+  // The home page opens with a hero or a composition that has a heading (its first screen); it can't be hidden.
+  if (outPages[0].sections[0]?.hidden) {
+    delete outPages[0].sections[0].hidden
+    warnings.push({ where: 'pages.0.sections.0.hidden', reason: 'first_screen_kept' })
+  }
   const opener = outPages[0].sections[0]
   if (!opener || !(opener.type === 'hero' || (opener.type === 'composition' && opener.blocks.some((b) => b.kind === 'heading')))) {
     warnings.push({ where: 'pages.0.sections.0', reason: 'first_screen_added' })
     outPages[0].sections.unshift(validateSpec({ pages: [{ sections: [{ type: 'hero' }] }] }, ctx).spec.pages[0].sections[0])
   }
   for (const pg of outPages) {
-    const linksToBook = pg.sections.some((s) => s.type === 'hero' || s.type === 'cta' || s.type === 'contact' || (s.type === 'composition' && s.blocks.some((b) => b.kind === 'button' && b.target === 'book')))
+    const linksToBook = pg.sections.some((s) => !s.hidden && (s.type === 'hero' || s.type === 'cta' || s.type === 'contact' || (s.type === 'composition' && s.blocks.some((b) => b.kind === 'button' && b.target === 'book'))))
     if (!linksToBook) pg.sections.push({ type: 'cta', id: `book-${pg.slug || 'home'}`, background: 'accent', backgroundImage: null, spacing: 'l', align: 'center', width: 'normal', animate: 'none', heading: 'Ready when you are.', eyebrow: '', text: '', layout: 'band', image: null, cta: { label: 'Book now', target: 'book' } })
   }
   // Section links must point at a section that exists.

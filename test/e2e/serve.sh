@@ -72,11 +72,13 @@ d1 "
     ('seed-appt-visit', '$E2E_HOME_CUSTOMER', 'seed-lead-visit', $PAST, $((PAST + 3600000)), 'booked', 'seed-event-3', $PAST, $PAST),
     ('seed-appt-visit-2', '$E2E_HOME_CUSTOMER', 'seed-lead-visit-2', $((PAST - 3600000)), $PAST, 'booked', 'seed-event-4', $PAST, $PAST);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
-    ('$E2E_DESIGN_CUSTOMER', 'E2E Design Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
-  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-design.example', '$E2E_DESIGN_CUSTOMER', $NOW);
-  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DESIGN_SESSION_TOKEN")', 'owner@e2e-design.example', $NOW, $FAR);
+    ('$E2E_DESIGN_CUSTOMER', 'E2E Design Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW),
+    ('$E2E_DESIGN_M_CUSTOMER', 'E2E Design Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-design.example', '$E2E_DESIGN_CUSTOMER', $NOW), ('owner@e2e-design-m.example', '$E2E_DESIGN_M_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DESIGN_SESSION_TOKEN")', 'owner@e2e-design.example', $NOW, $FAR), ('$(hash "$E2E_DESIGN_M_SESSION_TOKEN")', 'owner@e2e-design-m.example', $NOW, $FAR);
   INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
-    ('$E2E_DESIGN_CUSTOMER', '', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\"}]', '[\"Charleston\"]', $NOW);
+    ('$E2E_DESIGN_CUSTOMER', '', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\"}]', '[\"Charleston\"]', $NOW),
+    ('$E2E_DESIGN_M_CUSTOMER', '', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\"}]', '[\"Charleston\"]', $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_ADS_CUSTOMER', 'E2E Ads Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-ads.example', '$E2E_ADS_CUSTOMER', $NOW);
@@ -106,7 +108,23 @@ record() {
     scope: 'openid email https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy',
     refreshToken, connectedAt: new Date().toISOString() }))"
 }
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER"; do
+# Website Studio editor tests: two businesses (desktop / mobile project) with the same AI-designed draft (no AI call).
+EDITOR_DRAFT=$(node -e "process.stdout.write(JSON.stringify(JSON.parse(require('fs').readFileSync('test/e2e/editor-draft.json','utf8'))).replace(/'/g, \"''\"))")
+for E in "$E2E_EDITOR_CUSTOMER:$E2E_EDITOR_SESSION_TOKEN" "$E2E_EDITOR_M_CUSTOMER:$E2E_EDITOR_M_SESSION_TOKEN"; do
+  EC=${E%%:*}
+  ET=${E#*:}
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$EC', 'Editor Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$EC.example', '$EC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$ET")', 'owner@$EC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$EC', '(843) 555-0110', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280+\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES ('$EC', '$EDITOR_DRAFT', NULL, NULL, $NOW);
+  "
+done
+
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done

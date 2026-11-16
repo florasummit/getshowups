@@ -14,7 +14,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../../server/auth.js'
 import { track } from '../../../../server/events.js'
 import { approvedClaimsFor } from '../../../../server/landing.js'
-import { assetIdsFor, COLORS, generateContent, hostingStatus, isHosted, loadWebsite, publish, restore, saveDraft, TEMPLATES, unpublish, validateContent } from '../../../../server/website.js'
+import { displayBrand, assetIdsFor, COLORS, generateContent, hostingStatus, isHosted, loadWebsite, publish, restore, saveDraft, TEMPLATES, unpublish, validateContent } from '../../../../server/website.js'
 import { listAssets } from '../../../../server/assets.js'
 import { domainFor } from '../../../../server/domains.js'
 import { FONTS, PALETTES } from '../../../../server/site-design.js'
@@ -46,6 +46,8 @@ async function state(env, customer, email) {
   ])
   return {
     studio, // Website Studio for this business (server/website-studio.js): designer, own AI key, import
+    brand: displayBrand(customer.name, website.draft), // the public name the editor's templates use
+    visit: customer.appointmentMode === 'at_customer',
     studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (off in the pilot)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,
@@ -146,7 +148,11 @@ export async function onRequestPost({ request, env }) {
       const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       if (action === 'save') {
-        await saveDraft(db, customer.id, content)
+        // baseUpdatedAt: the draft version the page is editing; a newer draft (another tab, the AI designer) → 409
+        // with the latest state, never a silent overwrite. `force: true` (the owner chose "keep mine") skips the check.
+        const expect = body.force === true ? undefined : Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
+        const saved = await saveDraft(db, customer.id, content, Date.now(), { expect })
+        if (saved.conflict) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
         return json(200, await state(env, customer, session.email))
       }
       if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
