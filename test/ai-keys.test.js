@@ -10,6 +10,7 @@ import { strictSchema } from '../server/ai-providers.js'
 import { schemaFor } from '../server/website-ai.js'
 import * as aiKey from '../functions/api/dashboard/ai-key.js'
 import * as website from '../functions/api/dashboard/website/index.js'
+import { anthropicSchemaProblems } from './schema-limits.js'
 
 const ORIGIN = 'https://getshowups.com'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -84,7 +85,7 @@ beforeEach(() => {
       if (bad) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }, { status: 401 })
       if (u.pathname === '/v1/models') return Response.json({ data: accounts.anthropic.map((id) => ({ id, type: 'model', display_name: id, max_tokens: 128000, capabilities: { structured_outputs: { supported: !id.includes('legacy') }, effort: { supported: true } } })), has_more: false, first_id: 'a', last_id: 'a' })
       if (u.pathname === '/v1/messages') {
-        if (providerReply?.status) return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'credit' } }, { status: providerReply.status })
+        if (providerReply?.status) return Response.json({ type: 'error', error: { type: providerReply.type || 'invalid_request_error', message: 'mock' } }, { status: providerReply.status })
         return Response.json({ id: 'msg_1', type: 'message', role: 'assistant', model: body?.model, stop_reason: providerReply?.stop || 'end_turn', content: [{ type: 'text', text: JSON.stringify(providerReply?.raw || generated()) }], usage: { input_tokens: 1200, output_tokens: 900 } })
       }
     }
@@ -92,7 +93,7 @@ beforeEach(() => {
       if (bad) return Response.json({ error: { code: 'invalid_api_key' } }, { status: 401 })
       if (u.pathname === '/v1/models') return Response.json({ data: accounts.openai.map((id) => ({ id, object: 'model', owned_by: 'openai' })) })
       if (u.pathname === '/v1/chat/completions') {
-        if (providerReply?.status) return Response.json({ error: { code: providerReply.code } }, { status: providerReply.status })
+        if (providerReply?.status) return Response.json({ error: { type: providerReply.type, code: providerReply.code } }, { status: providerReply.status })
         return Response.json({ model: 'gpt-4o-mini', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(providerReply?.raw || generated()) } }], usage: { prompt_tokens: 1000, completion_tokens: 800 } })
       }
     }
@@ -190,7 +191,34 @@ test('own-key errors are explained, the dead key is marked, and nothing falls ba
   assert.equal(req.body.response_format.json_schema.strict, true)
   assert.equal(req.body.response_format.json_schema.schema.properties.design.additionalProperties, false)
   providerReply = { status: 429, code: 'insufficient_quota' }
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'x' } })).json.error, 'provider_rejected')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'x' } })).json.error, 'provider_billing')
+})
+
+test('billing problems are billing, not rate limits: OpenAI credit_balance_exhausted / insufficient_quota, Anthropic 402 billing_error', async () => {
+  const { openAiError, claudeError } = await import('../server/ai-providers.js')
+  // The exact response from the failed live test (2026-11-15): HTTP 429, type insufficient_quota, code credit_balance_exhausted.
+  assert.deepEqual(openAiError(429, { error: { type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'You have no credits remaining.' } }), { error: 'provider_billing', detail: { status: 429, type: 'insufficient_quota', code: 'credit_balance_exhausted' } })
+  assert.equal(openAiError(429, { error: { type: 'insufficient_quota', code: 'some_new_billing_code' } }).error, 'provider_billing', 'type alone is enough')
+  assert.equal(openAiError(429, { error: { type: 'requests', code: 'rate_limit_exceeded' } }).error, 'provider_rate_limited', 'a real rate limit stays a rate limit')
+  assert.equal(openAiError(400, { error: { type: 'invalid_request_error', code: null } }).error, 'provider_rejected')
+  assert.equal(openAiError(401, {}).error, 'invalid_key')
+  assert.equal(openAiError(429, { error: { code: 'x'.repeat(200) } }).detail.code, null, 'only short identifiers are kept')
+  assert.equal(claudeError({ status: 402, error: { type: 'error', error: { type: 'billing_error' } } }).error, 'provider_billing')
+  assert.equal(claudeError({ status: 400, error: { type: 'error', error: { type: 'invalid_request_error' } } }).error, 'provider_rejected')
+  assert.equal(claudeError({ status: 429 }).error, 'provider_rate_limited')
+  assert.equal(claudeError(new Error('socket hang up')).error, 'provider_unavailable')
+  // Through the API: the owner gets 402 provider_billing, nothing is charged to the limit, and the request isn't retried.
+  const c = await cookieFor('owner@pools.example')
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'openai', key: OPENAI_KEY, model: 'gpt-4o-mini' } })
+  providerReply = { status: 429, type: 'insufficient_quota', code: 'credit_balance_exhausted' }
+  let r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.deepEqual([r.status, r.json.error], [402, 'provider_billing'])
+  assert.equal(calls.filter((x) => x.path === '/v1/chat/completions').length, 1, 'no retry')
+  assert.equal(db.sql.prepare('SELECT cost_micros FROM ai_key_usage').get().cost_micros, 0)
+  await call(aiKey, 'POST', { cookie: c, body: { action: 'save', provider: 'anthropic', key: CLAUDE_KEY, model: 'claude-opus-5-5' } })
+  providerReply = { status: 402, type: 'billing_error' }
+  r = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+  assert.deepEqual([r.status, r.json.error], [402, 'provider_billing'])
 })
 
 test('start from a design never uses the own key (no provider call)', async () => {
@@ -340,6 +368,12 @@ test('discovered is not compatible: a model without structured outputs is never 
   accounts.anthropic.push('claude-new-9')
   await call(aiKey, 'POST', { cookie: c, body: { action: 'refresh' } })
   assert.deepEqual(db.sql.prepare('SELECT model, status FROM ai_model_registry ORDER BY provider, model').all(), before)
+})
+
+test('the website writer schema sent to Claude/OpenAI stays within Anthropic’s structured-output limits', async () => {
+  const { SCHEMA } = await import('../server/website-ai.js')
+  assert.deepEqual(anthropicSchemaProblems(strictSchema(SCHEMA)), [])
+  assert.ok(anthropicSchemaProblems({ type: 'object', properties: Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`f${i}`, { anyOf: [{ type: 'string' }, { type: 'null' }] }])), additionalProperties: false, required: Array.from({ length: 17 }, (_, i) => `f${i}`) }).some((p) => p.includes('17 union-typed')), 'the check itself catches the failure mode')
 })
 
 test('strictSchema closes every object and lists every property as required', () => {
