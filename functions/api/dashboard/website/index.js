@@ -24,6 +24,8 @@ import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
 import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../../server/website-studio.js'
 import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } from '../../../../server/website-history.js'
+import { renderSite } from '../../../../server/site-render.js'
+import { siteBusinessInfo } from '../../../../server/site-serve.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
 // redirects by hand-crafting a save: those two fields keep what the stored draft already has (nothing is lost).
@@ -32,6 +34,22 @@ async function guardStudioFields(env, customer, content) {
   const { site: _s, redirects: _r, ...rest } = content
   const current = (await loadWebsite(env.ONBOARDING_DB, customer)).draft
   return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
+}
+
+// Pre-publish check: every page of the content renders (no exception) with this business's details. A content that
+// can't render is never made live, so visitors keep seeing the previous version.
+async function rendersCleanly(db, customer, content) {
+  try {
+    const biz = await siteBusinessInfo(db, customer)
+    for (const page of content?.site?.pages?.map((p) => p.slug) || ['']) {
+      const html = renderSite(biz, content, { page, pageBase: '', bookUrl: '/book', canonical: null })
+      if (typeof html !== 'string' || !html.includes('</html>')) return false
+    }
+    return true
+  } catch (err) {
+    console.error('pre-publish render failed:', err?.name)
+    return false
+  }
 }
 
 async function state(env, customer, email) {
@@ -49,7 +67,7 @@ async function state(env, customer, email) {
     studio, // Website Studio for this business (server/website-studio.js): designer, own AI key, import
     brand: displayBrand(customer.name, website.draft), // the public name the editor's templates use
     visit: customer.appointmentMode === 'at_customer',
-    studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (off in the pilot)
+    studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (on unless switched off)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,
     hosting,
@@ -163,8 +181,10 @@ export async function onRequestPost({ request, env }) {
       const s = await state(env, customer, session.email)
       if (!s.ready) return json(409, { error: 'not_ready' })
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
-      // Internal pilot: AI-designed sites and Studio redirects stay private until publishing them is approved.
+      // Emergency off switch only (WEBSITE_STUDIO_PUBLISH=false); publishing is otherwise standard for every business.
       if (hasStudioOutput(content) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
+      // Every page must render before anything goes live; otherwise the current live version keeps serving.
+      if (!(await rendersCleanly(db, customer, content))) return json(422, { error: 'render_failed' })
       const version = await publish(db, customer.id, content)
       if (await studioAccess(env, customer)) await saveCheckpoint(db, customer.id, content, 'published').catch((e) => console.error('checkpoint failed:', e?.name))
       await track(env, 'website_published', { customer: customer.id, props: { version } })
@@ -188,12 +208,13 @@ export async function onRequestPost({ request, env }) {
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'restore') {
+      // Restoring replaces the live website: the owner confirms it, like a publish.
+      if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
       const s = await state(env, customer, session.email)
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
-      if (!studioPublishAllowed(env)) {
-        const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customer.id, Number(body.version) || 0).first()
-        if (v && hasStudioOutput(JSON.parse(v.content))) return json(409, { error: 'studio_publish_off' })
-      }
+      const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customer.id, Number(body.version) || 0).first()
+      if (v && hasStudioOutput(JSON.parse(v.content)) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
+      if (v && !(await rendersCleanly(db, customer, JSON.parse(v.content)))) return json(422, { error: 'render_failed' })
       if (!(await restore(db, customer.id, body.version))) return json(404, { error: 'not_found' })
       await track(env, 'website_restored', { customer: customer.id, props: { version: body.version } })
       await recordEvent(db, { type: 'website.restore', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version: Number(body.version) || null } })

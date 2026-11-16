@@ -21,8 +21,19 @@ let env, db, kv, calls, reply
 function d1() {
   const sql = new DatabaseSync(':memory:')
   for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) sql.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
-  const stmt = (q, args = []) => ({ bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => sql.prepare(q).run(...args) })
-  return { sql, prepare: (q) => stmt(q) }
+  const stmt = (q, args = []) => ({ q, args, bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => sql.prepare(q).run(...args) })
+  // Like D1's batch: all statements in one transaction.
+  const batch = async (list) => {
+    sql.exec('BEGIN')
+    try {
+      for (const st of list) sql.prepare(st.q).run(...st.args)
+      sql.exec('COMMIT')
+    } catch (e) {
+      sql.exec('ROLLBACK')
+      throw e
+    }
+  }
+  return { sql, prepare: (q) => stmt(q), batch }
 }
 async function cookieFor(email) {
   const token = email.replace(/[^A-Za-z0-9]/g, 'x').padEnd(43, 'Q').slice(0, 43)

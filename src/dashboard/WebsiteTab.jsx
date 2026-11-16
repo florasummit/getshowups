@@ -10,8 +10,8 @@ import SiteStudio from './SiteStudio.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-// Internal pilot: AI-designed sites (and imported old-address redirects) stay private until publishing them is approved.
-const STUDIO_PRIVATE = 'AI-designed websites stay private during the pilot: you can preview this one, but it can’t be published yet. Your live website hasn’t changed.'
+// Only while publishing is switched off for maintenance (WEBSITE_STUDIO_PUBLISH=false).
+const STUDIO_PRIVATE = 'Publishing AI-designed websites is paused for a moment: you can keep editing and previewing. Your live website hasn’t changed.'
 const studioOutput = (c) => Boolean(c && (c.site || c.redirects?.length))
 
 export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
@@ -30,6 +30,8 @@ export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
             ? 'Your plan isn’t active. Reactivate it in Settings to publish.'
             : d.error === 'studio_publish_off'
               ? STUDIO_PRIVATE
+              : d.error === 'render_failed'
+                ? 'This version couldn’t be prepared for visitors, so your live website hasn’t changed. Please try again, or contact us.'
             : d.fields
               ? problemText(d.fields)
               : 'Couldn’t publish. Please try again.',
@@ -66,6 +68,8 @@ export default function WebsiteTab() {
   const [rewrite, setRewrite] = useState(false)
   const [pending, setPending] = useState(null)
   const [editorKey, setEditorKey] = useState(0)
+  // The Studio editor has edits the server hasn't confirmed yet: publishing waits (Publish sends the saved draft).
+  const [unsaved, setUnsaved] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [more, setMore] = useState({})
   if (!data) return <div aria-busy="true" />
@@ -105,7 +109,7 @@ export default function WebsiteTab() {
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
           {!w.generated && !pending && !publishing && (!w.published || w.changed) && !(studioOutput(w.draft) && !data.studioPublish) && (
-            <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
+            <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing} disabled={unsaved}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
           )}
@@ -116,6 +120,7 @@ export default function WebsiteTab() {
           )}
         </div>
         {pending && <p className="fine">Keep or discard the new version below before publishing.</p>}
+        {unsaved && <p className="fine">Saving your latest changes before you can publish…</p>}
         {studioOutput(w.draft) && !data.studioPublish && <p className="fine">{STUDIO_PRIVATE}</p>}
         {publishing && !pending && (
           <>
@@ -225,7 +230,7 @@ export default function WebsiteTab() {
         <>
           {designed && data.studio ? (
             // Website Studio editor: edit the AI-designed site directly (no AI), with live preview and autosave.
-            <SiteStudio key={editorKey} website={w} assets={data.assets} brand={data.brand} visit={data.visit} checkpoints={data.checkpoints || []} onSaved={refresh} />
+            <SiteStudio key={editorKey} website={w} assets={data.assets} brand={data.brand} visit={data.visit} checkpoints={data.checkpoints || []} onSaved={refresh} onUnsaved={setUnsaved} />
           ) : (
             <section className="site-preview-wrap" aria-label="Preview">
               <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
@@ -261,7 +266,7 @@ export default function WebsiteTab() {
                     </p>
                   </div>
                   {!v.live && (
-                    <button type="button" className="btn btn-quiet btn-sm" disabled={more.busy} onClick={() => post({ action: 'restore', version: v.version })}>
+                    <button type="button" className="btn btn-quiet btn-sm" disabled={more.busy} onClick={() => window.confirm(`Make the version published ${day(v.createdAt)} your live website again? Visitors will see it right away. You can switch back from this list.`) && post({ action: 'restore', version: v.version, confirm: true })}>
                       Restore
                     </button>
                   )}

@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Website publishing for every eligible business (2026-11-16) — feature/publishing-on; no paid calls; no migration
+
+- Publishing is standard self-service (no allowlist, no per-business flag): studioPublishAllowed is ON unless
+  WEBSITE_STUDIO_PUBLISH === 'false' (emergency pause). No Cloudflare setting needed: the code release turns it on.
+- Safety added: restore now requires confirmation like publish (UI asks first); every page must render before going
+  live (422 render_failed, live untouched); version insert + live pointer in one D1 batch (all or nothing, tested by
+  failing the store mid-publish); Publish is held while the Studio editor has unconfirmed edits.
+- Unchanged: publish needs the owner (session, same-origin), explicit confirmation, a bookable business (calendar +
+  hours) and active hosting; per-business data; audit (website.publish / website.restore events); versions + rollback;
+  GetShowUps address /p/<id> and connected domains; no AI key needed to publish.
+- Tests: unit 488, browser (editor journey now publishes, republishes and restores on the GetShowUps address).
+
 ## Website Studio closing pass (2026-11-16) — feature/studio-finish; no paid calls; no migration
 
 - Production migrations 0021–0023 VERIFIED applied (read-only sqlite_master + pragma_table_info): all 8 tables/indexes

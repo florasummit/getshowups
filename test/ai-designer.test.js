@@ -366,36 +366,64 @@ test('an own key that is invalid, revoked or unreadable is reported and never re
   assert.deepEqual([requests.length, platform], [0, 0])
 })
 
-test('pilot: AI-designed sites stay private unless WEBSITE_STUDIO_PUBLISH is on (publish and restore refused; live site untouched)', async () => {
+test('publishing: AI-designed sites publish for every eligible business by default (no allowlist); restore needs confirmation; WEBSITE_STUDIO_PUBLISH=false pauses it with the live site untouched', async () => {
+  delete env.WEBSITE_STUDIO_PUBLISH
+  delete env.WEBSITE_STUDIO_BUSINESSES
   const c = await cookieFor('owner@pools.example')
   await addKey('pools')
   // The business's current, non-AI website is live (version 1).
   const plain = (await call(website, 'GET', { cookie: c })).json.website.draft
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: plain, confirm: true } })).status, 200)
-  const liveBefore = (await call(publicSite, 'GET', { params: { customer: 'pools' } })).text
-  // An AI design published while publishing was allowed (version 2), then the site is put back to version 1.
+  assert.equal((await call(website, 'GET', { cookie: c })).json.studioPublish, true, 'on by default')
+  // Design → publish needs the owner's explicit confirmation → live on the GetShowUps address, every page.
   await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
   const designed = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed } })).json, { error: 'confirmation_required' })
+  assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 404, 'nothing published without confirmation')
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed, confirm: true } })).status, 200)
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1 } })).status, 200)
-  // The pilot setting: switch unset.
-  delete env.WEBSITE_STUDIO_PUBLISH
-  const s = (await call(website, 'GET', { cookie: c })).json
-  assert.equal(s.studioPublish, false)
-  // Designing and previewing still work; the result can't go live, by publish or by restoring the AI version.
-  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website again' } })
-  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
-  assert.ok(draft.site)
-  assert.match((await call(preview, 'GET', { cookie: c, url: `${ORIGIN}/api/dashboard/website/preview` })).text, /Clear water, every week\./, 'private preview works')
-  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: draft, confirm: true } })).json, { error: 'studio_publish_off' })
-  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 2 } })).json, { error: 'studio_publish_off' })
-  // Imported old-address redirects are Studio output too.
-  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, redirects: [{ from: '/x', to: 'book' }] }, confirm: true } })).json, { error: 'studio_publish_off' })
-  // The live website is exactly what it was; the AI pages don't exist publicly.
-  assert.equal((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, liveBefore)
+  assert.match((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, /Clear water, every week\./)
+  assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
+  // Restoring the earlier version replaces the live site: confirmation required, then the AI pages are gone.
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1 } })).json, { error: 'confirmation_required' })
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1, confirm: true } })).status, 200)
   assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 404)
-  // Ordinary website changes still publish.
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, headline: 'Still publishable' }, confirm: true } })).status, 200)
+  const liveBefore = (await call(publicSite, 'GET', { params: { customer: 'pools' } })).text
+  // Another business is unaffected by any of this.
+  assert.equal((await call(publicSite, 'GET', { params: { customer: 'salon' } })).status, 404)
+  // Emergency off switch: designing and previewing still work; Studio output can't go live; the live site is untouched.
+  env.WEBSITE_STUDIO_PUBLISH = 'false'
+  assert.equal((await call(website, 'GET', { cookie: c })).json.studioPublish, false)
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed, confirm: true } })).json, { error: 'studio_publish_off' })
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 2, confirm: true } })).json, { error: 'studio_publish_off' })
+  assert.deepEqual((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, redirects: [{ from: '/x', to: 'book' }] }, confirm: true } })).json, { error: 'studio_publish_off' })
+  assert.equal((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, liveBefore)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, headline: 'Still publishable' }, confirm: true } })).status, 200, 'ordinary websites always publish')
+  env.WEBSITE_STUDIO_PUBLISH = 'true'
+})
+
+test('publishing failures keep the previous live version (store failure mid-publish; nothing half-published)', async () => {
+  const c = await cookieFor('owner@pools.example')
+  const plain = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, headline: 'Version one' }, confirm: true } })).status, 200)
+  const live = () => db.sql.prepare("SELECT live_version v FROM websites WHERE customer = 'pools'").get().v
+  const before = live()
+  // The version store fails during the publish batch: the batch rolls back, the live pointer doesn't move.
+  const batch = db.batch
+  db.batch = async (list) => {
+    if (list.some((x) => /INSERT INTO website_versions/.test(x.q))) {
+      db.sql.exec('BEGIN')
+      db.sql.prepare(list[0].q).run(...list[0].args)
+      db.sql.exec('ROLLBACK')
+      throw new Error('D1 unavailable')
+    }
+    return batch(list)
+  }
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'publish', content: { ...plain, headline: 'Version two' }, confirm: true } })
+  db.batch = batch
+  assert.equal(r.status, 503)
+  assert.equal(live(), before)
+  assert.match((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text, /Version one/)
+  assert.equal(db.sql.prepare("SELECT count(*) n FROM website_versions WHERE customer = 'pools'").get().n, before)
 })
 
 test('restoring an earlier AI-designed version brings back its pages and booking links, live and in the draft', async () => {
@@ -419,7 +447,7 @@ test('restoring an earlier AI-designed version brings back its pages and booking
   // Restore v1 (the first published version).
   const versions = (await call(website, 'GET', { cookie: c })).json.website.versions
   const first = Math.min(...versions.map((v) => v.version))
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: first } })).status, 200)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: first, confirm: true } })).status, 200)
   const home = await call(publicSite, 'GET', { params: { customer: 'pools' } })
   assert.equal(home.status, 200)
   assert.match(home.text, /Clear water, every week\./, 'v1 home is live again')

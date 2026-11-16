@@ -201,7 +201,7 @@ registerCapability({
   dependsOn: ['website.hosting'],
   // Every eligible business (server/website-studio.js); hidden until its tables exist. Publishing is a separate switch.
   state: async (env) => {
-    const publishing = studioPublishAllowed(env) ? 'AI publishing ON' : 'AI publishing off (WEBSITE_STUDIO_PUBLISH unset)'
+    const publishing = studioPublishAllowed(env) ? 'publishing on for every eligible business' : 'publishing PAUSED (WEBSITE_STUDIO_PUBLISH=false)'
     if (!studioEnabled(env)) return { mode: 'disabled', note: `Switched off (WEBSITE_STUDIO_ENABLED=false); ${publishing}` }
     const ready = await studioSchemaReady(env.ONBOARDING_DB).catch(() => false)
     return ready ? { mode: 'live', note: `Every eligible business; ${publishing}` } : { mode: 'missing', note: `Hidden until migrations 0021–0023 are applied; ${publishing}`, approval: 'Production migrations 0021–0023' }

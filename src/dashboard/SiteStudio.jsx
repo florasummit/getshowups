@@ -27,7 +27,7 @@ const writeBackup = (v) => {
 }
 const REMOVED = { claim: 'a claim we can’t verify (for example a rating or guarantee) was left out', too_long: 'a text was shortened to fit', link: 'a link outside your website was changed to “Book”', image: 'a photo that isn’t yours was removed', invented_number: 'a number that isn’t in your details was left out' }
 
-export default function SiteStudio({ website, assets: initialAssets, brand, visit, checkpoints = [], onSaved }) {
+export default function SiteStudio({ website, assets: initialAssets, brand, visit, checkpoints = [], onSaved, onUnsaved }) {
   const [content, setContent] = useState(() => clone(website.draft))
   const [base, setBase] = useState(website.updatedAt ?? null)
   const [past, setPast] = useState([])
@@ -144,6 +144,10 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     const t = setTimeout(() => saveNow(), [2000, 5000, 10000][attempt.current - 1] || 10000)
     return () => clearTimeout(t)
   }, [save, saveNow])
+  // Tell the dashboard while edits aren't server-confirmed yet (it holds Publish until they are).
+  useEffect(() => {
+    onUnsaved?.(save.state !== 'saved')
+  }, [save.state, onUnsaved])
   // The dashboard got a newer draft from this same tab (publish, restore): with no unsaved edits, follow it, so the next
   // save doesn't report a conflict with ourselves. With unsaved edits, the save's conflict check decides.
   useEffect(() => {
