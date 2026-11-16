@@ -63,11 +63,16 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     [brand, visit, content.services, content.area, content.about, photoAssets],
   )
 
-  // One edit = one undo step (up to 50). `fn` changes a deep copy of the current content.
-  const change = (fn) => {
+  // One edit = one undo step (up to 50). `fn` changes a deep copy of the current content. `merge`: typing in the same
+  // place within a couple of seconds stays one step (a word typed is undone at once, not letter by letter).
+  const lastMerge = useRef({ key: null, at: 0 })
+  const change = (fn, { merge = null } = {}) => {
     const next = clone(content)
     fn(next)
-    setPast((p) => [...p.slice(-49), content])
+    const now = Date.now()
+    const same = merge && lastMerge.current.key === merge && now - lastMerge.current.at < 2000
+    lastMerge.current = { key: merge, at: now }
+    if (!same) setPast((p) => [...p.slice(-49), content])
     setFuture([])
     dirty.current = true
     setContent(next)
@@ -89,8 +94,12 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   const editPage = (fn) => change((c) => fn(c.site.pages[pageIndex], c))
   const editSection = (fn) => change((c) => fn(c.site.pages[pageIndex].sections[sectionIndex], c))
 
-  // Live preview of the unsaved content (validated and rendered by the server; nothing stored).
+  // Live preview of the unsaved content (validated and rendered by the server; nothing stored). While the owner types
+  // directly in the page the preview isn't replaced (it would lose their cursor); it refreshes when they finish.
+  const typing = useRef(null)
+  const [tick, setTick] = useState(0)
   useEffect(() => {
+    if (typing.current) return
     const t = setTimeout(async () => {
       const { status, data } = await api('/api/dashboard/website/preview', { method: 'POST', body: { content, page: page.slug } })
       if (status === 200) {
@@ -99,7 +108,7 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
       }
     }, 250)
     return () => clearTimeout(t)
-  }, [content, page.slug])
+  }, [content, page.slug, tick])
 
   // Autosave: server-confirmed only; conflicts and failures are shown, never hidden; retried with backoff.
   const attempt = useRef(0)
@@ -165,32 +174,204 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     return () => window.removeEventListener('beforeunload', warn)
   }, [])
 
-  // Click-to-edit inside the preview (same-origin frame; the website itself runs no script).
+  // ---- Editing in the page itself ----
+  // The preview is a same-origin frame of the real website (which runs no script). This page makes its marked elements
+  // editable from outside: text in place (data-edit), buttons and photos with a small panel (data-btn / data-img), and
+  // sections with compact controls. "Preview" mode turns all of that off.
+  const [mode, setMode] = useState('edit')
+  const [hover, setHover] = useState(null) // { id, rect }
+  const [selRect, setSelRect] = useState(null)
+  const [pop, setPop] = useState(null) // { kind: 'btn'|'img', sid, path, rect }
+  const modeRef = useRef(mode)
+  const selectedRef = useRef(selected)
+  useEffect(() => {
+    modeRef.current = mode
+    selectedRef.current = selected
+  }, [mode, selected])
+  const stage = useRef(null)
+  const rectOf = (el) => {
+    const f = frame.current
+    if (!el || !f) return null
+    const r = el.getBoundingClientRect()
+    return { top: r.top + f.offsetTop, left: r.left + f.offsetLeft, width: r.width, height: r.height }
+  }
+  // Writes one edited value back into the draft: a section field (sid | dotted path) or a shared service (svc | id.field).
+  const write = (sid, path, value, merge) =>
+    change(
+      (c) => {
+        if (sid === 'svc') {
+          const [id, field] = path.split('.')
+          const svc = c.services.find((x) => x.id === id)
+          if (svc) svc[field] = value
+          return
+        }
+        const sec = c.site.pages[pageIndex].sections.find((x) => x.id === sid)
+        if (!sec) return
+        const keys = path.split('.')
+        let o = sec
+        for (const k of keys.slice(0, -1)) o = o?.[/^\d+$/.test(k) ? Number(k) : k]
+        if (o) o[keys.at(-1)] = value
+      },
+      { merge },
+    )
+  const readAt = (sid, path) => {
+    const sec = page.sections.find((x) => x.id === sid)
+    return path.split('.').reduce((o, k) => o?.[/^\d+$/.test(k) ? Number(k) : k], sec)
+  }
   const onFrameLoad = () => {
     const doc = frame.current?.contentDocument
     if (!doc) return
     const style = doc.createElement('style')
-    style.textContent = 'section[id],header.nav,footer.foot{cursor:pointer}section[id]:hover,header.nav:hover,footer.foot:hover{outline:2px dashed #2563eb;outline-offset:-2px}.ge-selected{outline:3px solid #2563eb!important;outline-offset:-3px}'
-    doc.head.appendChild(style)
-    if (selected) doc.getElementById(selected)?.classList.add('ge-selected')
+    style.id = 'ge-style'
+    style.textContent = `[data-edit]{cursor:text;border-radius:3px;transition:box-shadow .12s}[data-edit]:hover{box-shadow:0 0 0 2px rgba(99,102,241,.45)}[data-edit][contenteditable]{outline:none;box-shadow:0 0 0 2px rgba(99,102,241,.9);background:rgba(99,102,241,.04)}[data-btn],[data-img]{cursor:pointer}[data-img]:hover{outline:2px solid rgba(99,102,241,.6);outline-offset:-2px}[data-btn]:hover{box-shadow:0 0 0 3px rgba(99,102,241,.45)}section[id]{scroll-margin-top:80px}`
+    if (modeRef.current === 'edit') doc.head.appendChild(style)
+    const sectionOf = (t) => t.closest?.('section[id]')
+    doc.addEventListener('mousemove', (e) => {
+      if (modeRef.current !== 'edit') return
+      const sec = sectionOf(e.target)
+      setHover(sec ? { id: sec.id, rect: rectOf(sec) } : null)
+    })
+    doc.addEventListener('mouseleave', () => setHover(null))
+    // Text: editable in place on the first press, so the cursor lands where the owner clicked.
+    doc.addEventListener('mousedown', (e) => {
+      if (modeRef.current !== 'edit') return
+      const el = e.target.closest('[data-edit]')
+      if (el && !el.isContentEditable) {
+        el.contentEditable = 'plaintext-only'
+        if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true'
+        el.spellcheck = true
+      }
+    })
     doc.addEventListener('click', (e) => {
       const a = e.target.closest('a')
       const pageLink = a?.getAttribute('href')?.match(/^#page=([a-z0-9-]*)$/)
-      e.preventDefault()
+      if (modeRef.current !== 'edit' || !e.target.closest('[data-edit]')) e.preventDefault()
       if (pageLink && a.closest('header.nav')) {
         setSlug(pageLink[1])
         setSelected(null)
+        setPop(null)
         return
       }
-      const host = e.target.closest('section[id]')
-      const id = e.target.closest('header.nav') ? 'nav' : e.target.closest('footer.foot') ? 'footer' : host?.id
-      if (!id) return
-      const t = e.target
-      setFocus(t.closest('.btn') ? 'button' : t.closest('img') ? 'image' : t.closest('h1,h2,h3') ? 'heading' : t.closest('.eyebrow') ? 'eyebrow' : 'text')
-      setSelected(id)
-      setTab(id === 'nav' ? 'page' : id === 'footer' ? 'site' : 'section')
+      if (modeRef.current !== 'edit') return
+      const sec = sectionOf(e.target)
+      const btn = e.target.closest('[data-btn]')
+      const img = e.target.closest('[data-img]')
+      if (btn || img) {
+        const [sid, path] = (btn || img).getAttribute(btn ? 'data-btn' : 'data-img').split('|')
+        setPop({ kind: btn ? 'btn' : 'img', sid, path, rect: rectOf(btn || img) })
+      } else if (!e.target.closest('[data-edit]')) setPop(null)
+      if (e.target.closest('footer.foot')) {
+        setSelected(null)
+        setTab('site')
+        return
+      }
+      if (sec) {
+        setSelected(sec.id)
+        setSelRect(rectOf(sec))
+        if (!e.target.closest('[data-edit],[data-btn],[data-img]')) {
+          setFocus(null)
+          setTab('section')
+        }
+      }
+    })
+    doc.addEventListener('input', (e) => {
+      const el = e.target.closest?.('[data-edit]')
+      if (!el) return
+      typing.current = el
+      const [sid, path] = el.getAttribute('data-edit').split('|')
+      const multi = /(^|\.)(body|text|answer)$/.test(path) && sid !== 'svc'
+      const value = multi ? el.innerText.replace(/\n{3,}/g, '\n\n').trim() : el.innerText.replace(/\s+/g, ' ').trim()
+      write(sid, path, value, `${sid}|${path}`)
+    })
+    doc.addEventListener('keydown', (e) => {
+      const el = e.target.closest?.('[data-edit]')
+      if (!el) return
+      const multi = /(^|\.)(body|text|answer)$/.test(el.getAttribute('data-edit')) && !el.getAttribute('data-edit').startsWith('svc|')
+      if (e.key === 'Escape' || (e.key === 'Enter' && !multi)) {
+        e.preventDefault()
+        el.blur()
+      }
+    })
+    doc.addEventListener('focusout', (e) => {
+      const el = e.target.closest?.('[data-edit]')
+      if (!el) return
+      el.removeAttribute('contenteditable')
+      typing.current = null
+      setTick((n) => n + 1)
     })
     doc.addEventListener('submit', (e) => e.preventDefault())
+    const follow = () => {
+      setHover(null)
+      setPop(null)
+      const sel = selectedRef.current && doc.getElementById(selectedRef.current)
+      setSelRect(sel ? rectOf(sel) : null)
+    }
+    frame.current.contentWindow.addEventListener('scroll', follow, { passive: true })
+    const sel = selected && doc.getElementById(selected)
+    setSelRect(sel ? rectOf(sel) : null)
+  }
+  // Leaving edit mode, changing page or device: nothing stays selected on screen.
+  useEffect(() => {
+    setHover(null)
+    setPop(null)
+    if (mode !== 'edit') setSelRect(null)
+  }, [mode, page.slug, device])
+
+  const sectionAt = (id) => page.sections.findIndex((x) => x.id === id)
+  const moveSection = (id, d) => editPage((p) => {
+    const i = p.sections.findIndex((x) => x.id === id)
+    const j = i + d
+    if (i < 0 || j < 0 || j >= p.sections.length || (pageIndex === 0 && (i === 0 || j === 0))) return
+    p.sections.splice(j, 0, p.sections.splice(i, 1)[0])
+  })
+  const toggleSection = (id) => editPage((p) => {
+    const x = p.sections.find((y) => y.id === id)
+    if (x.hidden) delete x.hidden
+    else x.hidden = true
+  })
+  const duplicateSection = (id) => change((c) => {
+    const p = c.site.pages[pageIndex]
+    const i = p.sections.findIndex((x) => x.id === id)
+    const copy = clone(p.sections[i])
+    copy.id = newId(copy.type, takenIds(c.site))
+    delete copy.hidden
+    p.sections.splice(i + 1, 0, copy)
+  })
+  const removeSection = (id) => {
+    if (!window.confirm('Remove this section? You can undo this.')) return
+    editPage((p) => p.sections.splice(p.sections.findIndex((x) => x.id === id), 1))
+    setSelected(null)
+    setSelRect(null)
+  }
+  const addSectionAfter = (id, type) => {
+    change((c) => {
+      const p = c.site.pages[pageIndex]
+      const s2 = sectionTemplate(type, biz, newId(type, takenIds(c.site)))
+      const at = id ? p.sections.findIndex((x) => x.id === id) + 1 : p.sections.length
+      p.sections.splice(at || p.sections.length, 0, s2)
+    })
+  }
+  const actionsFor = (id) => {
+    const i = sectionAt(id)
+    const s2 = page.sections[i]
+    if (!s2) return null
+    const opener = pageIndex === 0 && i === 0
+    return {
+      label: SECTION_LABEL[s2.type],
+      hidden: Boolean(s2.hidden),
+      canUp: !opener && i > (pageIndex === 0 ? 1 : 0),
+      canDown: !opener && i < page.sections.length - 1,
+      canHide: !opener,
+      canDuplicate: !['hero', 'composition'].includes(s2.type),
+      canRemove: !opener,
+      onUp: () => moveSection(id, -1),
+      onDown: () => moveSection(id, 1),
+      onToggle: () => toggleSection(id),
+      onDuplicate: () => duplicateSection(id),
+      onRemove: () => removeSection(id),
+      onSettings: () => (setSelected(id), setTab('section')),
+      onAdd: (type) => addSectionAfter(id, type),
+    }
   }
 
   // Bring back an earlier server copy of the draft (the current draft is kept as a copy first, so this can be undone).
@@ -218,49 +399,74 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     setSave({ state: 'saved' })
   }
 
+  const hoverActions = mode === 'edit' && hover && hover.id !== selected ? actionsFor(hover.id) : null
+  const selActions = mode === 'edit' && selected && selRect ? actionsFor(selected) : null
+  const popValue = pop ? readAt(pop.sid, pop.path) : null
+
   return (
-    <section className="card studio" aria-label="Website Studio editor">
+    <section className="studio" aria-label="Website Studio editor">
       <div className="studio-bar">
         <label className="studio-page">
           <span className="sr-only">Page</span>
-          <select value={page.slug} onChange={(e) => (setSlug(e.target.value), setSelected(null))}>
+          <select
+            value={page.slug}
+            onChange={(e) => {
+              if (e.target.value === '__add') {
+                setMode('edit')
+                setTab('page')
+                setTimeout(() => document.getElementById('studio-add-page')?.focus(), 50)
+                return
+              }
+              setSlug(e.target.value)
+              setSelected(null)
+            }}
+          >
             {site.pages.map((p) => (
               <option key={p.slug} value={p.slug}>
                 {p.navLabel}
               </option>
             ))}
+            {site.pages.length < 10 && <option value="__add">+ Add a page…</option>}
           </select>
         </label>
-        <div className="segmented" role="group" aria-label="Preview size">
+        <div className="segmented segmented--sm" role="group" aria-label="Mode">
+          <button type="button" aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}>
+            Edit
+          </button>
+          <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>
+            Preview
+          </button>
+        </div>
+        <div className="segmented segmented--sm" role="group" aria-label="Preview size">
           {['desktop', 'phone'].map((d) => (
             <button key={d} type="button" aria-pressed={device === d} onClick={() => setDevice(d)}>
-              {d === 'phone' ? 'Phone' : 'Computer'}
+              {d === 'phone' ? 'Phone' : 'Desktop'}
             </button>
           ))}
         </div>
         <div className="studio-history">
-          <button type="button" className="btn btn-quiet btn-sm" onClick={undo} disabled={!past.length}>
-            Undo
+          <button type="button" className="studio-icon-btn" onClick={undo} disabled={!past.length} title="Undo" aria-label="Undo">
+            <Ico d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /> Undo
           </button>
-          <button type="button" className="btn btn-quiet btn-sm" onClick={redo} disabled={!future.length}>
-            Redo
+          <button type="button" className="studio-icon-btn" onClick={redo} disabled={!future.length} title="Redo" aria-label="Redo">
+            <Ico d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /> Redo
           </button>
         </div>
         <SaveState save={save} onRetry={() => saveNow()} />
       </div>
       {restore && (
-        <div className="notice" role="alert">
-          <p>You have changes from your last visit that weren’t saved.</p>
+        <div className="studio-notice" role="alert">
+          <span>You have unsaved changes from your last visit.</span>
           <button
             type="button"
-            className="btn btn-sm"
+            className="link-btn"
             onClick={() => {
               change((c) => Object.assign(c, clone(restore.content)))
               setRestore(null)
             }}
           >
             Restore them
-          </button>{' '}
+          </button>
           <button
             type="button"
             className="link-btn"
@@ -274,68 +480,241 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
         </div>
       )}
       {save.state === 'conflict' && (
-        <div className="notice" role="alert">
-          <p>This website was changed somewhere else (another window or the AI designer) after you started editing.</p>
-          <button type="button" className="btn btn-sm" onClick={conflictLoadLatest}>
+        <div className="studio-notice studio-notice--warn" role="alert">
+          <span>This website was changed in another window or by the AI designer.</span>
+          <button type="button" className="link-btn" onClick={conflictLoadLatest}>
             Load the latest version
-          </button>{' '}
+          </button>
           <button type="button" className="link-btn" onClick={conflictKeepMine}>
             Keep my version
           </button>
         </div>
       )}
       {removed.length > 0 && (
-        <p className="fine studio-removed" role="status">
-          Our checks adjusted this page: {[...new Set(removed.map((r) => REMOVED[r.reason]).filter(Boolean))].join('; ')}.
+        <p className="studio-notice" role="status">
+          Adjusted by our checks: {[...new Set(removed.map((r) => REMOVED[r.reason]).filter(Boolean))].join('; ')}.
         </p>
       )}
-      <div className="studio-grid">
-        <div className={`studio-preview studio-preview--${device}`}>
-          {html ? <iframe ref={frame} title="Editable website preview" srcDoc={html} sandbox="allow-same-origin" onLoad={onFrameLoad} /> : <p className="fine">Loading preview…</p>}
-          <p className="fine">Click anything on the page to edit it. Hidden sections are shown faded here and left out of your website.</p>
-        </div>
-        <div className="studio-panel">
-          <div className="segmented segmented--wide" role="tablist" aria-label="Edit">
-            {[
-              ['section', 'Section'],
-              ['page', 'Page'],
-              ['site', 'Look'],
-              ['photos', 'Photos'],
-              ['history', 'History'],
-            ].map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} aria-pressed={tab === k} onClick={() => setTab(k)}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {tab === 'section' &&
-            (section ? (
-              <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
-            ) : (
-              <p className="fine">Click a section in the preview, or choose one under Page.</p>
-            ))}
-          {tab === 'page' && <PageEditor site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s) => (setSlug(s), setSelected(null))} />}
-          {tab === 'site' && <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />}
-          {tab === 'photos' && (
-            <PhotosPanel
-              assets={assets}
-              variants={content.variants}
-              onAdded={(list) => {
-                setAssets((l) => [...list.filter((x) => !x.existing).map((x) => x.asset), ...l, ...list.filter((x) => x.small).map((x) => x.small)])
-                const pairs = list.filter((x) => x.small).map((x) => [x.asset.id, x.small.id])
-                if (pairs.length) change((c) => (c.variants = { ...(c.variants || {}), ...Object.fromEntries(pairs) }))
-              }}
-              onRemoved={(id) => setAssets((l) => l.filter((x) => x.id !== id))}
-              onReload={async () => {
-                const { status, data } = await api('/api/dashboard/website/assets')
-                if (status === 200) setAssets(data.assets)
-              }}
-            />
+      <div className={`studio-grid${mode === 'preview' ? ' studio-grid--preview' : ''}`}>
+        <div className={`studio-stage studio-preview--${device}`} ref={stage}>
+          {html ? <iframe ref={frame} key={mode} title="Editable website preview" srcDoc={html} sandbox="allow-same-origin" onLoad={onFrameLoad} /> : <div className="studio-loading">Loading your website…</div>}
+          {hoverActions && hover.rect && <div className="studio-outline studio-outline--hover" style={clip(hover.rect, frame.current)} />}
+          {hoverActions && hover.rect && <SectionBar rect={hover.rect} actions={hoverActions} subtle />}
+          {selActions && <div className="studio-outline" style={clip(selRect, frame.current)} />}
+          {selActions && <SectionBar rect={selRect} actions={selActions} />}
+          {pop && pop.rect && (
+            <Popover rect={pop.rect} stage={stage} tall={pop.kind === 'img'} onClose={() => setPop(null)}>
+              {pop.kind === 'btn' ? (
+                <ButtonFields
+                  title="Button"
+                  cta={popValue && (popValue.label !== undefined ? { label: popValue.label, target: popValue.target } : null)}
+                  site={site}
+                  page={page}
+                  autoFocus
+                  onChange={(c) => change((x) => {
+                    const sec = x.site.pages[pageIndex].sections.find((y) => y.id === pop.sid)
+                    const keys = pop.path.split('.')
+                    let o = sec
+                    for (const k of keys.slice(0, -1)) o = o[/^\d+$/.test(k) ? Number(k) : k]
+                    const last = keys.at(-1)
+                    if (c === null) delete o[last]
+                    else if (/^\d+$/.test(last)) Object.assign(o[Number(last)], c)
+                    else o[last] = c
+                  }, { merge: `btn|${pop.sid}|${pop.path}` })}
+                />
+              ) : (
+                <PhotoPop sid={pop.sid} path={pop.path} section={page.sections.find((x) => x.id === pop.sid)} assets={photoAssets} change={(fn) => editPage((p) => fn(p.sections.find((x) => x.id === pop.sid)))} onMore={() => setTab('photos')} />
+              )}
+            </Popover>
           )}
-          {tab === 'history' && <HistoryPanel checkpoints={checkpoints} busy={save.state !== 'saved'} onRestore={restoreVersion} />}
         </div>
+        {mode === 'edit' && (
+          <aside className="studio-panel" aria-label="Edit panel">
+            <div className="studio-tabs" role="tablist" aria-label="Edit">
+              {[
+                ...(section ? [['section', SECTION_LABEL[section.type]]] : []),
+                ['page', 'Sections'],
+                ['site', 'Style'],
+                ['photos', 'Photos'],
+                ['history', 'History'],
+              ].map(([k, label]) => (
+                <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {tab === 'section' &&
+              (section ? (
+                <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
+              ) : (
+                <p className="studio-empty">Click any part of your website to edit it.</p>
+              ))}
+            {tab === 'page' && <PageEditor site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} actionsFor={actionsFor} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s2) => (setSlug(s2), setSelected(null))} onAdd={(type) => addSectionAfter(selected, type)} />}
+            {tab === 'site' && <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />}
+            {tab === 'photos' && (
+              <PhotosPanel
+                assets={assets}
+                variants={content.variants}
+                onAdded={(list) => {
+                  setAssets((l) => [...list.filter((x) => !x.existing).map((x) => x.asset), ...l, ...list.filter((x) => x.small).map((x) => x.small)])
+                  const pairs = list.filter((x) => x.small).map((x) => [x.asset.id, x.small.id])
+                  if (pairs.length) change((c) => (c.variants = { ...(c.variants || {}), ...Object.fromEntries(pairs) }))
+                }}
+                onRemoved={(id) => setAssets((l) => l.filter((x) => x.id !== id))}
+                onReload={async () => {
+                  const { status, data } = await api('/api/dashboard/website/assets')
+                  if (status === 200) setAssets(data.assets)
+                }}
+              />
+            )}
+            {tab === 'history' && <HistoryPanel checkpoints={checkpoints} busy={save.state !== 'saved'} onRestore={restoreVersion} />}
+          </aside>
+        )}
       </div>
     </section>
+  )
+}
+
+// An outline over a section, kept inside the visible preview.
+const clip = (r, f) => {
+  if (!f) return {}
+  const top = Math.max(r.top, f.offsetTop)
+  const bottom = Math.min(r.top + r.height, f.offsetTop + f.offsetHeight)
+  return { top, left: r.left, width: r.width, height: Math.max(0, bottom - top) }
+}
+
+// Compact controls for one section, shown over it on hover (subtle) or when selected: name, move up/down, and a menu.
+const Ico = ({ d }) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={d} />
+  </svg>
+)
+
+function SectionBar({ rect, actions: a, subtle = false }) {
+  const top = Math.max(rect.top + 8, 20)
+  return (
+    <div className={`studio-sbar${subtle ? ' studio-sbar--hover' : ''}`} style={{ top, left: rect.left + rect.width - 8 }} role="toolbar" aria-label={`${a.label} section`}>
+      <button type="button" className="studio-sbar-name" onClick={a.onSettings} title={`${a.label} settings`}>
+        {a.label}
+        {a.hidden ? ' · hidden' : ''}
+      </button>
+      <button type="button" className="studio-sbar-btn" onClick={a.onUp} disabled={!a.canUp} title="Move up" aria-label={`Move ${a.label} up`}>
+        ↑
+      </button>
+      <button type="button" className="studio-sbar-btn" onClick={a.onDown} disabled={!a.canDown} title="Move down" aria-label={`Move ${a.label} down`}>
+        ↓
+      </button>
+      <SectionMenu actions={a} />
+    </div>
+  )
+}
+
+// The ⋯ menu for a section: settings, add below, duplicate, hide/show, remove (asks first). Escape closes it.
+function SectionMenu({ actions: a }) {
+  const [open, setOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const wrap = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => !wrap.current?.contains(e.target) && setOpen(false)
+    const esc = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => (document.removeEventListener('mousedown', away), document.removeEventListener('keydown', esc))
+  }, [open])
+  const pick = (fn) => () => (fn(), setOpen(false))
+  return (
+    <span className="studio-menu-wrap" ref={wrap}>
+      <button type="button" className="studio-sbar-btn" aria-haspopup="menu" aria-expanded={open} title="More" aria-label={`More for ${a.label}`} onClick={() => (setOpen(!open), setAdding(false))}>
+        ⋯
+      </button>
+      {open && (
+        <div className="studio-menu" role="menu">
+          <button type="button" role="menuitem" onClick={pick(a.onSettings)}>
+            Section settings
+          </button>
+          <button type="button" role="menuitem" onClick={() => setAdding(!adding)} aria-expanded={adding}>
+            Add a section below
+          </button>
+          {adding && (
+            <div className="studio-submenu">
+              {ADDABLE.map((t) => (
+                <button key={t} type="button" role="menuitem" onClick={pick(() => a.onAdd(t))}>
+                  {SECTION_LABEL[t]}
+                </button>
+              ))}
+            </div>
+          )}
+          {a.canDuplicate && (
+            <button type="button" role="menuitem" onClick={pick(a.onDuplicate)}>
+              Duplicate
+            </button>
+          )}
+          {a.canHide && (
+            <button type="button" role="menuitem" onClick={pick(a.onToggle)}>
+              {a.hidden ? 'Show on website' : 'Hide from website'}
+            </button>
+          )}
+          {a.canRemove && (
+            <button type="button" role="menuitem" className="danger" onClick={pick(a.onRemove)}>
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
+// A small panel next to the clicked button or photo, inside the preview area.
+function Popover({ rect, stage, tall = false, onClose, children }) {
+  const w = 320
+  const h = tall ? 380 : 210 // matches .studio-pop max-height (photo) / a button's two fields
+  const box = stage.current?.getBoundingClientRect()
+  const left = Math.max(8, Math.min(rect.left, (box?.width || 800) - w - 8))
+  // Below what was clicked (so it stays visible), above only when there's no room below.
+  const below = rect.top + rect.height + 8
+  const room = box?.height || 900
+  // …and always inside the preview area, so it never covers the editing panel next to or below it.
+  const top = below + h <= room ? below : rect.top - 8 - h >= 8 ? rect.top - 8 - h : Math.max(8, room - h - 8)
+  const box2 = useRef(null)
+  // Escape or a click/tap anywhere outside the panel closes it (clicks inside the website preview are the frame's own).
+  useEffect(() => {
+    const k = (e) => e.key === 'Escape' && onClose()
+    const away = (e) => box2.current && !box2.current.contains(e.target) && onClose()
+    window.addEventListener('keydown', k)
+    document.addEventListener('pointerdown', away)
+    return () => (window.removeEventListener('keydown', k), document.removeEventListener('pointerdown', away))
+  }, [onClose])
+  return (
+    <div ref={box2} className="studio-pop" style={{ top, left, width: w }} role="dialog" aria-label="Edit">
+      <button type="button" className="studio-pop-close" onClick={onClose} aria-label="Close">
+        ×
+      </button>
+      {children}
+    </div>
+  )
+}
+
+// The clicked photo: choose another, frame it (focus point + shape), describe it.
+function PhotoPop({ path, section, assets, change, onMore }) {
+  const block = /^blocks\.\d+$/.test(path) ? Number(path.split('.')[1]) : null
+  const b = block !== null ? section?.blocks?.[block] : null
+  const value = b ? b.image : section?.image
+  return (
+    <ImageField
+      label="Photo"
+      value={value}
+      alt={b ? b.alt : section?.imageAlt}
+      assets={assets}
+      onChange={(v) => v && change((s2) => (b ? (s2.blocks[block].image = v) : (s2.image = v)))}
+      onAlt={(v) => change((s2) => (b ? (s2.blocks[block].alt = v) : (s2.imageAlt = v)))}
+      focus={b ? b.focus : section?.imageFocus}
+      aspect={b ? b.aspect : section?.imageAspect}
+      onFocus={(v) => change((s2) => (b ? (s2.blocks[block].focus = v) : (s2.imageFocus = v)))}
+      onAspect={(v) => change((s2) => (b ? (s2.blocks[block].aspect = v) : (s2.imageAspect = v)))}
+      onMore={onMore}
+    />
   )
 }
 
@@ -367,11 +746,11 @@ function Text({ label, value, onChange, max, area = false, autoFocus = false, hi
     </label>
   )
 }
-function Choice({ label, value, options, onChange }) {
+function Choice({ id, label, value, options, onChange }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map(([v, l]) => (
           <option key={v} value={v}>
             {l}
@@ -588,55 +967,53 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
 }
 
 // ---------- page ----------
-function PageEditor({ site, page, pageIndex, selected, biz, onSelect, onPage, onSite, onGo }) {
+function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect, onPage, onSite, onGo, onAdd }) {
   const [adding, setAdding] = useState('')
   const [newPage, setNewPage] = useState('')
   const [service, setService] = useState('')
-  const move = (i, d) => onPage((p) => p.sections.splice(i + d, 0, p.sections.splice(i, 1)[0]))
+  const [drag, setDrag] = useState(null)
+  // Drag a row onto another to move it there (the first screen of the home page stays first).
+  const dropOn = (to) => {
+    const from = drag
+    setDrag(null)
+    if (from === null || from === to || (pageIndex === 0 && (from === 0 || to === 0))) return
+    onPage((p) => p.sections.splice(to, 0, p.sections.splice(from, 1)[0]))
+  }
   return (
     <div className="studio-page-panel">
-      <h3>Sections on {page.navLabel}</h3>
+      <h3>Sections</h3>
       <ol className="studio-sections">
-        {page.sections.map((s, i) => (
-          <li key={s.id} className={s.id === selected ? 'is-selected' : ''}>
-            <button type="button" className="studio-section-name" onClick={() => onSelect(s.id)}>
-              {SECTION_LABEL[s.type]}
-              {s.heading ? `: ${s.heading.slice(0, 40)}` : ''}
-              {s.hidden ? ' (hidden)' : ''}
-            </button>
-            <span className="studio-section-actions">
-              <button type="button" className="link-btn" disabled={i === 0 || (pageIndex === 0 && i === 1)} onClick={() => move(i, -1)} aria-label={`Move ${SECTION_LABEL[s.type]} up`}>
-                Up
+        {page.sections.map((s, i) => {
+          const a = actionsFor(s.id)
+          return (
+            <li
+              key={s.id}
+              className={`${s.id === selected ? 'is-selected' : ''}${s.hidden ? ' is-hidden' : ''}${drag === i ? ' is-dragging' : ''}`}
+              draggable={a.canUp || a.canDown}
+              onDragStart={() => setDrag(i)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => dropOn(i)}
+              onDragEnd={() => setDrag(null)}
+            >
+              <span className="studio-grip" aria-hidden="true" title="Drag to reorder">
+                ⠿
+              </span>
+              <button type="button" className="studio-section-name" onClick={() => onSelect(s.id)}>
+                <span>{a.label}</span>
+                {s.hidden && <span className="studio-tag">Hidden</span>}
               </button>
-              <button type="button" className="link-btn" disabled={i === page.sections.length - 1 || (pageIndex === 0 && i === 0)} onClick={() => move(i, 1)} aria-label={`Move ${SECTION_LABEL[s.type]} down`}>
-                Down
-              </button>
-              {!(pageIndex === 0 && i === 0) && (
-                <button type="button" className="link-btn" onClick={() => onPage((p) => (p.sections[i].hidden ? delete p.sections[i].hidden : (p.sections[i].hidden = true)))}>
-                  {s.hidden ? 'Show' : 'Hide'}
+              <span className="studio-row-actions">
+                <button type="button" className="studio-sbar-btn" disabled={!a.canUp} onClick={a.onUp} title="Move up" aria-label={`Move ${a.label} up`}>
+                  ↑
                 </button>
-              )}
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() =>
-                  onSite((st) => {
-                    const copy = clone(st.pages[pageIndex].sections[i])
-                    copy.id = newId(copy.type, takenIds(st))
-                    st.pages[pageIndex].sections.splice(i + 1, 0, copy)
-                  })
-                }
-              >
-                Duplicate
-              </button>
-              {!(pageIndex === 0 && i === 0) && (
-                <button type="button" className="link-btn" onClick={() => window.confirm('Remove this section? You can undo this.') && onPage((p) => p.sections.splice(i, 1))}>
-                  Remove
+                <button type="button" className="studio-sbar-btn" disabled={!a.canDown} onClick={a.onDown} title="Move down" aria-label={`Move ${a.label} down`}>
+                  ↓
                 </button>
-              )}
-            </span>
-          </li>
-        ))}
+                <SectionMenu actions={a} />
+              </span>
+            </li>
+          )
+        })}
       </ol>
       <div className="studio-add">
         <Choice label="Add a section" value={adding} options={[['', 'Choose…'], ...ADDABLE.map((t) => [t, SECTION_LABEL[t]])]} onChange={setAdding} />
@@ -645,15 +1022,11 @@ function PageEditor({ site, page, pageIndex, selected, biz, onSelect, onPage, on
           className="btn btn-sm"
           disabled={!adding}
           onClick={() => {
-            onSite((st) => {
-              const s = sectionTemplate(adding, biz, newId(adding, takenIds(st)))
-              const at = selected ? st.pages[pageIndex].sections.findIndex((x) => x.id === selected) + 1 : st.pages[pageIndex].sections.length
-              st.pages[pageIndex].sections.splice(at || st.pages[pageIndex].sections.length, 0, s)
-            })
+            onAdd(adding)
             setAdding('')
           }}
         >
-          Add section
+          Add
         </button>
       </div>
 
@@ -696,7 +1069,7 @@ function PageEditor({ site, page, pageIndex, selected, biz, onSelect, onPage, on
       </ol>
       {site.pages.length < 10 && (
         <div className="studio-add">
-          <Choice label="Add a page" value={newPage} options={[['', 'Choose…'], ...PAGE_TYPES]} onChange={setNewPage} />
+          <Choice id="studio-add-page" label="Add a page" value={newPage} options={[['', 'Choose…'], ...PAGE_TYPES]} onChange={setNewPage} />
           {newPage === 'service' && <Choice label="Which service" value={service} options={[['', 'Choose…'], ...biz.services.map((s) => [s.id, s.name])]} onChange={setService} />}
           <button
             type="button"

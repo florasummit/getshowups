@@ -9,7 +9,7 @@ test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const tokenFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_SESSION_TOKEN : fixtures.E2E_EDITOR_SESSION_TOKEN)
 const customerFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_CUSTOMER : fixtures.E2E_EDITOR_CUSTOMER)
 
-test('owner edits the AI-designed website without AI: click to edit, undo/redo, services, sections, pages, look; autosave survives a reload @mobile', async ({ page, context }, info) => {
+test('owner edits the website on the website itself: text in place, button panel, section controls, colours, pages, preview mode; autosave survives a reload; publish, republish, restore @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
   const aiCalls = []
   page.on('request', (r) => /\/api\/dashboard\/website\/designer|\/api\/dashboard\/website$/.test(new URL(r.url()).pathname) && r.method() === 'POST' && /"action":"(generate|revise|message|different)"/.test(r.postData() || '') && aiCalls.push(r.url()))
@@ -21,64 +21,117 @@ test('owner edits the AI-designed website without AI: click to edit, undo/redo, 
   const pageSelect = studio.getByRole('combobox', { name: 'Page', exact: true })
   await expect(h1).toHaveText('Clear water, every week.')
 
-  // Click the headline in the preview → its field opens focused; typing updates the preview and autosaves.
+  // Click the headline ON the website and type: it changes in place (no form), autosaves, and undo/redo work.
   await h1.click()
-  const heading = studio.getByRole('textbox', { name: /^Heading/ }).first()
-  await expect(heading).toBeFocused()
-  await heading.fill('Pools, handled with care')
+  await expect(h1).toHaveAttribute('contenteditable', /true|plaintext-only/)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('Pools, handled with care')
+  await page.keyboard.press('Enter')
   await expect(h1).toHaveText('Pools, handled with care')
+  await expect(h1).not.toHaveAttribute('contenteditable', /.+/)
   await expect(saved).toBeVisible()
   await studio.getByRole('button', { name: 'Undo' }).click()
   await expect(h1).toHaveText('Clear water, every week.')
   await studio.getByRole('button', { name: 'Redo' }).click()
   await expect(h1).toHaveText('Pools, handled with care')
 
-  // A service price and its description on the page.
-  await frame.getByRole('heading', { name: 'Services', exact: true }).click()
-  await studio.getByRole('textbox', { name: /^Price/ }).first().fill('$300+')
-  await studio.getByRole('textbox', { name: /^Description on this page/ }).first().fill('Every week: skim, brush, balance.')
+  // A button: click it on the website → a small panel with its text and where it goes.
+  // (After an edit the preview refreshes; a click that lands during that refresh is retried, as a person would.)
+  const pop = studio.getByRole('dialog', { name: 'Edit' })
+  await expect(saved).toBeVisible()
+  await expect(async () => {
+    await frame.getByRole('link', { name: 'Book a visit' }).first().click()
+    await expect(pop).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
+  await pop.getByRole('textbox', { name: /^Text/ }).fill('Book a pool visit')
+  await pop.getByLabel('Goes to').selectOption({ label: 'Section: Services' })
+  await expect(frame.getByRole('link', { name: 'Book a pool visit' })).toHaveAttribute('href', '#services')
+  await page.keyboard.press('Escape')
+  await expect(pop).toHaveCount(0)
+
+  // A service price and description, typed directly on the website.
+  const price = frame.getByText('$280+')
+  await expect(saved).toBeVisible()
+  await expect(async () => {
+    await price.click()
+    await expect(price).toHaveAttribute('contenteditable', /true|plaintext-only/, { timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('$300+')
+  await page.keyboard.press('Enter')
   await expect(frame.getByText('$300+')).toBeVisible()
-  await expect(frame.getByText('Every week: skim, brush, balance.')).toBeVisible()
 
-  // Sections: add questions, hide them (faded in the editor only), move, duplicate.
-  await studio.getByRole('tab', { name: 'Page' }).click()
+  // Sections: compact controls on the selected section (name · ↑ ↓ · ⋯); add, hide/show, duplicate, move.
+  await studio.getByRole('tab', { name: 'Sections' }).click()
   await studio.getByLabel('Add a section').selectOption('faq')
-  await studio.getByRole('button', { name: 'Add section' }).click()
+  await studio.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(frame.getByRole('heading', { name: 'Questions', exact: true })).toBeVisible()
-  const faqRow = studio.locator('.studio-sections li', { hasText: 'Questions: Questions' })
-  await faqRow.getByRole('button', { name: 'Hide' }).click()
+  const faqRow = studio.locator('.studio-sections li', { hasText: 'FAQ' })
+  await faqRow.getByRole('button', { name: 'More for FAQ' }).click()
+  await studio.getByRole('menuitem', { name: 'Hide from website' }).click()
   await expect(frame.locator('.ge-hidden')).toHaveCount(1)
-  await expect(frame.getByText('Hidden · not on your website')).toBeVisible()
-  await studio.locator('.studio-sections li', { hasText: 'Booking banner' }).first().getByRole('button', { name: 'Duplicate' }).click()
-  await expect(studio.locator('.studio-sections li', { hasText: 'Booking banner' })).toHaveCount(2)
-  await studio.locator('.studio-sections li', { hasText: 'Booking banner' }).last().getByRole('button', { name: /Move Booking banner up/ }).click()
+  await expect(faqRow.getByText('Hidden')).toBeVisible()
+  await faqRow.getByRole('button', { name: 'More for FAQ' }).click()
+  await studio.getByRole('menuitem', { name: 'Show on website' }).click()
+  await expect(frame.locator('.ge-hidden')).toHaveCount(0)
+  await faqRow.getByRole('button', { name: 'More for FAQ' }).click()
+  await studio.getByRole('menuitem', { name: 'Hide from website' }).click()
+  // On the website itself: select the booking section → its bar → duplicate, then move the copy up.
+  const bar = studio.getByRole('toolbar', { name: 'Booking section' })
+  await expect(async () => {
+    await frame.locator('#book-home').click({ position: { x: 30, y: 30 } })
+    await expect(bar).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
+  await bar.getByRole('button', { name: 'More for Booking' }).click()
+  await studio.getByRole('menuitem', { name: 'Duplicate' }).click()
+  await studio.getByRole('tab', { name: 'Sections' }).click()
+  await expect(studio.locator('.studio-sections li', { hasText: 'Booking' })).toHaveCount(2)
+  const order = async () => (await studio.locator('.studio-sections li .studio-section-name > span:first-child').allTextContents()).join(',')
+  const copyUp = studio.locator('.studio-sections li').nth(4).getByRole('button', { name: 'Move Booking up' })
+  await copyUp.click()
+  await studio.locator('.studio-sections li').nth(3).getByRole('button', { name: 'Move Booking up' }).click()
+  await expect.poll(order).toBe('Hero,Services,Booking,FAQ,Booking')
 
-  // Pages: add a Contact page with a contact form; set its Google title.
-  await studio.getByLabel('Add a page').selectOption('contact')
+  // Colours: the brand colour changes the website.
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await studio.getByLabel('Brand colour').fill('#7c3aed')
+  await expect.poll(async () => (await frame.locator('style').allTextContents()).join('').includes('#7c3aed')).toBe(true)
+
+  // Pages: "+ Add a page…" in the page menu → add a Contact page with a contact form; set its Google title.
+  await pageSelect.selectOption('__add')
+  await studio.getByRole('combobox', { name: 'Add a page', exact: true }).selectOption('contact')
   await studio.getByRole('button', { name: 'Add page' }).click()
   await expect(pageSelect).toHaveValue('contact')
   await expect(frame.getByRole('button', { name: 'Send message' })).toBeVisible()
   await expect(frame.getByLabel('Your name')).toBeVisible()
   await studio.getByRole('textbox', { name: /^Title in Google/ }).fill('Contact Editor Pools')
 
-  // Look: approved fonts and button style; desktop / phone preview.
-  await studio.getByRole('tab', { name: 'Look' }).click()
+  // Look: approved fonts and button style; phone preview; Preview mode shows the website without editing outlines.
+  await studio.getByRole('tab', { name: 'Style' }).click()
   await studio.getByLabel('Fonts').selectOption('fraunces|manrope')
   await studio.getByLabel('Buttons').selectOption('pill')
   await studio.getByRole('button', { name: 'Phone' }).click()
   await expect(studio.locator('.studio-preview--phone iframe')).toBeVisible()
+  await studio.getByRole('button', { name: 'Preview', exact: true }).click()
+  await expect(studio.getByRole('tab', { name: 'Style' })).toHaveCount(0)
+  await expect(frame.locator('#ge-style')).toHaveCount(0)
+  const anyHeading = frame.locator('[data-edit]').first()
+  await anyHeading.click()
+  await expect(anyHeading).not.toHaveAttribute('contenteditable', /.+/)
+  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(saved).toBeVisible()
 
   // Reload: everything came back from the server (not only shown).
   await page.reload()
   await expect(h1).toHaveText('Pools, handled with care')
   await expect(frame.getByText('$300+')).toBeVisible()
+  await expect(frame.getByRole('link', { name: 'Book a pool visit' })).toBeVisible()
   await expect(pageSelect.locator('option', { hasText: 'Contact' })).toHaveCount(1)
-  await studio.getByRole('tab', { name: 'Look' }).click()
+  await studio.getByRole('tab', { name: 'Style' }).click()
   await expect(studio.getByLabel('Fonts')).toHaveValue('fraunces|manrope')
   await expect(studio.getByLabel('Buttons')).toHaveValue('pill')
   await pageSelect.selectOption('contact')
-  await studio.getByRole('tab', { name: 'Page' }).click()
+  await studio.getByRole('tab', { name: 'Sections' }).click()
   await expect(studio.getByRole('textbox', { name: /^Title in Google/ })).toHaveValue('Contact Editor Pools')
   await pageSelect.selectOption('')
   await expect(frame.locator('.ge-hidden')).toHaveCount(1)
@@ -104,7 +157,9 @@ test('owner edits the AI-designed website without AI: click to edit, undo/redo, 
   expect(home).toMatch(/<link rel="canonical"/)
   expect(home).toMatch(/href="[^"]*\/book\//)
   await h1.click()
-  await studio.getByRole('textbox', { name: /^Heading/ }).first().fill('Pools, published twice')
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('Pools, published twice')
+  await page.keyboard.press('Enter')
   await page.waitForTimeout(1300)
   await publishNow()
   await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, published twice')).toBe(true)
@@ -119,12 +174,20 @@ test('keyboard: every editing action is reachable without the preview (section l
   await useSession(context, tokenFor(info))
   await page.goto('/dashboard/website')
   const studio = page.locator('section[aria-label="Website Studio editor"]')
-  await studio.getByRole('tab', { name: 'Page' }).focus()
+  await studio.getByRole('tab', { name: 'Sections' }).focus()
   await page.keyboard.press('Enter')
   const first = studio.locator('.studio-sections li').first().getByRole('button').first()
   await first.focus()
   await page.keyboard.press('Enter')
   await expect(studio.getByRole('textbox', { name: /^Heading/ }).first()).toBeVisible()
+  // Section actions by keyboard: the ⋯ menu opens with Enter, closes with Escape; arrows move sections.
+  await studio.getByRole('tab', { name: 'Sections' }).click()
+  const more = studio.locator('.studio-sections li').nth(1).getByRole('button', { name: /^More for / })
+  await more.focus()
+  await page.keyboard.press('Enter')
+  await expect(studio.getByRole('menuitem', { name: 'Hide from website' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(studio.getByRole('menu')).toHaveCount(0)
 })
 
 test('two tabs: a save from an older tab is refused with a clear choice, never silently overwriting the newer edit', async ({ browser }, info) => {
@@ -137,14 +200,16 @@ test('two tabs: a save from an older tab is refused with a clear choice, never s
   const edit = async (p, text) => {
     const studio = p.locator('section[aria-label="Website Studio editor"]')
     await p.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 }).click()
-    await studio.getByRole('textbox', { name: /^Heading/ }).first().fill(text)
+    await p.keyboard.press('ControlOrMeta+a')
+    await p.keyboard.type(text)
+    await p.keyboard.press('Enter')
     return studio
   }
   const sa = await edit(a, 'Saved first in tab A')
   await expect(sa.locator('[data-save="saved"]')).toBeVisible()
   const sb = await edit(b, 'Typed later in tab B')
   await expect(sb.locator('[data-save="conflict"]')).toBeVisible()
-  await expect(sb.getByText('This website was changed somewhere else')).toBeVisible()
+  await expect(sb.getByText('This website was changed in another window')).toBeVisible()
   await sb.getByRole('button', { name: 'Load the latest version' }).click()
   await expect(b.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 })).toHaveText('Saved first in tab A')
   await context.close()
@@ -169,8 +234,8 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   await saved()
 
   // Use it in the opening and frame it: square crop, focus point by keyboard.
-  await frame.getByRole('heading', { level: 1 }).click()
-  const photoGroup = studio.locator('fieldset', { has: page.getByText('Photo', { exact: true }) }).first()
+  await frame.locator('.hero-media').click()
+  const photoGroup = studio.getByRole('dialog', { name: 'Edit' })
   await photoGroup.locator('.studio-thumb').last().click()
   await photoGroup.getByLabel('Shape').selectOption('1x1')
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)

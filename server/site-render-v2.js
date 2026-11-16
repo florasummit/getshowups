@@ -103,9 +103,9 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 @media(max-width:820px){.nav ul{display:none}.nav .wrap{justify-content:space-between}.nav-center .wrap{grid-template-columns:1fr auto;padding-block:0}.nav-center .brand{grid-column:1;text-align:left}.nav-center .btn{grid-column:2}}
 .hero{position:relative}.h-auto{min-height:0}.h-tall{min-height:min(calc(85vh - 72px),760px);min-height:min(calc(85svh - 72px),760px)}.h-screen{min-height:calc(100vh - 72px);min-height:calc(100svh - 72px)}.hero .wrap{display:grid;align-items:center;gap:clamp(28px,5vw,72px)}.hero.h-tall,.hero.h-screen{display:flex;flex-direction:column;justify-content:center;padding-block:clamp(32px,6vh,var(--py))}
 .hero p.sub{font-size:${fs(0.6)};max-width:620px}.al-center .hero-copy p.sub{margin-inline:auto}
-.l-split .wrap{grid-template-columns:1.05fr .95fr}.l-split.side-left .hero-media{order:-1}.hero-media img{width:100%;height:100%;max-height:640px;object-fit:cover;border-radius:var(--r)}
+.l-split .wrap{grid-template-columns:1.05fr .95fr}.l-split.side-left .hero-media{order:-1}.hero-media img{width:100%;height:100%;max-height:min(560px,64vh);object-fit:cover;border-radius:var(--r)}
 .l-overlay{color:#fff}.l-overlay .hero-bg{position:absolute;inset:0}.l-overlay .hero-bg img{width:100%;height:100%;object-fit:cover}.l-overlay .hero-bg::after{content:"";position:absolute;inset:0;background:#000;opacity:var(--ov)}.l-overlay .wrap{position:relative}.l-overlay .eyebrow{color:#fff}
-.l-overlay .btn.ghost{color:#fff}.l-stacked .hero-media img{max-height:560px;margin-top:48px}.l-editorial h1{font-size:${fluid(6)};line-height:.98}.l-editorial .wrap{grid-template-columns:1fr}.l-editorial .hero-copy{display:grid;grid-template-columns:1.4fr 1fr;gap:48px;align-items:end}
+.l-overlay .btn.ghost{color:#fff}.l-stacked .hero-media img{max-height:min(480px,56vh);margin-top:40px}.l-editorial h1{font-size:${fluid(6)};line-height:.98}.l-editorial .wrap{grid-template-columns:1fr}.l-editorial .hero-copy{display:grid;grid-template-columns:1.4fr 1fr;gap:48px;align-items:end}
 .l-minimal .wrap{grid-template-columns:1fr}.l-mosaic .wrap{grid-template-columns:1fr 1fr}.mosaic{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mosaic img{width:100%;height:100%;aspect-ratio:3/4;object-fit:cover;border-radius:var(--r)}.mosaic img:first-child{grid-row:span 2;aspect-ratio:auto}
 @media(max-width:860px){.l-split .wrap,.l-mosaic .wrap,.l-editorial .hero-copy{grid-template-columns:1fr}.l-split.side-left .hero-media{order:0}.h-tall,.h-screen{min-height:0}}
 .grid{display:grid;gap:clamp(16px,2.4vw,28px);grid-template-columns:repeat(var(--cols),minmax(0,1fr))}@media(max-width:900px){.grid{--cols:2!important}}@media(max-width:600px){.grid{--cols:1!important}}
@@ -161,9 +161,13 @@ export function renderV2(biz, spec, opts = {}) {
     const id = target.slice(8)
     return where.get(id) === pg.slug ? `#${esc(id)}` : `${esc(href(where.get(id) ?? ''))}#${esc(id)}`
   }
-  const button = (c, ghost = false) => (c ? `<a class="btn${ghost ? ' ghost' : ''}" href="${link(c.target)}">${esc(c.label)}</a>` : '')
+  // Editor preview only: what each element edits (section id | field path), so the owner can click it in place.
+  const E = (sid, path) => (editing ? ` data-edit="${esc(sid)}|${esc(path)}"` : '')
+  const B = (sid, path) => (editing ? ` data-btn="${esc(sid)}|${esc(path)}"` : '')
+  const I = (sid, path) => (editing ? ` data-img="${esc(sid)}|${esc(path)}"` : '')
+  const button = (c, ghost = false, sid = null, path = null) => (c ? `<a class="btn${ghost ? ' ghost' : ''}" href="${link(c.target)}"${sid ? B(sid, path) : ''}>${esc(c.label)}</a>` : '')
   const visit = biz.appointmentMode === 'at_customer'
-  const head = (s, tag = 'h2') => (s.heading || s.eyebrow || s.text ? `<div class="head">${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}${s.heading ? `<${tag} id="h-${esc(s.id)}">${esc(s.heading)}</${tag}>` : ''}${s.text ? `<div class="muted">${paras(s.text)}</div>` : ''}</div>` : '')
+  const head = (s, tag = 'h2') => (s.heading || s.eyebrow || s.text ? `<div class="head">${s.eyebrow ? `<p class="eyebrow"${E(s.id, 'eyebrow')}>${esc(s.eyebrow)}</p>` : ''}${s.heading ? `<${tag} id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</${tag}>` : ''}${s.text ? `<div class="muted"${E(s.id, 'text')}>${paras(s.text)}</div>` : ''}</div>` : '')
   // A service by its stable id (server/website.js); a position only in content that never had ids (read-time upgraded).
   const svc = (it) => (typeof it.serviceId === 'string' ? biz.services?.find((s) => s?.id === it.serviceId) : biz.services?.[it.serviceIndex]) || { name: '', price: '' }
   let first = true
@@ -207,10 +211,10 @@ export function renderV2(biz, spec, opts = {}) {
           first = false
           const hid = labelled ? '' : ` id="h-${esc(s.id)}"`
           if (!labelled) labelled = `h-${s.id}`
-          inner = `<${tag}${hid} class="zs-${b.size}">${esc(b.text)}</${tag}>`
-        } else if (b.kind === 'text') inner = b.size === 's' ? `<p class="eyebrow">${esc(b.text)}</p>` : `<p class="zs-${b.size}${b.size === 'm' ? ' muted' : ''}">${esc(b.text)}</p>`
-        else if (b.kind === 'button') inner = `<a class="btn${b.secondary ? ' ghost' : ''}" href="${link(b.target)}">${esc(b.label)}</a>`
-        else if (b.kind === 'media') inner = `<div class="cm shape-${b.shape} tr-${b.treat}${under.has(b) ? ' under' : ''}">${pic(b.image, { alt: b.alt, eager, sizes: `(max-width:860px) 100vw, ${Math.max(25, Math.round((b.col[1] / 12) * 100))}vw` })}</div>`
+          inner = `<${tag}${hid} class="zs-${b.size}"${E(s.id, `blocks.${i}.text`)}>${esc(b.text)}</${tag}>`
+        } else if (b.kind === 'text') inner = b.size === 's' ? `<p class="eyebrow"${E(s.id, `blocks.${i}.text`)}>${esc(b.text)}</p>` : `<p class="zs-${b.size}${b.size === 'm' ? ' muted' : ''}"${E(s.id, `blocks.${i}.text`)}>${esc(b.text)}</p>`
+        else if (b.kind === 'button') inner = `<a class="btn${b.secondary ? ' ghost' : ''}" href="${link(b.target)}"${B(s.id, `blocks.${i}`)}>${esc(b.label)}</a>`
+        else if (b.kind === 'media') inner = `<div class="cm shape-${b.shape} tr-${b.treat}${under.has(b) ? ' under' : ''}"${I(s.id, `blocks.${i}`)}>${pic(b.image, { alt: b.alt, eager, sizes: `(max-width:860px) 100vw, ${Math.max(25, Math.round((b.col[1] / 12) * 100))}vw` })}</div>`
         else inner = `<div class="mk" aria-hidden="true">${esc(b.text)}</div>`
         return `<div class="cb${b === backdrop ? ' bd' : ''}${over.has(b) ? ' over' : raised.has(b) ? ' raised' : ''}">${inner}</div>`
       })
@@ -243,44 +247,44 @@ export function renderV2(biz, spec, opts = {}) {
       case 'hero': {
         const tag = first ? 'h1' : 'h2'
         first = false
-        const copy = `<div class="hero-copy">${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}<${tag} id="h-${esc(s.id)}">${esc(s.heading)}</${tag}>${s.text ? `<p class="sub${s.layout === 'overlay' ? '' : ' muted'}">${esc(s.text.replace(/\n+/g, ' '))}</p>` : ''}<div class="actions">${button(s.primaryCta)}${button(s.secondaryCta, true)}</div></div>`
-        const media = s.layout === 'mosaic' && s.images.length ? `<div class="mosaic">${s.images.map((im, i) => pic(im, { eager: i === 0, sizes: '(max-width:860px) 100vw, 50vw' })).join('')}</div>` : s.image ? `<div class="hero-media">${pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, alt: s.imageAlt, eager: true, sizes: s.layout === 'split' ? '(max-width:860px) 100vw, 50vw' : '100vw' })}</div>` : ''
-        if (s.layout === 'overlay' && s.image) return `<section id="${esc(s.id)}" class="hero ${cls.replace(/bg-\w+/, '')} l-overlay h-${s.height}" style="--ov:${s.overlay}" aria-labelledby="h-${esc(s.id)}"><div class="hero-bg">${pic(s.image, { focus: s.imageFocus, alt: s.imageAlt, eager: true })}</div><div class="wrap">${copy}</div></section>`
+        const copy = `<div class="hero-copy">${s.eyebrow ? `<p class="eyebrow"${E(s.id, 'eyebrow')}>${esc(s.eyebrow)}</p>` : ''}<${tag} id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</${tag}>${s.text ? `<p class="sub${s.layout === 'overlay' ? '' : ' muted'}"${E(s.id, 'text')}>${esc(s.text.replace(/\n+/g, ' '))}</p>` : ''}<div class="actions">${button(s.primaryCta, false, s.id, 'primaryCta')}${button(s.secondaryCta, true, s.id, 'secondaryCta')}</div></div>`
+        const media = s.layout === 'mosaic' && s.images.length ? `<div class="mosaic">${s.images.map((im, i) => pic(im, { eager: i === 0, sizes: '(max-width:860px) 100vw, 50vw' })).join('')}</div>` : s.image ? `<div class="hero-media"${I(s.id, 'image')}>${pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, alt: s.imageAlt, eager: true, sizes: s.layout === 'split' ? '(max-width:860px) 100vw, 50vw' : '100vw' })}</div>` : ''
+        if (s.layout === 'overlay' && s.image) return `<section id="${esc(s.id)}" class="hero ${cls.replace(/bg-\w+/, '')} l-overlay h-${s.height}" style="--ov:${s.overlay}" aria-labelledby="h-${esc(s.id)}"><div class="hero-bg"${I(s.id, 'image')}>${pic(s.image, { focus: s.imageFocus, alt: s.imageAlt, eager: true })}</div><div class="wrap">${copy}</div></section>`
         const layout = s.layout === 'overlay' ? 'minimal' : s.layout
-        if (layout === 'editorial') return `<section id="${esc(s.id)}" class="hero ${cls} l-editorial h-${s.height}" aria-labelledby="h-${esc(s.id)}">${bgImg}<div class="wrap"><div class="hero-copy"><div>${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}<${tag} id="h-${esc(s.id)}">${esc(s.heading)}</${tag}></div><div>${s.text ? `<p class="sub muted">${esc(s.text.replace(/\n+/g, ' '))}</p>` : ''}<div class="actions">${button(s.primaryCta)}${button(s.secondaryCta, true)}</div></div></div>${media}</div></section>`
+        if (layout === 'editorial') return `<section id="${esc(s.id)}" class="hero ${cls} l-editorial h-${s.height}" aria-labelledby="h-${esc(s.id)}">${bgImg}<div class="wrap"><div class="hero-copy"><div>${s.eyebrow ? `<p class="eyebrow"${E(s.id, 'eyebrow')}>${esc(s.eyebrow)}</p>` : ''}<${tag} id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</${tag}></div><div>${s.text ? `<p class="sub muted"${E(s.id, 'text')}>${esc(s.text.replace(/\n+/g, ' '))}</p>` : ''}<div class="actions">${button(s.primaryCta, false, s.id, 'primaryCta')}${button(s.secondaryCta, true, s.id, 'secondaryCta')}</div></div></div>${media}</div></section>`
         return `<section id="${esc(s.id)}" class="hero ${cls} l-${layout} side-${s.imageSide} h-${s.height}" aria-labelledby="h-${esc(s.id)}">${bgImg}<div class="wrap">${copy}${layout === 'minimal' ? '' : media}</div></section>`
       }
       case 'text':
-        return `${open()}<div class="wrap">${head({ ...s, text: '' })}<div class="${s.lead ? 'lead ' : ''}${s.columns === 2 ? 'grid" style="--cols:2' : ''}">${paras(s.body || s.text)}</div></div></section>`
+        return `${open()}<div class="wrap">${head({ ...s, text: '' })}<div class="${s.lead ? 'lead ' : ''}${s.columns === 2 ? 'grid" style="--cols:2' : ''}"${E(s.id, s.body ? 'body' : 'text')}>${paras(s.body || s.text)}</div></div></section>`
       case 'services': {
         const items = s.items.map((it, i) => ({ ...it, ...svc(it), n: i + 1 }))
-        const price = (it) => (s.showPrices && it.price ? `<span class="price">${esc(it.price)}</span>` : '')
+        const price = (it) => (s.showPrices && it.price ? `<span class="price"${it.serviceId ? E('svc', `${it.serviceId}.price`) : ''}>${esc(it.price)}</span>` : '')
         let body
-        if (s.layout === 'list') body = `<div class="list">${items.map((it) => `<div class="row"><h3>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted">${esc(it.text)}</p>` : ''}</div>`).join('')}</div>`
-        else if (s.layout === 'rows') body = `<div class="rows">${items.map((it) => `<div class="row"><span class="num">${String(it.n).padStart(2, '0')}</span><div><h3>${esc(it.name)}</h3>${it.text ? `<p class="muted">${esc(it.text)}</p>` : ''}</div>${price(it)}</div>`).join('')}</div>`
-        else if (s.layout === 'alternating') body = `<div class="alternating">${items.map((it) => `<div class="alt">${it.image ? `<div class="alt-media">${pic(it.image, { sizes: '(max-width:760px) 100vw, 50vw' })}</div>` : ''}<div>${icon(it.icon)}<h3>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted">${esc(it.text)}</p>` : ''}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book', target: 'book' })}</div></div></div>`).join('')}</div>`
-        else body = `<div class="grid ${s.layout}" style="--cols:${s.columns}">${items.map((it) => `<div class="card">${it.image ? pic(it.image, { sizes: '(max-width:600px) 100vw, 33vw' }) : icon(it.icon)}<h3>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted">${esc(it.text)}</p>` : ''}</div>`).join('')}</div>`
+        if (s.layout === 'list') body = `<div class="list">${items.map((it) => `<div class="row"><h3${it.serviceId ? E('svc', `${it.serviceId}.name`) : ''}>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted"${E(s.id, `items.${it.n - 1}.text`)}>${esc(it.text)}</p>` : ''}</div>`).join('')}</div>`
+        else if (s.layout === 'rows') body = `<div class="rows">${items.map((it) => `<div class="row"><span class="num">${String(it.n).padStart(2, '0')}</span><div><h3${it.serviceId ? E('svc', `${it.serviceId}.name`) : ''}>${esc(it.name)}</h3>${it.text ? `<p class="muted"${E(s.id, `items.${it.n - 1}.text`)}>${esc(it.text)}</p>` : ''}</div>${price(it)}</div>`).join('')}</div>`
+        else if (s.layout === 'alternating') body = `<div class="alternating">${items.map((it) => `<div class="alt">${it.image ? `<div class="alt-media">${pic(it.image, { sizes: '(max-width:760px) 100vw, 50vw' })}</div>` : ''}<div>${icon(it.icon)}<h3${it.serviceId ? E('svc', `${it.serviceId}.name`) : ''}>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted"${E(s.id, `items.${it.n - 1}.text`)}>${esc(it.text)}</p>` : ''}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book', target: 'book' })}</div></div></div>`).join('')}</div>`
+        else body = `<div class="grid ${s.layout}" style="--cols:${s.columns}">${items.map((it) => `<div class="card">${it.image ? pic(it.image, { sizes: '(max-width:600px) 100vw, 33vw' }) : icon(it.icon)}<h3${it.serviceId ? E('svc', `${it.serviceId}.name`) : ''}>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted"${E(s.id, `items.${it.n - 1}.text`)}>${esc(it.text)}</p>` : ''}</div>`).join('')}</div>`
         return `${open()}<div class="wrap">${head(s)}${body}</div></section>`
       }
       case 'features': {
         const body =
           s.layout === 'inline'
-            ? `<div class="feat-inline">${s.items.map((f) => `<div class="f">${icon(f.icon)}<strong>${esc(f.title)}</strong></div>`).join('')}</div>`
+            ? `<div class="feat-inline">${s.items.map((f, i) => `<div class="f">${icon(f.icon)}<strong${E(s.id, `items.${i}.title`)}>${esc(f.title)}</strong></div>`).join('')}</div>`
             : s.layout === 'list'
-              ? `<div class="feat-list">${s.items.map((f) => `<div class="f">${icon(f.icon)}<h3>${esc(f.title)}</h3>${f.text ? `<p class="muted">${esc(f.text)}</p>` : ''}</div>`).join('')}</div>`
-              : `<div class="grid" style="--cols:${s.columns}">${s.items.map((f) => `<div>${icon(f.icon)}<h3 style="margin-top:14px">${esc(f.title)}</h3>${f.text ? `<p class="muted" style="margin-top:8px">${esc(f.text)}</p>` : ''}</div>`).join('')}</div>`
+              ? `<div class="feat-list">${s.items.map((f, i) => `<div class="f">${icon(f.icon)}<h3${E(s.id, `items.${i}.title`)}>${esc(f.title)}</h3>${f.text ? `<p class="muted"${E(s.id, `items.${i}.text`)}>${esc(f.text)}</p>` : ''}</div>`).join('')}</div>`
+              : `<div class="grid" style="--cols:${s.columns}">${s.items.map((f, i) => `<div>${icon(f.icon)}<h3 style="margin-top:14px"${E(s.id, `items.${i}.title`)}>${esc(f.title)}</h3>${f.text ? `<p class="muted" style="margin-top:8px"${E(s.id, `items.${i}.text`)}>${esc(f.text)}</p>` : ''}</div>`).join('')}</div>`
         return `${open()}<div class="wrap">${head(s)}${body}</div></section>`
       }
       case 'imageText':
-        return `${open()}<div class="wrap"><div class="it side-${s.imageSide}">${s.image ? `<div class="it-media shape-${s.imageShape}">${pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, alt: s.imageAlt, sizes: '(max-width:820px) 100vw, 50vw' })}</div>` : ''}<div>${head({ ...s, text: '' })}${paras(s.body || s.text)}${s.cta ? `<div class="actions">${button(s.cta)}</div>` : ''}</div></div></div></section>`
+        return `${open()}<div class="wrap"><div class="it side-${s.imageSide}">${s.image ? `<div class="it-media shape-${s.imageShape}"${I(s.id, 'image')}>${pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, alt: s.imageAlt, sizes: '(max-width:820px) 100vw, 50vw' })}</div>` : ''}<div>${head({ ...s, text: '' })}${editing ? `<div${E(s.id, s.body ? 'body' : 'text')}>${paras(s.body || s.text)}</div>` : paras(s.body || s.text)}${s.cta ? `<div class="actions">${button(s.cta, false, s.id, 'cta')}</div>` : ''}</div></div></div></section>`
       case 'gallery':
         return `${open()}<div class="wrap">${head(s)}<div class="gal-${s.layout}">${s.images.map((im) => pic(im, { alt: `Work by ${biz.name}`, sizes: '(max-width:700px) 100vw, 33vw' })).join('')}</div></div></section>`
       case 'steps':
-        return `${open()}<div class="wrap">${head(s)}<div class="${s.layout === 'timeline' ? 'steps-t' : 'steps-n'}">${s.items.map((x) => `<div class="st"><h3>${esc(x.title)}</h3>${x.text ? `<p class="muted" style="margin-top:8px">${esc(x.text)}</p>` : ''}</div>`).join('')}</div></div></section>`
+        return `${open()}<div class="wrap">${head(s)}<div class="${s.layout === 'timeline' ? 'steps-t' : 'steps-n'}">${s.items.map((x, i) => `<div class="st"><h3${E(s.id, `items.${i}.title`)}>${esc(x.title)}</h3>${x.text ? `<p class="muted" style="margin-top:8px"${E(s.id, `items.${i}.text`)}>${esc(x.text)}</p>` : ''}</div>`).join('')}</div></div></section>`
       case 'faq':
-        return `${open(' faq')}<div class="wrap">${head(s)}${s.items.map((x) => `<details><summary>${esc(x.question)}</summary><p class="muted">${esc(x.answer)}</p></details>`).join('')}</div></section>`
+        return `${open(' faq')}<div class="wrap">${head(s)}${s.items.map((x, i) => `<details${editing ? ' open' : ''}><summary${E(s.id, `items.${i}.question`)}>${esc(x.question)}</summary><p class="muted"${E(s.id, `items.${i}.answer`)}>${esc(x.answer)}</p></details>`).join('')}</div></section>`
       case 'cta': {
-        const inner = `<div>${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}<h2 id="h-${esc(s.id)}">${esc(s.heading)}</h2>${s.text ? `<div class="muted" style="margin-top:14px">${paras(s.text)}</div>` : ''}<div class="actions">${button(s.cta)}</div></div>`
+        const inner = `<div>${s.eyebrow ? `<p class="eyebrow"${E(s.id, 'eyebrow')}>${esc(s.eyebrow)}</p>` : ''}<h2 id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</h2>${s.text ? `<div class="muted" style="margin-top:14px"${E(s.id, 'text')}>${paras(s.text)}</div>` : ''}<div class="actions">${button(s.cta, false, s.id, 'cta')}</div></div>`
         return `${open(` cta-${s.layout}`)}<div class="wrap">${inner}${s.layout === 'split' && s.image ? pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, sizes: '(max-width:760px) 100vw, 40vw' }) : ''}</div></section>`
       }
       case 'area':

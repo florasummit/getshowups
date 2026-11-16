@@ -70,6 +70,7 @@ export default function WebsiteTab() {
   const [editorKey, setEditorKey] = useState(0)
   // The Studio editor has edits the server hasn't confirmed yet: publishing waits (Publish sends the saved draft).
   const [unsaved, setUnsaved] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(null) // null = default: open until the site is AI-designed
   const [publishing, setPublishing] = useState(false)
   const [more, setMore] = useState({})
   if (!data) return <div aria-busy="true" />
@@ -93,10 +94,12 @@ export default function WebsiteTab() {
     } else setMore({ error: d?.error === 'studio_publish_off' ? STUDIO_PRIVATE : 'Something went wrong. Please try again.' })
   }
 
+  // AI-designed site in Website Studio: the editor is the page (status bar above it, other tools tucked below).
+  const studioMode = Boolean(designed && data.studio && !w.generated)
   return (
     <div className="enter">
       <h1 className="title title--page">Website</h1>
-      <section className="card site-status" aria-label="Website status">
+      <section className={`card site-status${studioMode ? ' site-status--bar' : ''}`} aria-label="Website status">
         <p className={`status status--${w.published ? (w.changed ? 'pending' : 'ok') : 'bad'}`}>
           <span className="status-dot" aria-hidden="true" />
           {w.published ? (w.changed ? 'Live · you have changes that aren’t published yet' : 'Live') : 'Not published yet'}
@@ -139,6 +142,11 @@ export default function WebsiteTab() {
         )}
       </section>
 
+      {/* Import + AI designer: one fixed place (never remounted, so a conversation in progress is kept). With an
+          AI-designed site it is a one-line row above the editor, open while the owner is using it. */}
+      {data.studio && (
+        <details className={studioMode ? 'card site-more' : 'site-more site-more--plain'} open={moreOpen ?? !studioMode} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+          {studioMode && <summary>Import your current website · AI designer</summary>}
       {/* Website Studio (internal pilot, server/website-studio.js): import + AI designer only for businesses in it. */}
       {data.studio && (
       <section className="card" aria-label="Bring your current website">
@@ -150,6 +158,7 @@ export default function WebsiteTab() {
             if (status === 200) {
               refresh(d)
               setEditorKey((k) => k + 1)
+              setMoreOpen(true)
             }
           }}
         />
@@ -165,10 +174,14 @@ export default function WebsiteTab() {
             if (status === 200) {
               refresh(d)
               setEditorKey((k) => k + 1)
+              setMoreOpen(true)
             }
           }}
         />
       </section>
+      )}
+
+        </details>
       )}
 
       {!designed && (

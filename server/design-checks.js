@@ -191,6 +191,9 @@ export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 
       break
     }
   }
+  // One opening per page: a second hero / headline composition further down reads as the page starting over.
+  const openingLike = (s) => s.type === 'hero' || (s.type === 'composition' && s.blocks?.some((b) => b.kind === 'heading' && (b.size === 'display' || b.size === 'xl')))
+  if ((spec?.pages || []).some((p) => p.sections.slice(1).some(openingLike))) soft.push('repeated_opening')
   // A different direction needs a different first-screen STRUCTURE: mirroring it or changing fonts/colours isn't one
   // (live GPT answer 2026-11-16: the "different" design was the first one flipped left-to-right with a serif).
   if (mode === 'different' && previous && firstScreenStructure(spec) === firstScreenStructure(previous)) soft.push('same_direction')
@@ -209,6 +212,7 @@ export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 
     invalid_choices: 'Many values were not from the allowed lists; use only the listed options and token formats.',
     sections_dropped: 'Several sections were unusable (unknown type or empty); give every section real content.',
     default_first_screen: 'The first screen was left to the default layout; choose a deliberate first screen (a composition or a specific hero layout).',
+    repeated_opening: 'A page opens twice: only its first section may be a hero or a display-headline composition; make later sections ordinary sections (services, text, steps, a booking banner).',
     repeated_sections: 'Two sections in a row have the same structure; vary the composition between neighbouring sections.',
     same_direction: 'This was meant to be a different direction but the first screen, type pairing or palette is the same as before; change them.',
     same_lead: 'This was meant to be a different direction but the first screen repeats the previous headline or leads with the same photo; write a new headline and open with a different photo (or with type alone).',
