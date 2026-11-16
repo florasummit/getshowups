@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Build 49: follow-up engine, two-way texts, A2P 10DLC readiness (2026-11-16) — feature/followups; migration 0024 (NOT applied)
+
+- One engine for every eligible business (server/followups/): source adapter (website_form, booking_page, sms; ready
+  for google_ads/gbp/call) → consent → immediate acknowledgment (website forms) → conversation → booking → follow-ups
+  stop. Reuses leads, messages (new kinds lead_ack, interested_followup, after_visit), the scheduler, Resend, opt-outs,
+  consent, conversation_control, the audit log. New: lead_threads, thread_messages, followup_settings, sms_registrations.
+- Texts only from the business's OWN sender with a provider-APPROVED registration + consent + SMS_LIVE (else test
+  recipients only). Existing confirmation/reminder texts now follow the same rule (prod had no Twilio configured).
+- Two-way texts: signed Twilio webhooks, MessageSid idempotency, forward-only delivery updates, fixed STOP/START/HELP/
+  human/cancel handling, assistant on the included model (FOLLOWUP_AI, off) with strict checks and a fixed fallback.
+- Dashboard Follow-ups tab: counts, inbox, conversation, takeover/hand back/reply/stop, pause, preferences, texting
+  registration (details + explicit approval). Website forms and booking page offer the texting box only when ready;
+  public /sms-terms/<id>. Admin: counts, failures, stuck work, spikes, costs, registrations, record provider status.
+- Tests: unit 509 (19 new follow-up tests), browser Follow-ups journey on desktop + phone.
+- **Needs approval**: apply 0024 in production; then docs/TEXTING_ACTIVATION.md (Twilio account, registrations, numbers,
+  SMS_LIVE, FOLLOWUP_AI + AI binding). Live texting stays off until then.
+
 ## Website Studio UX overhaul (2026-11-16) — feature/studio-ux; no migration, no paid calls
 
 - The website preview is the editing surface: click text to type in place; click a button (text + destination) or a

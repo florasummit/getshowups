@@ -76,7 +76,15 @@ async function seed(id, { owner = `owner@${id}.example`, zips = '' } = {}) {
 }
 
 const withEmail = () => Object.assign(env, { RESEND_API_KEY: 're_SECRET', EMAIL_FROM: 'GetShowUps <bookings@getshowups.com>', MESSAGES_LIVE: 'true' })
-const withSms = () => Object.assign(env, { TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tw_SECRET', TWILIO_MESSAGING_SERVICE_SID: 'MG123', MESSAGES_LIVE: 'true' })
+// Texting ready: provider configured, SMS_LIVE on, and every seeded business has its own sender with a registration
+// the provider APPROVED (as recorded by a platform admin). Quiet hours off here (direct row) so tests don't depend on
+// the time of day they run at; quiet hours have their own tests (test/followups.test.js).
+const withSms = () => {
+  Object.assign(env, { TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tw_SECRET', TWILIO_MESSAGING_SERVICE_SID: 'MG123', MESSAGES_LIVE: 'true', SMS_LIVE: 'true' })
+  const now = Date.now()
+  db.sql.prepare("INSERT OR IGNORE INTO sms_registrations (customer, status, messaging_service, updated_at) SELECT id, 'approved', 'MG123', ?1 FROM customers").run(now)
+  db.sql.prepare('INSERT OR IGNORE INTO followup_settings (customer, quiet_start, quiet_end, updated_at) SELECT id, 0, 0, ?1 FROM customers').run(now)
+}
 
 beforeEach(() => {
   db = d1()
@@ -546,7 +554,7 @@ test('scheduler endpoint: fails closed, requires the exact secret, returns count
   assert.equal((await run(CRON)).status, 401)
   const ok = await run(`Bearer ${CRON}`)
   assert.equal(ok.status, 200)
-  assert.deepEqual(Object.keys(ok.json()).sort(), ['ads', 'audit', 'changes', 'deletions', 'designerRaw', 'domains', 'messages', 'onboardingQueued', 'outbox', 'ownerNotices', 'reconcile', 'recovery'])
+  assert.deepEqual(Object.keys(ok.json()).sort(), ['ads', 'audit', 'changes', 'deletions', 'designerRaw', 'domains', 'followups', 'messages', 'onboardingQueued', 'outbox', 'ownerNotices', 'reconcile', 'recovery'])
   assert.deepEqual(ok.json().changes, { release: false, config: true }, 'first run records the configuration (names only)')
   assert.deepEqual(ok.json().audit, { ok: true, checked: 1 }, 'daily audit chain check: counts only')
   for (const step of Object.values(ok.json().ads)) for (const v of Object.values(step)) assert.ok(typeof v === 'number' || v === 'failed', 'ads step reports counts only')

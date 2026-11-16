@@ -212,7 +212,7 @@ function Details({ id, askZip, visit, offerSms, bizName, onDone }) {
           <input type="checkbox" checked={form.smsConsent} onChange={(e) => setForm((f) => ({ ...f, smsConsent: e.target.checked }))} />
           <span>
             Text me about this appointment (confirmation and reminders) from {bizName} via GetShowUps. Message frequency varies. Msg &amp; data
-            rates may apply. Reply STOP to opt out, HELP for help. Not required to book. <a href="/privacy">Privacy</a>
+            rates may apply. Reply STOP to opt out, HELP for help. Not required to book. <a href={`/sms-terms/${id}`}>Texting terms</a> · <a href="/privacy">Privacy</a>
           </span>
         </label>
       )}

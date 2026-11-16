@@ -6,7 +6,7 @@ import { siteOrigin } from './auth.js'
 import { linkToken } from './links.js'
 import { toE164 } from './sms.js'
 
-export const FOLLOW_UP_KINDS = ['lead_followup_1', 'lead_followup_2', 'no_show_rebook']
+export const FOLLOW_UP_KINDS = ['lead_ack', 'lead_followup_1', 'lead_followup_2', 'interested_followup', 'no_show_rebook', 'after_visit']
 
 const normalized = (channel, address) => (channel === 'email' ? String(address || '').trim().toLowerCase() : toE164(address))
 

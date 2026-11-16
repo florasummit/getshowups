@@ -4,7 +4,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { openSlots } from '../../../../server/booking.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
-import { smsConfigured } from '../../../../server/sms.js'
+import { smsReadyFor } from '../../../../server/followups/settings.js'
 import { policiesOrEmpty } from '../../../../server/policies.js'
 
 export async function onRequestGet({ request, env, params }) {
@@ -20,8 +20,8 @@ export async function onRequestGet({ request, env, params }) {
     // 'at_customer': the business comes to the lead, so the page asks for a service address.
     appointmentMode: customer.appointmentMode,
     askZip: customer.appointmentMode !== 'at_customer' && customer.serviceZips.length > 0,
-    // Text reminders are offered only when they can actually be sent.
-    offerSms: customer.automations && smsConfigured(env),
+    // Texting consent is offered only when this business can actually text (own sender + approved registration).
+    offerSms: Boolean(customer.automations) && (await smsReadyFor(env, customer.id)).ok,
     // What customers should know, written by the owner (empty notes are left out).
     policies,
     status: result.ok ? 'ok' : 'unavailable',

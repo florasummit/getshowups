@@ -45,6 +45,11 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      (same cancelAppointment; lead reopened; "Pick a new time" via the signed lead link)
   api/cron/run       Bearer CRON_SECRET: send due messages, onboarding follow-ups, outbox (called by workers/scheduler)
   api/dashboard/automations  POST: turn automatic messages on/off
+  api/dashboard/followups/   Follow-ups: index (GET inbox+counts+setup; POST settings|automations), thread (GET; POST
+                     reply|takeover|release|done|close), texting (POST save details | approve with confirm)
+  api/sms/twilio/    inbound (signed; idempotent per MessageSid), status (signed + per-message signed token)
+  api/platform/messaging  Admin: GET counts only; POST record provider-reported registration status / sender (audited)
+  sms-terms/[customer]  Public texting program terms (A2P disclosures) from records
   api/dashboard/policies   What customers should know (GET/POST beforeVisit, cancellation ≤300 chars)
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
@@ -76,7 +81,15 @@ server/              Shared backend modules imported by functions/ (bundled by P
   email-feedback.js  Resend webhook (Svix-signed): permanent bounce/complaint → email_suppressions (0020, hashes), message
                      failed/bounced, owner_bounce notice; sender skips suppressed addresses ('suppressed')
   notify.js          Owner notices (cron scan): new booking / customer cancellation / lead unbooked after 10 min → each member, once
-  sms.js             Twilio SMS (TWILIO_ACCOUNT_SID/AUTH_TOKEN + MESSAGING_SERVICE_SID or FROM); E.164 normalization
+  sms.js             Twilio credentials check (TWILIO_ACCOUNT_SID/AUTH_TOKEN) + E.164 normalization
+  followups/         Lead-to-booking engine (migration 0024; everything no-ops until it is applied, existing flows unchanged):
+                     settings (readiness, owner preferences, quiet hours, smsReadiness = the ONE rule for texting),
+                     engine (ingestLead source adapter, inbound texts, replies, sendQueued with every check, owner inbox),
+                     assistant (fixed STOP/START/HELP/human/cancel handling + constrained included-model replies, checked:
+                     no invented numbers/prices, no commitments/times/links/claims; fallback = fixed safe reply + owner
+                     asked), transport (Twilio with the business's OWN sender + signed status callbacks; email via Resend),
+                     registration (A2P 10DLC facts + owner attestation; provider status recorded only by a platform admin),
+                     ops (admin counts, Business Review capabilities)
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
   ai-usage.js        AI website allowances per business/UTC day (tiers; AI_TESTING_BUSINESSES), 30-day cost ceiling
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
@@ -319,6 +332,21 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
+- Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
+  eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
+  the business has its OWN sender (sms_registrations.messaging_service/sender_phone) AND its registration status is
+  'approved' (recorded by a platform admin from the PROVIDER's decision; never inferred, never set by the owner, refused
+  before the owner's explicit approval), the person consented (form box, or they texted first) and hasn't opted out,
+  and recipientAllowed with testOnly = test business OR SMS_LIVE !== 'true'. SMS_LIVE, FOLLOWUP_AI (assistant on the
+  included model) and MESSAGES_LIVE need approval. Automatic texts respect quiet hours (moved to morning); direct
+  answers within 30 min may go. Limits: 3 automatic texts/person/day, 6 assistant answers/person/day, 300 texts and
+  $0.20 assistant cost per business/day. STOP (carrier keywords incl. CANCEL) suppresses immediately (queued and
+  scheduled texts retired, provider confirms); START resubscribes; HELP and human requests get fixed replies; a
+  cancel request gets the person's own signed cancel link (never cancels by itself). Owner pause stops every automatic
+  message incl. fixed answers (owner is asked). Webhooks: Twilio signature required; MessageSid unique; status updates
+  forward-only. An unknown send outcome is never resent. Conversation text: owner inbox only, never logged or in admin
+  views; purged after 365 days; erased with the account. Live SMS / registration submission / number purchase need
+  approval (docs/TEXTING_ACTIVATION.md).
 - Owner notices (server/notify.js): only items from the last 2 h; queued only when recipientAllowed() would deliver now
   (nothing waits in the outbox to go out late); one per item + member (outbox id); body cleared once sent.
 - Owner cancellation (POST /api/dashboard/appointment-cancel, server/booking.js cancelAppointment): upcoming bookings only;

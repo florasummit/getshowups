@@ -10,6 +10,7 @@
 import { linkToken, verifyLinkToken } from './links.js'
 import { createLead, validateLead } from './booking.js'
 
+export const SITE_SMS_WORDING = 'site-form-sms-v1'
 export const MIN_AGE_MS = 3_000
 export const MAX_AGE_MS = 24 * 60 * 60 * 1000
 const PURPOSE = 'site-form'
@@ -38,7 +39,9 @@ export async function submitSiteForm(env, customer, fields, now = Date.now()) {
   if (error) return { state: error }
   if (customer.serviceZips.length && !lead.zip) return { state: 'invalid_zip' }
   try {
-    const { id } = await createLead(env, customer, lead, now)
+    // Texting consent only from the form's own optional, unchecked box (shown only when the business can text).
+    const smsConsent = fields.sms === 'yes' && Boolean(String(fields.phone || '').trim())
+    const { id } = await createLead(env, customer, { ...lead, source: 'website_form', smsConsent, smsWording: SITE_SMS_WORDING }, now)
     return { state: 'sent', stored: true, leadId: id }
   } catch (err) {
     console.error('site form lead save failed:', err?.name)

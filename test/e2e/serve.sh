@@ -124,7 +124,28 @@ for E in "$E2E_EDITOR_CUSTOMER:$E2E_EDITOR_SESSION_TOKEN" "$E2E_EDITOR_M_CUSTOME
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER"; do
+# Follow-ups: a business per browser project, texting registration APPROVED (as an admin records it) with its own
+# sender, default preferences (answers to their texts aren't held by quiet hours), one lead with texting consent.
+for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER" "$E2E_TEXTS_M_CUSTOMER:$E2E_TEXTS_M_SESSION_TOKEN:$E2E_TEXTS_M_SENDER"; do
+  IFS=: read -r TC TT TS <<< "$E"
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$TC', 'Texts Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$TC.example', '$TC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$TT")', 'owner@$TC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$TC', '(843) 555-0120', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO sms_registrations (customer, legal_name, business_type, status, approved_at, sender_phone, updated_at) VALUES ('$TC', 'Texts Pools LLC', 'llc', 'approved', $NOW, '$TS', $NOW);
+  INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES
+    ('lead-$TC', '$TC', 'Morgan Lane', 'morgan@example.net', '$E2E_TEXTS_LEAD_PHONE', 'Green pool cleanup', 'new', 'x', $NOW, $NOW);
+  INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES ('lead-$TC', '$TC', 'site-form-sms-v1', $NOW);
+  INSERT INTO lead_threads (lead_id, customer, source, stage, created_at, updated_at) VALUES ('lead-$TC', '$TC', 'website_form', 'contacted', $NOW, $NOW);
+  INSERT INTO thread_messages (id, customer, lead_id, direction, channel, author, body, status, created_at, updated_at) VALUES
+    ('seed-ack-$TC', '$TC', 'lead-$TC', 'out', 'email', 'auto', 'Texts Pools got your message', 'sent', $NOW, $NOW);
+  "
+done
+
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
@@ -148,4 +169,9 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding SITE_IMPORT_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding ACCOUNT_DELETION_ENABLED=true \
-  --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN"
+  --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN" \
+  --binding TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000 \
+  --binding TWILIO_AUTH_TOKEN="$E2E_TWILIO_AUTH_TOKEN" \
+  --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
+  --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE" \
+  --binding FOLLOWUP_AI=true

@@ -38,7 +38,7 @@ now but not a good long-term state (it keeps end customers' personal data with n
 | 2. Ads | Every running GetShowUps-managed campaign paused on Google/Meta and read back. An unreachable campaign (account disconnected/switched) blocks the deletion until a platform admin records the advertiser's confirmation that it is paused. Credentials are not removed before this. | Read-back PAUSED or audited confirmation |
 | 3. Billing | All Stripe subscriptions canceled now and re-checked; Stripe customer object deleted | Stripe reports canceled |
 | 4. Integrations | Calendar tokens (incl. archived) deleted; Google grant revoked unless another stored connection uses it; Ads/Meta/GoHighLevel tokens deleted; own domain detached; ad creative files deleted | KV keys absent |
-| 5. Data | Tables in `ERASED_TABLES` (leads, addresses, appointments, messages, consents, opt-outs, websites and versions, images, profiles, settings, Ads records, memberships, invitations, queued email, non-billing analytics) | Row counts 0 |
+| 5. Data | Tables in `ERASED_TABLES` (leads, conversations and their messages, follow-up preferences, texting registration, addresses, appointments, messages, consents, opt-outs, websites and versions, images, profiles, settings, Ads records, memberships, invitations, queued email, non-billing analytics) | Row counts 0 |
 | 6. Verify | Re-checks every table, key and the Stripe status; only then "completed" | report.verify.clean |
 
 Steps are idempotent; failures retry with backoff (5 min doubling to 6 h), are recorded as failure events, and after 3
@@ -82,3 +82,11 @@ Staff identities are kept for accountability. Limits of its tamper evidence: doc
 3. Approve enabling the deletion workflow (`ACCOUNT_DELETION_ENABLED`) after migrations 0015 and 0016.
 4. Privacy policy and FAQ wording (`src/legal/Privacy.jsx`, `src/content/site.js`), not changed yet.
 5. Whether to send the daily audit head hash outside Cloudflare (stronger tamper evidence).
+
+## Follow-up conversations (migration 0024)
+
+- `thread_messages` holds conversation text for the owner's inbox. It is never logged, never shown in admin views, and
+  is removed after 365 days (cron, `purgeOldMessages`, 500 per run). Delivery counts stay in the audit log (no text).
+- `lead_threads`, `followup_settings`, `sms_registrations` and `thread_messages` are in `ERASED_TABLES` (account deletion).
+- Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
+  for as long as the lead exists.

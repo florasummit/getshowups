@@ -652,6 +652,125 @@ function Reconciliation() {
   )
 }
 
+// Follow-ups and texting (counts only; no message text or contact details). Recording a registration status means:
+// the PROVIDER reported it (Twilio console / carrier decision). Never mark "approved" on anything else.
+const REG_STATUS = { not_configured: 'Not started', ready: 'Ready', pending: 'Pending', approved: 'Approved', rejected: 'Rejected', suspended: 'Suspended' }
+const SWITCHES = [
+  ['killSwitch', 'Kill switch', true],
+  ['messagesLive', 'Messages live'],
+  ['smsLive', 'Texts live'],
+  ['assistant', 'Assistant'],
+  ['twilioConfigured', 'Twilio'],
+]
+function MessagingOps() {
+  const [m, setM] = useState(null)
+  const [tick, setTick] = useState(0)
+  const [form, setForm] = useState({ customer: '', status: '', note: '', messagingService: '', senderPhone: '' })
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    api('/api/platform/messaging').then(({ status, data }) => setM(status === 200 ? data : { error: true }))
+  }, [tick])
+  const record = async (e) => {
+    e.preventDefault()
+    if (!window.confirm(`Record this for ${form.customer}? Only record what the provider reported.`)) return
+    const body = { customer: form.customer, confirm: true, note: form.note }
+    if (form.status) body.status = form.status
+    if (form.messagingService) body.messagingService = form.messagingService
+    if (form.senderPhone) body.senderPhone = form.senderPhone
+    const { status, data } = await api('/api/platform/messaging', { method: 'POST', body })
+    setNote(status === 200 ? 'Recorded.' : `Not recorded (${data.error || status}).`)
+    if (status === 200) setTick((n) => n + 1)
+  }
+  const usd = (micros) => `$${(micros / 1e6).toFixed(2)}`
+  return (
+    <section className="card" aria-labelledby="messaging-title">
+      <h2 className="card-title" id="messaging-title">
+        Follow-ups and texting
+      </h2>
+      {!m ? (
+        <p className="fine">Loading…</p>
+      ) : m.error ? (
+        <p className="empty">Not available.</p>
+      ) : (
+        <>
+          <p className="tags">
+            {SWITCHES.map(([k, l, bad]) => (
+              <span key={k} className={`tag${m.switches[k] && bad ? ' tag--bad' : ''}`}>
+                {l}: {m.switches[k] ? 'on' : 'off'}
+              </span>
+            ))}
+          </p>
+          {!m.ready ? (
+            <p className="fine">Migration 0024 not applied yet: conversations are off; existing messages work as before.</p>
+          ) : (
+            <>
+              <p className="fine" data-messaging-ops>
+                Last 24 h: {m.last24h.sendFailures} send failures · {m.last24h.deliveryFailures} delivery failures · {m.last24h.aiFallbacks} assistant fallbacks · {m.last24h.optOuts} opt-outs · {m.last24h.handoffs} hand-offs · {m.last24h.webhookProblems} webhook problems. Stuck: {m.stuck.sending} sending, {m.stuck.repliesWaiting} replies waiting, {m.stuck.scheduledOverdue} overdue.
+              </p>
+              {m.spikes.length > 0 && <p className="form-error">Unusual volume: {m.spikes.map((x) => `${x.customer} (${x.lastHour}/h)`).join(', ')}</p>}
+              {m.businesses.length > 0 && (
+                <ul className="rows">
+                  {m.businesses.map((b) => (
+                    <li key={b.customer} className="row">
+                      <div className="row-main">
+                        <p className="row-title">{b.name}</p>
+                        <p className="row-sub">
+                          {b.texts} texts · {b.inbound} received · {b.emails} emails · {b.ai} assistant · {b.failed} failed · {usd(b.costMicros)} est.
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <h3>Texting registrations</h3>
+              {m.registrations.length === 0 ? (
+                <p className="fine">None yet.</p>
+              ) : (
+                <ul className="rows">
+                  {m.registrations.map((r) => (
+                    <li key={r.customer} className="row">
+                      <div className="row-main">
+                        <p className="row-title">
+                          {r.name} <span className="tag">{REG_STATUS[r.status]}</span>
+                        </p>
+                        <p className="row-sub">
+                          {r.customer} · owner approved: {r.ownerApproved ? 'yes' : 'no'} · sender: {r.hasSender ? 'set' : 'not set'}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form className="fu-form" onSubmit={record}>
+                <p className="fine">Record what the provider reported for a business (status and/or its provisioned sender).</p>
+                <input aria-label="Business id" placeholder="business id" value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value.trim() })} required />
+                <select aria-label="Provider status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="">Status unchanged</option>
+                  <option value="pending">Pending (submitted)</option>
+                  <option value="approved">Approved by the provider</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+                <input aria-label="Provider note" placeholder="Provider reason / next step (no personal data)" value={form.note} maxLength={200} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+                <input aria-label="Messaging Service SID" placeholder="Messaging Service SID (MG...)" value={form.messagingService} onChange={(e) => setForm({ ...form, messagingService: e.target.value.trim() })} />
+                <input aria-label="Sender phone" placeholder="Sender number (+1...)" value={form.senderPhone} onChange={(e) => setForm({ ...form, senderPhone: e.target.value.trim() })} />
+                <button type="submit" className="btn btn-sm btn-quiet" disabled={!form.customer}>
+                  Record
+                </button>
+                {note && (
+                  <p className="fine" role="status">
+                    {note}
+                  </p>
+                )}
+              </form>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
 // Permanent audit log: chain status (recomputed on every load), newest entries, full JSON export.
 function AuditLog() {
   const [a, setA] = useState(null)
@@ -829,6 +948,7 @@ function Overview({ me }) {
 
       {me.billingConfigured && <Reconciliation />}
 
+      <MessagingOps />
       <AuditLog />
 
       <section className="card">

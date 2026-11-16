@@ -1,12 +1,13 @@
 import { recipientAllowed } from './email.js'
 
-// Text messages through Twilio. Inactive unless TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and a sender
-// (TWILIO_MESSAGING_SERVICE_SID preferred, or TWILIO_FROM) are configured. US carriers also require an
-// approved A2P 10DLC campaign or toll-free verification before messages are delivered.
+// Text messages through Twilio. Inactive unless TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are configured AND the
+// business has its own approved sender (server/followups/settings.js smsReadiness). US carriers require an approved
+// A2P 10DLC campaign before messages are delivered; nothing here assumes one.
 // Twilio handles STOP/HELP replies on the sender; a send to an opted-out number fails with 21610.
 
-export const smsConfigured = (env) =>
-  Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && (env.TWILIO_MESSAGING_SERVICE_SID || env.TWILIO_FROM))
+// The provider account is configured (credentials). Each business texts from its OWN sender (sms_registrations, set by a
+// platform admin once provisioned): no platform-wide number is needed or used for customer texts.
+export const smsConfigured = (env) => Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN)
 
 // US/Canada numbers to E.164 (+1XXXXXXXXXX); explicit "+<country>" numbers are kept. Otherwise null.
 export function toE164(phone) {

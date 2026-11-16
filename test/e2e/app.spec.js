@@ -173,7 +173,7 @@ test.describe('read-only pages @mobile', () => {
     await useSession(context, fixtures.E2E_SESSION_TOKEN)
     await page.goto('/dashboard')
     await expect(page.getByRole('heading', { level: 1, name: fixtures.E2E_CUSTOMER_NAME })).toBeVisible()
-    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Website', 'Ads', 'Settings'])
+    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Follow-ups', 'Website', 'Ads', 'Settings'])
     await expect(page.getByRole('region', { name: 'Your website' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat')).toHaveCount(3)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)

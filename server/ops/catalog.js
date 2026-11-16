@@ -19,6 +19,7 @@ import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
 import { customerRows } from '../metrics.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
+import './../followups/ops.js' // follow-up engine, texts, assistant, texting registration
 
 const DAY = 86400000
 const ago = (ms, now) => {

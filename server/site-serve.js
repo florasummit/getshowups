@@ -4,6 +4,7 @@
 import { testStatus } from './testbusiness.js'
 import { CUSTOMER_RE } from './invites.js'
 import { customerFromRow, siteOrigin } from './auth.js'
+import { smsReadyFor } from './followups/settings.js'
 import { getCustomer } from './customers.js'
 import { hitByIp } from './ratelimit.js'
 import { hostingStatus, isHosted, liveContent } from './website.js'
@@ -58,7 +59,9 @@ export async function serveSite(env, request, id, page = '') {
     const state = q.get('sent') === '1' ? 'sent' : /^[a-z_]{3,24}$/.test(q.get('form') || '') ? q.get('form') : null
     const form = { action: `${origin}/api/site-form/${customer.id}`, token: await formToken(env, customer.id), state }
     // A page showing a send result is personal to that visitor: not cached.
-    return htmlResponse(200, renderSite(await siteBusinessInfo(db, customer), live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form }), { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
+    // Website forms offer texting only when this business can text (own sender + approved registration).
+    const info = { ...(await siteBusinessInfo(db, customer)), offerSms: Boolean(customer.automations) && (await smsReadyFor(env, customer.id)).ok, smsTermsUrl: `${origin}/sms-terms/${customer.id}` }
+    return htmlResponse(200, renderSite(info, live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form }), { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })

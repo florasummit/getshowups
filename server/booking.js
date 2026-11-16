@@ -7,7 +7,8 @@ import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlo
 import { recordEvent } from './auditlog.js'
 import { track } from './events.js'
 import { verifyLinkToken } from './links.js'
-import { scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
+import { scheduleAfterVisitMessage, scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
+import { ingestLead, markStage } from './followups/engine.js'
 import { isTestLead } from './testdata.js'
 
 export const BOOKING_DAYS = 14
@@ -68,6 +69,8 @@ export function validateLead(body, mode = 'at_business') {
   return [null, lead]
 }
 
+// lead.source: where it came from (booking_page by default; website_form from the site's contact/quote forms).
+// lead.smsWording: the consent text version shown (booking page or website form).
 export async function createLead(env, customer, lead, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const qualified = customer.serviceZips.length === 0 || customer.serviceZips.includes(lead.zip)
@@ -90,11 +93,13 @@ export async function createLead(env, customer, lead, now = Date.now()) {
         ]
       : []),
     ...(lead.smsConsent
-      ? [db.prepare('INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES (?1, ?2, ?3, ?4)').bind(id, customer.id, SMS_CONSENT_WORDING, now)]
+      ? [db.prepare('INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES (?1, ?2, ?3, ?4)').bind(id, customer.id, lead.smsWording || SMS_CONSENT_WORDING, now)]
       : []),
   ])
   await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified }, at: now })
-  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent: lead.smsConsent }, now)
+  const source = lead.source || 'booking_page'
+  await ingestLead(env, customer.id, id, source, now)
+  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent: lead.smsConsent, source }, now)
   return { id, token, qualified }
 }
 
@@ -125,6 +130,8 @@ export async function bookAppointment(env, customer, input, now = Date.now()) {
     const { id, leadId, smsConsent, start } = result.appointment
     await track(env, 'appointment_booked', { id: `booked:${id}`, customer: customer.id, at: now })
     await scheduleAppointmentMessages(env, customer, { id, leadId, smsConsent, start }, now)
+    // Booked: the conversation moves on and every pending sales follow-up retires itself (lead status 'booked').
+    await markStage(env, customer.id, leadId, 'booked', now)
     result.appointment = { id, start, end: result.appointment.end }
   } else if (OPERATIONAL.has(result.error)) {
     await track(env, 'booking_failed', { customer: customer.id, props: { error: result.error }, at: now })
@@ -296,6 +303,10 @@ export async function setOutcome(env, customer, id, outcome, { work, valueCents,
     .first()
   if (outcome === 'no_show' && lead) {
     await scheduleNoShowMessage(env, customer, { id, leadId: row.lead_id, smsConsent: await hasSmsConsent(db, row.lead_id) }, now)
+  }
+  // A completed visit: an optional thank-you (owner preference, off by default).
+  if (outcome === 'showed' && before.status !== 'showed') {
+    await scheduleAfterVisitMessage(env, customer, { id, leadId: row.lead_id, smsConsent: await hasSmsConsent(db, row.lead_id) }, now)
   }
   if (before.status !== to || outcome === 'showed') {
     await db
@@ -469,6 +480,7 @@ export async function cancelAppointment(env, customer, id, { by = 'owner' } = {}
   const after = await db.prepare('SELECT status FROM appointments WHERE id = ?1 AND customer = ?2').bind(id, customer.id).first()
   if (after?.status !== 'cancelled') return fail(409, 'changed')
   await track(env, 'appointment_cancelled', { id: `cancelled:${id}`, customer: customer.id, at: now })
+  if (byCustomer) await markStage(env, customer.id, appt.lead_id, 'contacted', now)
   await recordEvent(db, { type: 'booking.cancel', ...who, customer: customer.id, capability: 'calendar.google', resource: { type: 'appointment', id }, outcome: 'success', details: { calendarEvent: Boolean(appt.google_event_id), by: byCustomer ? 'customer' : 'owner' }, at: now })
   return { ok: true, status: 'cancelled' }
 }
