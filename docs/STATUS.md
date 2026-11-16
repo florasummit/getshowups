@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio UX overhaul (2026-11-16) — feature/studio-ux; no migration, no paid calls
+
+- The website preview is the editing surface: click text to type in place; click a button (text + destination) or a
+  photo (choose, shape, focus point, description) for a small panel; hover/selected sections show a compact bar
+  (name, ↑, ↓, ⋯ = settings / add below / duplicate / hide-show / remove with confirmation). Edit | Preview mode,
+  Desktop | Phone, icon undo/redo (typing coalesced into one step), unobtrusive save status.
+- Side panel: contextual (selected section's settings) + Sections (compact rows, drag to reorder, arrows, ⋯) · Style ·
+  Photos · History. Concise section names (Hero, Services, Benefits, How it works, FAQ, Booking, Service areas…).
+  "+ Add a page…" in the page menu.
+- Website tab: a slim publish bar, then the editor (wider page); import + AI designer in one collapsible row above it
+  (kept mounted so a designer conversation isn't lost).
+- Rendering: hero photo heights capped (min(560px, 64vh); stacked 480px/56vh). AI designs that open a page twice get a
+  soft `repeated_opening` revision; the editor can't add or duplicate a second opening. Stored content untouched.
+- Tests: unit 490; browser 85 (in-place headline, button panel, price in place, add/hide/show/duplicate/move sections,
+  brand colour, add page from the page menu, phone + Preview mode, reload persistence, undo/redo, keyboard menu,
+  photo panel framing, history restore, publish/republish/restore, two-tab conflict).
+
 ## Website publishing for every eligible business (2026-11-16) — feature/publishing-on; no paid calls; no migration
 
 - Publishing is standard self-service (no allowlist, no per-business flag): studioPublishAllowed is ON unless

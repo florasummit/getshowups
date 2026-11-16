@@ -12,7 +12,7 @@ export const LAYOUTS = {
   cta: [['band', 'Band'], ['card', 'Card'], ['split', 'With photo']],
 }
 export const BACKGROUNDS = [['bg', 'Page'], ['surface', 'Soft'], ['accent', 'Brand colour'], ['ink', 'Dark']]
-export const SECTION_LABEL = { hero: 'Opening', composition: 'Opening (designed)', text: 'Text', services: 'Services', features: 'Highlights', imageText: 'Photo and text', gallery: 'Photo gallery', steps: 'Steps', faq: 'Questions', cta: 'Booking banner', area: 'Service area', contact: 'Contact' }
+export const SECTION_LABEL = { hero: 'Hero', composition: 'Hero', text: 'Text', services: 'Services', features: 'Benefits', imageText: 'Photo and text', gallery: 'Gallery', steps: 'How it works', faq: 'FAQ', cta: 'Booking', area: 'Service areas', contact: 'Contact' }
 
 export const newId = (type, taken) => {
   let id
