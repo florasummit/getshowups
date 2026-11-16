@@ -344,21 +344,12 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
   for (const m of results) {
     // A test business (or a message scheduled while it was one) only ever reaches test recipients.
     const testOnly = sandboxed(statusIn(tests, m.customer), m.created_at) || (m.channel === 'sms' && !smsLive(env))
-    // Quiet hours (texts): wait until morning instead of texting at night (relevance is re-checked when it goes out).
-    if (m.channel === 'sms' && !skipReason(m, now)) {
-      const until = await quiet(m)
-      if (until) {
-        await db.prepare("UPDATE messages SET send_at = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, until, now).run()
-        continue
-      }
-    }
     const reason =
       (killSwitch(env) ? 'paused_by_platform' : null) ??
       skipReason(m, now) ??
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
       (m.channel === 'sms' && !(await readyFor(m.customer)).ok ? 'sms_not_ready' : null) ??
-      (m.channel === 'sms' && (await quiet(m)) ? 'quiet_hours' : null) ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
       (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null) ??
       // Known bad address (permanent bounce / spam complaint, from Resend's signed feedback): never sent again.
@@ -367,6 +358,16 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       await db.prepare("UPDATE messages SET status = 'skipped', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, reason, now).run()
       out.skipped++
       continue
+    }
+    // Quiet hours (texts): a text that would go out now waits until morning instead (relevance is re-checked then).
+    // Checked last, so a text that can't be sent at all (GHL owns texting, not ready, opted out, …) is skipped, not
+    // postponed night after night.
+    if (m.channel === 'sms') {
+      const until = await quiet(m)
+      if (until) {
+        await db.prepare("UPDATE messages SET send_at = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, until, now).run()
+        continue
+      }
     }
     const claimed = await db
       .prepare("UPDATE messages SET status = 'sending', updated_at = ?2 WHERE id = ?1 AND status = 'scheduled' RETURNING id")

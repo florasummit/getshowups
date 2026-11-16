@@ -423,6 +423,13 @@ test('quiet hours: automatic texts wait for morning; a direct answer to their te
   assert.equal(m.status, 'scheduled')
   assert.equal(new Date(m.send_at).getUTCHours(), 8, 'moved to the end of quiet hours')
   assert.equal(sentSms().length, 0)
+  // A text that can't go out at all is skipped at night with its real reason, never postponed to the next morning.
+  db.sql.prepare("UPDATE sms_registrations SET status = 'pending' WHERE customer = 'alpha'").run()
+  db.sql.prepare("UPDATE messages SET status = 'scheduled', error = NULL, send_at = ?, created_at = ? WHERE lead_id = ? AND kind = 'lead_followup_2' AND channel = 'sms'").run(night, night, l)
+  await processDueMessages(env, night + 2 * MIN)
+  const blocked = db.sql.prepare("SELECT status, error FROM messages WHERE lead_id = ? AND kind = 'lead_followup_2' AND channel = 'sms'").get(l)
+  assert.deepEqual({ ...blocked }, { status: 'skipped', error: 'sms_not_ready' })
+  db.sql.prepare("UPDATE sms_registrations SET status = 'approved' WHERE customer = 'alpha'").run()
   // Direct answer (HELP) at night is allowed within 30 minutes of their message.
   await handleInbound(env, { from: PHONE, to: SENDER.alpha, body: 'HELP', providerId: 'SMq1' }, night)
   await sendQueued(env, night + MIN)

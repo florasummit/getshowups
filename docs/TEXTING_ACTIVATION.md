@@ -6,7 +6,7 @@ off**. Nothing below has been done; each step needs the approval noted. Steps ar
 ## 0. Database (approval: production migration)
 
 ```
-npx wrangler d1 execute ONBOARDING_DB --remote --file migrations/0024_followups.sql
+npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0024_followups.sql
 ```
 
 Additive and idempotent (4 new tables, no change to existing ones). Until it is applied, Follow-ups shows "being set up",

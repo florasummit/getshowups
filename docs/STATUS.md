@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Post-Build-49 checks (2026-11-16) — fix/quiet-hours-order; no migration
+
+- PoolThru /p/poolthru-llc 404: NOT the release. audit_log seq 53 `website.unpublish` by an owner session at 20:00:52
+  UTC (two-click "Take website offline"), 10 min after publishing v7 and 51 min before b5a7f86 deployed. v7 intact;
+  the draft holds unpublished edits (palette, hero focus), so Restore (overwrites draft) and Publish (puts them live)
+  are owner decisions. Founder decision: leave it offline; nothing written.
+- Fix: quiet hours deferred a text before the permanent skip checks, so a text that could never go (GHL owns texting,
+  not ready, opted out) was postponed nightly instead of skipped; it also made a CI test fail between 21:00 and 08:00
+  UTC. The deferral now runs last. Regression test with a fixed night clock. Only reachable after 0024 + Twilio.
+- Runbook: production D1 is `getshowups-onboarding` (docs/TEXTING_ACTIVATION.md said ONBOARDING_DB, the binding).
+- 0024 re-reviewed: 4 tables + 5 indexes, all IF NOT EXISTS, no ALTER/DROP/UPDATE/DELETE/INSERT; none exist in prod.
+
 ## Build 49: follow-up engine, two-way texts, A2P 10DLC readiness (2026-11-16) — feature/followups; migration 0024 (NOT applied)
 
 - One engine for every eligible business (server/followups/): source adapter (website_form, booking_page, sms; ready
