@@ -65,6 +65,8 @@ test('owner edits, previews and publishes the website; visitors book through it 
   const previewH1 = page.frameLocator('iframe[title="Website preview"]').getByRole('heading', { level: 1 })
   // Today's AI allowance is shown and counts down; revisions have their own allowance.
   await expect(page.locator('[data-allowance="revision"]')).toHaveText(/^\d+ of \d+ AI changes left today · resets at /)
+  // …and it says whose limit it is: no own key here, so it's the included writer's daily limit, not a provider credit.
+  await expect(page.locator('[data-allowance-note="revision"]')).toHaveText(/daily limit of the AI writer included with GetShowUps \(no API key needed\)\. Editing by hand is never limited\./)
   await page.getByRole('button', { name: 'Make it more modern' }).click()
   await expect(caption).toHaveText('New version · not saved yet')
   await expect(page.getByRole('button', { name: /^Publish/ })).toHaveCount(0)
@@ -125,11 +127,13 @@ test('owner edits, previews and publishes the website; visitors book through it 
 test('changes stay private until published again; an earlier version can be restored', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
   await page.goto('/dashboard/website')
-  // Website Studio is an internal pilot: a business outside it sees no import, AI designer or AI-key controls.
+  // Website Studio is available to every eligible business (no allowlist, and no Studio variable set, as in production):
+  // the import, the AI designer and the Claude/OpenAI key choice are offered; manual editing works without any key.
   await expect(page.getByLabel('Headline')).toBeVisible()
-  await expect(page.locator('section[aria-label="AI designer"], section[aria-label="Bring your current website"]')).toHaveCount(0)
-  await expect(page.getByLabel('API key')).toHaveCount(0)
-  expect((await page.request.get('/api/dashboard/website/designer')).status()).toBe(404)
+  await expect(page.locator('section[aria-label="AI designer"], section[aria-label="Bring your current website"]')).toHaveCount(2)
+  await expect(page.getByRole('radio', { name: 'Claude' })).toBeVisible()
+  await expect(page.getByRole('radio', { name: 'OpenAI' })).toBeVisible()
+  expect((await page.request.get('/api/dashboard/website/designer')).status()).toBe(200)
   await page.getByLabel('Headline').fill('A brand new headline')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(page.getByText('you have changes that aren’t published yet')).toBeVisible()

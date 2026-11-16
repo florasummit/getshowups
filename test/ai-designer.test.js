@@ -16,7 +16,7 @@ import * as website from '../functions/api/dashboard/website/index.js'
 import * as preview from '../functions/api/dashboard/website/preview.js'
 import * as aiKeyRoute from '../functions/api/dashboard/ai-key.js'
 import * as importRoute from '../functions/api/dashboard/website/import.js'
-import { studioEnabledFor } from '../server/website-studio.js'
+import { studioAccess, studioEnabled, studioSchemaReady } from '../server/website-studio.js'
 import * as publicSite from '../functions/p/[customer].js'
 import * as publicPage from '../functions/p/[customer]/[page].js'
 
@@ -234,52 +234,129 @@ test('designer: needs the owner’s own key; one turn streams progress, designs 
   assert.deepEqual((await call(designer, 'GET', { cookie: await cookieFor('owner@salon.example') })).json.turns, [])
 })
 
-test('Website Studio is an internal pilot: master switch AND an explicit business list; nobody else gets its routes, key or fields', async () => {
-  // The switch itself: exactly 'true', explicit ids only, no wildcard; empty → nobody.
-  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), true)
-  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'TRUE', WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), false)
-  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: '*' }, 'pools'), false)
-  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: '' }, 'pools'), false)
-  assert.equal(studioEnabledFor({ WEBSITE_STUDIO_BUSINESSES: 'pools' }, 'pools'), false)
+test('Website Studio is on for every eligible business (no allowlist); off switch, suspension and lapsed hosting turn it off; ineligible businesses get no routes, key, fields or platform AI', async () => {
+  // Default on; only an explicit 'false' switches it off. The old allowlist variable no longer matters.
+  assert.equal(studioEnabled({}), true)
+  assert.equal(studioEnabled({ WEBSITE_STUDIO_ENABLED: 'false' }), false)
+  delete env.WEBSITE_STUDIO_BUSINESSES
+  env.WEBSITE_STUDIO_ENABLED = undefined
+  let platform = 0
+  env.AI = { run: async () => { platform++; throw new Error('the included model must not run here') } }
 
-  // A pilot business designs and publishes; then the pilot is narrowed to nobody else and switched off for it.
+  // Two different eligible businesses, neither on any list: both get Studio.
   const c = await cookieFor('owner@pools.example')
+  const s = await cookieFor('owner@salon.example')
+  assert.equal((await call(website, 'GET', { cookie: c })).json.studio, true)
+  assert.equal((await call(website, 'GET', { cookie: s })).json.studio, true)
+  for (const mod of [designer, aiKeyRoute, importRoute]) assert.equal((await call(mod, 'GET', { cookie: s })).status, 200)
+  // Not signed in → 401 everywhere.
+  for (const mod of [designer, aiKeyRoute, importRoute, website]) assert.equal((await call(mod, 'GET')).status, 401)
+
+  // PoolThru-like business designs and publishes on its own key; the other business sees none of it.
   await addKey('pools')
   await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
   const designed = (await call(website, 'GET', { cookie: c })).json.website.draft
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'publish', content: designed, confirm: true } })).status, 200)
+  assert.equal((await call(aiKeyRoute, 'GET', { cookie: s })).json.key, null, 'business B never sees business A\'s key')
+  assert.deepEqual((await call(designer, 'GET', { cookie: s })).json.turns, [], 'or its conversation')
+  assert.equal((await call(website, 'GET', { cookie: s })).json.website.draft.site, undefined, 'or its design')
+
+  // Each way a business stops being eligible: Studio disappears for it, and its stored key is NOT replaced by the
+  // included (GetShowUps-paid) model: the writer refuses instead.
   const sent = requests.length
-  for (const off of [{ WEBSITE_STUDIO_ENABLED: undefined }, { WEBSITE_STUDIO_BUSINESSES: 'salon' }]) {
-    Object.assign(env, { WEBSITE_STUDIO_ENABLED: 'true', WEBSITE_STUDIO_BUSINESSES: 'pools,salon' }, off)
-    // Every Studio route is 404 (GET and POST): designer, own key, import.
+  const now = Date.now()
+  const cases = [
+    ['switched off', () => (env.WEBSITE_STUDIO_ENABLED = 'false'), () => (env.WEBSITE_STUDIO_ENABLED = undefined)],
+    ['suspended by an admin', () => db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'pools'").run(), () => db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'pools'").run()],
+    [
+      'subscription cancelled (hosting in grace)',
+      () => {
+        db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at, onboarded_at) VALUES ('pools', 'founding', ?, ?)").run(now, now)
+        db.sql.prepare("UPDATE subscriptions SET status = 'canceled', current_period_end = ? WHERE customer = 'pools'").run(now + DAY)
+      },
+      () => {
+        db.sql.prepare("DELETE FROM self_signups WHERE customer = 'pools'").run()
+        db.sql.prepare("UPDATE subscriptions SET status = 'active', current_period_end = NULL WHERE customer = 'pools'").run()
+      },
+    ],
+  ]
+  for (const [label, off, on] of cases) {
+    off()
     for (const [mod, body] of [[designer, { action: 'message', message: 'x' }], [aiKeyRoute, { action: 'remove' }], [importRoute, { action: 'start', url: 'example.com', confirm: true }]]) {
-      assert.equal((await call(mod, 'GET', { cookie: c })).status, 404)
-      assert.equal((await call(mod, 'POST', { cookie: c, body })).status, 404)
+      assert.equal((await call(mod, 'GET', { cookie: c })).status, 404, `${label}: GET`)
+      assert.equal((await call(mod, 'POST', { cookie: c, body })).status, 404, `${label}: POST`)
     }
-    const s = (await call(website, 'GET', { cookie: c })).json
-    assert.deepEqual([s.studio, s.aiKey], [false, null], 'no Studio flag, the stored key is not even shown')
-    // The older writer never uses the stored own key outside the pilot (template instead, no provider request).
+    const st = (await call(website, 'GET', { cookie: c })).json
+    assert.deepEqual([st.studio, st.aiKey], [false, null], label)
     const g = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
-    assert.equal(g.json.generation?.source, 'template')
-    assert.equal(requests.length, sent, 'no request with the stored key')
+    assert.deepEqual([g.status, g.json.error], [503, 'ai_unavailable'], `${label}: refused, not the included model`)
+    assert.deepEqual([requests.length, platform], [sent, 0], `${label}: no provider request, no platform AI`)
     // A hand-crafted save can neither add nor change the AI site or redirects; what was stored is kept.
     const crafted = { ...designed, headline: 'Edited by hand', site: { ...designed.site, name: 'Crafted' }, redirects: [{ from: '/x', to: 'book' }] }
     assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: crafted } })).status, 200)
     const after = (await call(website, 'GET', { cookie: c })).json.website.draft
-    assert.deepEqual([after.headline, after.site.name, after.redirects], ['Edited by hand', designed.site.name, undefined])
-    // Published content is never gated: the live AI site (and its pages) keep serving.
+    assert.deepEqual([after.headline, after.site.name, after.redirects], ['Edited by hand', designed.site.name, undefined], label)
+    // Published content is never gated by Studio: the live AI site (and its pages) keep serving. (A suspended business's
+    // site is offline for the existing suspension rule, not because of Studio.)
     const home = await call(publicSite, 'GET', { params: { customer: 'pools' } })
-    assert.equal(home.status, 200)
-    assert.match(home.text, /Clear water, every week\./)
-    assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
+    if (label.startsWith('suspended')) assert.notEqual(home.status, 200)
+    else {
+      assert.equal(home.status, 200, label)
+      assert.match(home.text, /Clear water, every week\./)
+      assert.equal((await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })).status, 200)
+    }
+    on()
   }
-  // A business never in the pilot cannot introduce an AI site by hand either.
-  env.WEBSITE_STUDIO_BUSINESSES = 'pools'
-  const s = await cookieFor('owner@salon.example')
-  db.sql.prepare('INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES (?, ?, NULL, NULL, 1)').run('salon', JSON.stringify({ ...designed, site: undefined }))
-  assert.equal((await call(website, 'POST', { cookie: s, body: { action: 'save', content: { ...designed, redirects: [{ from: '/x', to: 'book' }] } } })).status, 200)
-  const salon = (await call(website, 'GET', { cookie: s })).json.website.draft
-  assert.deepEqual(['site' in salon, 'redirects' in salon], [false, false])
+  assert.equal((await call(website, 'GET', { cookie: c })).json.studio, true, 'eligible again')
+
+  // A self-serve business before payment is not eligible.
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('salon', 'founding', ?)").run(now)
+  assert.equal((await call(website, 'GET', { cookie: s })).json.studio, false)
+  assert.equal((await call(designer, 'GET', { cookie: s })).status, 404)
+})
+
+test('Website Studio stays hidden (not broken) until its tables exist, so deploying never requires the migration first', async () => {
+  const sql = new DatabaseSync(':memory:')
+  for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort().filter((f) => f < '0021')) sql.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
+  const stmt = (q, args = []) => ({ bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => ({ meta: { changes: sql.prepare(q).run(...args).changes } }) })
+  const old = { prepare: (q) => stmt(q) }
+  assert.equal(await studioSchemaReady(old), false)
+  assert.equal(await studioAccess({ ONBOARDING_DB: old }, { id: 'pools', status: 'active' }), false)
+  assert.equal(await studioSchemaReady(db), true)
+  assert.equal(await studioAccess(env, { id: 'pools', status: 'active' }), true)
+  // The writer with no key table at all: no stored key, so nothing to refuse (the included model may run as before).
+  const { storedCredential } = await import('../server/ai-credentials.js')
+  assert.equal(await storedCredential({ ...env, ONBOARDING_DB: old }, 'pools'), null)
+})
+
+test('an own key that is invalid, revoked or unreadable is reported and never replaced by the included model; no key → designer asks for one', async () => {
+  let platform = 0
+  env.AI = { run: async () => { platform++; throw new Error('the included model must not run here') } }
+  const c = await cookieFor('owner@pools.example')
+  // No key: the designer asks for one and calls nobody.
+  const none = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+  assert.equal(none.error, 'key_required')
+  assert.deepEqual([requests.length, platform], [0, 0])
+  // A stored key the provider rejected earlier (marked invalid), then one that can't be decrypted.
+  await addKey('pools')
+  for (const [label, breakIt] of [
+    ['marked invalid', () => db.sql.prepare("UPDATE ai_credentials SET status = 'invalid' WHERE customer = 'pools'").run()],
+    ['unreadable', () => db.sql.prepare("UPDATE ai_credentials SET status = 'ok', sealed = 'v1.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' WHERE customer = 'pools'").run()],
+  ]) {
+    breakIt()
+    const g = await call(website, 'POST', { cookie: c, body: { action: 'generate' } })
+    assert.deepEqual([g.status, g.json.error], [400, 'invalid_key'], `${label}: generate`)
+    const r = await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'Make the intro shorter' } })
+    assert.deepEqual([r.status, r.json.error], [400, 'invalid_key'], `${label}: revise`)
+    const d = events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1)
+    assert.equal(d.error, 'key_required', `${label}: designer`)
+    assert.deepEqual([requests.length, platform], [0, 0], `${label}: no provider request, no platform AI`)
+  }
+  // Manual editing never needs a key or calls any AI.
+  const draft = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...draft, headline: 'Edited by hand' } } })).status, 200)
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.headline, 'Edited by hand')
+  assert.deepEqual([requests.length, platform], [0, 0])
 })
 
 test('pilot: AI-designed sites stay private unless WEBSITE_STUDIO_PUBLISH is on (publish and restore refused; live site untouched)', async () => {

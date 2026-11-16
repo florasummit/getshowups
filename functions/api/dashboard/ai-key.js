@@ -11,13 +11,13 @@ import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { recordEvent } from '../../../server/auditlog.js'
 import { credentialFor, credentialView, removeCredential, saveCredential, setBudget, setModel } from '../../../server/ai-credentials.js'
 import { refreshCatalog } from '../../../server/ai-models.js'
-import { studioEnabledFor } from '../../../server/website-studio.js'
+import { studioAccess } from '../../../server/website-studio.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
-  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  // Website Studio (server/website-studio.js): only eligible businesses have this route.
+  if (!(await studioAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const id = session.customer.id
   // New models appear without a deployment: a catalog older than a day is re-read from the provider.
   const cred = await credentialFor(env, id).catch(() => null)
@@ -28,8 +28,8 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
-  // Internal pilot (server/website-studio.js): businesses outside it don't have this route.
-  if (!studioEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  // Website Studio (server/website-studio.js): only eligible businesses have this route.
+  if (!(await studioAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const body = await request.json().catch(() => null)
   const id = session.customer.id
   try {

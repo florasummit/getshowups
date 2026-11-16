@@ -172,6 +172,7 @@ export default function WebsiteTab() {
             hasDraft={!w.generated}
             templates={rewrite === 'templates'}
             usage={data.aiUsage}
+            ownKey={data.aiKey?.status === 'ok' ? data.aiKey.provider : null}
             onUsage={setUsage}
             intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
             onApplied={(d) => {
@@ -185,6 +186,7 @@ export default function WebsiteTab() {
           <>
             <ReviseBox
               usage={data.aiUsage}
+              ownKey={data.aiKey?.status === 'ok' ? data.aiKey.provider : null}
               onUsage={setUsage}
               onPreview={setPending}
               onApplied={(d) => {
