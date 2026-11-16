@@ -2,6 +2,32 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: live re-validation for PR #43 (2026-11-16) — both providers pass; $0.497 spent; draft, NOT merged
+
+- Claude compatibility call (approved, $0.40 cap, enforced in the harness as a worst-case-before-send guard): passed,
+  1 request, $0.077. The compact 58-property schema compiles; the composition came back valid with no check issues.
+  That call is Claude's turn 1 (same brief), counted inside Claude's $2.50 product limit.
+- Three turns per provider (design → different direction → owner change request), approved $5 combined:
+  Claude Sonnet 5.5 $0.077 + $0.153 (1 revision) + $0.062 = $0.292; GPT-6.1 Sol $0.051 + $0.095 (1 revision) + $0.059 =
+  $0.205. Total $0.497. Every turn produced a valid design; no provider/schema errors.
+- Both models now use the composition system: Claude type poster → full-bleed photo with the headline inside; GPT type
+  poster with a large mark → three-photo collage with an overlapping headline card. Brand "PoolThru" everywhere.
+- Visual inspection found renderer defects (fixed, regression tests): a full-width photo under words kept its 21:9
+  proportion as a grid item (grew past the page edge as type grew; sat inside the margins on a dark band) → now a
+  backdrop (design-blocks.js compositionRoles) that fills the section/content area; a photo beside a stack spread its
+  extra height between rows (button far below its text) → two flexible spacer rows centre the stack; on phones photo
+  boxes took their width from their height and overflowed the screen (GPT's page measured 10,003px, now 5,342px) →
+  width:100%; footer "PoolThru: pool cleaning…" lost the brand but started lower-case, and "PoolThru. Pool care…"
+  repeated it → fixed. The balance estimator follows the same roles; a ragged text stack is no longer a "hole".
+- New soft checks (one revision): `buried_photo` (a photo mostly hidden under a layered card — GPT's revision left a
+  sliver) and `same_lead` ("different" kept the previous headline or lead photo — GPT kept "Less upkeep. More pool time."
+  and the hat photo). Both were applied to the saved live outputs offline, not yet with a live call.
+- Remaining weaknesses: GPT leads with the same owner photo it likes best; below-the-fold sections are still mostly
+  preset patterns (services rows, steps, area chips, CTA band); the collage's paragraph and button sit below a 900px
+  desktop first screen (the nav Book stays visible); the poster's large top padding.
+- Unit 473/473, browser 79/79, lint/build/Functions clean. Next: owner review of the screenshots; optional one more paid
+  "different direction" turn per provider to see `same_lead`/`buried_photo` trigger their revision live.
+
 ## Website Studio: design quality pass for PR #43 (2026-11-16) — paid re-validation BLOCKED (Keychain), $0 spent
 
 - Root cause of generic AI first screens: the prompt described composition options abstractly and nothing pushed back

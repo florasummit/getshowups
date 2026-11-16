@@ -86,3 +86,12 @@ test('brand: AI-designed sites show the public brand in the owner\'s spelling, t
   const legacy = renderSite(biz, v[1], { bookUrl: '/book/x', year: 2026 })
   assert.match(legacy, /Poolthru LLC/, 'sites without an AI design render exactly as before')
 })
+
+test('footer: a tagline that repeats the brand (any separator) loses it and starts with a capital', () => {
+  const biz = { id: 'poolthru-llc', name: 'PoolThru', legalName: 'Poolthru LLC', cities: ['Charleston'], phone: '', services: SERVICES }
+  const foot = (layout, text) => renderV2(biz, validateSpec({ ...recipeSpec(RECIPES[0]), footer: { layout, text } }, CTX).spec, { bookUrl: '/book/x', year: 2026 }).match(/<footer[\s\S]*<\/footer>/)[0]
+  assert.match(foot('statement', 'PoolThru: pool cleaning and maintenance for Charleston.'), /<p class="big">Pool cleaning and maintenance for Charleston\.<\/p>/)
+  const simple = foot('simple', 'PoolThru. Pool care for life in the Lowcountry.')
+  assert.match(simple, /© 2026 PoolThru · Pool care for life in the Lowcountry\.<\/span>/)
+  assert.equal(simple.match(/PoolThru/g).length, 1, 'the brand once')
+})

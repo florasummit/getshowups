@@ -80,6 +80,26 @@ export function blockToItem(b) {
   return { serviceIndex: -1, icon: '', title: [m.kind, m.place, m.look].filter(Boolean).join(' '), text: m.text, image: b.kind === 'media' ? m.image : b.kind === 'button' ? m.target : '' }
 }
 
+// How the desktop layout treats a photo that spans the whole composition (renderer and balance check share this):
+//   backdrop  a photo across all 12 columns and every row with words layered over it is the section's backdrop: it fills
+//             the section edge to edge (width full) or the content area, at any height, and the words keep a padding.
+//             Laid out as a grid item it kept its proportion: taller text grew it past the page edge (live Claude design,
+//             2026-11-16), and the words sat on its very edge.
+//   centred   a photo spanning every row beside a stack of words (2+ rows): the photo's extra height goes above and below
+//             the stack (two flexible spacer rows), not between its rows, which pushed the button far from its text.
+export function compositionRoles(blocks) {
+  const list = (blocks || []).filter((b) => Array.isArray(b?.col) && Array.isArray(b?.row))
+  if (!list.length) return { backdrop: null, centred: new Set(), maxEnd: 0 }
+  const minRow = Math.min(...list.map((b) => b.row[0]))
+  const maxEnd = Math.max(...list.map((b) => b.row[0] + b.row[1]))
+  const full = (b) => b.kind === 'media' && b.row[0] === minRow && b.row[0] + b.row[1] === maxEnd && b.row[1] >= 2
+  const words = list.filter((b) => b.kind !== 'media' && b.kind !== 'mark')
+  const backdrop = list.find((b) => full(b) && b.col[0] === 1 && b.col[1] === 12 && words.some((w) => w.z > b.z)) || null
+  const stackRows = new Set(words.map((b) => b.row[0]))
+  const centred = new Set(backdrop || stackRows.size < 2 ? [] : list.filter(full))
+  return { backdrop, centred, maxEnd }
+}
+
 // First-screen recipes taught to the model (the prompt prints them; test/design-recipes.test.js validates and renders
 // each one, so the prompt never teaches something the validator or the balance check would refuse). Text in <…> is a
 // placeholder the model writes. They are starting points: the model varies placement, sizes and proportions.

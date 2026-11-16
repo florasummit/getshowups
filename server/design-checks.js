@@ -4,6 +4,7 @@
 //   soft — a generic or repetitive choice (a first screen left to the default, two identical sections in a row, the
 //          "different direction" isn't different). One automatic revision is asked for; the result is saved either way.
 // `notes` are short instructions for that revision (no owner data in them).
+import { compositionRoles } from './design-blocks.js'
 const LAYOUT_TYPES = new Set(['hero', 'services', 'features', 'gallery', 'steps', 'cta'])
 
 const bucket = (b) => (b.col?.[0] <= 4 ? 'L' : b.col?.[0] >= 9 ? 'R' : 'C')
@@ -28,6 +29,16 @@ export function firstScreenStructure(spec) {
   return `composition:${s.height}:photos${media.length}:${width >= 10 ? 'wide' : width >= 5 ? 'half' : width ? 'small' : 'none'}:${overlap ? 'overlap' : 'side'}:${heading?.size || '-'}:${s.blocks.some((b) => b.kind === 'mark') ? 'mark' : ''}`
 }
 
+// The first screen's headline (normalised) and its largest photo.
+export function firstScreenLead(spec) {
+  const s = spec?.pages?.[0]?.sections?.[0]
+  if (!s) return ['', '']
+  const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  if (s.type !== 'composition') return [norm(s.heading), s.image || s.backgroundImage || '']
+  const photo = s.blocks.filter((b) => b.kind === 'media').sort((a, b) => b.col[1] * b.row[1] - a.col[1] * a.row[1])[0]
+  return [norm(s.blocks.find((b) => b.kind === 'heading')?.text), photo?.image || '']
+}
+
 // A rough desktop layout of one composition (no browser): 1200px content width on 12 columns, type sizes close to the
 // renderer's at 1440px, photos by their proportion, auto-height grid rows. Good enough to spot the obvious problems —
 // a section that is mostly empty, a tall empty band beside a short column, edges that miss each other by one column —
@@ -49,8 +60,20 @@ function contentHeight(b) {
   return lines * fs * lh
 }
 export function layoutComposition(section) {
-  const blocks = (section?.blocks || []).filter((b) => Array.isArray(b.col) && Array.isArray(b.row))
-  if (!blocks.length) return null
+  const all = (section?.blocks || []).filter((b) => Array.isArray(b.col) && Array.isArray(b.row))
+  if (!all.length) return null
+  // Same desktop roles as the renderer: a backdrop or a full-height photo takes the section's height (its own proportion
+  // or the stack's, whichever is taller) and the other blocks sit centred on it.
+  const { backdrop, centred } = compositionRoles(all)
+  const whole = all.filter((b) => b === backdrop || centred.has(b))
+  const blocks = all.filter((b) => !whole.includes(b))
+  if (!blocks.length) return { rects: whole.map((b) => ({ b, x0: b.col[0] - 1, x1: b.col[0] - 1 + b.col[1], y0: 0, y1: contentHeight(b) })), height: Math.max(...whole.map(contentHeight)) }
+  const flow = flowLayout(blocks)
+  const height = Math.max(flow.height, ...whole.map(contentHeight))
+  const dy = (height - flow.height) / 2
+  return { rects: [...whole.map((b) => ({ b, x0: b.col[0] - 1, x1: b.col[0] - 1 + b.col[1], y0: 0, y1: height })), ...flow.rects.map((r) => ({ ...r, y0: r.y0 + dy, y1: r.y1 + dy }))], height }
+}
+function flowLayout(blocks) {
   const rows = Math.max(...blocks.map((b) => b.row[0] + b.row[1] - 1))
   const h = Array(rows + 1).fill(0)
   const span = (b) => [...Array(b.row[1]).keys()].map((i) => b.row[0] + i)
@@ -85,10 +108,14 @@ export function compositionBalance(section) {
   if (used / ((x1 - x0) * L.height) < 0.4) issues.push('mostly_empty')
   // Holes: per column, empty runs below content in that column. A band = at least 3 neighbouring columns empty over the
   // same stretch, taller than 35% of the section and 220px (a gutter or a single short column is fine).
+  // A stack of words sharing a left edge reads as one column as wide as its widest block: a ragged right edge (a short
+  // button under a wide headline) is not a hole.
+  const words = L.rects.filter((r) => r.b.kind !== 'media')
+  const solid = L.rects.map((r) => (r.b.kind === 'media' ? r : { ...r, x1: Math.max(...words.filter((w) => w.x0 === r.x0).map((w) => w.x1)) }))
   const limit = Math.max(220, L.height * 0.35)
   const empty = []
   for (let c = x0; c < x1; c++) {
-    const covered = [...Array(slices).keys()].map((i) => L.rects.some((r) => r.x0 <= c && c < r.x1 && r.y0 <= i * step + step / 2 && i * step + step / 2 < r.y1))
+    const covered = [...Array(slices).keys()].map((i) => solid.some((r) => r.x0 <= c && c < r.x1 && r.y0 <= i * step + step / 2 && i * step + step / 2 < r.y1))
     const first = covered.indexOf(true)
     empty.push(covered.map((v, i) => first >= 0 && i > first && !v))
   }
@@ -106,6 +133,24 @@ export function compositionBalance(section) {
   const layered = (r) => r.b.kind !== 'media' && L.rects.some((m) => m.b.kind === 'media' && m.x0 < r.x1 && r.x0 < m.x1 && m.y0 < r.y1 && r.y0 < m.y1)
   const stacked = L.rects.filter((r) => r.b.x !== 'center' && !layered(r))
   if (stacked.some((a) => stacked.some((b) => a !== b && b.y0 >= a.y1 - 1 && a.x0 < b.x1 && b.x0 < a.x1 && Math.abs(a.x0 - b.x0) === 1))) issues.push('misaligned')
+  // A photo mostly hidden under a card layered above it (over half, by this rough estimate) reads as a stray strip (live GPT revision, 2026-11-16: a
+  // 4-column photo with a headline card over its lower two-thirds). Words written INSIDE a photo (white over a darkening
+  // layer) are the photo's own text, not a cover; only blocks that stick out past it (raised cards) count.
+  const inside = (r, m) => r.x0 >= m.x0 && r.x1 <= m.x1 && r.y0 >= m.y0 - 1 && r.y1 <= m.y1 + 1
+  for (const m of L.rects.filter((r) => r.b.kind === 'media')) {
+    const covers = L.rects.filter((r) => r.b.kind !== 'media' && r.b.z > m.b.z && !inside(r, m) && r.x0 < m.x1 && m.x0 < r.x1 && r.y0 < m.y1 && m.y0 < r.y1)
+    if (!covers.length) continue
+    let hidden = 0
+    for (let i = 0; i < 20; i++) for (let j = 0; j < 20; j++) {
+      const x = m.x0 + ((i + 0.5) / 20) * (m.x1 - m.x0)
+      const y = m.y0 + ((j + 0.5) / 20) * (m.y1 - m.y0)
+      if (covers.some((r) => r.x0 <= x && x < r.x1 && r.y0 <= y && y < r.y1)) hidden++
+    }
+    if (hidden / 400 > 0.5) {
+      issues.push('buried_photo')
+      break
+    }
+  }
   return issues
 }
 // A "safe" first screen: one photo beside the text, nothing overlapping, no mark, a headline below display size.
@@ -149,6 +194,9 @@ export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 
   // A different direction needs a different first-screen STRUCTURE: mirroring it or changing fonts/colours isn't one
   // (live GPT answer 2026-11-16: the "different" design was the first one flipped left-to-right with a serif).
   if (mode === 'different' && previous && firstScreenStructure(spec) === firstScreenStructure(previous)) soft.push('same_direction')
+  // …and its own words and picture: live GPT 2026-11-16 kept "Less upkeep. More pool time." and the same lead photo in
+  // a structurally new direction, so the two read as one site.
+  else if (mode === 'different' && previous && firstScreenLead(spec).some((x, i) => x && x === firstScreenLead(previous)[i])) soft.push('same_lead')
   // New designs (not owner-requested revisions, which may ask for something simple) shouldn't open with the safe
   // template: one photo beside the text (live GPT answers 2026-11-16: all three first screens were this).
   if (fresh && conventionalFirstScreen(spec)) soft.push('conventional_first_screen')
@@ -163,8 +211,9 @@ export function checkDesign({ raw, spec, warnings = [], previous = null, mode = 
     default_first_screen: 'The first screen was left to the default layout; choose a deliberate first screen (a composition or a specific hero layout).',
     repeated_sections: 'Two sections in a row have the same structure; vary the composition between neighbouring sections.',
     same_direction: 'This was meant to be a different direction but the first screen, type pairing or palette is the same as before; change them.',
+    same_lead: 'This was meant to be a different direction but the first screen repeats the previous headline or leads with the same photo; write a new headline and open with a different photo (or with type alone).',
     conventional_first_screen: 'The first screen is the safe template (one photo beside the text). Recompose it with one of the FIRST-SCREEN RECIPES: overlap the headline with a large photo, or a display headline across 8+ columns, or a collage of 2-3 photos at different sizes, or a type poster with a mark.',
-    unbalanced_composition: `A composition looks unbalanced: ${[...balance].map((x) => ({ mostly_empty: 'most of its area is empty', empty_band: 'a tall empty band where one column ends far above the other', misaligned: 'stacked blocks whose left edges miss each other by one column' })[x]).join('; ')}. Align stacked blocks to the same column edge, and size rows so the columns end together (or make the empty side deliberate).`,
+    unbalanced_composition: `A composition looks unbalanced: ${[...balance].map((x) => ({ mostly_empty: 'most of its area is empty', empty_band: 'a tall empty band where one column ends far above the other', misaligned: 'stacked blocks whose left edges miss each other by one column', buried_photo: 'a photo almost entirely hidden under a card layered over it' })[x]).join('; ')}. Align stacked blocks to the same column edge, and size rows so the columns end together (or make the empty side deliberate); a layered card may overlap a photo's edge, not hide most of it.`,
   }
   return { hard, soft, info, balance: [...balance], notes: [...hard, ...soft].map((c) => NOTE[c]), signature: firstScreenSignature(spec) }
 }

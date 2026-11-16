@@ -6,6 +6,7 @@
 // and off for people who prefer reduced motion.
 import { FONTS } from './site-spec.js'
 import { stockById } from './site-design.js'
+import { compositionRoles } from './design-blocks.js'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const paras = (s) =>
@@ -121,9 +122,10 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 ${composition ? `.zs-display{font-size:${fluid(7)};line-height:.96}.zs-xl{font-size:${fluid(5)};line-height:1.02}.zs-l{font-size:${fluid(3.4)}}.zs-m{font-size:${fs(0.6)}}.zs-s{font-size:${fs(-0.3)}}
 .comp .cg{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:clamp(14px,2vw,28px);align-items:start}.cb{position:relative;min-width:0}.cb p{margin:0}.cb .eyebrow{margin:0}
 .comp.h-tall,.comp.h-screen{display:flex;flex-direction:column;justify-content:center;padding-block:clamp(32px,6vh,var(--py))}
-.cm{position:relative;overflow:hidden;height:100%;min-height:160px}.cm img{width:100%;height:100%;object-fit:cover}.cm.shape-rounded{border-radius:var(--r)}.cm.shape-arch{border-radius:999px 999px var(--r) var(--r)}.cm.shape-circle{border-radius:50%}.cm.shape-rect img,.cm.shape-rounded img,.cm.shape-arch img,.cm.shape-circle img{border-radius:0}
+.cm{position:relative;overflow:hidden;width:100%;height:100%;min-height:160px}.cm img{width:100%;height:100%;object-fit:cover}.cm.shape-rounded{border-radius:var(--r)}.cm.shape-arch{border-radius:999px 999px var(--r) var(--r)}.cm.shape-circle{border-radius:50%}.cm.shape-rect img,.cm.shape-rounded img,.cm.shape-arch img,.cm.shape-circle img{border-radius:0}
 .cm.tr-tint::after,.cm.tr-duo::after,.cm.tr-scrim::after{content:"";position:absolute;inset:0;pointer-events:none}.cm.tr-tint::after{background:var(--accent);mix-blend-mode:multiply;opacity:.35}.cm.tr-duo img{filter:grayscale(1) contrast(1.1)}.cm.tr-duo::after{background:var(--accent);mix-blend-mode:screen;opacity:.55}.cm.tr-scrim::after{background:linear-gradient(180deg,transparent 35%,rgba(0,0,0,.6))}
 .mk{font:800 clamp(64px,14vw,240px)/.8 var(--hf);color:var(--line);user-select:none}
+@media(min-width:861px){.comp.has-bd{position:relative;isolation:isolate;display:flex;flex-direction:column;justify-content:center}.comp.has-bd .cg{align-content:center}.comp.has-bd:not(.w-full) .cg{position:relative;padding:clamp(28px,4vw,64px)}.comp.has-bd .cg>.cb.bd{position:absolute;inset:0;z-index:0}.comp.has-bd.w-full .cb.bd .cm{border-radius:0}.cb.bd .cm{height:100%}}
 @media(min-width:861px){.cb.over{color:#fff;text-shadow:0 1px 18px rgba(0,0,0,.35)}.cb.over .muted,.cb.over .eyebrow{color:#fff;opacity:.92}.cb.over .btn.ghost{color:#fff}.cm.under::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.15),rgba(0,0,0,.55))}.cb.raised{background:var(--bg);color:var(--ink);padding:clamp(16px,2.2vw,32px);border-radius:var(--r);box-shadow:0 12px 40px rgba(0,0,0,.12)}.bg-surface .cb.raised{background:var(--surface)}.cb.raised .muted{color:var(--muted)}}
 @media(max-width:860px){.comp .cg{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}}` : ''}
 .preview-bar{background:#fff4d6;color:#4a3800;text-align:center;font:500 14px system-ui;padding:8px}.skip{position:absolute;left:-999px}.skip:focus{left:16px;top:16px;z-index:99;background:var(--bg);padding:8px}
@@ -164,12 +166,24 @@ export function renderV2(biz, spec, opts = {}) {
     const under = new Set(media.filter((m) => [...over].some((b) => hit(b, m))))
     const eager = first
     let labelled = ''
+    // Desktop roles (design-blocks.js): a backdrop photo, or a full-height photo beside a stack that sits centred on it.
+    const { backdrop, centred, maxEnd } = compositionRoles(s.blocks)
+    const shift = centred.size ? 1 : 0
+    if (shift) blockCss.push(`@media(min-width:861px){#${s.id} .cg{grid-template-rows:minmax(0,1fr) repeat(${maxEnd - 1},auto) minmax(0,1fr);margin-block:calc(-1 * clamp(14px,2vw,28px))}}`)
+    if (backdrop) {
+      const [w, h] = (ASPECT[backdrop.aspect] || '16/9').split('/')
+      blockCss.push(`@media(min-width:861px){#${s.id}${s.width === 'full' ? '' : ' .cg'}{min-height:min(calc(${s.width === 'full' ? '100vw' : 'min(100vw, var(--max))'} * ${h} / ${w}),85vh)}}`)
+    }
     const html = s.blocks
       .map((b, i) => {
         const sel = `#${s.id} .cg>.cb:nth-child(${i + 1})`
         const box = b.kind === 'button' || b.kind === 'mark'
-        blockCss.push(`${sel}{grid-column:${b.col[0]} / span ${b.col[1]};grid-row:${b.row[0]} / span ${b.row[1]};z-index:${b.z};align-self:${b.kind === 'media' && b.aspect === 'auto' ? 'stretch' : b.y};justify-self:${box ? b.x : 'stretch'};text-align:${b.x === 'end' ? 'right' : b.x === 'center' ? 'center' : 'left'}}`)
-        if (b.kind === 'media') blockCss.push(`${sel} .cm${ASPECT[b.aspect] ? `{aspect-ratio:${ASPECT[b.aspect]}}` : '{min-height:320px}'}${sel} img{object-position:${b.focus[0]}% ${b.focus[1]}%}`)
+        const rows = centred.has(b) ? `1 / ${maxEnd + 2}` : `${b.row[0] + shift} / span ${b.row[1]}`
+        // No grid placement for a backdrop: an absolutely positioned grid child with grid lines is sized to that grid
+        // area, not to the padded content box, so it would stop short of the edges with the words on its border.
+        blockCss.push(`${sel}{${b === backdrop ? '' : `grid-column:${b.col[0]} / span ${b.col[1]};grid-row:${rows};`}z-index:${b.z};align-self:${b.kind === 'media' && (b.aspect === 'auto' || centred.has(b)) ? 'stretch' : b.y};justify-self:${box ? b.x : 'stretch'};text-align:${b.x === 'end' ? 'right' : b.x === 'center' ? 'center' : 'left'}}`)
+        // A backdrop keeps its proportion only on phones (where it stacks); on desktop it fills the section.
+        if (b.kind === 'media') blockCss.push(`${b === backdrop ? '@media(max-width:860px){' : ''}${sel} .cm${ASPECT[b.aspect] ? `{aspect-ratio:${ASPECT[b.aspect]}}` : '{min-height:320px}'}${b === backdrop ? '}' : ''}${sel} img{object-position:${b.focus[0]}% ${b.focus[1]}%}`)
         blockCss.push(`@media(max-width:860px){${sel}{grid-column:span ${b.m.span};grid-row:auto;order:${b.m.order};text-align:${b.x === 'center' ? 'center' : 'left'}${b.m.hide ? ';display:none' : ''}}}`)
         let inner = ''
         if (b.kind === 'heading') {
@@ -182,10 +196,10 @@ export function renderV2(biz, spec, opts = {}) {
         else if (b.kind === 'button') inner = `<a class="btn${b.secondary ? ' ghost' : ''}" href="${link(b.target)}">${esc(b.label)}</a>`
         else if (b.kind === 'media') inner = `<div class="cm shape-${b.shape} tr-${b.treat}${under.has(b) ? ' under' : ''}">${image(b.image, { alt: b.alt, eager, sizes: `(max-width:860px) 100vw, ${Math.max(25, Math.round((b.col[1] / 12) * 100))}vw` })}</div>`
         else inner = `<div class="mk" aria-hidden="true">${esc(b.text)}</div>`
-        return `<div class="cb${over.has(b) ? ' over' : raised.has(b) ? ' raised' : ''}">${inner}</div>`
+        return `<div class="cb${b === backdrop ? ' bd' : ''}${over.has(b) ? ' over' : raised.has(b) ? ' raised' : ''}">${inner}</div>`
       })
       .join('')
-    return `<section id="${esc(s.id)}" class="${cls} comp h-${s.height}"${labelled ? ` aria-labelledby="${esc(labelled)}"` : ''}><div class="wrap cg">${html}</div></section>`
+    return `<section id="${esc(s.id)}" class="${cls} comp h-${s.height}${backdrop ? ' has-bd' : ''}"${labelled ? ` aria-labelledby="${esc(labelled)}"` : ''}><div class="wrap cg">${html}</div></section>`
   }
 
   const section = (s) => {
@@ -251,7 +265,8 @@ export function renderV2(biz, spec, opts = {}) {
   const nav = `<header class="nav nav-${spec.nav.layout}${spec.nav.sticky ? ' sticky' : ''}"><div class="wrap"><a class="brand" href="${esc(href(''))}">${esc(biz.name)}</a>${navLinks}${spec.nav.showBook ? `<a class="btn" href="${esc(bookUrl)}">${visit ? 'Book a visit' : 'Book'}</a>` : ''}</div></header>`
   // The footer names the brand once: a tagline that starts with the name again ("Poolthru LLC · Pool care…") loses it.
   const names = [biz.name, biz.legalName].filter(Boolean).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-  const tagline = (spec.footer.text || '').replace(new RegExp(`^(?:${names})(?:[,\\s]+(?:llc|inc|ltd|co)\\.?)?\\s*[·|:,–—-]\\s*`, 'i'), '').trim()
+  // What remains starts a sentence ("PoolThru: pool cleaning…" → "Pool cleaning…", live Claude answer 2026-11-16).
+  const tagline = (spec.footer.text || '').replace(new RegExp(`^(?:${names})(?:[,\\s]+(?:llc|inc|ltd|co)\\.?)?\\s*[·|:,.–—-]\\s*(\\S?)`, 'i'), (_, c) => c.toUpperCase()).trim()
   const repeat = new RegExp(`^(?:${names})\\.?$`, 'i').test(tagline)
   const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(tagline || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && tagline && !repeat ? ` · ${esc(tagline)}` : ''}</span><span><a href="${esc(privacyUrl)}">Privacy</a> · Website by GetShowUps</span></div></footer>`
   const title = pg.seoTitle || (pg.slug ? `${pg.navLabel} · ${biz.name}` : biz.name)

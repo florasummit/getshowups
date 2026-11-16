@@ -141,8 +141,17 @@ test('design checks: unusable answers are hard failures; generic or repeated cho
   const prev = v.spec
   const same = { ...ok, direction: 'Something else' }
   assert.deepEqual(checkDesign({ raw: same, ...validateSpec(same, CTX), previous: prev, mode: 'different' }).soft, ['same_direction'])
-  const poster = validateSpec(directions(PHOTOS).poster, CTX)
-  assert.deepEqual(checkDesign({ raw: directions(PHOTOS).poster, ...poster, previous: prev, mode: 'different' }).soft, [])
+  // The showcase fixtures share one placeholder headline; a real different direction writes its own.
+  const posterRaw = structuredClone(directions(PHOTOS).poster)
+  for (const b of posterRaw.pages[0].sections[0].blocks) if (b.kind === 'heading') b.text = 'Pools, handled.'
+  const poster = validateSpec(posterRaw, CTX)
+  assert.deepEqual(checkDesign({ raw: posterRaw, ...poster, previous: prev, mode: 'different' }).soft, [])
+  // A new structure that keeps the previous headline (any punctuation/case) is still the same site.
+  const heading = (spec) => spec.pages[0].sections[0].blocks.find((b) => b.kind === 'heading')
+  const copied = structuredClone(poster.spec)
+  heading(copied).text = heading(prev).text.toUpperCase() + '!'
+  assert.deepEqual(checkDesign({ raw: copied, spec: copied, warnings: [], previous: prev, mode: 'different' }).soft, ['same_lead'])
+  assert.deepEqual(checkDesign({ raw: copied, spec: copied, warnings: [], previous: prev, mode: 'design' }).soft, [], 'only for "different"')
 })
 
 test('raw model answers are redacted before they are kept', () => {
@@ -187,4 +196,50 @@ test('a different direction must change the first-screen structure: a mirrored, 
   assert.equal(firstScreenStructure(mirror), firstScreenStructure(a))
   assert.notEqual(firstScreenStructure(validateSpec(directions(PHOTOS).poster, CTX).spec), firstScreenStructure(a))
   assert.notEqual(firstScreenStructure(validateSpec(directions(PHOTOS).collage, CTX).spec), firstScreenStructure(a))
+})
+
+// Live designs, 2026-11-16: a full-width photo with words over it kept its 21:9 proportion as a grid item, so taller
+// type made it grow past the page edge (desktop) and it sat inside the page margins on a dark band; a photo beside a
+// stack of words spread its extra height between the rows (a button far below its text); on phones a photo box sized
+// from its height overflowed the screen.
+test('composition roles: a full-width photo under words is a backdrop; a full-height photo centres the stack beside it', async () => {
+  const { compositionRoles, parseBlock } = await import('../server/design-blocks.js')
+  const { renderV2 } = await import('../server/site-render-v2.js')
+  const { validateSpec } = await import('../server/site-spec.js')
+  const P = (place, look, kind, text = 'Words here', image = '') => parseBlock({ kind, place, look, text, image: image && `asset:${image}`, target: kind === 'button' ? 'book' : '' })
+  const A = 'a'.repeat(32)
+  const immersive = [P('c1/12 r1/5 z0 y-stretch', 'aspect-21x9 scrim m-order-4', 'media', 'A pool', A), P('c2/8 r2/2 z1 y-end', 'display m-order-1', 'heading', 'A pool that is ready'), P('c2/5 r4/1 z1', 'm m-order-2', 'text'), P('c2/3 r5/1 z1', 'm-order-3', 'button', 'Book a visit')]
+  const beside = [P('c1/5 r1/4 z0', 'aspect-4x5 m-order-4', 'media', 'A pool', A), P('c7/6 r1/2 z1', 'xl m-order-1', 'heading', 'Clear water'), P('c7/5 r3/1 z1', 'm m-order-2', 'text'), P('c7/3 r4/1 z1', 'm-order-3', 'button', 'Book a visit')]
+  const one = compositionRoles(immersive)
+  assert.equal(one.backdrop, immersive[0])
+  assert.equal(one.centred.size, 0)
+  const two = compositionRoles(beside)
+  assert.equal(two.backdrop, null)
+  assert.deepEqual([...two.centred], [beside[0]])
+  assert.equal(compositionRoles([P('c1/6 r1/1 z0', 'aspect-4x3', 'media', 'A', A), P('c7/6 r1/1 z0', 'xl', 'heading', 'One row')]).centred.size, 0, 'a single row keeps its own alignment')
+
+  const ctx = { assetIds: new Set([A]), services: [], claims: [] }
+  const page = (blocks, width) => renderV2({ id: 'p', name: 'Pools', cities: [], phone: '', services: [] }, validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'composition', id: 'top', width, height: 'screen', background: 'ink', blocks }] }] }, ctx).spec, { bookUrl: '/book/p', year: 2026 })
+  const full = page(immersive, 'full')
+  assert.match(full, /<section id="top" class="[^"]*w-full[^"]*has-bd"/)
+  assert.match(full, /<div class="cb bd">/)
+  assert.match(full, /@media\(max-width:860px\)\{#top \.cg>\.cb:nth-child\(1\) \.cm\{aspect-ratio:21\/9\}\}/, 'the backdrop keeps its proportion only on phones')
+  assert.match(full, /@media\(min-width:861px\)\{#top\{min-height:min\(calc\(100vw \* 9 \/ 21\),85vh\)\}\}/)
+  assert.match(page(immersive, 'wide'), /#top \.cg\{min-height:/, 'not full width: the backdrop fills the content area')
+  const side = page(beside, 'wide')
+  assert.match(side, /#top \.cg\{grid-template-rows:minmax\(0,1fr\) repeat\(4,auto\) minmax\(0,1fr\)/)
+  assert.match(side, /#top \.cg>\.cb:nth-child\(1\)\{grid-column:1 \/ span 5;grid-row:1 \/ 7;/, 'the photo spans both spacer rows')
+  assert.match(side, /#top \.cg>\.cb:nth-child\(2\)\{grid-column:7 \/ span 6;grid-row:2 \/ span 2;/, 'the stack moves down one line')
+  assert.match(side, /\.cm\{position:relative;overflow:hidden;width:100%;/, 'photo boxes take their width from the column, never from their height')
+})
+
+test('balance: a ragged text stack is not a hole; a photo mostly hidden under a layered card is flagged', async () => {
+  const { parseBlock } = await import('../server/design-blocks.js')
+  const { compositionBalance } = await import('../server/design-checks.js')
+  const P = (place, look, kind, text = 'Words here and a few more words') => parseBlock({ kind, place, look, text, image: kind === 'media' ? `asset:${'a'.repeat(32)}` : '', target: kind === 'button' ? 'book' : '' })
+  // Claude's "different" spread (2026-11-16): wide headline, narrower text, short button, sharing a left edge.
+  assert.deepEqual(compositionBalance({ type: 'composition', blocks: [P('c1/5 r1/4 z0', 'aspect-4x5', 'media'), P('c7/6 r1/2 z1', 'xl', 'heading', 'Clear water, clear communication'), P('c7/5 r3/1 z1', 'm', 'text'), P('c7/3 r4/1 z1', '', 'button', 'Book a visit')] }), [])
+  // GPT's revision (2026-11-16): a 4-column photo with the display headline card over most of it.
+  const buried = [P('c1/5 r1/5 z0 y-stretch', 'aspect-4x5', 'media'), P('c9/4 r1/2 z0 y-stretch', 'aspect-4x3', 'media'), P('c6/3 r1/1 z1 y-center', 's', 'text', 'Pool care / Charleston, SC'), P('c6/7 r2/2 z2 y-center', 'display', 'heading', 'Less upkeep. More pool time.'), P('c6/6 r4/1 z1', 'm', 'text'), P('c6/4 r5/1 z1 y-end', '', 'button', 'Book a pool visit')]
+  assert.ok(compositionBalance({ type: 'composition', blocks: buried }).includes('buried_photo'))
 })

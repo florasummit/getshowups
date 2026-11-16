@@ -387,7 +387,7 @@ const genericAnswer = (reply = 'Generic design.') => {
 }
 const thinAnswer = () => ({ reply: 'Thin.', rawSite: { name: 'Thin', theme: DESIGN().theme, nav: DESIGN().nav, footer: DESIGN().footer, pages: [{ slug: '', navLabel: 'Home', seoTitle: '', seoDescription: '', sections: [toCompact({ pages: [{ sections: [{ type: 'area', id: 'area', heading: 'Where we work' }] }] }).pages[0].sections[0]] }] } })
 const POSTER = () => DESIGN({ name: 'Poster', direction: 'Loud typographic poster', theme: { ...DESIGN().theme, headingFont: 'bricolage-grotesque', colors: { ...DESIGN().theme.colors, bg: '#ffffff' } }, pages: [{ slug: '', navLabel: 'Home', seoTitle: 'Pools', seoDescription: 'Pools', sections: [
-  { type: 'composition', id: 'top', height: 'screen', blocks: [{ kind: 'heading', text: 'Clear water, every week.', size: 'display', col: [1, 10], row: [1, 1] }, { kind: 'button', label: 'Book a visit', target: 'book', col: [1, 4], row: [2, 1] }] },
+  { type: 'composition', id: 'top', height: 'screen', blocks: [{ kind: 'heading', text: 'Pools, handled.', size: 'display', col: [1, 10], row: [1, 1] }, { kind: 'button', label: 'Book a visit', target: 'book', col: [1, 4], row: [2, 1] }] },
   { type: 'area', id: 'area', heading: 'Where we work' },
 ] }] })
 
