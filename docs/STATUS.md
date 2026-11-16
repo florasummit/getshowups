@@ -28,8 +28,19 @@ _Update at the end of every task. Newest first._
   identical. OpenAI keeps the standard schema.
 - Renderer: wide sections now share the header/footer content edge (were 160px wider → 20px vs 80px at 1440).
   Measured in Chrome: 80px = header at 1440; mobile unchanged (20px), no horizontal overflow.
-- Known, pre-existing, unrelated: e2e automation.spec "can't make it … picks a new time" fails after 00:00 UTC
-  ("That time was just taken") — also on the previous commit; fixture/slot timing at the UTC date boundary. Not fixed.
+- Fourth live run (Option B, Claude only, approved): Claude Sonnet 5.5 design + revision both succeeded. Design 6,060 in /
+  5,345 out ≈ $0.0656 (validation removed one too-long SEO description); revision 9,896 in / 3,536 out ≈ $0.0552 (nothing
+  removed). Total ≈ $0.121 (our estimate from list prices). Booking link in the first screen of every page, desktop and
+  phone. Artifacts and the side-by-side comparison with GPT are local only (scratchpad demo-live4).
+- Renderer: full-width sections had NO gutter (text at 0px; header at 120px desktop / 20px phone), found on Claude's
+  full-width overlay hero; every section type had it. Fixed: `.w-full .wrap` padding = the container edge, min 20px.
+  Backgrounds and overlay photos stay edge to edge. Measured in Chrome at 1440/1024/390, all 6 hero layouts and every
+  section type: text at 120/20/20 = header; no overflow. Regression test.
+- e2e automation.spec "can't make it … picks a new time" (was failing in the evening): test-fixture race, not a product
+  bug. The booking page lists one day at a time; from 20:00 to 21:00 New York (01:00–02:00 UTC in winter) only one slot is
+  left today, so this test's "last slot" and the parallel resume test's "first slot" (same business) were the same slot
+  and the double-booking guard rightly refused one ("That time was just taken"). Failures were at 01:12–01:14 UTC. Fixed
+  in the test: book on the last offered day. Product unchanged.
 
 ## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
 

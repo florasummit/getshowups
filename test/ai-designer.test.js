@@ -352,7 +352,25 @@ test('wide sections share the header/footer content edge (no extra width that pu
   const base = css.match(/(?:^|[}\n])\.wrap\{width:([^;]+);/)[1]
   assert.equal(css.match(/\.w-wide \.wrap\{width:([^}]+)\}/)[1], base, 'wide = the same container as the header, hero and footer')
   assert.doesNotMatch(css, /\+ 160px/)
-  assert.match(css, /\.w-full \.wrap\{width:100%;max-width:none\}/, 'full-width sections stay edge to edge on purpose')
+})
+
+test('regression (live test 2026-11-15): full-width sections keep their background edge to edge, but text lines up with the header', () => {
+  // Claude chose a full-width overlay hero; its headline sat at 0px (header at 120px desktop, 20px phone).
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  const d = DESIGN()
+  for (const p of d.pages) for (const s of p.sections) s.width = 'full'
+  const { spec } = validateSpec(fromStrict(d), opts)
+  const html = renderV2({ id: 'pools', name: 'Pools', cities: ['Charleston'], phone: '' }, spec, { page: '', pageBase: '/p/pools/', bookUrl: '/book/pools', year: 2026 })
+  assert.match(html, /class="[^"]*\bhero\b[^"]*\bw-full\b/, 'the hero really renders full width')
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+  const base = css.match(/(?:^|[}\n])\.wrap\{width:min\(var\(--max\),100% - (\d+)px\);/)
+  const full = css.match(/\.w-full \.wrap\{([^}]+)\}/)[1]
+  assert.match(full, /width:100%;max-width:none/, 'the section itself still spans the page')
+  // Gutter = the container edge on wide screens, and never less than the header's own phone gutter (half of 40px).
+  assert.match(full, /padding-inline:max\((\d+)px,\(100% - var\(--max\)\) \/ 2\)/)
+  assert.equal(Number(full.match(/max\((\d+)px/)[1]), Number(base[1]) / 2)
+  // The full-bleed image of an overlay hero sits outside the padded content.
+  assert.match(css, /\.l-overlay \.hero-bg\{position:absolute;inset:0\}/)
 })
 
 test('option B: Claude gets the compact section shape (13 fields, within limits); OpenAI keeps the standard one', async () => {
