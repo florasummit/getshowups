@@ -7,6 +7,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { contrast, validateSpec } from '../server/site-spec.js'
+import { DESIGN_SCHEMA, fromStrict } from '../server/ai-designer.js'
+import { anthropicSchemaProblems } from './schema-limits.js'
 import { renderV2 } from '../server/site-render-v2.js'
 import { sealKey } from '../server/ai-credentials.js'
 import * as designer from '../functions/api/dashboard/website/designer.js'
@@ -123,12 +125,14 @@ beforeEach(() => {
       const body = await req.clone().json()
       requests.push({ body, auth: req.headers.get('authorization') || req.headers.get('x-api-key') })
       if (nextDesign instanceof Error) return Response.json({ type: 'error', error: { type: 'authentication_error', message: 'bad' } }, { status: 401 })
+      if (nextDesign?.httpError) return Response.json({ type: 'error', error: { type: nextDesign.httpError.type, message: 'mock' } }, { status: nextDesign.httpError.status })
       return new Response(sse(JSON.stringify(nextDesign)), { headers: { 'content-type': 'text/event-stream' } })
     }
     if (u.hostname === 'api.openai.com' && u.pathname === '/v1/chat/completions') {
       const body = await req.clone().json()
       requests.push({ body, auth: req.headers.get('authorization') })
       if (nextDesign instanceof Error) return Response.json({ error: { code: 'invalid_api_key' } }, { status: 401 })
+      if (nextDesign?.httpError) return Response.json({ error: { type: nextDesign.httpError.type, code: nextDesign.httpError.code ?? null, message: 'mock' } }, { status: nextDesign.httpError.status })
       return Response.json({ model: `${body.model}-2024-07-18`, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(nextDesign) } }], usage: { prompt_tokens: 5000, completion_tokens: 7000 } })
     }
     throw new Error(`unexpected fetch ${u}`)
@@ -307,4 +311,72 @@ test('provider failures change nothing and are explained; a dead key is marked',
   assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'invalid_key' })
   assert.equal(db.sql.prepare("SELECT status FROM ai_credentials WHERE customer = 'pools'").get().status, 'invalid')
   assert.equal(JSON.parse(db.sql.prepare("SELECT draft FROM websites WHERE customer = 'pools'").get().draft).site, undefined, 'draft untouched')
+})
+
+test('regression (live test 2026-11-15): the design schema compiles under Anthropic’s structured-output limits', () => {
+  // It had 29 union-typed (nullable) parameters; the limit is 16 → HTTP 400 before any generation.
+  assert.deepEqual(anthropicSchemaProblems(DESIGN_SCHEMA), [])
+  assert.equal(JSON.stringify(DESIGN_SCHEMA).includes('"anyOf"'), false, 'no unions at all')
+  // OpenAI strict mode: every object closed, every property required.
+  const objects = []
+  const walk = (s) => {
+    if (!s || typeof s !== 'object') return
+    if (s.type === 'object') objects.push(s)
+    Object.values(s).forEach(walk)
+  }
+  walk(DESIGN_SCHEMA)
+  assert.ok(objects.every((o) => o.additionalProperties === false && o.required.length === Object.keys(o.properties).length))
+})
+
+test('"not used" values from the strict schema mean exactly what missing fields meant: same validated site', () => {
+  // The same design as a strict-schema answer: every section/item key present, unused ones as "", [], -1/0, empty buttons.
+  const SECTION = DESIGN_SCHEMA.properties.site.properties.pages.items.properties.sections.items.properties
+  const ITEM = SECTION.items.items.properties
+  const fill = (props, o, booleans) => {
+    const out = {}
+    for (const [k, p] of Object.entries(props)) {
+      if (o[k] !== undefined) out[k] = o[k]
+      else if (p.type === 'array') out[k] = []
+      else if (p.type === 'object') out[k] = { label: '', target: '' }
+      else if (p.type === 'boolean') out[k] = booleans[k] ?? false
+      else if (k === 'overlay' || k === 'serviceIndex') out[k] = -1
+      else if (p.type === 'integer' || p.type === 'number') out[k] = 0
+      else out[k] = ''
+    }
+    if (Array.isArray(o.items)) out.items = o.items.map((x) => fill(ITEM, x, {}))
+    return out
+  }
+  const sparse = DESIGN()
+  // What a model would send for the defaults: prices shown, no lead paragraph, no phone unless asked.
+  const strict = { ...sparse, footer: { ...sparse.footer }, pages: sparse.pages.map((p) => ({ ...p, sections: p.sections.map((s) => fill(SECTION, s, { showPrices: true, showPhone: Boolean(s.showPhone), lead: Boolean(s.lead) })) })) }
+  const opts = { assetIds: new Set(), services: SERVICES, claims: [], factsText: '', brand: 'Pools' }
+  assert.deepEqual(validateSpec(fromStrict(strict), opts), validateSpec(sparse, opts))
+  // Sentinels never survive as values.
+  const s = fromStrict(strict).pages[0].sections[0]
+  assert.ok(!('overlay' in s && s.overlay < 0) && !('eyebrow' in s) && !('cta' in s) && !('images' in s))
+})
+
+test('designer: billing problems and provider refusals are classified, recorded with the provider’s identifiers, and not retried', async () => {
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools', 'openai', 'gpt-4o-mini')
+  // The exact OpenAI answer from the live test.
+  nextDesign = { httpError: { status: 429, type: 'insufficient_quota', code: 'credit_balance_exhausted' } }
+  let r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'provider_billing' })
+  assert.equal(requests.length, 1, 'no retry')
+  let ev = JSON.parse(db.sql.prepare("SELECT details FROM audit_log WHERE action = 'website.design_turn' ORDER BY seq DESC LIMIT 1").get().details)
+  assert.deepEqual([ev.error, ev.status, ev.type, ev.code, ev.model], ['provider_billing', 429, 'insufficient_quota', 'credit_balance_exhausted', 'gpt-4o-mini'])
+  assert.equal(db.sql.prepare('SELECT cost_micros FROM ai_key_usage').get().cost_micros, 0, 'released: nothing was billed')
+  // Anthropic: 400 is a refused request (not billing); 402 billing_error is billing.
+  db.sql.prepare("DELETE FROM ai_credentials WHERE customer = 'pools'").run()
+  await addKey('pools')
+  nextDesign = { httpError: { status: 400, type: 'invalid_request_error' } }
+  r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'provider_rejected' })
+  ev = JSON.parse(db.sql.prepare("SELECT details FROM audit_log WHERE action = 'website.design_turn' ORDER BY seq DESC LIMIT 1").get().details)
+  assert.deepEqual([ev.status, ev.type], [400, 'invalid_request_error'])
+  nextDesign = { httpError: { status: 402, type: 'billing_error' } }
+  r = await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'provider_billing' })
+  assert.equal(requests.length, 3, 'one request per attempt')
 })

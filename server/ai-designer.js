@@ -12,23 +12,28 @@ import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
 import { brandName, loadWebsite, saveDraft, validateContent } from './website.js'
-import { strictSchema } from './ai-providers.js'
+import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, claudeFallbackFor, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
 
-const opt = (t) => ({ anyOf: [t, { type: 'null' }] })
+// No union types: Anthropic's structured outputs allow at most 16 union-typed parameters (anyOf / type arrays) per
+// schema and refuse larger ones with HTTP 400 "Schema is too complex for compilation". "Not used" is therefore a value,
+// not null: '' for text and enums, [] for lists, an empty label for buttons, -1 (or 0 for columns) for numbers.
+// fromStrict() turns those back into missing fields before validateSpec, which then applies its usual defaults.
 const S = { type: 'string' }
-const CTA = opt({ type: 'object', properties: { label: S, target: { type: 'string', description: '"book", "page:<slug>" ("page:" for home) or "section:<section id>"' } } })
+const T = (description = '"" if not used') => ({ type: 'string', description })
+const E = (values) => ({ type: 'string', enum: ['', ...values], description: '"" if not used' })
+const CTA = { type: 'object', description: 'label "" if this section has no such button', properties: { label: S, target: { type: 'string', description: '"book", "page:<slug>" ("page:" for home) or "section:<section id>"' } } }
 const ITEM = {
   type: 'object',
   properties: {
-    serviceIndex: opt({ type: 'integer', description: 'services section only: index into facts.services' }),
-    icon: opt({ type: 'string', enum: ICONS }),
-    title: opt(S),
-    text: opt(S),
-    question: opt(S),
-    answer: opt(S),
-    image: opt(S),
+    serviceIndex: { type: 'integer', description: 'services section only: index into facts.services; -1 otherwise' },
+    icon: E(ICONS),
+    title: T(),
+    text: T(),
+    question: T(),
+    answer: T(),
+    image: T(),
   },
 }
 const SECTION = {
@@ -37,33 +42,56 @@ const SECTION = {
     type: { type: 'string', enum: SECTION_TYPES },
     id: { type: 'string', description: 'kebab-case, unique on the site' },
     background: { type: 'string', enum: ['bg', 'surface', 'accent', 'ink', 'image'] },
-    backgroundImage: opt(S),
+    backgroundImage: T(),
     spacing: { type: 'string', enum: ['s', 'm', 'l', 'xl'] },
     align: { type: 'string', enum: ['left', 'center'] },
     width: { type: 'string', enum: ['narrow', 'normal', 'wide', 'full'] },
     animate: { type: 'string', enum: ['none', 'fade', 'rise'] },
-    eyebrow: opt(S),
-    heading: opt(S),
-    text: opt(S),
-    body: opt(S),
-    layout: opt({ type: 'string', description: 'hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split' }),
-    image: opt(S),
-    images: opt({ type: 'array', items: S }),
-    imageAlt: opt(S),
-    imageSide: opt({ type: 'string', enum: ['left', 'right'] }),
-    imageShape: opt({ type: 'string', enum: ['rect', 'rounded', 'arch', 'circle'] }),
-    height: opt({ type: 'string', enum: ['auto', 'tall', 'screen'] }),
-    overlay: opt({ type: 'number' }),
-    columns: opt({ type: 'integer' }),
-    lead: opt({ type: 'boolean' }),
-    showPrices: opt({ type: 'boolean' }),
-    showPhone: opt({ type: 'boolean' }),
+    eyebrow: T(),
+    heading: T(),
+    text: T(),
+    body: T(),
+    layout: T('"" for the default, or hero: split|overlay|stacked|editorial|minimal|mosaic; services: cards|list|rows|tiles|alternating; features: grid|list|inline; gallery: grid|masonry|strip|feature; steps: numbered|timeline; cta: band|card|split'),
+    image: T(),
+    images: { type: 'array', items: S, description: '[] if not used' },
+    imageAlt: T(),
+    imageSide: E(['left', 'right']),
+    imageShape: E(['rect', 'rounded', 'arch', 'circle']),
+    height: E(['auto', 'tall', 'screen']),
+    overlay: { type: 'number', description: 'hero image darkening 0–0.85; -1 for the default' },
+    columns: { type: 'integer', description: '0 for the default' },
+    lead: { type: 'boolean', description: 'text sections: larger first paragraph' },
+    showPrices: { type: 'boolean', description: 'services sections: show prices (normally true)' },
+    showPhone: { type: 'boolean', description: 'contact sections: show the phone number' },
     primaryCta: CTA,
     secondaryCta: CTA,
     cta: CTA,
-    items: opt({ type: 'array', items: ITEM }),
+    items: { type: 'array', items: ITEM, description: '[] if not used' },
   },
 }
+// The "not used" values of DESIGN_SCHEMA back to missing fields (sections, their items, buttons, footer text), so
+// validateSpec applies the same defaults as before. Other values pass through untouched; validateSpec still checks all.
+const UNUSED_NUMBER = { overlay: (v) => v < 0, columns: (v) => v <= 0, serviceIndex: (v) => v < 0 }
+function dropUnused(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return o
+  const out = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (v === '' || (Array.isArray(v) && v.length === 0)) continue
+    if (typeof v === 'number' && UNUSED_NUMBER[k]?.(v)) continue
+    if (v && typeof v === 'object' && !Array.isArray(v) && 'label' in v && 'target' in v && !String(v.label).trim()) continue
+    out[k] = k === 'items' && Array.isArray(v) ? v.map(dropUnused) : v
+  }
+  return out
+}
+export function fromStrict(site) {
+  if (!site || typeof site !== 'object') return site
+  return {
+    ...site,
+    footer: site.footer ? dropUnused(site.footer) : site.footer,
+    pages: Array.isArray(site.pages) ? site.pages.map((p) => (p && typeof p === 'object' ? { ...p, sections: Array.isArray(p.sections) ? p.sections.map(dropUnused) : p.sections } : p)) : site.pages,
+  }
+}
+
 export const DESIGN_SCHEMA = strictSchema({
   type: 'object',
   properties: {
@@ -92,7 +120,7 @@ export const DESIGN_SCHEMA = strictSchema({
           },
         },
         nav: { type: 'object', properties: { layout: { type: 'string', enum: ['left', 'center', 'split'] }, sticky: { type: 'boolean' }, showBook: { type: 'boolean' } } },
-        footer: { type: 'object', properties: { layout: { type: 'string', enum: ['simple', 'columns', 'statement'] }, text: opt(S) } },
+        footer: { type: 'object', properties: { layout: { type: 'string', enum: ['simple', 'columns', 'statement'] }, text: T() } },
         pages: { type: 'array', items: { type: 'object', properties: { slug: S, navLabel: S, seoTitle: S, seoDescription: S, sections: { type: 'array', items: SECTION } } } },
       },
     },
@@ -197,10 +225,7 @@ async function callClaude(env, apiKey, model, prompt, { effort, onProgress, maxO
       return { ok: false, error: 'ai_invalid_output', usage }
     }
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return { ok: false, error: 'invalid_key' }
-    if (err instanceof Anthropic.RateLimitError) return { ok: false, error: 'provider_rate_limited' }
-    if (err instanceof Anthropic.BadRequestError) return { ok: false, error: 'provider_rejected' }
-    return { ok: false, error: 'provider_unavailable' }
+    return { ok: false, ...claudeError(err) }
   }
 }
 
@@ -215,7 +240,7 @@ async function callOpenAI(env, apiKey, model, prompt, { onProgress, maxOutput = 
       signal: AbortSignal.timeout(600000),
     })
     const body = await res.json().catch(() => ({}))
-    if (!res.ok) return { ok: false, error: res.status === 401 || res.status === 403 ? 'invalid_key' : res.status === 429 ? (body?.error?.code === 'insufficient_quota' ? 'provider_rejected' : 'provider_rate_limited') : res.status === 400 ? 'provider_rejected' : 'provider_unavailable' }
+    if (!res.ok) return { ok: false, ...openAiError(res.status, body) }
     const ch = body?.choices?.[0]
     const usage = { input: body?.usage?.prompt_tokens ?? 0, output: body?.usage?.completion_tokens ?? 0 }
     if (ch?.message?.refusal) return { ok: false, error: 'ai_declined', usage }
@@ -257,10 +282,12 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   await settleUsage(ctx.db, m.reservation, cred.provider, r)
   if (!r.ok) {
     if (r.error === 'invalid_key') await markCredential(env, customer.id, 'invalid', now)
-    await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error } })
-    return { ok: false, httpStatus: { invalid_key: 400, provider_rejected: 402, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
+    // The provider's status and error type/code (identifiers only) are kept on the event so a refusal is diagnosable
+    // without retrying it.
+    await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error, provider: cred.provider, model: m.model, ...(r.detail ? { status: r.detail.status, type: r.detail.type, code: r.detail.code } : {}) } })
+    return { ok: false, httpStatus: { invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
   }
-  const { spec, warnings } = validateSpec(r.raw?.site, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: brandName(customer.name) })
+  const { spec, warnings } = validateSpec(fromStrict(r.raw?.site), { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: brandName(customer.name) })
   const reply = String(r.raw?.reply || '').replace(/\s+/g, ' ').trim().slice(0, 600) || 'Here is the design.'
   const [errors, content] = validateContent({ ...ctx.draft, site: spec }, ctx.claims, ctx.assetIds)
   if (errors.length) return { ok: false, httpStatus: 502, error: 'ai_invalid_output' }

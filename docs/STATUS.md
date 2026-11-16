@@ -2,6 +2,20 @@
 
 _Update at the end of every task. Newest first._
 
+## Live A/B test diagnosis (2026-11-15) — #38 → #40, draft, NOT merged; no paid calls since
+
+- Test run (approved): Claude Sonnet 5.5 → HTTP 400, 0 tokens; GPT-6.1 Sol → HTTP 429 insufficient_quota /
+  credit_balance_exhausted ("no credits remaining"), 0 tokens. $0 charged. No designs, so no revisions. Keys deleted.
+- Claude root cause (ours): the designer's strict schema had 29 union-typed (nullable) parameters; Anthropic's
+  structured outputs allow 16 and return 400 "Schema is too complex for compilation". Not billing (Anthropic billing is
+  402 billing_error). The provider's message was not captured on that call; the cause is established from the schema
+  and the documented limit. Fixed: no unions ("not used" = ""/[]/-1/0/empty button, mapped back by fromStrict before
+  validateSpec, proven equivalent by test). Regression test for both schemas (test/schema-limits.js).
+- OpenAI root cause (account): no API credit. Our bug: only code === 'insufficient_quota' counted as billing, so it was
+  shown as a rate limit. Fixed: openAiError/claudeError → provider_billing (402, released, not retried); provider
+  status/type/code kept on events/logs (identifiers only).
+- Next: fund the OpenAI API account; re-run the same approved test (approval needed).
+
 ## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
 
 - Both providers end to end, tested with mocks: connect key → model list from the customer's account → design → revision
