@@ -28,7 +28,10 @@ export async function onRequestGet({ request, env }) {
     }
     if (content && TEMPLATES.includes(q.get('template'))) content = { ...content, template: q.get('template') }
     if (!content) return htmlResponse(404, renderNotice('Not published yet', 'Publish your website to see it here.'), { preview: true })
-    return htmlResponse(200, renderSite(await siteBusinessInfo(db, session.customer), content, { preview: true }), { preview: true })
+    const page = /^[a-z0-9-]{0,32}$/.test(q.get('page') || '') ? q.get('page') || '' : ''
+    // Multi-page designs: nav links stay inside the private preview.
+    const pageBase = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}page=`
+    return htmlResponse(200, renderSite(await siteBusinessInfo(db, session.customer), content, { preview: true, page, pageBase }), { preview: true })
   } catch (err) {
     console.error('preview failed:', err?.message)
     return htmlResponse(503, renderNotice('Preview unavailable', 'Please try again in a moment.'), { preview: true })

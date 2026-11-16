@@ -1855,3 +1855,167 @@
 .hl--failing { background: #fee2e2; color: #991b1b; }
 .hl--degraded { background: #fef3c7; color: #92400e; }
 .cap-events { margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.82rem; display: grid; gap: 4px; overflow-wrap: anywhere; }
+
+/* Website import */
+.import > * + * {
+  margin-top: 14px;
+}
+.import-pages ul,
+.notice-bad ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.import-fields,
+.import-photos {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.import-fields legend,
+.import-photos legend {
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.import-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.import-field input {
+  margin-top: 4px;
+}
+.import-label {
+  display: block;
+  font-weight: 600;
+}
+.import-text {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.import-services {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.import-services p {
+  margin: 2px 0 6px;
+}
+.import-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.import-photo {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.import-photo.is-on {
+  border-color: var(--orange-500);
+}
+.import-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.import-photo input {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+}
+.budget-row {
+  display: grid;
+  gap: 8px;
+}
+
+/* AI designer */
+.designer > * + * {
+  margin-top: 14px;
+}
+.chat {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.chat li {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  max-width: 88%;
+}
+.chat li p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.chat-owner {
+  justify-self: end;
+  background: var(--ink-900);
+  color: var(--white);
+}
+.chat-designer {
+  justify-self: start;
+  background: var(--ink-50);
+  border: 1px solid var(--border);
+}
+.chat-who {
+  font-size: 0.78rem;
+  font-weight: 650;
+  opacity: 0.75;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text);
+  cursor: pointer;
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.designer-input {
+  display: grid;
+  gap: 10px;
+}
+/* Suggestions are sentences: the status-tag .chip rule capitalises every word. */
+.designer .chip {
+  text-transform: none;
+}
+.editor-designed {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--ink-100);
+}
+.designer-key summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.designer-key[open] summary {
+  margin-bottom: 10px;
+}
+.designer-key select {
+  max-width: 100%;
+}

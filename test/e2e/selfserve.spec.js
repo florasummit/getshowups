@@ -86,7 +86,18 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // Website: written from the answers in one AI request (local stand-in), design chosen, private until published.
-  await expect(page.getByRole('heading', { name: 'Create your website' })).toBeVisible()
+  // Ways in (create new · start from a design · skip), one editor; this journey creates a new one. "Bring my current
+  // website" is Website Studio (internal pilot): a new self-serve business is not in it, so it isn't offered.
+  await expect(page.getByRole('heading', { name: 'Your website' })).toBeVisible()
+  await page.getByLabel(/Skip for now/).check()
+  await expect(page.getByRole('button', { name: 'Skip the website for now' })).toBeVisible()
+  await expect(page.getByLabel(/Bring my current website/)).toHaveCount(0)
+  // Start from a design: the professional layouts with the business details, no AI.
+  await page.getByLabel(/Start from a design/).check()
+  await page.getByRole('button', { name: 'Show me the designs' }).click()
+  await expect(page.getByText('Choose a design.')).toBeVisible()
+  await expect(page.getByText('Designed from your details using our standard layouts.')).toBeVisible()
+  await page.getByLabel(/Create a new website/).check()
   await page.getByRole('button', { name: 'Create my website' }).click()
   await expect(page.getByText('Choose a design.')).toBeVisible()
   await expect(page.frameLocator('iframe[title="Deep End design"]').getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)

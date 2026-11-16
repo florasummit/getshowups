@@ -5,6 +5,7 @@
 //        { action: 'unpublish' }                   take the site offline (content kept)
 //        { action: 'restore', version }            make an earlier published version live again
 //        { action: 'regenerate' }                  a fresh draft from the business details (not saved)
+//        { action: 'template' }                    three professional designs from the business details, no AI (stored)
 //        { action: 'generate' }                    AI copy + three designs from the business details, stored (draft untouched)
 //        { action: 'revise', instruction }         AI revision of the draft ("make it more modern"), stored (draft untouched)
 //        { action: 'apply', generationId, option } make a stored design the private draft (owner photos kept)
@@ -20,17 +21,31 @@ import { FONTS, PALETTES } from '../../../../server/site-design.js'
 import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../../../../server/website-ai.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
+import { credentialView } from '../../../../server/ai-credentials.js'
+import { hasStudioOutput, studioEnabledFor, studioPublishAllowed } from '../../../../server/website-studio.js'
+
+// Outside the Website Studio pilot the owner can't introduce an AI-designed site or old-address redirects by hand-crafting
+// a save: those two fields keep what the stored draft already has (so nothing a former pilot business published is lost).
+async function guardStudioFields(env, customer, content) {
+  if (studioEnabledFor(env, customer.id) || !content || typeof content !== 'object') return content
+  const { site: _s, redirects: _r, ...rest } = content
+  const current = (await loadWebsite(env.ONBOARDING_DB, customer)).draft
+  return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
+}
 
 async function state(env, customer, email) {
   const db = env.ONBOARDING_DB
-  const [website, hosting, domain, assets, usage] = await Promise.all([
+  const [website, hosting, domain, assets, usage, aiKey] = await Promise.all([
     loadWebsite(db, customer),
     hostingStatus(db, customer.id),
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),
+    studioEnabledFor(env, customer.id) ? credentialView(env, customer.id).catch(() => null) : null, // pilot only; before 0022: none
   ])
   return {
+    studio: studioEnabledFor(env, customer.id), // Website Studio internal pilot (server/website-studio.js)
+    studioPublish: studioPublishAllowed(env), // whether AI-designed sites / Studio redirects may go live (off in the pilot)
     website,
     url: `${siteOrigin(env)}/p/${customer.id}`,
     hosting,
@@ -38,7 +53,8 @@ async function state(env, customer, email) {
     assets,
     // Bookable = calendar connected and hours saved; a site without booking isn't published.
     ready: customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`)),
-    writer: aiConfigured(env), // AI copy available (otherwise the template is used)
+    writer: aiConfigured(env) || aiKey?.status === 'ok', // AI copy available (otherwise the template is used)
+    aiKey, // the business's own Claude/OpenAI key (provider + last 4 only), if any
     aiUsage: usage, // today's AI allowance (server/ai-usage.js); manual edits are never limited
     options: {
       templates: TEMPLATES,
@@ -69,17 +85,33 @@ export async function onRequestPost({ request, env }) {
   const customer = session.customer
   try {
     if (action === 'regenerate') return json(200, { content: await generateContent(db, customer) })
+    // Start from a design: the three professional layouts filled with the business details. No AI, no allowance used.
+    if (action === 'template') {
+      const draft = (await loadWebsite(db, customer)).draft
+      const r = await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), logo: draft.logo || null, allowAi: false, useAi: false })
+      await track(env, 'website_template', { customer: customer.id })
+      return json(200, { generation: r.generation, aiUsage: await aiUsage(env, customer, session.email) })
+    }
     if (action === 'generate' || action === 'revise') {
       const kind = action === 'generate' ? 'generation' : 'revision'
       const rl = await hit(env, 'websiteAi', customer.id)
       if (rl.limited) return tooManyJson(rl.retryAfter)
       const usage = await aiUsage(env, customer, session.email)
       if (usage[kind].remaining <= 0) return json(429, { error: 'daily_limit', kind, limit: usage[kind].limit, resetsAt: usage.resetsAt, aiUsage: usage })
-      if (kind === 'revision' && usage.monthlyCapReached) return json(429, { error: 'monthly_limit', aiUsage: usage })
-      const draft = (await loadWebsite(db, customer)).draft
+      const own = (await credentialView(env, customer.id).catch(() => null))?.status === 'ok'
+      // The monthly ceiling protects OUR spend; a business using its own key isn't limited by it (daily limits still apply).
+      if (kind === 'revision' && usage.monthlyCapReached && !own) return json(429, { error: 'monthly_limit', aiUsage: usage })
+      const loaded = await loadWebsite(db, customer)
+      const draft = loaded.draft
       const r =
         kind === 'generation'
-          ? await generateWebsite(env, customer, { draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean), logo: draft.logo || null, allowAi: !usage.monthlyCapReached })
+          ? await generateWebsite(env, customer, {
+              draftPhotos: [draft.hero, ...(draft.photos || [])].filter(Boolean),
+              logo: draft.logo || null,
+              allowAi: !usage.monthlyCapReached,
+              // The owner's own (imported or edited) text informs a new design.
+              draftText: loaded.generated ? null : [draft.headline, draft.intro, draft.about, ...(draft.services || []).map((x) => `${x.name} ${x.price} ${x.description}`)].join('\n'),
+            })
           : await reviseWebsite(env, customer, draft, body.instruction)
       if (!r.ok) return json(r.httpStatus, { error: r.error, aiUsage: usage })
       // Only successful AI results count against the allowance (template fallbacks are free).
@@ -91,11 +123,14 @@ export async function onRequestPost({ request, env }) {
       const g = await getGeneration(db, customer.id, body.generationId)
       if (!g) return json(404, { error: 'not_found' })
       const current = (await loadWebsite(db, customer)).draft
+      // A template/AI-writer result carries no AI-designed site; applying it would silently drop the owner's AI design
+      // (e.g. from a tab opened before the design). The AI designer's Undo and earlier versions remain the way back.
+      if (current.site) return json(409, { error: 'designed_site' })
       const option = Number.isInteger(body.option) ? body.option : 0
       if (g.designs.length && !g.designs[option]) return json(400, { error: 'invalid_request' })
       // The owner's logo, photos and confirmed facts stay; the chosen design is applied. Only the private draft changes.
       const [errors, content] = validateContent(
-        { ...g.content, highlights: current.highlights?.length ? current.highlights : g.content.highlights, template: body.template ?? g.content.template, design: g.designs[option] ?? g.content.design ?? null, logo: current.logo, hero: current.hero, photos: current.photos },
+        { ...g.content, highlights: current.highlights?.length ? current.highlights : g.content.highlights, template: body.template ?? g.content.template, design: g.designs[option] ?? g.content.design ?? null, logo: current.logo, hero: current.hero, photos: current.photos, redirects: current.redirects || [] },
         await approvedClaimsFor(db, customer.id),
         await assetIdsFor(db, customer.id),
       )
@@ -104,7 +139,7 @@ export async function onRequestPost({ request, env }) {
       return json(200, await state(env, customer, session.email))
     }
     if (action === 'save' || action === 'publish') {
-      const [errors, content] = validateContent(body.content, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
+      const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id))
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       if (action === 'save') {
         await saveDraft(db, customer.id, content)
@@ -114,6 +149,8 @@ export async function onRequestPost({ request, env }) {
       const s = await state(env, customer, session.email)
       if (!s.ready) return json(409, { error: 'not_ready' })
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
+      // Internal pilot: AI-designed sites and Studio redirects stay private until publishing them is approved.
+      if (hasStudioOutput(content) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
       const version = await publish(db, customer.id, content)
       await track(env, 'website_published', { customer: customer.id, props: { version } })
       await recordEvent(db, { type: 'website.publish', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version } })
@@ -128,6 +165,10 @@ export async function onRequestPost({ request, env }) {
     if (action === 'restore') {
       const s = await state(env, customer, session.email)
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })
+      if (!studioPublishAllowed(env)) {
+        const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customer.id, Number(body.version) || 0).first()
+        if (v && hasStudioOutput(JSON.parse(v.content))) return json(409, { error: 'studio_publish_off' })
+      }
       if (!(await restore(db, customer.id, body.version))) return json(404, { error: 'not_found' })
       await track(env, 'website_restored', { customer: customer.id, props: { version: body.version } })
       await recordEvent(db, { type: 'website.restore', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version: Number(body.version) || null } })

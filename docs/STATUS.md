@@ -2,6 +2,110 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio release candidate (2026-11-16) — `release/website-studio` (= #37–#40 + below), draft, NOT merged
+
+- Production verified READ-ONLY (schema names from sqlite_master, no rows): every table/index/trigger of migrations
+  0001–0020 exists (incl. both audit_log triggers); nothing outside the migrations; 0021–0023 absent. Production code:
+  main e3af1fc, Pages deployment 1aff1e8f (from build.json + the commit's Pages check).
+- No server-side fallback for own-key requests (owner decision): only the chosen/reserved model runs; usage is recorded
+  and priced as that model even if a response names another. Regression test (one request, no `fallbacks`, no fallback
+  beta header, Sonnet prices on an "Opus" response, refusal not re-run). Ads strategy (GetShowUps' key) unchanged.
+- Internal pilot gate: WEBSITE_STUDIO_ENABLED + WEBSITE_STUDIO_BUSINESSES (server/website-studio.js). Tests: switch,
+  routes 404, no key use, no hand-crafted site/redirects, published sites keep serving; browser: non-pilot sees nothing.
+- Restore of an earlier AI-designed version (pages + booking links, live + draft): regression test.
+- Rollback measured with production code on Claude's real PoolThru design: renders the older template from the same
+  content (imported headline; booking link intact); extra pages (/p/<id>/services) show the GetShowUps marketing page
+  (production's fallback, checked read-only); a dashboard save during rollback drops `site` and `redirects`.
+- One merge = one deploy: merging #37–#40 one by one would put three ungated intermediate states in production.
+- Unit 447/447, browser 79/79. Local journey re-run on the candidate (PoolThru in the local pilot): all steps pass.
+- Preflight (read-only, 2026-11-16): `poolthru-llc` = PoolThru (real, not test-marked; its one owner account is NOT the
+  GetShowUps owner's); `gsu-stripe-test-pools` = internal test business (test-marked, owned by the GetShowUps owner).
+  PoolThru's live website (v5, not AI) renders byte-identically with production code and this candidate (our address and
+  own domain); no booking/Ads/cron/messaging/billing/auth/domain code changes. D1 Time Travel bookmark recorded; production
+  deployment 1aff1e8f confirmed via `wrangler pages deployment list`.
+- WEBSITE_STUDIO_PUBLISH (off by default): AI-designed sites and Studio redirects can't be published or restored during
+  the pilot (409 studio_publish_off; dashboard explains it; drafts and previews work). Unit + browser tests. 448/448, 79/79.
+
+## Website Studio customer-journey validation (2026-11-16) — #38 → #40, draft, NOT merged; no paid calls
+
+- Walked the whole PoolThru journey in a real browser, UI only, on a local build (throwaway DB; local stand-ins for
+  Google sign-in/Calendar and for Claude, which replays Claude Sonnet 5.5's real saved PoolThru designs): sign in →
+  Website → connect key → design → desktop/phone preview → revision → publish (local /p/poolthru-llc) → a customer books
+  from the site's "Book a visit" on a phone → the owner sees it under Appointments. All steps work after the fixes.
+- Found and fixed:
+  - Auto dead end (#38, migration 0022 seed, unapplied): no model was 'tested', so a new owner's first request on the
+    default Auto was refused. claude-sonnet-5-5 and gpt-6.1-sol (verified live 2026-11-15) are now 'tested'.
+  - Data loss: the older "Create with AI" tools (Describe a change / three new designs / standard designs) build drafts
+    without the AI design; keeping one silently dropped it. Hidden for AI-designed drafts, and the server refuses such an
+    apply (409 designed_site, e.g. from an old tab). Regression test.
+  - Dead controls on AI-designed drafts: style, colours, logo and Google fields saved but changed nothing. Hidden, with
+    a note on what the remaining fields do (services/prices show directly; the rest is what the designer writes from).
+  - The applied import kept its full review ("Use this in my draft") → one-line summary with "Review again".
+  - Duplicate key panel ("Your own AI key") removed: the designer card holds key, model and limit.
+  - Two identical "Publish website" buttons while confirming → one, plus "Not yet". Designer chips were Title Cased.
+- Website tab after a design: 3,802 px (was 5,737). Unit 444/444, browser 79/79 (designer + import specs updated).
+- Not changed (noted): the older "N of 40 AI changes left today" allowance also counts designer turns but is now only
+  shown before an AI design; business name shows as "Poolthru LLC" (owner can rename in Settings).
+
+## Live A/B test diagnosis (2026-11-15) — #38 → #40, draft, NOT merged; no paid calls since
+
+- Test run (approved): Claude Sonnet 5.5 → HTTP 400, 0 tokens; GPT-6.1 Sol → HTTP 429 insufficient_quota /
+  credit_balance_exhausted ("no credits remaining"), 0 tokens. $0 charged. No designs, so no revisions. Keys deleted.
+- Claude root cause (ours): the designer's strict schema had 29 union-typed (nullable) parameters; Anthropic's
+  structured outputs allow 16 and return 400 "Schema is too complex for compilation". Not billing (Anthropic billing is
+  402 billing_error). The provider's message was not captured on that call; the cause is established from the schema
+  and the documented limit. Fixed: no unions ("not used" = ""/[]/-1/0/empty button, mapped back by fromStrict before
+  validateSpec, proven equivalent by test). Regression test for both schemas (test/schema-limits.js).
+- OpenAI root cause (account): no API credit. Our bug: only code === 'insufficient_quota' counted as billing, so it was
+  shown as a rate limit. Fixed: openAiError/claudeError → provider_billing (402, released, not retried); provider
+  status/type/code kept on events/logs (identifiers only).
+- Next: fund the OpenAI API account; re-run the same approved test (approval needed).
+- Second live run (keys recovered into Keychain, read with --keychain): Claude 400 "The compiled grammar is too large …
+  Simplify your tool schemas" (req_011Ch5gsxM43xB4hLPaicRSF) — so removing unions was necessary but not sufficient.
+  OpenAI 429 credit_balance_exhausted again (the key's organization has no credit). $0, 0 tokens.
+- Fix A (owner-approved): choices are described strings, not enums (18 enums → 1: section type). validateSpec already
+  enforces every list with a safe default (test). Grammar size can't be measured locally; needs a live call to confirm.
+- Third live run: GPT-6.1 Sol design + revision succeeded (7,781 in / 5,993 out tokens, ≈$0.0755; nothing removed by
+  validation). Claude still 400 "compiled grammar is too large" (req_011Ch5hhHLNWBx7VbHCWkrxZ).
+- Option B (owner-approved): Claude gets a compact section shape (13 fields instead of 28; 58 properties instead of
+  79): style/option tokens, one image list, one button list, FAQ via title/text. fromCompact() → standard shape →
+  unchanged validateSpec; toCompact() for revisions. Round-trip test: every section type and control comes back
+  identical. OpenAI keeps the standard schema.
+- Renderer: wide sections now share the header/footer content edge (were 160px wider → 20px vs 80px at 1440).
+  Measured in Chrome: 80px = header at 1440; mobile unchanged (20px), no horizontal overflow.
+- Fourth live run (Option B, Claude only, approved): Claude Sonnet 5.5 design + revision both succeeded. Design 6,060 in /
+  5,345 out ≈ $0.0656 (validation removed one too-long SEO description); revision 9,896 in / 3,536 out ≈ $0.0552 (nothing
+  removed). Total ≈ $0.121 (our estimate from list prices). Booking link in the first screen of every page, desktop and
+  phone. Artifacts and the side-by-side comparison with GPT are local only (scratchpad demo-live4).
+- Renderer: full-width sections had NO gutter (text at 0px; header at 120px desktop / 20px phone), found on Claude's
+  full-width overlay hero; every section type had it. Fixed: `.w-full .wrap` padding = the container edge, min 20px.
+  Backgrounds and overlay photos stay edge to edge. Measured in Chrome at 1440/1024/390, all 6 hero layouts and every
+  section type: text at 120/20/20 = header; no overflow. Regression test.
+- e2e automation.spec "can't make it … picks a new time" (was failing in the evening): test-fixture race, not a product
+  bug. The booking page lists one day at a time; from 20:00 to 21:00 New York (01:00–02:00 UTC in winter) only one slot is
+  left today, so this test's "last slot" and the parallel resume test's "first slot" (same business) were the same slot
+  and the double-booking guard rightly refused one ("That time was just taken"). Failures were at 01:12–01:14 UTC. Fixed
+  in the test: book on the last offered day. Product unchanged.
+
+## Website Studio: own-key models discovered per account, Auto, hard limit (2026-11-15) — #38 → #39 → #40, draft, NOT merged
+
+- Both providers end to end, tested with mocks: connect key → model list from the customer's account → design → revision
+  → publish (Claude streaming + OpenAI strict json_schema). No real provider call made yet.
+- Models: discovered with the customer's key (free `GET /v1/models`); Anthropic filtered by
+  `capabilities.structured_outputs`, OpenAI by text-model family rules (no audio/image/embedding/realtime/dated snapshots).
+  Catalog stored per key, refreshed when older than a day or on "Check for new models". `ai_model_registry` (0022, editable
+  without deploying) holds verified prices (2026-11-15), quality rank, status tested/supported/blocked and the model's own
+  output ceiling. Unpriced new models are shown but not selectable (spend must be boundable).
+- Selection kept; a model the account stops offering is reported and refused, never swapped. Auto (default) uses only
+  `tested` models, best quality within the limit, never moves to a more expensive model. **No model is `tested` yet**:
+  until the approved real demo marks some, owners pick a model by hand.
+- Hard monthly limit per key (default $10, owner $1–$1,000): month-to-date spend from `ai_key_usage` (every own-key call,
+  failed ones too; tokens only) + this request's worst case (measured prompt, the output cap actually sent) must fit, else
+  refused before sending. SDK retries off for own-key calls.
+- Fixed: GPT-4o / GPT-4o mini output ceiling 16,384 (asking for more would have been a 400).
+- Next: approval for the real two-provider PoolThru demo (estimate in the PR thread / summary), then mark the demoed
+  models `tested` in the registry.
+
 ## Integration checkpoint (2026-11-14) — PRs #24–#28, all draft, CI green, NOT merged or deployed
 
 **Verified now:** production deployment 0020f305 (main d426fef); production has migrations through 0014 (0015–0017

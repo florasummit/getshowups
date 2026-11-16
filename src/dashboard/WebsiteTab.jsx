@@ -4,9 +4,14 @@ import { api, fmt } from '../lib/api.js'
 import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { problemText, useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
+import WebsiteImport from './WebsiteImport.jsx'
+import WebsiteDesigner from './WebsiteDesigner.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+// Internal pilot: AI-designed sites (and imported old-address redirects) stay private until publishing them is approved.
+const STUDIO_PRIVATE = 'AI-designed websites stay private during the pilot: you can preview this one, but it can’t be published yet. Your live website hasn’t changed.'
+const studioOutput = (c) => Boolean(c && (c.site || c.redirects?.length))
 
 export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
   const [ok, setOk] = useState(false)
@@ -22,6 +27,8 @@ export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
           ? 'Connect your calendar and set your hours first, so customers can book.'
           : d.error === 'plan_required'
             ? 'Your plan isn’t active. Reactivate it in Settings to publish.'
+            : d.error === 'studio_publish_off'
+              ? STUDIO_PRIVATE
             : d.fields
               ? problemText(d.fields)
               : 'Couldn’t publish. Please try again.',
@@ -63,6 +70,9 @@ export default function WebsiteTab() {
   if (!data) return <div aria-busy="true" />
   if (data.failed) return <p className="form-error">Couldn’t load your website. Please refresh.</p>
   const w = data.website
+  // An AI-designed draft (content.site): the AI designer owns its look. The older template tools would replace it (their
+  // results carry no AI design), so they are not offered for it; Undo and earlier versions stay available.
+  const designed = Boolean(w.draft?.site)
   const live = data.domain?.status === 'connected' ? data.domain.url : data.url
   const setUsage = (aiUsage) => setData((d) => ({ ...d, aiUsage }))
   const refresh = (d) => {
@@ -75,7 +85,7 @@ export default function WebsiteTab() {
     if (status === 200) {
       refresh(d)
       setMore({})
-    } else setMore({ error: 'Something went wrong. Please try again.' })
+    } else setMore({ error: d?.error === 'studio_publish_off' ? STUDIO_PRIVATE : 'Something went wrong. Please try again.' })
   }
 
   return (
@@ -93,7 +103,7 @@ export default function WebsiteTab() {
         )}
         <HostingNotice hosting={data.hosting} />
         <div className="card-actions">
-          {!w.generated && !pending && (!w.published || w.changed) && (
+          {!w.generated && !pending && !publishing && (!w.published || w.changed) && !(studioOutput(w.draft) && !data.studioPublish) && (
             <button type="button" className="btn btn-primary" onClick={() => setPublishing(!publishing)} aria-expanded={publishing}>
               {w.published ? 'Publish changes' : 'Publish website'}
             </button>
@@ -105,22 +115,62 @@ export default function WebsiteTab() {
           )}
         </div>
         {pending && <p className="fine">Keep or discard the new version below before publishing.</p>}
+        {studioOutput(w.draft) && !data.studioPublish && <p className="fine">{STUDIO_PRIVATE}</p>}
         {publishing && !pending && (
-          <PublishBox
-            data={data}
-            label={w.published ? 'Publish changes' : 'Publish website'}
-            onDone={(d) => {
-              setPublishing(false)
-              refresh(d)
-            }}
-          />
+          <>
+            <PublishBox
+              data={data}
+              label={w.published ? 'Publish changes' : 'Publish website'}
+              onDone={(d) => {
+                setPublishing(false)
+                refresh(d)
+              }}
+            />
+            <button type="button" className="link-btn" onClick={() => setPublishing(false)}>
+              Not yet
+            </button>
+          </>
         )}
       </section>
 
+      {/* Website Studio (internal pilot, server/website-studio.js): import + AI designer only for businesses in it. */}
+      {data.studio && (
+      <section className="card" aria-label="Bring your current website">
+        <h2 className="card-title">Bring your current website</h2>
+        <WebsiteImport
+          defaultUrl={data.domain?.hostname || ''}
+          onApplied={async () => {
+            const { status, data: d } = await api('/api/dashboard/website')
+            if (status === 200) {
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }
+          }}
+        />
+      </section>
+      )}
+
+      {data.studio && (
+      <section className="card" aria-label="AI designer">
+        <h2 className="card-title">AI designer</h2>
+        <WebsiteDesigner
+          onChanged={async () => {
+            const { status, data: d } = await api('/api/dashboard/website')
+            if (status === 200) {
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }
+          }}
+        />
+      </section>
+      )}
+
+      {!designed && (
       <section className="card" aria-label="Create with AI">
         {w.generated || rewrite ? (
           <WebsiteGenerator
             hasDraft={!w.generated}
+            templates={rewrite === 'templates'}
             usage={data.aiUsage}
             onUsage={setUsage}
             intro={w.generated ? 'We’ll write your website from your business details. You choose the design, check it, then publish.' : null}
@@ -153,9 +203,20 @@ export default function WebsiteTab() {
             >
               Start over with three new designs
             </button>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                setPending(null)
+                setRewrite('templates')
+              }}
+            >
+              Choose one of our standard designs (no AI)
+            </button>
           </>
         )}
       </section>
+      )}
 
       {!w.generated && (
         <>
@@ -164,7 +225,7 @@ export default function WebsiteTab() {
           </section>
           <section className="card site-editor" aria-label="Edit website">
             <h2 className="card-title">Edit text and photos</h2>
-            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} />
+            <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? (data.studio ? 'studio' : 'locked') : false} />
           </section>
         </>
       )}

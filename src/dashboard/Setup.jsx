@@ -12,6 +12,7 @@ import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
 import { PublishBox } from './WebsiteTab.jsx'
+import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 
 const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
@@ -480,7 +481,6 @@ function WebsiteStep({ onDone, back }) {
   const latest = useRef(null)
   const [stamp, setStamp] = useState(0)
   const [editorKey, setEditorKey] = useState(0)
-  const [keep, setKeep] = useState(false)
   const [pending, setPending] = useState(null)
   const [state, setState] = useState({})
   if (!data) return <div aria-busy="true" />
@@ -493,41 +493,81 @@ function WebsiteStep({ onDone, back }) {
     setState({ error: 'Please check the highlighted text, then continue.' })
   }
   const keepCurrent = async () => {
-    setState({ busy: true })
-    await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'keep_website' } })
-    onDone()
+    setState({ mode: 'skip', busy: true })
+    const { status } = await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'keep_website', choice: 'none' } })
+    if (status === 200) return onDone()
+    setState({ mode: 'skip', error: 'Something went wrong. Please try again.' })
   }
+  // Three ways in, one editor: create new, bring the current website, or skip (booking only). All of them land on the
+  // same draft, preview, publishing and version history.
   if (w.generated) {
+    const mode = state.mode || 'new'
+    const reload = async () => {
+      const { status, data: d } = await api('/api/dashboard/website')
+      if (status === 200) {
+        setData(d)
+        setStamp((n) => n + 1)
+      }
+    }
     return (
       <div className="form">
         <h1 id="step-title" className="title">
-          Create your website
+          Your website
         </h1>
-        {!keep ? (
-          <>
-            <WebsiteGenerator
-              usage={data.aiUsage}
-              onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
-              intro="We’ll write a professional website from your answers. You pick the design, check everything, and nothing is public until you publish."
-              onApplied={(d) => {
-                setData(d)
-                setStamp((n) => n + 1)
-              }}
-            />
-            <button type="button" className="link-btn" onClick={() => setKeep(true)}>
-              I already have a website
-            </button>
-          </>
-        ) : (
+        <div className="choice-list" role="radiogroup" aria-label="How do you want to start?">
+          {[
+            ['new', 'Create a new website', 'Pick a design. We write it from your details; you can edit everything.'],
+            ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you redesign it here.'],
+            ['design', 'Start from a design', 'Choose one of our professional designs, filled in with your details. No AI needed.'],
+            ['skip', 'Skip for now', 'Just use your booking link. You can create a website any time.'],
+          ]
+            // Bringing the current website is part of Website Studio (internal pilot).
+            .filter(([value]) => value !== 'import' || data.studio)
+            .map(([value, label, hint]) => (
+            <label key={value} className="choice-card">
+              <input type="radio" name="website-start" value={value} checked={mode === value} onChange={() => setState({ mode: value })} />
+              <span>
+                <strong>{label}</strong>
+                <span className="fine">{hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {mode === 'new' && (
+          <WebsiteGenerator
+            usage={data.aiUsage}
+            onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
+            intro="Nothing is public until you publish."
+            onApplied={(d) => {
+              setData(d)
+              setStamp((n) => n + 1)
+            }}
+          />
+        )}
+        {mode === 'import' && data.studio && <WebsiteImport onApplied={reload} />}
+        {mode === 'design' && (
+          <WebsiteGenerator
+            templates
+            usage={data.aiUsage}
+            intro="Nothing is public until you publish."
+            onApplied={(d) => {
+              setData(d)
+              setStamp((n) => n + 1)
+            }}
+          />
+        )}
+        {mode === 'skip' && (
           <div className="stack">
-            <p className="lede">No problem. Keep your current website and add a “Book now” link to it. You’ll get the link at the end of setup. You can create a GetShowUps website later.</p>
+            <p className="lede">You’ll get your booking link at the end of setup to share or add to an existing website. Create a website later from the Website tab.</p>
             <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={keepCurrent}>
-              Keep my current website
-            </button>
-            <button type="button" className="link-btn" onClick={() => setKeep(false)}>
-              Create a website instead
+              Skip the website for now
             </button>
           </div>
+        )}
+        {state.error && (
+          <p className="form-error" role="alert">
+            {state.error}
+          </p>
         )}
         {back && (
           <button type="button" className="link-btn" onClick={back}>

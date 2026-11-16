@@ -105,7 +105,7 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await page.getByRole('button', { name: 'Publish website' }).first().click()
   const publish = page.getByRole('button', { name: 'Publish website' }).last()
   await expect(publish).toBeDisabled()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
   await publish.click()
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
 
@@ -125,12 +125,17 @@ test('owner edits, previews and publishes the website; visitors book through it 
 test('changes stay private until published again; an earlier version can be restored', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
   await page.goto('/dashboard/website')
+  // Website Studio is an internal pilot: a business outside it sees no import, AI designer or AI-key controls.
+  await expect(page.getByLabel('Headline')).toBeVisible()
+  await expect(page.locator('section[aria-label="AI designer"], section[aria-label="Bring your current website"]')).toHaveCount(0)
+  await expect(page.getByLabel('API key')).toHaveCount(0)
+  expect((await page.request.get('/api/dashboard/website/designer')).status()).toBe(404)
   await page.getByLabel('Headline').fill('A brand new headline')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(page.getByText('you have changes that aren’t published yet')).toBeVisible()
   expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).not.toContain('A brand new headline')
   await page.getByRole('button', { name: 'Publish changes' }).first().click()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
   await page.getByRole('button', { name: 'Publish changes' }).last().click()
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
   expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).toContain('A brand new headline')

@@ -72,6 +72,12 @@ d1 "
     ('seed-appt-visit', '$E2E_HOME_CUSTOMER', 'seed-lead-visit', $PAST, $((PAST + 3600000)), 'booked', 'seed-event-3', $PAST, $PAST),
     ('seed-appt-visit-2', '$E2E_HOME_CUSTOMER', 'seed-lead-visit-2', $((PAST - 3600000)), $PAST, 'booked', 'seed-event-4', $PAST, $PAST);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_DESIGN_CUSTOMER', 'E2E Design Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-design.example', '$E2E_DESIGN_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DESIGN_SESSION_TOKEN")', 'owner@e2e-design.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$E2E_DESIGN_CUSTOMER', '', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_ADS_CUSTOMER', 'E2E Ads Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-ads.example', '$E2E_ADS_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_ADS_SESSION_TOKEN")', 'owner@e2e-ads.example', $NOW, $FAR);
@@ -100,7 +106,7 @@ record() {
     scope: 'openid email https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy',
     refreshToken, connectedAt: new Date().toISOString() }))"
 }
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
@@ -121,6 +127,9 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding GOOGLE_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding GOOGLE_ADS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding DNS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
+  --binding SITE_IMPORT_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding ACCOUNT_DELETION_ENABLED=true \
+  --binding WEBSITE_STUDIO_ENABLED=true \
+  --binding WEBSITE_STUDIO_BUSINESSES="$E2E_ADS_CUSTOMER,$E2E_DESIGN_CUSTOMER" \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN"

@@ -6,6 +6,10 @@
 // business's records, and every generated sentence passes the claims filter plus a number check
 // (no invented years, ratings, prices or counts). Anything that fails falls back to the template text.
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
+import { credentialFor, markCredential } from './ai-credentials.js'
+import { studioEnabledFor } from './website-studio.js'
+import { runWithOwnKey } from './ai-providers.js'
+import { inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { brandName, generateContent, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
@@ -181,6 +185,26 @@ async function runModel(env, msgs, schema) {
   return env.AI.run(WEBSITE_MODEL, body)
 }
 
+// Own-key errors that mean the key itself is unusable: shown to the owner, and the key is marked so it isn't retried.
+const KEY_ERRORS = new Set(['invalid_key'])
+const OWN_KEY_HTTP = { model_unavailable: 409, no_tested_model: 409, budget_reached: 402, invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422, ai_invalid_output: 502, provider_unavailable: 503 }
+// The own key is part of Website Studio (internal pilot): outside it, a stored key is never used.
+const studioKey = (env, customer) => (studioEnabledFor(env, customer.id) ? credentialFor(env, customer.id) : null)
+async function ownKey(env, customer, msgs, schema, now) {
+  const cred = await studioKey(env, customer)
+  if (!cred) return null
+  // The owner's chosen model (or Auto's pick) from their account's catalog, within their monthly limit.
+  const m = await resolveModel(env, customer.id, cred, { kind: 'writer', input: inputTokensFor(JSON.stringify(msgs), JSON.stringify(schema)) }, now)
+  if (!m.ok) return { ok: false, error: m.error }
+  const r = await runWithOwnKey(env, { ...cred, model: m.model, maxOutput: m.maxOutput }, msgs, schema)
+  await settleUsage(env.ONBOARDING_DB, m.reservation, cred.provider, r)
+  // Status and the provider's own error type/code only (identifiers, no message text): enough to diagnose without a retry.
+  if (!r.ok && r.detail) console.error('own-key request failed:', r.error, JSON.stringify(r.detail))
+  if (!r.ok && KEY_ERRORS.has(r.error)) await markCredential(env, customer.id, 'invalid', now)
+  return r
+}
+const usageOf = (r) => (r?.usage ? { prompt_tokens: r.usage.input, completion_tokens: r.usage.output } : null)
+
 export const aiConfigured = (env) => Boolean(env.AI?.run) || (typeof env.AI_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.AI_API_MOCK_ORIGIN))
 
 const parseOutput = (r) => {
@@ -227,12 +251,13 @@ async function context(env, customer) {
   return { db, base, profile, claims, assetIds, industry, allowedStock }
 }
 
-async function store(db, customer, { content, designs, source, usage, latencyMs, rejected, now }) {
+async function store(db, customer, { content, designs, source, usage, latencyMs, rejected, now, model = null }) {
   const id = crypto.randomUUID().replaceAll('-', '')
-  const costMicros = usage ? Math.round((usage.prompt_tokens || 0) * PRICE.inputPerM + (usage.completion_tokens || 0) * PRICE.outputPerM) : 0
+  // Our cost only for the included model; a business's own key is billed to its own API account.
+  const costMicros = usage && !model ? Math.round((usage.prompt_tokens || 0) * PRICE.inputPerM + (usage.completion_tokens || 0) * PRICE.outputPerM) : 0
   await db
     .prepare('INSERT INTO website_generations (id, customer, content, source, model, input_tokens, output_tokens, cost_micros, latency_ms, rejected, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)')
-    .bind(id, customer.id, JSON.stringify({ content, designs }), source, source === 'ai' ? WEBSITE_MODEL : null, usage?.prompt_tokens ?? null, usage?.completion_tokens ?? null, costMicros, latencyMs, rejected.length ? JSON.stringify(rejected) : null, now)
+    .bind(id, customer.id, JSON.stringify({ content, designs }), source, source === 'ai' ? model || WEBSITE_MODEL : null, usage?.prompt_tokens ?? null, usage?.completion_tokens ?? null, costMicros, latencyMs, rejected.length ? JSON.stringify(rejected) : null, now)
     .run()
   return id
 }
@@ -244,11 +269,13 @@ const imageChoices = (assetIds, industry, photos = []) => [...[...new Set([...ph
 // Generates copy + three designs for a business and stores them (website_generations). Never touches the
 // draft or the live site. Returns { ok, generation: { id, content, designs, source } }.
 // `allowAi: false` (usage policy: monthly cost ceiling reached) uses the standard layouts without a model call.
-export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], logo = null, allowAi = true } = {}) {
+// `useAi: false`: the professional templates only, no model call of any kind (own key included): "start from a design".
+export async function generateWebsite(env, customer, { now = Date.now(), draftPhotos = [], logo = null, allowAi = true, draftText = null, useAi = true } = {}) {
   const ctx = await context(env, customer)
   const { db, base, profile, claims, industry, allowedStock } = ctx
   const assetIds = withoutLogo(ctx.assetIds, logo) // the logo is never placed as a photo
-  const facts = websiteFacts(customer, profile, base)
+  // An imported or edited draft is the owner's own text: the model may use it (numbers in it are allowed).
+  const facts = { ...websiteFacts(customer, profile, base), ...(draftText ? { currentText: String(draftText).slice(0, 6000) } : {}) }
   const photos = draftPhotos.filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
   const presets = presetDesigns(industry, photos)
@@ -258,7 +285,20 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
   let usage = null
   let latencyMs = null
   let rejected = []
-  if (aiConfigured(env) && allowAi) {
+  let model = null
+  // The business's own API key first (its own account and limits); else the included model within our allowance.
+  const own = useAi ? await ownKey(env, customer, messages(facts, images), schemaFor(images), now) : null
+  if (own && !own.ok) return { ok: false, httpStatus: OWN_KEY_HTTP[own.error] || 503, error: own.error }
+  if (own?.ok) {
+    const merged = mergeGenerated(base, own.raw, facts, claims, { requireBrand: true })
+    content = merged.content
+    rejected = merged.rejected
+    const aiDesigns = (Array.isArray(own.raw.designs) ? own.raw.designs : []).slice(0, 3).map((d, i) => repairDesign(d, presets[i], assetIds, allowedStock))
+    designs = diversify(aiDesigns, industry, photos).map((d, i) => repairDesign(d, presets[i], assetIds, allowedStock))
+    source = 'ai'
+    usage = usageOf(own)
+    model = own.model
+  } else if (useAi && aiConfigured(env) && allowAi) {
     const t0 = Date.now()
     try {
       const r = await runModel(env, messages(facts, images), schemaFor(images))
@@ -277,8 +317,8 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
       console.error('website generation failed:', err?.name || 'error')
     }
   }
-  const id = await store(db, customer, { content, designs, source, usage, latencyMs, rejected, now })
-  return { ok: true, generation: { id, content, designs, source } }
+  const id = await store(db, customer, { content, designs, source, usage, latencyMs, rejected, now, model })
+  return { ok: true, generation: { id, content, designs, source, ownKey: Boolean(model) } }
 }
 
 // Natural-language revision of the current draft ("make it more modern", "use my photos"). Produces one
@@ -286,7 +326,8 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
 export async function reviseWebsite(env, customer, draft, instruction, { now = Date.now() } = {}) {
   const ask = String(instruction ?? '').replace(/\s+/g, ' ').trim().slice(0, 240)
   if (!ask) return { ok: false, httpStatus: 400, error: 'instruction_required' }
-  if (!aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
+  const hasOwn = Boolean(await studioKey(env, customer))
+  if (!hasOwn && !aiConfigured(env)) return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
   const ctx = await context(env, customer)
   const { db, profile, claims, industry, allowedStock } = ctx
   const assetIds = withoutLogo(ctx.assetIds, draft.logo) // the logo is never placed as a photo
@@ -299,18 +340,28 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   const current = { headline: draft.headline, intro: draft.intro, about: draft.about, services: draft.services.map((s) => ({ name: s.name, description: s.description })), seoTitle: draft.seoTitle, seoDescription: draft.seoDescription, design: preset }
   const t0 = Date.now()
   let r
-  try {
-    r = await runModel(env, reviseMessages(facts, current, ask, images), reviseSchemaFor(images))
-  } catch (err) {
-    console.error('website revision failed:', err?.name || 'error')
-    return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
+  let model = null
+  let raw
+  if (hasOwn) {
+    const own = await ownKey(env, customer, reviseMessages(facts, current, ask, images), reviseSchemaFor(images), now)
+    if (!own?.ok) return { ok: false, httpStatus: OWN_KEY_HTTP[own?.error] || 503, error: own?.error || 'ai_unavailable' }
+    raw = own.raw
+    r = { usage: usageOf(own) }
+    model = own.model
+  } else {
+    try {
+      r = await runModel(env, reviseMessages(facts, current, ask, images), reviseSchemaFor(images))
+    } catch (err) {
+      console.error('website revision failed:', err?.name || 'error')
+      return { ok: false, httpStatus: 503, error: 'ai_unavailable' }
+    }
+    raw = parseOutput(r)
   }
   const latencyMs = Date.now() - t0
-  const raw = parseOutput(r)
   if (!raw) return { ok: false, httpStatus: 502, error: 'ai_unavailable' }
   const merged = mergeGenerated(draft, raw, facts, claims, { allowZip })
   const design = repairDesign(raw.design, preset, assetIds, allowedStock)
-  const id = await store(db, customer, { content: merged.content, designs: [design], source: 'ai', usage: r?.usage || null, latencyMs, rejected: merged.rejected, now })
+  const id = await store(db, customer, { content: merged.content, designs: [design], source: 'ai', usage: r?.usage || null, latencyMs, rejected: merged.rejected, now, model })
   return { ok: true, generation: { id, content: merged.content, designs: [design], source: 'ai', revision: true } }
 }
 

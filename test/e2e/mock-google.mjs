@@ -268,6 +268,55 @@ createServer(async (req, res) => {
     const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
     return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
   }
+  // AI designer (Claude, streamed): a first design, or a darker revision when the prompt carries CURRENT_SITE.
+  if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST') {
+    const prompt = JSON.parse(raw).messages?.[0]?.content || ''
+    const revise = prompt.includes('CURRENT_SITE')
+    const theme = revise
+      ? { colors: { bg: '#0b1620', surface: '#13232f', ink: '#eef6f8', muted: '#a3b8c2', accent: '#5fd4d0', onAccent: '#062023', line: '#223746' }, headingFont: 'cormorant-garamond', bodyFont: 'manrope', headingWeight: 600, headingCase: 'none', headingTracking: -0.01, baseSize: 17, scale: 1.3, lineHeight: 1.6, radius: 4, density: 'airy', maxWidth: 1200, buttons: 'outline', motion: 'subtle' }
+      : { colors: { bg: '#f4f8f7', surface: '#e3eeec', ink: '#10292b', muted: '#4b6466', accent: '#0f5c63', onAccent: '#ffffff', line: '#cfdedb' }, headingFont: 'syne', bodyFont: 'manrope', headingWeight: 700, headingCase: 'none', headingTracking: -0.03, baseSize: 17, scale: 1.3, lineHeight: 1.6, radius: 18, density: 'comfortable', maxWidth: 1200, buttons: 'pill', motion: 'subtle' }
+    const site = { name: revise ? 'Midnight' : 'Lowcountry', theme, nav: { layout: 'left', sticky: true, showBook: true }, footer: { layout: 'simple', text: null }, pages: [{ slug: '', navLabel: 'Home', seoTitle: 'Pools', seoDescription: 'Pools', sections: [
+      // Claude answers in the compact section shape (server/ai-designer.js COMPACT_DESIGN_SCHEMA).
+      { type: 'hero', id: 'top', style: 'bg l left normal none', eyebrow: '', layout: 'split', heading: revise ? 'Quietly perfect pools.' : 'Clear water, every week.', text: 'Pool care, booked online.', body: '', images: ['stock:pool-water'], imageAlt: '', options: 'side-right height-tall', buttons: [{ label: 'Book a visit', target: 'book' }], items: [] },
+      { type: 'area', id: 'area', style: 'surface m left normal none', eyebrow: '', layout: '', heading: 'Where we work', text: '', body: '', images: [], imageAlt: '', options: '', buttons: [], items: [] },
+    ] }] }
+    const text = JSON.stringify({ reply: revise ? 'Darker and more premium, with a serif headline.' : 'A fresh coastal design with booking up front.', site })
+    const ev = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    return res.end(ev('message_start', { message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } }) + ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }) + ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } }) + ev('content_block_stop', { index: 0 }) + ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 900 } }) + ev('message_stop', {}))
+  }
+  // Own-key AI providers (AI_API_MOCK_ORIGIN): key check only; a key containing BAD is refused.
+  if (url.pathname === '/anthropic/v1/models' || url.pathname === '/openai/v1/models') {
+    const auth = req.headers['x-api-key'] || String(req.headers.authorization || '')
+    if (auth.includes('BAD')) return send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid' } })
+    // What a connected account offers: Anthropic reports capabilities; OpenAI ids only (one non-text model to filter out).
+    const caps = { structured_outputs: { supported: true }, effort: { supported: true } }
+    const data = url.pathname.startsWith('/anthropic')
+      ? ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((id) => ({ id, type: 'model', display_name: id, max_tokens: 128000, capabilities: caps }))
+      : ['gpt-4o-mini', 'gpt-4.1', 'text-embedding-3-small'].map((id) => ({ id, object: 'model', owned_by: 'openai' }))
+    return send(res, 200, { data, has_more: false, first_id: data[0].id, last_id: data.at(-1).id })
+  }
+  // Website import stand-in (SITE_IMPORT_MOCK_ORIGIN): /__site/<host><path> serves a small Squarespace-style site.
+  if (url.pathname.startsWith('/__site/')) {
+    const [, , host, ...rest] = url.pathname.split('/')
+    const path = '/' + rest.join('/')
+    const html = (title, body) => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Weekly pool care in Charleston, booked online."></head><body>${body}</body></html>`
+    const pages = {
+      '/robots.txt': ['text/plain', 'User-agent: *\nDisallow: /config\nSitemap: https://www.harborpools.example/sitemap.xml'],
+      '/sitemap.xml': ['application/xml', '<urlset><url><loc>https://www.harborpools.example/services</loc></url><url><loc>https://www.harborpools.example/about</loc></url></urlset>'],
+      '/': ['text/html', html('Harbor Pools', '<h1>Clear Pools in Charleston</h1><p>Weekly pool care from a small local team.</p><img data-src="https://img.harborcdn.example/pool.jpg" data-image-dimensions="1600x1000" alt="Pool">')],
+      '/services': ['text/html', html('Services — Harbor Pools', '<h1>Services</h1><h3>Weekly Pool Care</h3><p>$180+</p><p>Skimming, brushing and balanced water every week.</p><h3>Green Pool Cleanup</h3><p>$400+</p><p>We bring green water back to clear in a few visits.</p><h3>Spring Opening</h3><p>$250+</p><p>Experience the joy of coming home to a spotless sanctuary, every corner of your house.</p>')],
+      '/about': ['text/html', html('About — Harbor Pools', '<h2>Who we are</h2><p>A small Charleston team focused on reliable weekly visits and clear communication.</p>')],
+    }
+    if (host === 'img.harborcdn.example') {
+      res.writeHead(200, { 'Content-Type': 'image/png' })
+      return res.end(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]))
+    }
+    const p = host === 'www.harborpools.example' ? pages[path] : null
+    if (!p) return send(res, 404, { error: 'not found' })
+    res.writeHead(200, { 'Content-Type': p[0] })
+    return res.end(p[1])
+  }
   if (url.pathname === '/__dns' && req.method === 'POST') {
     const body = JSON.parse(raw)
     dnsRecords.set(`${body.type}:${body.name}`, body.values)

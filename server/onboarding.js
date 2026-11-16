@@ -96,7 +96,7 @@ export async function onboardingSteps(env, customer, { calendar }) {
   ])
   const marked = new Set(marks.results.map((m) => m.step))
   // "Keep my current website": no GetShowUps website, so the address and publish steps don't apply.
-  const keeps = marks.results.some((m) => m.step === 'website' && m.value === 'existing')
+  const keeps = marks.results.some((m) => m.step === 'website' && (m.value === 'existing' || m.value === 'none'))
   const billing = sub ? sub.status : 'required'
   const steps = [
     { id: 'business', done: true },
@@ -142,7 +142,7 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
     // Real bookings only (test records never count).
     db.prepare(`SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND NOT ${isTestLead('l', '?2')}`).bind(customer.id, internalEmails(env)).first(),
     domainFor(env, customer.id),
-    db.prepare("SELECT 1 AS x FROM onboarding_marks WHERE customer = ?1 AND step = 'website' AND value = 'existing'").bind(customer.id).first(),
+    db.prepare("SELECT 1 AS x FROM onboarding_marks WHERE customer = ?1 AND step = 'website' AND value IN ('existing', 'none')").bind(customer.id).first(),
   ])
   const items = []
   if (signup || sub?.stripeSubscriptionId) {

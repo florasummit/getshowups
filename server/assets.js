@@ -2,6 +2,7 @@
 // JPEG/PNG/WebP files (checked by their bytes, never by the declared type; no SVG), within size and
 // count limits. Stored per business; served only when published or to the business's own owner.
 import { liveContent } from './website.js'
+import { specImages } from './site-spec.js'
 
 export const MAX_BYTES = 1_000_000
 export const MAX_ASSETS = 30
@@ -34,7 +35,7 @@ export async function listAssets(db, customerId) {
 // D1 may return a BLOB as an ArrayBuffer, a typed array or a plain number array.
 export const blobBytes = (v) => (v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v) : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : Uint8Array.from(v || []))
 
-export const usedBy = (content) => new Set([content?.logo, content?.hero, ...(content?.photos || [])].filter(Boolean))
+export const usedBy = (content) => new Set([content?.logo, content?.hero, ...(content?.photos || []), ...specImages(content?.site)].filter(Boolean))
 
 // Returns the asset row if `viewerCustomer` owns it, or if its business's live site uses it.
 export async function readAsset(db, id, viewerCustomer = null) {

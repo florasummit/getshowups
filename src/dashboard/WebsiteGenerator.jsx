@@ -7,6 +7,19 @@ import { api } from '../lib/api.js'
 import { ScaledFrame } from './WebsiteEditor.jsx'
 
 const FAIL = { 503: 'Our website designer is busy. Please try again in a minute.' }
+// Errors from the business's own Claude/OpenAI key, in plain words.
+const OWN_KEY = {
+  invalid_key: 'Your AI API key isn’t working any more. Replace it under “Your own AI key”, or remove it to use the included writer.',
+  provider_billing: 'Your AI provider account has no credit or has hit its spending limit. Add credit in your provider’s billing settings, then try again. Waiting won’t fix this.',
+  provider_rejected: 'Your AI provider couldn’t accept this request. Please try again later; if it keeps happening, contact us.',
+  provider_rate_limited: 'Your AI provider says you’ve hit its rate limit. Please wait a minute and try again.',
+  ai_declined: 'The AI declined this request. Try describing the change differently.',
+  ai_invalid_output: 'The AI’s answer couldn’t be used. Please try again.',
+  provider_unavailable: 'Your AI provider isn’t responding right now. Please try again in a minute.',
+  model_unavailable: 'Your chosen AI model is no longer offered on your account. Choose another under “Your own AI key”.',
+  no_tested_model: 'Auto has no tested model on your account yet. Choose a model under “Your own AI key”.',
+  budget_reached: 'This would go over your monthly AI limit. Raise the limit under “Your own AI key”, or edit by hand.',
+}
 
 const resetTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 // Today's AI allowance for one kind ('generation' or 'revision'), e.g. "18 of 20 left today · resets at 7:00 PM".
@@ -19,6 +32,7 @@ export function Allowance({ usage, kind, noun }) {
     </p>
   )
 }
+const DESIGNED_SITE = 'Your website is now designed with the AI designer, so this version wasn’t used (it would have replaced that design). Refresh the page to continue with the designer.'
 // Specific, honest messages for the server's limits (manual editing is never limited).
 const failText = (status, data, noun) =>
   data?.error === 'daily_limit'
@@ -27,14 +41,14 @@ const failText = (status, data, noun) =>
       ? 'You’ve reached this month’s AI limit. You can still edit the text and photos below.'
       : data?.error === 'rate_limited'
         ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
-        : FAIL[status]
+        : OWN_KEY[data?.error] || FAIL[status]
 
-export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage }) {
+export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false }) {
   const [gen, setGen] = useState(null)
   const [state, setState] = useState({})
   const generate = async () => {
     setState({ busy: 'writing' })
-    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'generate' } })
+    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: templates ? 'template' : 'generate' } })
     if (data?.aiUsage) onUsage?.(data.aiUsage)
     if (status === 200) {
       setGen(data.generation)
@@ -48,7 +62,7 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
       setGen(null)
       setState({})
       onApplied(data)
-    } else setState({ error: 'Couldn’t use that design. Please try again.' })
+    } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t use that design. Please try again.' })
   }
 
   if (!gen) {
@@ -57,9 +71,9 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
         {intro && <p className="lede">{intro}</p>}
         {hasDraft && <p className="fine">This creates three new designs to choose from. Your current draft stays until you pick one, and your live website doesn’t change until you publish.</p>}
         <button type="button" className="btn btn-primary btn-lg" disabled={Boolean(state.busy)} onClick={generate}>
-          {state.busy ? 'Designing your website…' : hasDraft ? 'Design it again' : 'Create my website'}
+          {state.busy ? 'Designing your website…' : templates ? 'Show me the designs' : hasDraft ? 'Design it again' : 'Create my website'}
         </button>
-        {state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
+        {templates ? null : state.busy ? <p className="fine" role="status">This takes about 15 seconds.</p> : <Allowance usage={usage} kind="generation" noun="new designs" />}
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}
@@ -125,7 +139,7 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage }) {
       setState({})
       onPreview?.(null)
       onApplied(data)
-    } else setState({ error: 'Couldn’t save that version. Please try again.' })
+    } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t save that version. Please try again.' })
   }
   if (rev) {
     return (

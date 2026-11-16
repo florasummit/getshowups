@@ -6,6 +6,7 @@ import { unapprovedClaims } from './ads/spec.js'
 import { approvedClaimsFor } from './landing.js'
 import { getSubscription } from './stripe.js'
 import { validateDesign } from './site-design.js'
+import { validateSpec } from './site-spec.js'
 
 export const TEMPLATES = ['clean', 'bold', 'warm']
 // Accent colours, each dark enough for white button text (WCAG AA).
@@ -18,6 +19,11 @@ export const COLORS = {
   plum: '#6b3fa0',
   slate: '#334155',
 }
+// Old addresses from a previous website (e.g. /services) → where they go on this one, used once the business's own
+// domain points here (functions/_middleware.js). Targets are fixed choices, never free URLs.
+export const REDIRECT_TARGETS = ['/', '/#services', '/#about', '/#contact', 'book']
+const REDIRECT_FROM = /^\/[a-z0-9][a-z0-9._~/-]{0,119}$/
+export const MAX_REDIRECTS = 30
 export const LIMITS = { headline: 80, intro: 400, about: 1200, services: 12, serviceName: 60, price: 40, serviceText: 240, area: 200, highlights: 5, highlight: 90, photos: 6, seoTitle: 70, seoDescription: 160 }
 const ASSET_RE = /^[a-f0-9]{32}$/
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
@@ -115,6 +121,9 @@ export function validateContent(body, approvedClaims = [], assetIds = null) {
     photos: (Array.isArray(b.photos) ? b.photos : []).map(asset).filter(Boolean),
     seoTitle: clean(b.seoTitle),
     seoDescription: clean(b.seoDescription),
+    redirects: (Array.isArray(b.redirects) ? b.redirects : [])
+      .map((r) => ({ from: String(r?.from ?? '').toLowerCase().replace(/\/+$/, ''), to: String(r?.to ?? '') }))
+      .filter((r) => r.from),
   }
   if (b.template !== undefined && !TEMPLATES.includes(b.template)) errors.push('template')
   if (b.color !== undefined && !Object.hasOwn(COLORS, b.color)) errors.push('color')
@@ -126,6 +135,11 @@ export function validateContent(body, approvedClaims = [], assetIds = null) {
   if (c.highlights.length > LIMITS.highlights || c.highlights.some((h) => h.length > LIMITS.highlight)) errors.push('highlights')
   if (c.seoTitle.length > LIMITS.seoTitle) errors.push('seoTitle')
   if (c.seoDescription.length > LIMITS.seoDescription) errors.push('seoDescription')
+  if (!c.redirects.length) delete c.redirects // older content has none: keep drafts and live versions comparable
+  else if (c.redirects.length > MAX_REDIRECTS || c.redirects.some((r) => !REDIRECT_FROM.test(r.from) || !REDIRECT_TARGETS.includes(r.to)) || new Set(c.redirects.map((r) => r.from)).size !== c.redirects.length) errors.push('redirects')
+  // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
+  // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
+  if (b.site != null) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, claims: approvedClaims }).spec
   // Optional AI-chosen design (layout, palette, type, images) from the safe design system.
   if (b.design != null) {
     const [designErrors, design] = validateDesign(b.design, assetIds)

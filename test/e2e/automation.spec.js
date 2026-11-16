@@ -58,7 +58,11 @@ test("can't make it: the customer cancels from their email link (nothing changes
   await expect(page.getByText('E2E Auto Co has been told.')).toBeVisible()
   await page.getByRole('link', { name: 'Pick a new time' }).click()
   await expect(page.getByRole('heading', { name: 'Pick a time' })).toBeVisible()
-  await page.locator('.slot').last().click() // the follow-up test books the first slot of this business
+  // The follow-up test books this business's first slot in parallel. Book on the LAST offered day: "last slot of the first
+  // day" was the same slot from 20:00 to 21:00 New York time (only one left today), and the double-booking guard then
+  // correctly refused one of the two tests.
+  await page.locator('.day-chip').last().click()
+  await page.locator('.slot').last().click()
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
 })

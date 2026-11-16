@@ -53,8 +53,9 @@ export async function onRequestPost({ request, env }) {
       await markStep(db, customer.id, 'address', body.choice)
       return json(200, { ok: true })
     case 'keep_website':
-      // The owner keeps their current website and links to their booking page from it.
-      await markStep(db, customer.id, 'website', 'existing')
+      // No GetShowUps website for now: the owner keeps their current site ('existing') or has none yet ('none') and
+      // shares the booking link. A website can be created any time later from the Website tab.
+      await markStep(db, customer.id, 'website', body.choice === 'none' ? 'none' : 'existing')
       return json(200, { ok: true })
     case 'keep_private':
       await markStep(db, customer.id, 'publish', 'private')

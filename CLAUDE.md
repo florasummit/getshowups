@@ -50,6 +50,8 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
+  api/dashboard/ai-key  GET (provider + last 4) · POST save (validated) | remove
+  api/dashboard/website/import  GET latest import; POST start (url, confirm) | apply (importId, fields, photos)
   api/dashboard/website/ Website: index (GET state; POST save|publish|unpublish|restore|regenerate), preview (owner-only
                      HTML), assets (image upload), export (owner's content + images as JSON)
   api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
@@ -88,12 +90,30 @@ server/              Shared backend modules imported by functions/ (bundled by P
   website-ai.js      AI website design: one Workers AI request (binding AI, model WEBSITE_MODEL) → copy + 3 designs;
                      revise (natural-language change) → 1 design. Facts from records only; claims + invented-number
                      filter; designs repaired via site-design.js; stored in website_generations; template fallback
+  ai-credentials.js  Bring-your-own Claude/OpenAI key (0022): validated read-only before storing; AES-GCM under an HKDF
+                     subkey of TOKEN_ENCRYPTION_KEY bound to (customer, provider); only provider + last 4 ever returned
+  ai-providers.js    Own-key website writer: Claude (SDK, claude-opus-5-5, output_config json_schema; NO server-side fallback:
+                     the chosen/reserved model is the only one that runs, recorded and priced as that model)
+                     or OpenAI (strict json_schema); same mergeGenerated/claims/number/design-repair pipeline; own-key
+                     errors are reported (never a silent fallback); cost recorded as 0 (billed to the owner's account)
+  site-spec.js       AI-designed sites, spec v2 (content.site): pages, composed sections, theme tokens. validateSpec() is the
+                     security boundary: enums/clamps, AA contrast repair, own-or-stock images, links only book/page/section,
+                     services/prices/towns/phone from records, claims + invented-number filter, limits. site-render-v2.js
+                     renders it (escaped, no scripts but JSON-LD, CSS-only motion, multi-page: /p/<id>/<page>, domain /<page>)
+  ai-designer.js     Conversational designer on the owner's own key: one turn = one model call → { reply, site } →
+                     validateSpec → PRIVATE draft (undo keeps the previous design); imported text given as quoted data;
+                     turns in website_design_turns (0023). Route streams NDJSON progress (designer.js)
   site-design.js     The design system the AI chooses from: 8 palettes (AA-checked), 5 font pairings, 4 hero / 3
                      services / 3 about layouts, shapes, section order, image refs (asset:<id> | stock:<id>).
                      validateDesign(), presetDesigns(), diversify() (3 designs never share hero/palette/fonts)
   site-designed.js   Renderer for content.design (escaped, script-free, self-hosted fonts/photos). Content without
                      a design still uses site-render.js unchanged, so existing sites look exactly the same
   stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
+  site-import.js     Website import: public pages of the owner's existing site (robots.txt honoured, same site only, public
+                     hosts only via normalizeWebsiteUrl, ≤12 pages, size/time caps, manual redirects re-checked), tolerant
+                     HTML extraction (no scripts), suggestContent (only text found on the site). website-import.js: stored
+                     imports (0021) and applyImport → PRIVATE draft (fields through validateContent; photos only from that
+                     import, via saveAsset). Imported text is untrusted data, never instructions
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)
@@ -209,8 +229,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
 - Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
   /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
-  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off). Turning one on
-  in production requires approval.
+  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
+  WEBSITE_STUDIO_ENABLED AND WEBSITE_STUDIO_BUSINESSES (same shape as Ads; server/website-studio.js studioEnabledFor()):
+  Website Studio internal pilot = own AI key, AI designer, website import (+ old-address redirects). Outside it: those
+  routes are 404, the dashboard/onboarding don't offer them, a stored key is never used, and a save can't add or change
+  `site`/`redirects` (stored values kept). Published content is never gated. WEBSITE_STUDIO_PUBLISH (off in the pilot):
+  unless 'true', content with an AI-designed `site` or `redirects` can't be published or restored (409
+  studio_publish_off); drafts/previews unaffected. Turning one on in production requires approval.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not
@@ -236,6 +261,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
   the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
   at a doubled name is never accepted as proof.
+- Old-site redirects: content.redirects [{from: path, to: '/' | '/#services' | '/#about' | '/#contact' | 'book'}] (≤30, fixed
+  targets, suggested by the import), applied by functions/_middleware.js on a connected domain from the LIVE version only.
+  www is the connected hostname; the bare domain stays with the owner's provider (UI tells them to forward it).
 - Domain re-claims (claimDomain, one atomic upsert): the same business re-claiming a hostname it removed ≤30 days ago keeps
   its verify_token (verified_at/attached_at always reset: ownership re-proven by DNS); any other business, or after 30 days,
   gets a new random token. A business never holds two active domains; an active claim is never changed.
