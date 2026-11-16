@@ -83,10 +83,35 @@ test('owner edits the AI-designed website without AI: click to edit, undo/redo, 
   await pageSelect.selectOption('')
   await expect(frame.locator('.ge-hidden')).toHaveCount(1)
 
-  // Nothing went live: AI-designed websites can't be published yet, and no AI was called for any of this.
-  await expect(page.getByText('AI-designed websites stay private')).toBeVisible()
+  // Nothing went live by editing; no AI was called for any of this.
   expect((await page.request.get(`/p/${customerFor(info)}`)).status()).toBe(404)
   expect(aiCalls, 'editing never calls AI').toEqual([])
+
+  // Publish (explicit confirmation) → public on the GetShowUps address; edit and republish; restore the first version.
+  const status = page.locator('section[aria-label="Website status"]')
+  const publishNow = async () => {
+    await expect(saved).toBeVisible()
+    await status.getByRole('button', { name: /^Publish/ }).first().click()
+    await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+    await page.getByRole('button', { name: /^Publish/ }).last().click()
+    await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
+  }
+  await publishNow()
+  const site = `/p/${customerFor(info)}`
+  await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, handled with care')).toBe(true)
+  expect((await page.request.get(`${site}/contact`)).status()).toBe(200)
+  const home = await (await page.request.get(site)).text()
+  expect(home).toMatch(/<link rel="canonical"/)
+  expect(home).toMatch(/href="[^"]*\/book\//)
+  await h1.click()
+  await studio.getByRole('textbox', { name: /^Heading/ }).first().fill('Pools, published twice')
+  await page.waitForTimeout(1300)
+  await publishNow()
+  await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, published twice')).toBe(true)
+  page.once('dialog', (d) => d.accept())
+  await page.getByText('Earlier versions and more').click()
+  await page.getByRole('button', { name: 'Restore' }).last().click()
+  await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, handled with care')).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
 

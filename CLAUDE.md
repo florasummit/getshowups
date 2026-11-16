@@ -255,9 +255,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   then Studio stays hidden, never broken). Not eligible: those routes are 404, the dashboard/onboarding don't offer them,
   and a save can't add or change `site`/`redirects` (stored values kept). A STORED own key is never replaced by the
   included (GetShowUps-paid) model: unusable/invalid key → invalid_key, no access → ai_unavailable (website-ai.js
-  ownCredential; the designer needs a usable key: key_required). Published content is never gated. WEBSITE_STUDIO_PUBLISH:
-  unless 'true', content with an AI-designed `site` or `redirects` can't be published or restored (409
-  studio_publish_off); drafts/previews unaffected. Turning one on in production requires approval.
+  ownCredential; the designer needs a usable key: key_required). Published content is never gated. Publishing is
+  standard self-service for every eligible business (owner decision 2026-11-16): explicit confirmation for publish AND
+  restore (confirmation_required), every page must render first (render_failed → live version untouched), version +
+  live pointer stored in one batch. WEBSITE_STUDIO_PUBLISH === 'false' is the emergency pause for AI-designed `site` /
+  `redirects` content (409 studio_publish_off); drafts/previews unaffected. Never publish a draft automatically.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not

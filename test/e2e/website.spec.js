@@ -145,6 +145,7 @@ test('changes stay private until published again; an earlier version can be rest
   expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).toContain('A brand new headline')
 
   await page.getByText('Earlier versions and more').click()
+  page.once('dialog', (d) => d.accept()) // restoring replaces the live site: the owner confirms
   await page.getByRole('button', { name: 'Restore' }).first().click()
   await expect.poll(async () => (await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).includes('Pool care in Charleston')).toBe(true)
 })

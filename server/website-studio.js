@@ -45,9 +45,9 @@ export async function studioAccess(env, customer) {
   }
 }
 
-// Publishing Studio output is a separate, later decision (owner, 2026-11-16: no public AI-designed website yet). Unless
-// WEBSITE_STUDIO_PUBLISH is exactly 'true', content that carries an AI-designed site or old-address redirects can't go
-// live (publish or restore); drafts and private previews are unaffected. Content that was already live is never taken
-// down by this.
-export const studioPublishAllowed = (env) => env?.WEBSITE_STUDIO_PUBLISH === 'true'
+// Publishing is a standard self-service step for every eligible business (owner decision 2026-11-16; it was held back
+// during the internal pilot). The owner publishes explicitly (confirmation required); drafts are never published
+// automatically. WEBSITE_STUDIO_PUBLISH === 'false' is the emergency off switch: content that carries an AI-designed site
+// or old-address redirects then can't go live (publish or restore); what is already live keeps serving.
+export const studioPublishAllowed = (env) => env?.WEBSITE_STUDIO_PUBLISH !== 'false'
 export const hasStudioOutput = (content) => Boolean(content && (content.site || content.redirects?.length))

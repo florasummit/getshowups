@@ -215,12 +215,12 @@ test('versions: every publish is kept; restoring an earlier version makes it liv
   const w = (await call(website, 'GET', { cookie: c })).json.website
   assert.deepEqual(w.versions.map((v) => [v.version, v.live]), [[2, true], [1, false]])
   assert.ok((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text.includes('Version two'))
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1 } })).status, 200)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 1, confirm: true } })).status, 200)
   assert.ok((await call(publicSite, 'GET', { params: { customer: 'pools' } })).text.includes('Version one'))
   assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.headline, 'Version one', 'editing continues from the restored version')
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 9 } })).status, 404)
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restore', version: 9, confirm: true } })).status, 404)
   // Another business can't restore (or see) these versions.
-  assert.equal((await call(website, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'restore', version: 1 } })).status, 404)
+  assert.equal((await call(website, 'POST', { cookie: await cookieFor('owner@salon.example'), body: { action: 'restore', version: 1, confirm: true } })).status, 404)
 })
 
 test('legacy landing page (e.g. PoolThru) stays live as the website, including through the first edit', async () => {

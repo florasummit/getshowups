@@ -11,8 +11,9 @@ the AI-key controls, and those routes are 404. Manual editing never needs a key.
 AI work runs on the business's own Claude or OpenAI key. A stored key is never replaced by the included GetShowUps-paid
 model: an invalid, revoked or unreadable key is reported (`invalid_key`), out of credit is `provider_billing`.
 Own-key requests never use Anthropic's server-side fallback: only the chosen/reserved model runs and is priced.
-`WEBSITE_STUDIO_PUBLISH` stays unset: AI-designed sites (and imported old-address redirects) can be previewed but not
-published or restored live.
+Publishing is standard for every eligible business: the owner confirms each publish and restore; drafts are never
+published automatically. `WEBSITE_STUDIO_PUBLISH=false` pauses publishing of AI-designed sites and imported redirects
+(emergency only); what is live keeps serving.
 
 **Composition + design quality (2026-11-16, draft PR):** a `composition` section (blocks placed on a 12-column grid,
 phone layout derived) for the first screen and signature moments; invalid AI choices are reported, not silently made
