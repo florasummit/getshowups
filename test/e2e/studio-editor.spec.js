@@ -36,8 +36,13 @@ test('owner edits the website on the website itself: text in place, button panel
   await expect(h1).toHaveText('Pools, handled with care')
 
   // A button: click it on the website → a small panel with its text and where it goes.
-  await frame.getByRole('link', { name: 'Book a visit' }).first().click()
+  // (After an edit the preview refreshes; a click that lands during that refresh is retried, as a person would.)
   const pop = studio.getByRole('dialog', { name: 'Edit' })
+  await expect(saved).toBeVisible()
+  await expect(async () => {
+    await frame.getByRole('link', { name: 'Book a visit' }).first().click()
+    await expect(pop).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
   await pop.getByRole('textbox', { name: /^Text/ }).fill('Book a pool visit')
   await pop.getByLabel('Goes to').selectOption({ label: 'Section: Services' })
   await expect(frame.getByRole('link', { name: 'Book a pool visit' })).toHaveAttribute('href', '#services')
@@ -46,7 +51,11 @@ test('owner edits the website on the website itself: text in place, button panel
 
   // A service price and description, typed directly on the website.
   const price = frame.getByText('$280+')
-  await price.click()
+  await expect(saved).toBeVisible()
+  await expect(async () => {
+    await price.click()
+    await expect(price).toHaveAttribute('contenteditable', /true|plaintext-only/, { timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('$300+')
   await page.keyboard.press('Enter')
@@ -68,8 +77,11 @@ test('owner edits the website on the website itself: text in place, button panel
   await faqRow.getByRole('button', { name: 'More for FAQ' }).click()
   await studio.getByRole('menuitem', { name: 'Hide from website' }).click()
   // On the website itself: select the booking section → its bar → duplicate, then move the copy up.
-  await frame.locator('#book-home').click({ position: { x: 30, y: 30 } })
   const bar = studio.getByRole('toolbar', { name: 'Booking section' })
+  await expect(async () => {
+    await frame.locator('#book-home').click({ position: { x: 30, y: 30 } })
+    await expect(bar).toBeVisible({ timeout: 2000 })
+  }).toPass({ timeout: 20_000 })
   await bar.getByRole('button', { name: 'More for Booking' }).click()
   await studio.getByRole('menuitem', { name: 'Duplicate' }).click()
   await studio.getByRole('tab', { name: 'Sections' }).click()
