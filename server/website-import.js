@@ -76,7 +76,8 @@ export async function applyImport(env, customer, importId, { fields = [], photos
   let content = { ...draft }
   const rejected = []
   for (const f of chosen) {
-    const [errors, next] = validateContent({ ...content, [f]: view.suggestion.content[f] }, claims, null)
+    // `prior`: on an AI-designed draft, imported services keep the id (and description) of the same-named service.
+    const [errors, next] = validateContent({ ...content, [f]: view.suggestion.content[f] }, claims, null, { prior: draft.services })
     if (errors.length) rejected.push({ field: f, reason: errors.some((e) => e.endsWith(':unapproved_claim')) ? 'claim' : 'limit' })
     else content = { ...content, [f]: next[f] }
   }
@@ -96,7 +97,7 @@ export async function applyImport(env, customer, importId, { fields = [], photos
     const hero = content.hero || added[0]
     content = { ...content, hero, photos: [...new Set([...added, ...(content.photos || [])])].filter((p) => p !== hero).slice(0, LIMITS.photos) }
   }
-  const [errors, final] = validateContent(content, claims, await assetIdsFor(db, customer.id))
+  const [errors, final] = validateContent(content, claims, await assetIdsFor(db, customer.id), { prior: draft.services })
   if (errors.length) return { ok: false, httpStatus: 400, error: 'invalid_content', fields: errors }
   await saveDraft(db, customer.id, final, now)
   await db.prepare('UPDATE website_imports SET applied_at = ?2 WHERE id = ?1').bind(importId, now).run()

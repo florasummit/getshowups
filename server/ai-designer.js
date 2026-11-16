@@ -203,6 +203,23 @@ function sectionToCompact(s) {
   }
 }
 export const toCompact = (site) => (site && Array.isArray(site.pages) ? { ...site, name: site.direction || site.name, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionToCompact) })) } : site)
+// The model refers to services by their position in FACTS.services (the current list, numbered for it); the stored
+// design refers to them by stable id. The current design is converted only here, for the prompt; answers are converted
+// back by validateSpec against the same list. Ids never reach the model.
+export const servicesForModel = (site, services) =>
+  site && Array.isArray(site.pages)
+    ? {
+        ...site,
+        pages: site.pages.map((p) => ({
+          ...p,
+          sections: (p.sections || []).map((s) =>
+            s?.type === 'services' && Array.isArray(s.items)
+              ? { ...s, items: s.items.map(({ serviceId, serviceIndex, ...x }) => ({ serviceIndex: typeof serviceId === 'string' ? services.findIndex((v) => v.id === serviceId) : Number.isInteger(serviceIndex) ? serviceIndex : -1, ...x })) }
+              : s,
+          ),
+        })),
+      }
+    : site
 // Standard shape for revisions (OpenAI): composition blocks back in the token form the model writes.
 export const toStandard = (site) => (site && Array.isArray(site.pages) ? { ...site, pages: site.pages.map((p) => ({ ...p, sections: (p.sections || []).map(sectionBlocksToModel) })) } : site)
 
@@ -292,7 +309,7 @@ export async function designContext(env, customer) {
   ])
   const draft = website.draft
   const cities = profile ? JSON.parse(profile.cities || '[]') : []
-  const services = (draft.services || []).map((s) => ({ name: s.name, price: s.price || '' }))
+  const services = (draft.services || []).map((s) => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: s.price || '' }))
   const industry = industryOf(customer, profile ? { ...profile, services: JSON.parse(profile.services || '[]') } : null, draft)
   const assetIds = new Set(assets.results.map((a) => a.id).filter((id) => id !== draft.logo))
   const facts = {
@@ -413,7 +430,7 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   const different = mode === 'different' && Boolean(current)
   // Claude answers (and revises) in the compact section shape; OpenAI in the standard one.
   const compact = cred.provider === 'anthropic'
-  const shape = (site) => (compact ? toCompact(site) : toStandard(site))
+  const shape = (site) => (compact ? toCompact : toStandard)(servicesForModel(site, ctx.services))
   const away = different ? `\n\nMOVE AWAY FROM the current direction and design something genuinely different: a first screen from a DIFFERENT recipe than the current one, led by a different photo (or type-led), with a new type pairing and palette. Mirroring or recolouring the current design is not different. Current direction: "${current.direction || current.name}"; first screen ${firstScreenSignature(current)}.` : ''
   const call = cred.provider === 'anthropic' ? callClaude : callOpenAI
   const attempts = []

@@ -113,6 +113,22 @@ export function validateSpec(raw, ctx = {}) {
   const assets = ctx.assetIds || new Set()
   const claims = ctx.claims || []
   const services = ctx.services || []
+  // Services are referred to by their stable id (server/website.js SERVICE_ID_RE). A position (serviceIndex) is read
+  // against the list it was written for: the model's FACTS list (= `services`), or `legacyServices`, the list a design
+  // saved before ids existed was made with; it's then matched to the current list by id, else by name.
+  const legacy = Array.isArray(ctx.legacyServices) ? ctx.legacyServices : services
+  const nameKey = (n) => String(n || '').trim().toLowerCase()
+  const serviceAt = (x) => {
+    if (typeof x?.serviceId === 'string') return services.findIndex((s) => s?.id && s.id === x.serviceId)
+    if (!Number.isInteger(x?.serviceIndex) || !legacy[x.serviceIndex]) return -1
+    if (legacy === services) return x.serviceIndex
+    const old = legacy[x.serviceIndex]
+    const byId = old.id ? services.findIndex((s) => s?.id === old.id) : -1
+    return byId >= 0 ? byId : services.findIndex((s) => nameKey(s?.name) === nameKey(old.name))
+  }
+  // Stored form: the id when the services have ids (always, for saved AI-designed content); a position only for callers
+  // that pass a list without ids (it is converted when the content is saved).
+  const serviceRef = (j) => (services[j]?.id ? { serviceId: services[j].id } : { serviceIndex: j })
   const numbersOk = (t) => {
     if (!ctx.factsText) return true
     const facts = ctx.factsText.replace(/[,\s]/g, '')
@@ -330,14 +346,15 @@ export function validateSpec(raw, ctx = {}) {
         case 'services': {
           const list = items(LIMITS.items)
             .map((x, i) => {
-              const idx = Number.isInteger(x?.serviceIndex) ? x.serviceIndex : -1
-              if (!services[idx]) return null
-              return { serviceIndex: idx, text: txt(x.text, LIMITS.itemText, `${where}.items.${i}.text`), icon: pick(x?.icon, ICONS, null), image: img(x?.image, `${where}.items.${i}.image`) }
+              const j = serviceAt(x)
+              if (!services[j]) return null
+              return { j, text: txt(x.text, LIMITS.itemText, `${where}.items.${i}.text`), icon: pick(x?.icon, ICONS, null), image: img(x?.image, `${where}.items.${i}.image`) }
             })
             .filter(Boolean)
-            .filter((x, i, all) => all.findIndex((y) => y.serviceIndex === x.serviceIndex) === i)
+            .filter((x, i, all) => all.findIndex((y) => y.j === x.j) === i)
           // Every service the business offers appears (the AI may order and describe them, not drop them).
-          for (const [i] of services.entries()) if (!list.some((x) => x.serviceIndex === i)) list.push({ serviceIndex: i, text: '', icon: null, image: null })
+          for (const [j] of services.entries()) if (!list.some((x) => x.j === j)) list.push({ j, text: '', icon: null, image: null })
+          for (const [i, { j, ...rest }] of list.entries()) list[i] = { ...serviceRef(j), ...rest }
           out = { ...base, layout: choose(s.layout, ENUM.servicesLayout, 'cards', `${where}.layout`), columns: clamp(s.columns, 1, 4, 3) | 0, showPrices: bool(s.showPrices, true), items: list }
           if (!list.length) out = null
           break

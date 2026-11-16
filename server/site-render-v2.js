@@ -149,7 +149,8 @@ export function renderV2(biz, spec, opts = {}) {
   const button = (c, ghost = false) => (c ? `<a class="btn${ghost ? ' ghost' : ''}" href="${link(c.target)}">${esc(c.label)}</a>` : '')
   const visit = biz.appointmentMode === 'at_customer'
   const head = (s, tag = 'h2') => (s.heading || s.eyebrow || s.text ? `<div class="head">${s.eyebrow ? `<p class="eyebrow">${esc(s.eyebrow)}</p>` : ''}${s.heading ? `<${tag} id="h-${esc(s.id)}">${esc(s.heading)}</${tag}>` : ''}${s.text ? `<div class="muted">${paras(s.text)}</div>` : ''}</div>` : '')
-  const svc = (it) => biz.services?.[it.serviceIndex] || { name: '', price: '' }
+  // A service by its stable id (server/website.js); a position only in content that never had ids (read-time upgraded).
+  const svc = (it) => (typeof it.serviceId === 'string' ? biz.services?.find((s) => s?.id === it.serviceId) : biz.services?.[it.serviceIndex]) || { name: '', price: '' }
   let first = true
   // Placement rules for composition blocks, generated from validated numbers/enums only (section ids are slugs).
   const blockCss = []

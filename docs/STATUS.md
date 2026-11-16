@@ -2,7 +2,21 @@
 
 _Update at the end of every task. Newest first._
 
-## Website Studio: final live "different direction" test for PR #43 (2026-11-16) — $0.184 of $0.50; draft, NOT merged
+## Website Studio: stable service ids in AI-designed sites (2026-11-16) — PR #43; no paid calls; draft, NOT merged
+
+- Defect (on main since the pilot, found in the release review): the AI design pointed at services by list position, so
+  deleting the first service showed "Weekly Pool Care" with the one-time service's description. Now the design refers
+  to `content.services[].id` (AI-designed content only; content without an AI design keeps its exact shape).
+- Ids: kept if valid and unique; else inherited from the saved service with the same name (`prior`: save route, import
+  apply), so a page or import that drops ids keeps descriptions; else a new random id (never a position, never reused).
+- Backward compatible, no migration: drafts and versions saved before ids are upgraded at READ time, deterministically
+  (s1, s2, … against the same stored list their positions were written for), so they show the right descriptions,
+  compare equal draft vs live, and are never rewritten by reading. A pre-id page saving positions is read against the
+  saved list. The model still sees positions in FACTS.services (servicesForModel converts at that edge only).
+- Other positional references checked: photos (asset/stock ids), links (section ids, page slugs), redirects (paths) are
+  already stable. Remaining best effort: an undo stored BEFORE this change resolves positions against today's list.
+- Tests: delete first + middle, add, reorder, a page without ids, save + reload, pre-id draft + published version,
+  model positions ↔ stored ids, import by name, dangling id dropped. The 3 new tests fail on the old code.
 
 - Cap: actual settled spend in this test + the next request's worst case ≤ $0.50, checked before every request (the
   product's own limit can't express a combined $0.50: $1 minimum, per provider). GPT ran first ($0.057 + $0.059 =

@@ -53,6 +53,82 @@ export function displayBrand(name, content) {
   return best
 }
 
+// Stable service ids (AI-designed sites only). The AI design (content.site) describes each service in its own words; it
+// refers to the service by id, never by its position in the list, so deleting, adding or reordering services can't put
+// one service's description under another (positions did, 2026-11-16). Content without an AI design keeps its exact
+// shape (no ids), so nothing changes for anyone outside the Website Studio pilot.
+export const SERVICE_ID_RE = /^[a-z][a-z0-9]{1,23}$/
+const newServiceId = () => `v${[...crypto.getRandomValues(new Uint32Array(2))].map((n) => n.toString(36)).join('')}`.slice(0, 13)
+const nameKey = (n) => String(n || '').trim().toLowerCase()
+const withId = (s, id) => {
+  const { id: _old, ...rest } = s
+  return { id, ...rest }
+}
+
+// Services saved with an AI design: every service gets an id. Kept: a valid id the service already has (unique in the
+// list). Inherited: the id of the previously saved service with the same name (a client that dropped ids, an import
+// replacing the list). Otherwise a new random id (never a position, so an old reference can't land on a new service).
+export function assignServiceIds(services, prior = []) {
+  const used = new Set()
+  const out = services.map((s) => (SERVICE_ID_RE.test(s.id ?? '') && !used.has(s.id) ? (used.add(s.id), withId(s, s.id)) : withId(s, null)))
+  for (const [i, s] of out.entries()) {
+    if (s.id) continue
+    const p = (prior || []).find((x) => SERVICE_ID_RE.test(x?.id ?? '') && !used.has(x.id) && nameKey(x.name) === nameKey(s.name))
+    if (p) {
+      out[i] = withId(s, p.id)
+      used.add(p.id)
+    }
+  }
+  for (const [i, s] of out.entries()) {
+    if (s.id) continue
+    let id
+    do id = newServiceId()
+    while (used.has(id))
+    out[i] = withId(s, id)
+    used.add(id)
+  }
+  return out
+}
+
+// Read-time upgrade of a stored AI-designed draft or version saved before service ids existed: deterministic (the same
+// content always gets the same ids), so drafts and live versions stay comparable and nothing has to be migrated. The
+// design's position references are converted against the SAME stored list they were saved with, so they stay right.
+export function withServiceRefs(content) {
+  if (!content?.site || !Array.isArray(content.services)) return content
+  const seen = new Set()
+  const taken = new Set(content.services.map((s) => s?.id).filter((id) => SERVICE_ID_RE.test(id ?? '')))
+  let n = 0
+  const services = content.services.map((s) => {
+    if (SERVICE_ID_RE.test(s?.id ?? '') && !seen.has(s.id)) {
+      seen.add(s.id)
+      return s
+    }
+    let id
+    do id = `s${++n}`
+    while (taken.has(id) || seen.has(id))
+    seen.add(id)
+    return withId(s, id)
+  })
+  const pages = Array.isArray(content.site.pages)
+    ? content.site.pages.map((p) => ({
+        ...p,
+        sections: (p.sections || []).map((s) =>
+          s?.type === 'services' && Array.isArray(s.items)
+            ? {
+                ...s,
+                items: s.items.map((x) => {
+                  if (typeof x?.serviceId === 'string' || !Number.isInteger(x?.serviceIndex)) return x
+                  const { serviceIndex, ...rest } = x
+                  return services[serviceIndex] ? { serviceId: services[serviceIndex].id, ...rest } : x
+                }),
+              }
+            : s,
+        ),
+      }))
+    : content.site.pages
+  return { ...content, services, site: { ...content.site, pages } }
+}
+
 function legacyContent(landing) {
   return {
     headline: landing.headline,
@@ -115,12 +191,16 @@ export async function generateContent(db, customer) {
 }
 
 // Returns [errors[], content]. `assetIds`: ids this business owns (images are checked against them).
-export function validateContent(body, approvedClaims = [], assetIds = null) {
+// `prior`: the services as last saved (with ids), for an AI-designed site: ids carry over by name, and a design still
+// using positions (saved before ids, sent by an older page) is read against the list it was made for.
+export function validateContent(body, approvedClaims = [], assetIds = null, { prior = null } = {}) {
   const b = body && typeof body === 'object' ? body : {}
   const errors = []
-  const services = (Array.isArray(b.services) ? b.services : [])
-    .map((s) => ({ name: clean(s?.name), price: clean(s?.price), description: clean(s?.description) }))
+  const designed = b.site != null
+  const listed = (Array.isArray(b.services) ? b.services : [])
+    .map((s) => ({ ...(designed && SERVICE_ID_RE.test(s?.id ?? '') ? { id: s.id } : {}), name: clean(s?.name), price: clean(s?.price), description: clean(s?.description) }))
     .filter((s) => s.name)
+  const services = designed ? assignServiceIds(listed, prior) : listed
   const asset = (v) => (v == null || v === '' ? null : String(v))
   const c = {
     template: TEMPLATES.includes(b.template) ? b.template : 'clean',
@@ -154,7 +234,7 @@ export function validateContent(body, approvedClaims = [], assetIds = null) {
   else if (c.redirects.length > MAX_REDIRECTS || c.redirects.some((r) => !REDIRECT_FROM.test(r.from) || !REDIRECT_TARGETS.includes(r.to)) || new Set(c.redirects.map((r) => r.from)).size !== c.redirects.length) errors.push('redirects')
   // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
   // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
-  if (b.site != null) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, claims: approvedClaims }).spec
+  if (designed) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, legacyServices: prior?.length ? prior : services, claims: approvedClaims }).spec
   // Optional AI-chosen design (layout, palette, type, images) from the safe design system.
   if (b.design != null) {
     const [designErrors, design] = validateDesign(b.design, assetIds)
@@ -195,7 +275,7 @@ export async function liveContent(db, customerId) {
   if (w) {
     if (w.live_version == null) return null
     const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customerId, w.live_version).first()
-    return v ? { version: w.live_version, publishedAt: w.published_at, content: { ...defaults(), ...parse(v.content) } } : null
+    return v ? { version: w.live_version, publishedAt: w.published_at, content: withServiceRefs({ ...defaults(), ...parse(v.content) }) } : null
   }
   const legacy = await db.prepare('SELECT * FROM landing_pages WHERE customer = ?1 AND published = 1').bind(customerId).first()
   return legacy ? { version: 0, publishedAt: legacy.published_at, content: { ...defaults(), ...legacyContent(legacy) } } : null
@@ -209,7 +289,7 @@ export async function loadWebsite(db, customer) {
     liveContent(db, customer.id),
     db.prepare('SELECT version, created_at FROM website_versions WHERE customer = ?1 ORDER BY version DESC LIMIT 10').bind(customer.id).all(),
   ])
-  const draft = w ? { ...defaults(), ...parse(w.draft) } : live ? live.content : await generateContent(db, customer)
+  const draft = w ? withServiceRefs({ ...defaults(), ...parse(w.draft) }) : live ? live.content : await generateContent(db, customer)
   return {
     draft,
     generated: !w && !live,

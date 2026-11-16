@@ -105,6 +105,10 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      (white+scrim inside, raised card partly over; desktop only); CSS only from validated numbers/enums and
                      only on pages that use it. Invalid model choices are REPORTED (invalid_choice/empty_block), never
                      silently defaulted. Nav Book button always on. spec.direction = one-line art direction (not rendered).
+                     Services are referenced by STABLE ID (items[].serviceId → content.services[].id, AI-designed content
+                     only), never by position: website.js assignServiceIds (kept / inherited by name from `prior` / new
+                     random) and withServiceRefs (read-time, deterministic upgrade of pre-id drafts and versions). The
+                     model still sees positions in FACTS.services; ai-designer.js servicesForModel converts at that edge.
   ai-designer.js     Conversational designer on the owner's own key: one turn → { reply, site } → validateSpec →
                      design-checks.js (hard: unusable → error ai_design_incomplete, nothing saved; soft: generic first
                      screen / repeated sections / "different" not different) → at most ONE automatic revision (each call

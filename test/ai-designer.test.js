@@ -786,3 +786,127 @@ test('designer: billing problems and provider refusals are classified, recorded 
   assert.deepEqual(events(r.text).at(-1), { type: 'error', error: 'provider_billing' })
   assert.equal(requests.length, 3, 'one request per attempt')
 })
+
+// ---- Stable service ids (2026-11-16): the AI design describes each service by id, never by list position. ----
+const ONE = 'A single visit to refresh your pool.'
+const WEEKLY = 'Weekly skimming, brushing and balancing.'
+const WINTER = 'Closing your pool for winter.'
+const describedDesign = () => {
+  const d = DESIGN()
+  d.pages[1].sections[0].items = [{ serviceIndex: 0, text: ONE }, { serviceIndex: 1, text: WEEKLY }, { serviceIndex: 2, text: WINTER }]
+  return d
+}
+// Each service as the AI-designed site shows it: [name, the description the design gives it], in the design's order.
+const shown = (draft) =>
+  draft.site.pages
+    .flatMap((p) => p.sections.filter((s) => s.type === 'services'))
+    .flatMap((s) => s.items)
+    .map((it) => [draft.services.find((v) => v.id === it.serviceId)?.name, it.text])
+const servicesHtml = (draft) => renderV2({ id: 'pools', name: 'Pools', cities: [], phone: '', services: draft.services }, draft.site, { page: 'services', bookUrl: '/book/pools', year: 2026 })
+
+test('services keep their own AI descriptions when the owner deletes (first, middle), adds or reorders services: save + reload', async () => {
+  const { servicesForModel } = await import('../server/ai-designer.js')
+  const c = await cookieFor('owner@pools.example')
+  await addKey('pools')
+  nextDesign = { reply: 'Design.', site: describedDesign() }
+  assert.equal(events((await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })).text).at(-1).type, 'done')
+  const load = async () => (await call(website, 'GET', { cookie: c })).json.website.draft
+  const save = async (content) => assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'save', content } })).status, 200)
+
+  let draft = await load()
+  assert.ok(draft.services.every((s) => /^[a-z][a-z0-9]{1,23}$/.test(s.id)), 'every service of an AI-designed draft has an id')
+  assert.ok(draft.site.pages[1].sections[0].items.every((it) => typeof it.serviceId === 'string' && !('serviceIndex' in it)), 'the design refers to services by id only')
+  assert.deepEqual(shown(draft), [['One Time Service', ONE], ['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  const ids = Object.fromEntries(draft.services.map((s) => [s.name, s.id]))
+
+  // Delete the FIRST service.
+  await save({ ...draft, services: draft.services.slice(1) })
+  draft = await load()
+  assert.deepEqual(shown(draft), [['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.match(servicesHtml(draft), /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+  assert.doesNotMatch(servicesHtml(draft), /A single visit to refresh your pool/, 'the deleted service\'s description is gone, not moved')
+
+  // ADD a service at the top and REORDER the other two.
+  await save({ ...draft, services: [{ name: 'Green Pool Rescue', price: '$400+', description: '' }, draft.services[1], draft.services[0]] })
+  draft = await load()
+  assert.deepEqual(draft.services.map((s) => s.name), ['Green Pool Rescue', 'Pool Winterization', 'Weekly Pool Care'])
+  assert.deepEqual(new Map(shown(draft)), new Map([['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER], ['Green Pool Rescue', '']]))
+  assert.deepEqual([draft.services[2].id, draft.services[1].id], [ids['Weekly Pool Care'], ids['Pool Winterization']], 'ids survive reordering')
+  assert.ok(!Object.values(ids).includes(draft.services[0].id), 'a new service never takes an old id')
+
+  // A page that sends services back without ids (opened before ids existed) still keeps each description.
+  const stale = { ...draft, services: draft.services.map(({ id: _id, ...s }) => s), site: servicesForModel(draft.site, draft.services) }
+  await save(stale)
+  const again = await load()
+  assert.deepEqual(again.services.map((s) => s.id), draft.services.map((s) => s.id), 'ids inherited by name')
+  assert.deepEqual(shown(again), shown(draft))
+
+  // Delete the MIDDLE service (Pool Winterization is in the middle now).
+  draft = again
+  await save({ ...draft, services: [draft.services[0], draft.services[2]] })
+  draft = await load()
+  assert.deepEqual(new Map(shown(draft)), new Map([['Green Pool Rescue', ''], ['Weekly Pool Care', WEEKLY]]))
+  assert.match(servicesHtml(draft), /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+  assert.doesNotMatch(servicesHtml(draft), /Closing your pool for winter/)
+
+  // Reload is stable (nothing changes by reading), and the model is shown positions in the CURRENT list, never ids.
+  assert.equal(JSON.stringify(await load()), JSON.stringify(draft))
+  nextDesign = { reply: 'Warmer.', site: describedDesign() }
+  await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Make it warmer' } })
+  const prompt = requests.at(-1).body.messages[0].content
+  const current = prompt.slice(prompt.indexOf('CURRENT_SITE'))
+  assert.doesNotMatch(current, /serviceId/)
+  assert.match(current, new RegExp(`"serviceIndex":\\s*1,[^}]*${WEEKLY.slice(0, 20)}`), 'Weekly Pool Care is position 1 in the list the model sees')
+})
+
+test('designs saved before service ids: read with the right descriptions, upgraded the same way every time, saved right from an old page', async () => {
+  const c = await cookieFor('owner@pools.example')
+  // As stored before this change: services without ids, the design referring to them by position.
+  const legacySite = validateSpec(describedDesign(), { assetIds: new Set(), services: SERVICES, claims: [] }).spec
+  assert.deepEqual(legacySite.pages[1].sections[0].items.map((x) => x.serviceIndex), [0, 1, 2])
+  const stored = JSON.parse(db.sql.prepare("SELECT draft FROM websites WHERE customer = 'pools'").get().draft)
+  const legacy = { ...stored, services: SERVICES.map((s) => ({ ...s, description: '' })), site: legacySite }
+  db.sql.prepare("UPDATE websites SET draft = ?, live_version = 1, published_at = 1 WHERE customer = 'pools'").run(JSON.stringify(legacy))
+  db.sql.prepare("INSERT INTO website_versions (customer, version, content, created_at) VALUES ('pools', 1, ?, 1)").run(JSON.stringify(legacy))
+
+  const first = (await call(website, 'GET', { cookie: c })).json.website
+  const second = (await call(website, 'GET', { cookie: c })).json.website
+  assert.equal(JSON.stringify(first.draft), JSON.stringify(second.draft), 'deterministic: the same ids on every read')
+  assert.deepEqual(first.draft.services.map((s) => s.id), ['s1', 's2', 's3'])
+  assert.deepEqual(shown(first.draft), [['One Time Service', ONE], ['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.equal(first.changed, false, 'draft and live version still compare equal')
+  assert.equal(JSON.parse(db.sql.prepare("SELECT draft FROM websites WHERE customer = 'pools'").get().draft).services[0].id, undefined, 'reading never rewrites the stored draft')
+
+  // The published (pre-id) version renders each service with its own description.
+  const live = await call(publicPage, 'GET', { params: { customer: 'pools', page: 'services' } })
+  assert.equal(live.status, 200)
+  assert.match(live.text, /<h3>Weekly Pool Care<\/h3><p class="muted">Weekly skimming, brushing and balancing\.<\/p>/)
+
+  // A page still holding the pre-id draft deletes the first service: positions are read against the saved list.
+  await call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...legacy, services: legacy.services.slice(1) } } })
+  const after = (await call(website, 'GET', { cookie: c })).json.website.draft
+  assert.deepEqual(shown(after), [['Weekly Pool Care', WEEKLY], ['Pool Winterization', WINTER]])
+  assert.deepEqual(after.services.map((s) => s.id), ['s2', 's3'], 'the ids from the upgrade are kept')
+})
+
+test('service ids exist only on AI-designed content; the model works with positions, its answer is stored by id', async () => {
+  const { validateContent } = await import('../server/website.js')
+  const { servicesForModel } = await import('../server/ai-designer.js')
+  // Content without an AI design keeps its exact shape (nothing changes outside the pilot).
+  const [, plain] = validateContent({ headline: 'Pool care', intro: 'Weekly pool care.', services: [{ id: 'abc', name: 'Weekly Pool Care', price: '$280+' }] })
+  assert.deepEqual(plain.services, [{ name: 'Weekly Pool Care', price: '$280+', description: '' }])
+  // The current design → positions in the current list for the prompt; an answer by position → ids again.
+  const services = [{ id: 's1', name: 'One Time Service', price: '' }, { id: 'vq2', name: 'Weekly Pool Care', price: '' }]
+  const site = { pages: [{ slug: '', sections: [{ type: 'services', items: [{ serviceId: 'vq2', text: 'weekly' }, { serviceId: 's1', text: 'once' }] }] }] }
+  assert.deepEqual(servicesForModel(site, services).pages[0].sections[0].items.map((x) => [x.serviceIndex, x.text, 'serviceId' in x]), [[1, 'weekly', false], [0, 'once', false]])
+  const { spec } = validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceIndex: 1, text: 'weekly' }] }] }] }, { assetIds: new Set(), services, claims: [] })
+  assert.deepEqual(spec.pages[0].sections[1].items.map((x) => [x.serviceId, x.text]), [['vq2', 'weekly'], ['s1', '']])
+  // An import that replaces the list (no ids, new order, one service gone): same-named services keep id and description.
+  const designedSite = { pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceId: 's1', text: 'once' }, { serviceId: 'vq2', text: 'weekly' }] }] }] }
+  const [, imported] = validateContent({ headline: 'Pool care', intro: 'Weekly pool care.', services: [{ name: 'Pool Winterization', price: '$350+' }, { name: 'weekly pool care', price: '$290+' }], site: designedSite }, [], null, { prior: services })
+  assert.deepEqual(imported.services.map((s) => [s.name, s.id === 'vq2']), [['Pool Winterization', false], ['weekly pool care', true]])
+  assert.deepEqual(imported.site.pages[0].sections[1].items.map((x) => [imported.services.find((s) => s.id === x.serviceId).name, x.text]), [['weekly pool care', 'weekly'], ['Pool Winterization', '']])
+  // A reference to a service that no longer exists is dropped, never re-pointed.
+  const gone = validateSpec({ pages: [{ slug: '', navLabel: 'Home', sections: [{ type: 'hero', id: 'top', layout: 'minimal', heading: 'Pools' }, { type: 'services', id: 'svc', layout: 'list', items: [{ serviceId: 'zz9', text: 'old' }] }] }] }, { assetIds: new Set(), services, claims: [] }).spec
+  assert.deepEqual(gone.pages[0].sections[1].items.map((x) => [x.serviceId, x.text]), [['s1', ''], ['vq2', '']])
+})
