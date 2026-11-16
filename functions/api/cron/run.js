@@ -4,6 +4,7 @@
 import { purgeClickIds, uploadConversions } from '../../../server/ads/conversions.js'
 import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server/google-oauth.js'
 import { processDueMessages } from '../../../server/messages.js'
+import { processReplies, sendQueued, purgeOldMessages } from '../../../server/followups/engine.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { purgeDesignerRaw } from '../../../server/ai-designer.js'
@@ -39,6 +40,12 @@ export async function onRequestPost({ request, env }) {
   if (!presented || !timingSafeEqual(await sha256Hex(presented), await sha256Hex(env.CRON_SECRET))) return json(401, { error: 'unauthorized' })
   try {
     const messages = await processDueMessages(env)
+    // Conversations: answers to texts still waiting (the webhook normally answers at once), then queued messages.
+    const followups = {
+      replies: await adsStep('followup replies', () => processReplies(env)),
+      sent: await adsStep('followup send', () => sendQueued(env)),
+      purged: await adsStep('followup retention', () => purgeOldMessages(env)),
+    }
     const onboardingQueued = await queueFollowUps(env)
     // New bookings / unbooked leads → the business's members (queued before the flush so they go out this run).
     const ownerNotices = await adsStep('owner notices', () => queueOwnerNotices(env))
@@ -71,7 +78,7 @@ export async function onRequestPost({ request, env }) {
       const r = await auditCheckpoint(env.ONBOARDING_DB)
       return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
     })
-    return json(200, { messages, onboardingQueued, ownerNotices, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
+    return json(200, { messages, followups, onboardingQueued, ownerNotices, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

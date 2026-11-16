@@ -242,7 +242,19 @@ createServer(async (req, res) => {
   if (url.pathname === '/__events') return send(res, 200, events)
   // Workers AI stand-in (AI_API_MOCK_ORIGIN): deterministic website copy built from the facts it is given.
   // The about text deliberately contains an unapproved claim, so the app's filter must drop it.
+  // Twilio stand-in (TWILIO_API_MOCK_ORIGIN): accepts texts and records them for the tests (/__events).
+  const tw = url.pathname.match(/^\/2010-04-01\/Accounts\/([^/]+)\/Messages\.json$/)
+  if (tw && req.method === 'POST') {
+    const p = new URLSearchParams(raw)
+    const sid = `SMe2e${events.length}${Date.now()}`
+    events.push({ type: 'twilio.message', sid, to: p.get('To'), from: p.get('From'), body: p.get('Body') })
+    return send(res, 201, { sid })
+  }
   if (url.pathname.startsWith('/ai/run/') && req.method === 'POST') {
+    // Follow-up assistant: a short answer that uses no numbers (the app adds the booking link).
+    if (/^You answer text messages/.test(JSON.parse(raw).messages[0].content)) {
+      return send(res, 200, { response: { intent: 'question', answerable: true, reply: 'Yes, we can help with that in Charleston.' }, usage: { prompt_tokens: 500, completion_tokens: 20 } })
+    }
     const prompt = JSON.parse(raw).messages.at(-1).content
     const facts = JSON.parse(prompt.match(/Facts \(JSON\):\n(\{.*\})/)[1])
     const revision = prompt.includes("Owner's request")

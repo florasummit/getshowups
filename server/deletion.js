@@ -25,7 +25,7 @@ const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 
 // Erased per business, children before parents (foreign keys).
 export const ERASED_TABLES = [
-  'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'appointment_outcomes', 'appointment_changes',
+  'thread_messages', 'lead_threads', 'followup_settings', 'sms_registrations', 'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'appointment_outcomes', 'appointment_changes',
   'lead_addresses', 'lead_attribution', 'test_marks', 'meta_lead_events', 'ghl_links', 'appointments', 'leads',
   'ad_metrics_daily', 'ad_creatives', 'ad_actions', 'ad_campaigns', 'ad_budget_approvals', 'ad_profiles', 'ad_connections',
   'website_versions', 'website_generations', 'website_ai_usage', 'website_assets', 'website_domains', 'websites', 'landing_pages',
@@ -152,7 +152,15 @@ async function data(env, id, now) {
   const db = env.ONBOARDING_DB
   const erased = {}
   for (const t of ERASED_TABLES) {
-    const r = await db.prepare(`DELETE FROM ${t} WHERE customer = ?1`).bind(id).run()
+    // A table whose migration isn't applied yet holds no data: nothing to erase (any other error still fails the step).
+    const r = await db
+      .prepare(`DELETE FROM ${t} WHERE customer = ?1`)
+      .bind(id)
+      .run()
+      .catch((err) => {
+        if (String(err?.message).includes('no such table')) return { meta: { changes: 0 } }
+        throw err
+      })
     if (r.meta.changes) erased[t] = r.meta.changes
   }
   const ev = await db.prepare(`DELETE FROM events WHERE customer = ?1 AND type NOT IN (${FINANCIAL_EVENTS.map((t) => `'${t}'`).join(',')})`).bind(id).run()
@@ -184,7 +192,14 @@ async function verify(env, id) {
   const db = env.ONBOARDING_DB
   const left = {}
   for (const t of ERASED_TABLES) {
-    const r = await db.prepare(`SELECT count(*) AS n FROM ${t} WHERE customer = ?1`).bind(id).first()
+    const r = await db
+      .prepare(`SELECT count(*) AS n FROM ${t} WHERE customer = ?1`)
+      .bind(id)
+      .first()
+      .catch((err) => {
+        if (String(err?.message).includes('no such table')) return { n: 0 }
+        throw err
+      })
     if (r.n) left[t] = r.n
   }
   const ev = await db.prepare(`SELECT count(*) AS n FROM events WHERE customer = ?1 AND type NOT IN (${FINANCIAL_EVENTS.map((t) => `'${t}'`).join(',')})`).bind(id).first()

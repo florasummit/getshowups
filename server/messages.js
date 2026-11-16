@@ -14,7 +14,10 @@ import { isSuppressed } from './email-feedback.js'
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
 import { FOLLOW_UP_KINDS, isOptedOut, recordOptOut, unsubscribeUrl } from './optouts.js'
 import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
-import { sendSms, smsConfigured } from './sms.js'
+import { smsConfigured } from './sms.js'
+import { sendTwilio } from './followups/transport.js'
+import { recordAutomatic } from './followups/engine.js'
+import { followupsReady, getSettings, DEFAULTS, killSwitch, smsLive, smsReadyFor, inQuietHours, quietEndsAt } from './followups/settings.js'
 import { smsHandledByGhl } from './ghl.js'
 import { confirmUrl, resumeUrl } from './links.js'
 import { track } from './events.js'
@@ -30,6 +33,9 @@ export const TIMING = {
   reminder_24h: { before: 24 * HOUR, maxLate: 6 * HOUR, minLead: 2 * HOUR },
   reminder_2h: { before: 2 * HOUR, maxLate: 1 * HOUR, minLead: 30 * MIN },
   no_show_rebook: { after: 30 * MIN, maxLate: 24 * HOUR }, // delay lets the owner fix a mis-click
+  lead_ack: { after: 0, maxLate: 2 * HOUR }, //               website-form leads: an answer right away
+  interested_followup: { after: 24 * HOUR, maxLate: 12 * HOUR }, // replied but didn't book: one nudge a day later
+  after_visit: { after: 3 * HOUR, maxLate: 24 * HOUR }, //      optional thank-you after a completed visit
 }
 const MAX_ATTEMPTS = 3
 const STUCK_SENDING_MS = 10 * MIN
@@ -60,13 +66,27 @@ async function safely(label, fn) {
   }
 }
 
-// New qualified lead: two "pick a time" follow-ups, skipped automatically once they book.
-export function scheduleLeadMessages(env, customer, lead, now = Date.now()) {
+// Owner preferences (defaults until migration 0024 is applied or the owner changes them).
+async function prefs(env, customer) {
+  try {
+    return (await followupsReady(env.ONBOARDING_DB)) ? await getSettings(env.ONBOARDING_DB, customer) : { ...DEFAULTS }
+  } catch {
+    return { ...DEFAULTS }
+  }
+}
+
+// New qualified lead. Website-form leads get an answer right away (acknowledge), booking-page leads (mid-booking) a
+// first nudge after 15 minutes; then a second nudge a day later. All skipped automatically once they book.
+export async function scheduleLeadMessages(env, customer, lead, now = Date.now()) {
   if (!customer.automations || !lead.qualified) return 0
+  const p = await prefs(env, customer.id)
+  // Before migration 0024 (no preferences, no conversations) every lead keeps the previous schedule.
+  const form = lead.source === 'website_form' && (await followupsReady(env.ONBOARDING_DB))
+  const kinds = [...(form ? (p.acknowledge ? ['lead_ack'] : []) : p.nudges >= 1 ? ['lead_followup_1'] : []), ...(p.nudges >= 2 || (form && p.nudges >= 1) ? ['lead_followup_2'] : [])]
   return safely('schedule lead', () =>
     insert(
       env,
-      ['lead_followup_1', 'lead_followup_2'].flatMap((kind) =>
+      kinds.flatMap((kind) =>
         channelsFor(lead.smsConsent).map((channel) => ({
           id: `${kind}:${channel}:${lead.id}`,
           customer: customer.id,
@@ -94,6 +114,14 @@ export function scheduleAppointmentMessages(env, customer, appt, now = Date.now(
     }
   }
   return safely('schedule appointment', () => insert(env, rows, now))
+}
+
+// Completed visit: an optional thank-you with the link to book again (owner preference, off by default).
+export async function scheduleAfterVisitMessage(env, customer, appt, now = Date.now()) {
+  if (!customer.automations || !(await prefs(env, customer.id)).afterVisit) return 0
+  return safely('schedule after visit', () =>
+    insert(env, channelsFor(appt.smsConsent).map((channel) => ({ id: `after_visit:${channel}:${appt.id}`, customer: customer.id, leadId: appt.leadId, appointmentId: appt.id, kind: 'after_visit', channel, sendAt: now + TIMING.after_visit.after })), now),
+  )
 }
 
 // Marked as a no-show: invite them to pick a new time.
@@ -124,9 +152,15 @@ export function skipReason(m, now) {
   if (m.channel === 'sms' && !m.sms_consent) return 'no_consent'
   if (now - m.send_at > TIMING[m.kind].maxLate) return 'expired'
   switch (m.kind) {
+    case 'lead_ack':
     case 'lead_followup_1':
     case 'lead_followup_2':
+    case 'interested_followup':
+      if (m.taken_over) return 'human_takeover'
+      if (m.thread_stage === 'closed' || m.thread_stage === 'opted_out') return 'not_needed'
       return m.lead_status === 'new' ? null : 'not_needed'
+    case 'after_visit':
+      return m.appt_status === 'showed' ? null : 'not_needed'
     case 'confirmation':
     case 'reminder_24h':
     case 'reminder_2h':
@@ -155,13 +189,37 @@ export async function render(env, m) {
   const hi = `Hi ${firstName(m.lead_name)},`
   // Follow-ups (not confirmations/reminders) carry a one-click unsubscribe link for this business.
   const unsub = FOLLOW_UP_KINDS.includes(m.kind) ? `\n\nNo more follow-up emails from ${biz}: ${await unsubscribeUrl(env, m.lead_id)}` : ''
-  const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you requested an appointment on their booking page. Reply to this email to reach ${biz}.${unsub}`
+  const footer = `\n\n— ${biz}\n\nSent by GetShowUps for ${biz} because you contacted ${biz}. Reply to this email to reach ${biz}.${unsub}`
   const confirmed = Boolean(m.confirmed_at)
   // What customers should know (owner-written): in the confirmation and the day-before reminder only.
   const notes = ['confirmation', 'reminder_24h'].includes(m.kind) ? policyNotes(await policiesOrEmpty(env.ONBOARDING_DB, m.customer)) : ''
   const visit = m.appointment_mode === 'at_customer'
   const place = m.street ? ` at ${m.street}` : ''
   switch (m.kind) {
+    case 'lead_ack': {
+      const url = await resumeUrl(env, m.customer, m.lead_id)
+      return {
+        subject: `${biz} got your message`,
+        text: `${hi}\n\nThanks for contacting ${biz} about "${shortNeed(m.need)}". We'll be in touch soon. If you'd like to book now, pick a time that works for you:\n${url}${footer}`,
+        sms: `${biz}: ${hi} thanks for your message about "${shortNeed(m.need)}". We'll be in touch soon, or pick a time: ${url} Reply STOP to opt out.`,
+      }
+    }
+    case 'interested_followup': {
+      const url = await resumeUrl(env, m.customer, m.lead_id)
+      return {
+        subject: `Ready to pick a time with ${biz}?`,
+        text: `${hi}\n\nWhenever you're ready, you can pick a time with ${biz} here:\n${url}${footer}`,
+        sms: `${biz}: whenever you're ready, pick a time here: ${url} Reply STOP to opt out.`,
+      }
+    }
+    case 'after_visit': {
+      const url = await resumeUrl(env, m.customer, m.lead_id)
+      return {
+        subject: `Thanks from ${biz}`,
+        text: `${hi}\n\nThanks for choosing ${biz}. If you need us again, you can pick a time here:\n${url}${footer}`,
+        sms: `${biz}: thanks for choosing us! Need us again? Pick a time: ${url} Reply STOP to opt out.`,
+      }
+    }
     case 'lead_followup_1':
     case 'lead_followup_2': {
       const url = await resumeUrl(env, m.customer, m.lead_id)
@@ -227,8 +285,10 @@ export async function render(env, m) {
   throw new Error('unknown kind')
 }
 
-const DUE_SQL = `
-  SELECT m.*, c.name AS biz, c.timezone, c.status AS cstatus,
+const DUE_SQL = (threads) => `
+  SELECT m.*, c.name AS biz,${threads ? `
+         (SELECT 1 FROM conversation_control cc WHERE cc.customer = m.customer AND cc.conversation_id = m.lead_id AND cc.controller = 'human') AS taken_over,
+         (SELECT lt.stage FROM lead_threads lt WHERE lt.lead_id = m.lead_id AND lt.customer = m.customer) AS thread_stage,` : ''} c.timezone, c.status AS cstatus,
          (SELECT ss.appointment_mode FROM service_settings ss WHERE ss.customer = m.customer) AS appointment_mode,
          (SELECT la.street FROM lead_addresses la WHERE la.lead_id = m.lead_id AND la.customer = m.customer) AS street,
          coalesce((SELECT cs.automations FROM customer_settings cs WHERE cs.customer = m.customer), 1) AS automations,
@@ -261,8 +321,20 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     .prepare("UPDATE messages SET status = 'failed', error = 'interrupted', updated_at = ?1 WHERE status = 'sending' AND updated_at < ?2")
     .bind(now, now - STUCK_SENDING_MS)
     .run()
-  const { results } = await db.prepare(DUE_SQL).bind(now, limit).all()
+  const threads = await followupsReady(db)
+  const { results } = await db.prepare(DUE_SQL(threads)).bind(now, limit).all()
   const configured = { email: emailConfigured(env), sms: smsConfigured(env) }
+  // Texts only from a business whose own sender is set up and whose US texting registration was approved.
+  const smsReady = new Map()
+  const readyFor = async (customer) => {
+    if (!smsReady.has(customer)) smsReady.set(customer, await smsReadyFor(env, customer))
+    return smsReady.get(customer)
+  }
+  const quiet = async (m) => {
+    if (!threads || !['lead_ack', 'lead_followup_1', 'lead_followup_2', 'interested_followup', 'no_show_rebook', 'after_visit', 'reminder_24h'].includes(m.kind)) return null
+    const p = await getSettings(db, m.customer).catch(() => DEFAULTS)
+    return inQuietHours(now, m.timezone, p) ? quietEndsAt(now, m.timezone, p) : null
+  }
   const ghlSms = new Map() // one owner per channel: a business texting through GoHighLevel gets no texts from us
   const textsViaGhl = async (customer) => {
     if (!ghlSms.has(customer)) ghlSms.set(customer, await smsHandledByGhl(env, customer).catch(() => false))
@@ -271,11 +343,22 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
   const tests = results.length ? await testStatuses(env) : new Map()
   for (const m of results) {
     // A test business (or a message scheduled while it was one) only ever reaches test recipients.
-    const testOnly = sandboxed(statusIn(tests, m.customer), m.created_at)
+    const testOnly = sandboxed(statusIn(tests, m.customer), m.created_at) || (m.channel === 'sms' && !smsLive(env))
+    // Quiet hours (texts): wait until morning instead of texting at night (relevance is re-checked when it goes out).
+    if (m.channel === 'sms' && !skipReason(m, now)) {
+      const until = await quiet(m)
+      if (until) {
+        await db.prepare("UPDATE messages SET send_at = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'scheduled'").bind(m.id, until, now).run()
+        continue
+      }
+    }
     const reason =
+      (killSwitch(env) ? 'paused_by_platform' : null) ??
       skipReason(m, now) ??
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
+      (m.channel === 'sms' && !(await readyFor(m.customer)).ok ? 'sms_not_ready' : null) ??
+      (m.channel === 'sms' && (await quiet(m)) ? 'quiet_hours' : null) ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
       (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null) ??
       // Known bad address (permanent bounce / spam complaint, from Resend's signed feedback): never sent again.
@@ -292,8 +375,10 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     if (!claimed) continue
 
     let result
+    let lastContent = null
     try {
       const content = await render(env, m)
+      lastContent = content
       result =
         m.channel === 'email'
           ? await sendEmail(env, {
@@ -301,7 +386,7 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
             // Follow-ups: one-click unsubscribe headers (RFC 8058) with the same signed link as the footer.
             unsubscribeUrl: FOLLOW_UP_KINDS.includes(m.kind) ? await unsubscribeUrl(env, m.lead_id) : null,
           })
-          : await sendSms(env, { to: m.lead_phone, text: content.sms, testOnly })
+          : await sendTwilio(env, { to: m.lead_phone, text: content.sms, sender: (await readyFor(m.customer)).sender })
     } catch (err) {
       console.error('messages: render/send error:', m.kind, err?.name)
       result = { ok: false, error: 'internal_error' }
@@ -314,6 +399,8 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
         .bind(m.id, attempts, result.providerId ?? null, now)
         .run()
       await track(env, 'message_sent', { id: `message_sent:${m.id}`, customer: m.customer, props: { kind: m.kind, channel: m.channel }, at: now })
+      // The same text appears in the owner's conversation view.
+      if (threads) await recordAutomatic(env, { id: m.id, customer: m.customer, leadId: m.lead_id, channel: m.channel, body: m.channel === 'sms' ? lastContent.sms : `${lastContent.subject}\n\n${lastContent.text}`, providerId: result.providerId }, now)
       out.sent++
     } else if (result.permanent || attempts >= MAX_ATTEMPTS) {
       console.error('messages: send failed:', m.kind, m.channel, result.error)

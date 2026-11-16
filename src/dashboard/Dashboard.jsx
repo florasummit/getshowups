@@ -15,7 +15,7 @@ const LOGIN_ERRORS = {
 }
 
 // A deep dashboard link (e.g. /dashboard/ads) is where sign-in returns; the server allowlists it.
-const returnTo = () => (/^\/dashboard\/(appointments|website|ads|settings)$/.test(window.location.pathname) ? `?next=${encodeURIComponent(window.location.pathname)}` : '')
+const returnTo = () => (/^\/dashboard\/(appointments|followups|website|ads|settings)$/.test(window.location.pathname) ? `?next=${encodeURIComponent(window.location.pathname)}` : '')
 
 // An invitation token arrives as ?invite=… and is kept for this tab until sign-in completes.
 const INVITE_KEY = 'gsu_invite'
