@@ -5,13 +5,13 @@ setup). Each business's registration, Messaging Service, number, opt-outs and us
 Registration runs step by step from /admin (server/followups/provisioning.js, through Twilio's APIs), each step
 confirmed and audited. Details, brand types, fees and review: docs/A2P_REGISTRATION.md.
 
-Done: migration 0024 (2026-11-16). Nothing else below has been done. Each step needs the approval noted, in order.
+Done: migrations 0024 and 0025 (2026-11-16). Nothing else below has been done. Each step needs the approval noted, in order.
 `SMS_LIVE`, `FOLLOWUP_AI`, `MESSAGES_LIVE` stay off.
 
 ## 0. Databases
 
 - 0024_followups — DONE 2026-11-16.
-- **0025_twilio_accounts (approval: production migration)** — 3 new tables (`sms_accounts`, `sms_provider_objects`,
+- 0025_twilio_accounts — DONE 2026-11-16 (approved; verified, existing schema and data unchanged) — 3 new tables (`sms_accounts`, `sms_provider_objects`,
   `sms_registration_extra`), additive, no change to existing ones:
   ```
   npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0025_twilio_accounts.sql

@@ -2,7 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
-## Twilio: one subaccount per business, A2P through Twilio's APIs (2026-11-16) — feature/twilio-subaccounts; migration 0025 (NOT applied)
+## Migration 0025 applied (2026-11-16, founder approval) — production 66a294d
+
+- Applied the reviewed file (SHA-256 e073a335…076d) to `getshowups-onboarding` (8137dd39-53c5-4bad-8a46-3d20a43670bd).
+  Before: dry run on a local replica of the production schema (no data): 104 existing objects unchanged,
+  idempotent, constraints refuse a shared subaccount, a second subaccount per business, unknown businesses, invalid
+  status/path, duplicate provider objects per business.
+- After: `sms_accounts`, `sms_provider_objects`, `sms_registration_extra` exist (FK customer → customers(id);
+  UNIQUE account_sid; one subaccount per business), all empty; schema objects 167 → 174 (3 tables + 4 key indexes);
+  every existing table/index definition identical; counts identical (4 businesses, 8 leads, 6 appointments,
+  31 messages, 0 registrations, 0 consents, 1 thread).
+- Health: pages, booking (144/72/71 slots), PoolThru website, terms, privacy 200; auth/cross-site refusals as
+  expected; Twilio webhooks 503 (not configured); texting box off everywhere; 0 sent since 0024.
+- Switches: MESSAGES_LIVE off (last change 18:30 UTC); SMS_LIVE, FOLLOWUP_AI, TWILIO_* and
+  TWILIO_REGISTRATION_SUBMIT not set. Nothing created at Twilio; nothing submitted or bought.
+- Next (founder, Twilio Console): docs/TEXTING_ACTIVATION.md §1 — upgrade, Primary ISV profile, secrets.
+
+## Twilio: one subaccount per business, A2P through Twilio's APIs (2026-11-16) — PR #52 (66a294d); migration 0025 applied 2026-11-16
 
 - Founder decision: ONE GetShowUps parent account, ONE Twilio subaccount PER business (Twilio's preferred ISV
   architecture). Reuses the Build 49 engine unchanged except where it talks to Twilio.
