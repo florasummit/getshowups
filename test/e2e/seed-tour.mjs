@@ -93,6 +93,19 @@ const sql = [
   row('websites', { customer: id, draft: SITE, live_version: 1, published_at: now - 2 * DAY, updated_at: now - 2 * DAY }),
   row('website_versions', { customer: id, version: 1, content: SITE, created_at: now - 2 * DAY }),
   row('website_domains', { hostname: 'www.harborpool.example', customer: id, verify_token: 'tourverifytoken000000000000000', status: 'securing', detail: 'waiting_for_cname', verified_at: now - DAY, attached_at: now - DAY, connected_at: null, checked_at: now - 600_000, created_at: now - DAY, updated_at: now - 600_000 }),
+  // Ads (visual review of results): one Search campaign created and running, 20 days of spend, the booked and completed
+  // leads attributed to it, a third from elsewhere; money recorded on the completed visit (estimate + invoiced + paid).
+  row('ad_profiles', { customer: id, website: '', industry: 'Pool service', services: JSON.stringify(['Weekly pool care', 'Filter cleaning']), service_area: JSON.stringify({ zips: ['29403', '29401'], cities: ['Charleston'] }), exclusions: '', customer_value_cents: 28000, objective: 'leads', monthly_budget_cents: 60000, approved_claims: '[]', updated_at: now }),
+  row('ad_budget_approvals', { id: 'tourapproval1', customer: id, monthly_cents: 60000, approved_by: `owner@${id}.example`, approved_at: now - 20 * DAY }),
+  row('ad_campaigns', {
+    id: 'tourcamp1', customer: id, platform: 'google', status: 'active', daily_budget_cents: 1900, platform_campaign_id: '5551234', platform_ids: '{}', approved_by: `owner@${id}.example`, approved_at: now - 20 * DAY, launched_at: now - 20 * DAY, created_at: now - 21 * DAY, updated_at: now - DAY,
+    spec: JSON.stringify({ version: 1, platform: 'google', name: 'Pool care · Charleston', dailyBudgetCents: 1900, geo: { zips: ['29403', '29401'] }, finalUrl: `https://getshowups.com/p/${id}?utm_source=google&utm_medium=cpc&utm_campaign=tourcamp1`, google: { keywords: [{ text: 'pool cleaning charleston', match: 'PHRASE' }, { text: 'weekly pool service', match: 'PHRASE' }], negativeKeywords: ['jobs', 'diy'], headlines: ['Weekly Pool Care', 'Charleston Pool Service', 'Book Online in a Minute'], descriptions: ['Weekly pool care for Charleston homes.', 'Pick a time online that suits you.'] } }),
+  }),
+  ...Array.from({ length: 20 }, (_, i) => row('ad_metrics_daily', { campaign_id: 'tourcamp1', customer: id, date: new Date(now - (i + 1) * DAY).toISOString().slice(0, 10), spend_cents: 1700 + (i % 4) * 150, impressions: 400 + i * 7, clicks: 9 + (i % 5), conversions: 0, fetched_at: now - 2 * 3_600_000 })),
+  ...['tour-lead-1', 'tour-lead-2'].map((lead) => row('lead_attribution', { lead_id: lead, customer: id, source: 'google_ads', campaign_id: 'tourcamp1', details: '{"medium":"cpc","gclid":"present"}', created_at: now - 3 * DAY })),
+  row('appointment_outcomes', { appointment_id: 'tour-appt-2', customer: id, work: 'completed', value_cents: 9500, reported_at: past + 2 * H }),
+  row('revenue_entries', { appointment_id: 'tour-appt-2', customer: id, kind: 'invoiced', amount_cents: 9500, recorded_by: 'ref:tour', recorded_at: past + 3 * H }),
+  row('revenue_entries', { appointment_id: 'tour-appt-2', customer: id, kind: 'paid', amount_cents: 9500, recorded_by: 'ref:tour', recorded_at: past + 4 * H }),
   row('receptionist_requests', { id: 'tourreq1', customer: id, conversation_id: 'tourconv2', kind: 'callback', name: 'Morgan Diaz', phone: '+18435550104', email: null, note: 'Pool pump is sparking and smells like burning.', urgent: 1, status: 'open', held: 1, created_at: now - 35 * 60_000, updated_at: now - 35 * 60_000, resolved_at: null }),
 ]
 process.stdout.write(sql.join('\n'))

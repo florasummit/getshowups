@@ -22,7 +22,7 @@ export async function onRequestPost({ request, env, params }) {
       conv = await loadConversation(env, customer, String(body.conversationId), String(body.token || ''))
       if (!conv) return json(404, { error: 'conversation_not_found' })
     } else {
-      const c = await startConversation(env, customer, 'chat')
+      const c = await startConversation(env, customer, 'chat', Date.now(), { attribution: body.attribution })
       conv = await loadConversation(env, customer, c.id)
     }
     const r = await respond(env, customer, conv, text, { channel: 'chat' })

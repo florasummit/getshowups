@@ -87,32 +87,50 @@ function OutcomeButtons({ a, visit, onDone, current, onCancel }) {
   )
 }
 
-function ReportedValue({ a, onDone }) {
+// One amount, edited in place. Empty clears it. onSave(cents|null) → status code.
+function Amount({ label, cents, empty, onSave }) {
   const [editing, setEditing] = useState(false)
-  const [amount, setAmount] = useState(a.valueCents != null ? String(a.valueCents / 100) : '')
+  const [amount, setAmount] = useState(cents != null ? String(cents / 100) : '')
   const [error, setError] = useState('')
   const save = async (e) => {
     e.preventDefault()
-    const cents = amount.trim() === '' ? null : Math.round(Number(amount) * 100)
-    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) return setError('Enter an amount like 250')
-    const { status } = await record({ id: a.id, outcome: 'showed', work: a.work ?? undefined, valueCents: cents })
+    const next = amount.trim() === '' ? null : Math.round(Number(amount.replace(/[$,\s]/g, '')) * 100)
+    if (next !== null && (!Number.isFinite(next) || next < 0)) return setError('Enter an amount like 250')
+    const status = await onSave(next)
     if (status === 200) {
       setEditing(false)
-      onDone()
+      setError('')
     } else setError('Couldn’t save. Try again.')
   }
   if (!editing)
     return (
-      <button type="button" className="link-btn" onClick={() => setEditing(true)}>
-        {a.valueCents != null ? money(a.valueCents) : 'Add job value'}
+      <button type="button" className="link-btn money-item" onClick={() => setEditing(true)}>
+        <span className="money-label">{label}</span> {cents != null ? money(cents) : empty}
       </button>
     )
   return (
     <form className="value-form" onSubmit={save}>
-      <input aria-label="Job value in dollars" inputMode="decimal" placeholder="$" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+      <input aria-label={`${label} in dollars`} inputMode="decimal" placeholder="$" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
       <button className="btn btn-sm btn-primary">Save</button>
+      <button type="button" className="link-btn" onClick={() => setEditing(false)}>
+        Cancel
+      </button>
       {error && <span className="fine">{error}</span>}
     </form>
+  )
+}
+
+// Money for a visit that happened, kept apart: what the job is worth (estimate) vs. what was billed vs. what was paid.
+// Invoiced/paid appear once recording them is available (server/revenue.js); an estimate is never shown as paid.
+function ReportedValue({ a, onDone }) {
+  const revenue = async (kind, cents) => (await api('/api/dashboard/revenue', { method: 'POST', body: { appointmentId: a.id, kind, amountCents: cents } })).status
+  const done = (status) => (status === 200 && onDone(), status)
+  return (
+    <span className="money-line" role="group" aria-label="Job money">
+      <Amount label="Estimated" cents={a.valueCents} empty="add" onSave={async (c) => done((await record({ id: a.id, outcome: 'showed', work: a.work ?? undefined, valueCents: c })).status)} />
+      {a.invoicedCents !== undefined && <Amount label="Invoiced" cents={a.invoicedCents} empty="add" onSave={async (c) => done(await revenue('invoiced', c))} />}
+      {a.paidCents !== undefined && <Amount label="Paid" cents={a.paidCents} empty="add" onSave={async (c) => done(await revenue('paid', c))} />}
+    </span>
   )
 }
 

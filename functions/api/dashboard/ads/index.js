@@ -7,6 +7,7 @@ import { currentApproval, remainingDailyCents } from '../../../../server/ads/bud
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { internalEmails } from '../../../../server/testdata.js'
 
 export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -19,7 +20,7 @@ export async function onRequestGet({ request, env }) {
     const [profile, campaigns, results, approval, remaining, usage, conns, creatives] = await Promise.all([
       getProfile(db, id),
       listCampaigns(db, id),
-      adResults(db, id),
+      adResults(db, id, Date.now(), internalEmails(env)),
       currentApproval(db, id),
       remainingDailyCents(db, id),
       usageThisMonth(db, id),

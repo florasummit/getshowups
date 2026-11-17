@@ -11,6 +11,7 @@ import { scheduleAfterVisitMessage, scheduleAppointmentMessages, scheduleLeadMes
 import { ingestLead, markStage } from './followups/engine.js'
 import { offerSmsFor } from './followups/settings.js'
 import { isTestLead } from './testdata.js'
+import { CURRENT_REVENUE_SQL, revenueReady } from './revenue.js'
 
 export const BOOKING_DAYS = 14
 const DAY = 24 * 60 * 60 * 1000
@@ -330,6 +331,13 @@ const addressOf = (r) => (r.street ? formatAddress({ street: r.street, unit: r.u
 // included only for this business's own lists.
 // Test records (server/testdata.js) are listed with test: true and left out of every count.
 // `internal`: JSON list from internalEmails(env).
+async function withRevenue(db, customerId, list) {
+  if (!list.length || !(await revenueReady(db))) return list
+  const { results } = await db.prepare(CURRENT_REVENUE_SQL).bind(customerId).all()
+  const by = new Map(results.map((r) => [r.appointment_id, r]))
+  return list.map((a) => (a.status === 'showed' ? { ...a, invoicedCents: by.get(a.id)?.invoiced ?? null, paidCents: by.get(a.id)?.paid ?? null } : a))
+}
+
 export async function overview(db, customerId, now = Date.now(), internal = '[]') {
   const since = now - 30 * DAY
   const one = (sql, ...args) => db.prepare(sql).bind(customerId, ...args).first()
@@ -427,7 +435,8 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     },
     upcoming: upcoming.map(appt),
     needsOutcome: needsOutcome.map(appt),
-    recent: recent.map(appt),
+    // Visits that happened carry their current invoiced/paid amounts (server/revenue.js), once migration 0028 exists.
+    recent: await withRevenue(db, customerId, recent.map(appt)),
     followUp: followUp.map((r) => ({ id: r.id, leadId: r.id, test: Boolean(r.is_test), name: r.name, phone: r.phone, email: r.email, need: r.need, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
   }
 }

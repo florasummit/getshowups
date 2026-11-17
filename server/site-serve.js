@@ -9,7 +9,7 @@ import { receptionistOn } from './receptionist/engine.js'
 
 // Floating "Chat or talk with us" link (inline styles only; the site CSP allows no scripts and no frames).
 export const chatLink = (href) =>
-  `<a href="${href.replace(/[&<>"']/g, '')}" data-gsu-chat style="position:fixed;right:16px;bottom:16px;z-index:50;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;background:#111113;color:#fff;font:600 15px/1.2 system-ui,-apple-system,sans-serif;text-decoration:none;box-shadow:0 8px 24px rgb(0 0 0 / .25)">Chat or talk with us</a>`
+  `<a href="${href.replace(/[<>"']/g, '').replace(/&/g, '&amp;')}" data-gsu-chat style="position:fixed;right:16px;bottom:16px;z-index:50;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;background:#111113;color:#fff;font:600 15px/1.2 system-ui,-apple-system,sans-serif;text-decoration:none;box-shadow:0 8px 24px rgb(0 0 0 / .25)">Chat or talk with us</a>`
 import { getCustomer } from './customers.js'
 import { hitByIp } from './ratelimit.js'
 import { hostingStatus, isHosted, liveContent } from './website.js'
@@ -62,13 +62,16 @@ export async function serveSite(env, request, id, page = '') {
     // Contact/quote forms (server/site-form.js): where they post, a signed render time, and the result of a send.
     const q = new URL(request.url).searchParams
     const state = q.get('sent') === '1' ? 'sent' : /^[a-z_]{3,24}$/.test(q.get('form') || '') ? q.get('form') : null
-    const form = { action: `${origin}/api/site-form/${customer.id}`, token: await formToken(env, customer.id), state }
+    // Ad attribution (utm_* / gclid from the ad's landing address) rides along with the form and the chat link, so leads
+    // from the website are tied to the campaign the same way booking-page leads are (server/ads/attribution.js).
+    const carried = carryQuery(request.url)
+    const form = { action: `${origin}/api/site-form/${customer.id}`, token: await formToken(env, customer.id), state, attribution: Object.fromEntries(new URLSearchParams(carried.slice(1))) }
     // A page showing a send result is personal to that visitor: not cached.
     // Website forms offer texting only when this business can text (own sender + approved registration).
     const info = { ...(await siteBusinessInfo(db, customer)), offerSms: await offerSmsFor(env, customer), smsTermsUrl: `${origin}/sms-terms/${customer.id}` }
     let html = renderSite(info, live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form })
     // AI receptionist on: one plain link to the business's chat/voice page on GetShowUps (no script on the site).
-    if (await receptionistOn(env, customer).catch(() => false)) html = html.replace('</body>', `${chatLink(`${origin}/chat/${customer.id}`)}</body>`)
+    if (await receptionistOn(env, customer).catch(() => false)) html = html.replace('</body>', `${chatLink(`${origin}/chat/${customer.id}${carried}`)}</body>`)
     return htmlResponse(200, html, { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
   } catch (err) {
     console.error('site render failed:', err?.message)

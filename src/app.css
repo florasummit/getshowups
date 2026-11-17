@@ -407,6 +407,162 @@
   font: inherit;
 }
 
+/* Ads results (AdsResults.jsx): one funnel, honest gaps */
+.ar {
+  display: grid;
+  gap: var(--s-3);
+}
+.ar .ui-section-head {
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+.ar .fchips {
+  margin: 0;
+}
+.ar-source {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.ar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ar-table th,
+.ar-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--surface-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.ar-table th[scope='row'],
+.ar-table thead th:first-child {
+  text-align: left;
+  font-weight: 600;
+  white-space: normal;
+}
+.ar-table thead th {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ar-table td:nth-child(2) {
+  font-weight: 700;
+  font-size: var(--fs-md);
+}
+.ar-detail {
+  color: var(--text-muted);
+}
+@media (max-width: 560px) {
+  .ar-table thead th:nth-child(4),
+  .ar-table td.ar-detail {
+    display: none;
+  }
+}
+.ar-money {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--s-2);
+  margin: 0;
+}
+.ar-money div {
+  padding: var(--s-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+.ar-money dt {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.ar-money dd {
+  margin: 2px 0 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ar-findings {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ar-findings li {
+  display: grid;
+  gap: 4px;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.ar-findings li.is-top {
+  border-color: color-mix(in srgb, var(--warn-dot) 45%, var(--border));
+}
+.ar-finding-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 650;
+}
+.ar-defs ul {
+  display: grid;
+  gap: 4px;
+  margin: var(--s-2) 0 0;
+  padding-left: 18px;
+}
+
+.who-pays {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+}
+.who-pays div {
+  display: grid;
+  grid-template-columns: minmax(130px, 34%) 1fr;
+  gap: var(--s-3);
+}
+.who-pays dt {
+  font-weight: 650;
+}
+.who-pays dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+@media (max-width: 560px) {
+  .who-pays div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+/* Estimate / invoiced / paid for one visit (Appointments) */
+.money-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+}
+.money-item {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.money-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* ---------- setup steps ---------- */
 .steps-bar {
   display: flex;

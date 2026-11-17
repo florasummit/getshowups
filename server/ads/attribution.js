@@ -10,8 +10,21 @@ export function parseUtm(input) {
   return { source: pick('utm_source'), medium: pick('utm_medium'), campaign: pick('utm_campaign'), gclid: typeof s.gclid === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(s.gclid) ? 'present' : null }
 }
 
+// For places that keep attribution longer than a click id may be kept (a receptionist conversation): the campaign
+// parameters and only WHETHER a click id was present, never the id itself.
+export function keepableAttribution(raw) {
+  const u = parseUtm(raw)
+  const out = {}
+  if (u.source) out.utm_source = u.source
+  if (u.medium) out.utm_medium = u.medium
+  if (u.campaign) out.utm_campaign = u.campaign
+  if (u.gclid) out.gclidPresent = true
+  return Object.keys(out).length ? out : null
+}
+
 export async function recordAttribution(env, customerId, leadId, rawUtm, now = Date.now()) {
   const utm = parseUtm(rawUtm)
+  if (!utm.gclid && rawUtm?.gclidPresent === true) utm.gclid = 'present'
   let source = 'booking_page'
   let campaignId = null
   if (utm.campaign && SOURCE[utm.source]) {
