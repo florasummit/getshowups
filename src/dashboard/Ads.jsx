@@ -198,11 +198,10 @@ function BudgetCard({ budget, profile, onSaved }) {
             <dt>Your GetShowUps plan</dt>
             <dd>Doesn’t include ad spend.</dd>
           </div>
-          <div>
-            <dt>GetShowUps fee on ads</dt>
-            <dd>None. No markup, no percentage of spend.</dd>
-          </div>
         </dl>
+        <p className="muted">
+          Advertising spend is separate from your GetShowUps subscription and is billed by Google. GetShowUps does not currently charge an additional percentage of your ad spend.
+        </p>
         {state.error && <p className="form-error" role="alert">{state.error}</p>}
         {state.note && (
           <p className="fine" role="status">

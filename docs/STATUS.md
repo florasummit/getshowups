@@ -14,7 +14,7 @@ _Update at the end of every task. Newest first._
   - **Money kept apart:** estimated (existing) vs invoiced vs paid (revenue_entries, append-only, migration 0028); POST /api/dashboard/revenue; Appointments shows Estimated / Invoiced / Paid per visit.
   - **Diagnostics** (deterministic, minimum samples, ordered along the funnel): tracking, stale spend, lead→booking, visits not marked, attendance, payments missing. Never recommends more spend; never acts.
   - **Attribution through the website:** ads land on the published website; its forms (hidden utm/gclid) and the receptionist chat (campaign params only) now credit the campaign. Previously those leads were unattributed.
-  - **Ads tab:** Results panel (GET /api/dashboard/results); "Who pays what" at budget approval (Google bills ad spend; plan excludes it; no GetShowUps fee on ads).
+  - **Ads tab:** Results panel (GET /api/dashboard/results); "Who pays what" at budget approval (Google bills ad spend; plan excludes it; owner-approved wording 2026-11-17: no additional percentage of ad spend, checked against the only plan = flat $499/month licensed Stripe price, no meter).
 - Tests: unit (test/acquisition.test.js: funnel, honesty/nulls, diagnostics, routes, website + receptionist attribution); browser (ads.spec results + who pays; modes.spec estimated/invoiced/paid; tour screens incl. Ads).
 - Blocked externally (unchanged, approvals):
   - Google Ads developer token at Test level (real accounts need Explorer/Basic access).

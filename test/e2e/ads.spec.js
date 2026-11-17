@@ -83,7 +83,8 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await expect(budget.getByText('Approved: $300/month')).toBeVisible()
   // Who pays what, at the moment of approving: Google charges ad spend; the plan doesn't include it; no GetShowUps fee.
   const pays = budget.getByRole('term').filter({ hasText: /./ })
-  await expect(pays).toHaveText(['Ad spend', 'Your GetShowUps plan', 'GetShowUps fee on ads'])
+  await expect(pays).toHaveText(['Ad spend', 'Your GetShowUps plan'])
+  await expect(budget.getByText('Advertising spend is separate from your GetShowUps subscription and is billed by Google. GetShowUps does not currently charge an additional percentage of your ad spend.')).toBeVisible()
   await expect(budget.getByText('Charged by Google, directly to the payment method in your Google Ads account.')).toBeVisible()
 
   // The $600/mo draft no longer fits a $300/mo approval → shown as a problem, then fixed by editing.
