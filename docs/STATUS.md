@@ -2,6 +2,60 @@
 
 _Update at the end of every task. Newest first._
 
+## Website migration journey, phase 2 (2026-11-17) — feat/website-journey; no migration; nothing published, no DNS change
+
+- PoolThru's production state (read-only check, 2026-11-17):
+  - AI-designed site live at /p/poolthru-llc (version 8). No import ever run.
+  - www.poolthru.com is verified and attached to hosting, but waiting for the www CNAME, which still points at Squarespace.
+- A read-only importer run against www.poolthru.com from a dev machine (nothing stored):
+  - Squarespace detected; 8 pages, 12 photos.
+  - Suggested 8 old-address redirects (/services, /about, /contact, /careers, /privacy-policy, /request-service, /new-page, /home).
+  - Flags: /request-service is empty; /careers has a template title.
+- Website tab: "Your website, step by step" (WebsiteJourney.jsx + pure journey.js). Five steps, each computed from real state, with one primary action that jumps to the section that does it:
+  1. Bring your content
+  2. Review, edit and preview
+  3. Publish
+  4. Connect your domain
+  5. Check it's live
+- "Recommended before switching" when a domain is being connected but no old addresses were imported.
+- Journey Publish follows the same guard as the status card (no unkept AI revision, nothing unsaved, publishing not paused).
+- Import into a business that already has a website pre-ticks only "Old page addresses" (no text, no photos), so moving a domain never replaces the current copy unless the owner ticks it.
+- Domain step 2:
+  - Says where www points today (live DNS read, never stored; known platforms named, e.g. Squarespace) and to CHANGE that existing CNAME, not add a second one.
+  - Before-switch checklist: site published; old addresses kept.
+  - After-switch advice: keep the domain registration, cancel only the old website plan after checking.
+  - "Waiting for your DNS change" replaces "Securing…" before the record exists (honest status).
+- Also: the stray unlabelled "Details" toggle is gone; publish and domain statuses use the shared pills; "Not published" is neutral, not red.
+- Tests:
+  - test/journey.test.js (5 states, incl. PoolThru's exact state).
+  - website.test.js: current pointer (Squarespace / unknown / none once connected, platform matching not fooled by look-alike hosts).
+  - website-journey.spec.js: PoolThru-like seeded business, desktop and phone; Squarespace instruction; import defaults; nothing changed.
+- Old addresses (planAddresses in server/site-import.js):
+  - Each old page is classified by its own address, then its real title (template titles like "Contact 3" ignored) and headings.
+  - Destinations in order: kept (the new site has the same address) → the matching page (/privacy-policy → /privacy) → booking (request/schedule pages) → home only when nothing is related, saying which page to add to keep the address.
+  - Redirects may target the site's own pages; a page removed later falls back to home and never blocks saving.
+  - The middleware sends common old addresses (/about-us, /contact-us, /privacy-policy, /faqs, …) to a matching page added after the import.
+  - The import review lists every old address, what it was, and where it goes.
+- PoolThru address plan (read-only crawl, 2026-11-17):
+  - /services kept. /contact → booking until a Contact page exists. /request-service (empty) → booking.
+  - /about and /privacy-policy → home until an About / Privacy page exists.
+  - /careers and /new-page ("Our App") → home (nothing similar). /home → home.
+- PoolThru content audit (live = draft, version 8): no placeholder text; booking (4 links), chat link and privacy link work. Missing or uncertain:
+  - no services/prices (profile and site);
+  - no phone/email/address anywhere;
+  - no About, Contact or own Privacy page (the footer links to the GetShowUps policy);
+  - no logo;
+  - name "Poolthru" vs "PoolThru Pool Care";
+  - service area Charleston and ZIP 29403 only vs "Charleston & Surrounding Areas";
+  - generic copy (an odd "Do I need to bring my pool anywhere?" FAQ).
+  - Owner reviews and fixes these in the app; nothing was changed for them.
+- Needs approval: merge/deploy. Then PoolThru, in the app:
+  1. Import www.poolthru.com, keeping old addresses (+ any photos).
+  2. Publish.
+  3. Change the www CNAME at Squarespace (owner's DNS change).
+  4. Forward the bare domain.
+  5. Verify; then cancel only the Squarespace website plan.
+
 ## Product experience, phase 1: receptionist dashboard, customer chat, Overview, design tokens (2026-11-17) — feat/ux-phase-1; no migration
 
 - Design system:

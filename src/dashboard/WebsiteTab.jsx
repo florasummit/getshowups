@@ -8,6 +8,8 @@ import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteDesigner from './WebsiteDesigner.jsx'
 import SiteStudio from './SiteStudio.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
+import WebsiteJourney from './WebsiteJourney.jsx'
+import { Pill } from './ui.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 // Only while publishing is switched off for maintenance (WEBSITE_STUDIO_PUBLISH=false).
@@ -96,13 +98,21 @@ export default function WebsiteTab() {
 
   // AI-designed site in Website Studio: the editor is the page (status bar above it, other tools tucked below).
   const studioMode = Boolean(designed && data.studio && !w.generated)
+  const openPublish = () => {
+    setPublishing(true)
+    document.getElementById('site-publish')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  // The import + AI designer tools: collapsed under a labelled row only when an AI-designed site is being edited.
+  const ToolsWrap = studioMode ? 'details' : 'div'
+  const toolsProps = studioMode ? { className: 'card site-more', open: moreOpen ?? false, onToggle: (e) => setMoreOpen(e.currentTarget.open) } : { className: 'site-tools' }
   return (
     <div className="enter">
-      <h1 className="title title--page">Website</h1>
-      <section className={`card site-status${studioMode ? ' site-status--bar' : ''}`} aria-label="Website status">
-        <p className={`status status--${w.published ? (w.changed ? 'pending' : 'ok') : 'bad'}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {w.published ? (w.changed ? 'Live · you have changes that aren’t published yet' : 'Live') : 'Not published yet'}
+      <h1 className="ui-page-title ui-page-title--top">Website</h1>
+      <WebsiteJourney data={data} onPublish={openPublish} canPublish={!w.generated && !pending && !publishing && !unsaved && !(studioOutput(w.draft) && !data.studioPublish)} />
+      <section id="site-publish" className={`card site-status${studioMode ? ' site-status--bar' : ''}`} aria-label="Website status">
+        <p className="site-status-line">
+          <Pill tone={w.published ? (w.changed ? 'warn' : 'ok') : 'neutral'}>{w.published ? 'Live' : 'Not published'}</Pill>
+          {w.published ? (w.changed ? <span>You have changes that aren’t published yet</span> : null) : <span>Not published yet</span>}
         </p>
         {w.published && (
           <a className="booking-url booking-url--dark" href={live} target="_blank" rel="noreferrer">
@@ -145,14 +155,15 @@ export default function WebsiteTab() {
       {/* Import + AI designer: one fixed place (never remounted, so a conversation in progress is kept). With an
           AI-designed site it is a one-line row above the editor, open while the owner is using it. */}
       {data.studio && (
-        <details className={studioMode ? 'card site-more' : 'site-more site-more--plain'} open={moreOpen ?? !studioMode} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+        <ToolsWrap {...toolsProps}>
           {studioMode && <summary>Import your current website · AI designer</summary>}
       {/* Website Studio (internal pilot, server/website-studio.js): import + AI designer only for businesses in it. */}
       {data.studio && (
-      <section className="card" aria-label="Bring your current website">
+      <section id="site-import" className="card" aria-label="Bring your current website">
         <h2 className="card-title">Bring your current website</h2>
         <WebsiteImport
           defaultUrl={data.domain?.hostname || ''}
+          hasContent={Boolean(designed || w.published)}
           onApplied={async () => {
             const { status, data: d } = await api('/api/dashboard/website')
             if (status === 200) {
@@ -181,11 +192,11 @@ export default function WebsiteTab() {
       </section>
       )}
 
-        </details>
+        </ToolsWrap>
       )}
 
       {!designed && (
-      <section className="card" aria-label="Create with AI">
+      <section id="site-create" className="card" aria-label="Create with AI">
         {w.generated || rewrite ? (
           <WebsiteGenerator
             hasDraft={!w.generated}
@@ -240,7 +251,7 @@ export default function WebsiteTab() {
       )}
 
       {!w.generated && (
-        <>
+        <div id="site-edit" className="site-edit-anchor">
           {designed && data.studio ? (
             // Website Studio editor: edit the AI-designed site directly (no AI), with live preview and autosave.
             <SiteStudio key={editorKey} website={w} assets={data.assets} brand={data.brand} visit={data.visit} checkpoints={data.checkpoints || []} onSaved={refresh} onUnsaved={setUnsaved} />
@@ -257,12 +268,19 @@ export default function WebsiteTab() {
               <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? 'locked' : false} />
             </section>
           )}
-        </>
+        </div>
       )}
 
-      <section className="card">
+      <section id="site-domain" className="card" aria-label="Website address">
         <h2 className="card-title">Website address</h2>
-        <DomainSettings siteUrl={data.url} />
+        <DomainSettings
+          siteUrl={data.url}
+          site={{ published: Boolean(w.published), redirects: w.draft?.redirects?.length || 0 }}
+          onChange={async () => {
+            const { status, data: d } = await api('/api/dashboard/website')
+            if (status === 200) setData(d)
+          }}
+        />
       </section>
 
       <section className="card">

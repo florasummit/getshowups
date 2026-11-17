@@ -29,18 +29,33 @@ const FIELDS = [
   ['redirects', 'Old page addresses'],
 ]
 
-function Preview({ field, value }) {
-  if (field === 'redirects')
-    return (
-      <ul className="import-services">
-        {value.map((r) => (
-          <li key={r.from}>
-            {r.from} → {r.to === 'book' ? 'booking page' : r.to === '/' ? 'home page' : `${r.to.slice(2)} section`}
-          </li>
-        ))}
-        <li className="fine">Once your domain points here, these old links keep working.</li>
-      </ul>
-    )
+const destination = (a) =>
+  a.kept ? 'kept as it is (same page on your new site)' : a.to === 'book' ? 'booking page' : a.to === '/' ? 'home page' : a.to.startsWith('/#') ? `${a.to.slice(2)} section` : `your ${a.to.slice(1).replace(/-/g, ' ')} page`
+
+// Every old address, what it was, and where it will go. Anything sent to the home page says why.
+function Addresses({ list }) {
+  return (
+    <ul className="import-addresses" aria-label="Old page addresses">
+      {list.map((a) => (
+        <li key={a.from} data-from={a.from}>
+          <span className="import-address">
+            <code>{a.from}</code> <span className="fine">{a.label}</span>
+          </span>
+          <span>
+            → {destination(a)}
+            {a.empty && <span className="fine"> · this page is empty on your old site</span>}
+          </span>
+          {a.add && <span className="fine">Add a “{a.add}” page in the editor to keep this address{a.to === '/' ? '' : ' (until then it goes to booking)'}.</span>}
+          {a.nomatch && <span className="fine">Nothing similar on your new site yet, so visitors land on your home page.</span>}
+        </li>
+      ))}
+      <li className="fine">Once your domain points here, these old links keep working.</li>
+    </ul>
+  )
+}
+
+function Preview({ field, value, addresses }) {
+  if (field === 'redirects') return addresses?.length ? <Addresses list={addresses} /> : null
   if (field === 'services')
     return (
       <ul className="import-services">
@@ -56,7 +71,9 @@ function Preview({ field, value }) {
   return <p className="import-text">{value}</p>
 }
 
-export default function WebsiteImport({ defaultUrl = '', onApplied }) {
+// hasContent: the business already has website text (a designed or published site). Then the import pre-selects only the
+// old page addresses and no photos, so moving a domain never replaces current text unless the owner ticks it.
+export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent = false }) {
   const [imp, setImp] = useState(undefined)
   const [url, setUrl] = useState(defaultUrl)
   const [mine, setMine] = useState(false)
@@ -69,13 +86,15 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
   const choose = (i) => {
     setImp(i)
     if (i?.status === 'done') {
-      setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined))
-      setPhotos(i.suggestion.photos.slice(0, 6).map((p) => p.url))
+      setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined && (!hasContent || f === 'redirects')))
+      setPhotos(hasContent ? [] : i.suggestion.photos.slice(0, 6).map((p) => p.url))
       setFixes((i.suggestion.fixes || []).map((f) => f.id))
     }
   }
+  // Loads the latest import once on mount (choose only sets state from it).
   useEffect(() => {
     api('/api/dashboard/website/import').then(({ status, data }) => choose(status === 200 ? data.import : null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   if (imp === undefined) return <div aria-busy="true" />
 
@@ -216,12 +235,13 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
       )}
       <fieldset className="import-fields">
         <legend>Text</legend>
+        {hasContent && <p className="fine">Your current website text stays as it is unless you tick it here. Old page addresses are ticked so links from Google keep working.</p>}
         {FIELDS.filter(([f]) => s.content[f] !== undefined).map(([f, label]) => (
           <label key={f} className="import-field">
             <input type="checkbox" checked={fields.includes(f)} onChange={() => toggle(fields, setFields, f)} />
             <span>
               <span className="import-label">{label}</span>
-              <Preview field={f} value={s.content[f]} />
+              <Preview field={f} value={s.content[f]} addresses={s.addresses} />
             </span>
           </label>
         ))}

@@ -6,9 +6,15 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { track } from '../../../server/events.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
-import { checkDomain, claimDomain, cnameTarget, disconnectDomain, domainFor } from '../../../server/domains.js'
+import { checkDomain, claimDomain, cnameTarget, currentPointer, disconnectDomain, domainFor } from '../../../server/domains.js'
 
-const view = async (env, customerId) => ({ domain: await domainFor(env, customerId), target: cnameTarget(env) })
+// While the owner is pointing the domain at us: where it points right now (e.g. Squarespace), read live from public DNS,
+// so the screen can say which existing record to change. Never stored; null when DNS can't be read.
+const view = async (env, customerId) => {
+  const domain = await domainFor(env, customerId)
+  const current = domain?.step === 'point' && domain.status !== 'connected' ? await currentPointer(env, domain.hostname).catch(() => null) : null
+  return { domain: domain && { ...domain, current }, target: cnameTarget(env) }
+}
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)

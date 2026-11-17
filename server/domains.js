@@ -71,6 +71,30 @@ async function dnsLookup(env, name, type) {
   }
 }
 
+// Which website platform a hostname's CNAME currently points at, so the owner is told to CHANGE that existing record
+// (providers allow one www record) instead of adding a second one. Only well-known targets are named; anything else is
+// shown as the raw target. Public DNS data only.
+const PLATFORMS = [
+  ['squarespace', 'Squarespace', /(^|\.)squarespace\.com$/],
+  ['wix', 'Wix', /(^|\.)wixdns\.net$|(^|\.)wix\.com$/],
+  ['shopify', 'Shopify', /(^|\.)myshopify\.com$|(^|\.)shopify\.com$/],
+  ['godaddy', 'GoDaddy', /(^|\.)secureserver\.net$|(^|\.)godaddysites\.com$/],
+  ['wordpress', 'WordPress.com', /(^|\.)wordpress\.com$|(^|\.)wp\.com$/],
+  ['weebly', 'Weebly', /(^|\.)weebly\.com$/],
+]
+export function platformOf(target) {
+  const t = String(target || '').toLowerCase()
+  const hit = PLATFORMS.find(([, , re]) => re.test(t))
+  return hit ? { id: hit[0], name: hit[1] } : null
+}
+// What the hostname points to right now (CNAME), read-only. null when unknown (lookup failed); target null = no CNAME.
+export async function currentPointer(env, hostname) {
+  const c = await dnsLookup(env, hostname, 'CNAME')
+  if (!c.ok) return null
+  const target = c.values[0] || null
+  return { target, ours: target === cnameTarget(env), platform: platformOf(target) }
+}
+
 // ---------- hosting provider (Cloudflare Pages custom domains) ----------
 export const providerConfigured = (env) => Boolean(env.CF_API_TOKEN && env.CF_ACCOUNT_ID && env.CF_PAGES_PROJECT)
 async function provider(env, method, hostname) {

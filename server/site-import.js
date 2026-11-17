@@ -328,7 +328,7 @@ const pageLike = (pages, re) => pages.find((p) => re.test(p.path) || re.test(p.t
 
 // A suggested draft from the import. Only text that appears on the owner's site; nothing invented. The caller passes it
 // through validateContent (claims filter + limits) before anything is saved.
-export function suggestContent(result, LIMITS) {
+export function suggestContent(result, LIMITS, { site = null } = {}) {
   const pages = result.pages
   const home = pages[0]
   const about = pageLike(pages, /about/i)
@@ -374,16 +374,66 @@ export function suggestContent(result, LIMITS) {
     .filter((i) => !/logo|icon|favicon/i.test(i.url + ' ' + i.alt) && (!i.width || i.width >= 500))
     .sort((a, b) => (b.width || 0) * (b.height || 0) - (a.width || 0) * (a.height || 0))
     .slice(0, 12)
-  // Old page addresses → the matching place on the new site, so links and search results keep working after the domain moves.
-  out.redirects = pages
+  // Old page addresses → the closest place on the new site, so links and search results keep working after the domain
+  // moves. `addresses` is the full plan the owner reviews (incl. addresses kept as they are).
+  const addresses = planAddresses(result, site)
+  out.redirects = addresses.filter((a) => !a.kept).map((a) => ({ from: a.from, to: a.to }))
+  return { content: out, photos, addresses }
+}
+
+// ---------- old addresses ----------
+// What an old page is, from its own address first, then its real title (a leftover template title like "Contact 3" is
+// ignored) and headings. Order matters: the most specific kinds first.
+const KINDS = [
+  ['privacy', /privacy|terms|cookie|legal/],
+  ['careers', /career|jobs?\b|hiring|join (the|our)\b.*team|work with us|openings/],
+  ['faq', /\bfaqs?\b|questions/],
+  ['area', /service-?areas?|areas-we-serve|locations|where-we-work/],
+  // Asking for service/a time → booking is the closest place; general contact/quote → a Contact page when there is one.
+  ['request', /request|book|schedule|appointment/],
+  ['contact', /contact|quote|estimate|reach us|get in touch/],
+  ['services', /servic|pricing|prices?\b|rates|packages|what-we-do|pool-care|maintenance|cleaning|repair/],
+  ['about', /about|team|who-we|who we are|our story|story\b/],
+  ['home', /^\/(home|index(\.html?)?)$/],
+]
+const PLACEHOLDER_TITLE = /^(contact|page|new page|blank|untitled|copy of .*)\s*\d*$/i
+const titleOf = (p) => String(p.title || '').split(/\s+[—–|-]\s+/)[0].trim()
+export function pageKind(p) {
+  const path = p.path.toLowerCase()
+  for (const [kind, re] of KINDS) if (re.test(path)) return kind
+  const title = titleOf(p)
+  const words = [PLACEHOLDER_TITLE.test(title) ? '' : title, ...(p.headings || []).slice(0, 3).map((h) => h.text)].join(' ').toLowerCase()
+  for (const [kind, re] of KINDS) if (kind !== 'home' && re.test(words)) return kind
+  return 'other'
+}
+// Pages of the new (AI-designed) site that stand in for each kind, by the slugs the page templates use.
+const KIND_SLUGS = { about: ['about'], contact: ['contact'], privacy: ['privacy', 'privacy-policy'], services: ['services'], faq: ['faq'], area: ['service-area'], home: [''] }
+// Page types the owner can add in the editor to keep an address (src/dashboard/site-templates.js PAGE_TYPES).
+const ADDABLE = { about: 'About', contact: 'Contact', privacy: 'Privacy', services: 'Services', faq: 'Questions', area: 'Service area' }
+
+// site: the current draft's content.site (AI-designed; pages by slug) or null (template site: fixed sections).
+export function planAddresses(result, site = null) {
+  const slugs = new Set((site?.pages || []).map((p) => p.slug))
+  const clean = (path) => path.toLowerCase().replace(/\/+$/, '')
+  const old = result.pages
     .filter((p) => p.path !== '/')
-    .map((p) => p.path.toLowerCase().replace(/\/+$/, ''))
-    .filter((from, i, all) => from && /^\/[a-z0-9][a-z0-9._~/-]{0,119}$/.test(from) && all.indexOf(from) === i)
-    .map((from) => ({ from, to: /servic|pricing|price|rates|packages|what-we-do/.test(from) ? '/#services' : /about|team|who-we|story/.test(from) ? '/#about' : /contact|quote|request|book|schedule|appointment|estimate/.test(from) ? 'book' : '/' }))
-    .concat(result.skipped.filter((x) => x.reason === 'duplicate').map((x) => ({ from: new URL(x.url).pathname.toLowerCase().replace(/\/+$/, ''), to: '/' })))
-    .filter((r, i, all) => r.from && all.findIndex((x) => x.from === r.from) === i)
+    .map((p) => ({ from: clean(p.path), kind: pageKind(p), label: (PLACEHOLDER_TITLE.test(titleOf(p)) ? p.headings?.[0]?.text : titleOf(p)) || p.headings?.[0]?.text || clean(p.path), empty: !(p.text || []).length }))
+    .concat(result.skipped.filter((x) => x.reason === 'duplicate').map((x) => ({ from: clean(new URL(x.url).pathname), kind: 'home', label: 'Home (duplicate address)', empty: false })))
+    .filter((a, i, all) => a.from && /^\/[a-z0-9][a-z0-9._~/-]{0,119}$/.test(a.from) && all.findIndex((x) => x.from === a.from) === i)
     .slice(0, 30)
-  return { content: out, photos }
+  return old.map((a) => {
+    const base = { from: a.from, kind: a.kind, label: a.label.slice(0, 80), ...(a.empty ? { empty: true } : {}) }
+    // Same address on the new site: nothing to redirect, the old link simply keeps working.
+    if (site && slugs.has(a.from.slice(1))) return { ...base, kept: true, to: a.from }
+    if (a.kind === 'home') return { ...base, to: '/' }
+    if (a.kind === 'request') return { ...base, to: 'book' }
+    const page = site && (KIND_SLUGS[a.kind] || []).find((s) => s && slugs.has(s))
+    if (page) return { ...base, to: `/${page}` }
+    if (!site && ['services', 'about'].includes(a.kind)) return { ...base, to: `/#${a.kind}` } // template sites have these sections
+    if (a.kind === 'contact') return { ...base, to: 'book', ...(site ? { add: ADDABLE.contact } : {}) }
+    // Nothing similar yet: the home page, saying which page would keep this address (if the editor can add one).
+    return { ...base, to: '/', ...(site && ADDABLE[a.kind] ? { add: ADDABLE[a.kind] } : { nomatch: true }) }
+  })
 }
 
 // Downloads one image the owner picked (public https, any host the page referenced; capped and byte-checked by the

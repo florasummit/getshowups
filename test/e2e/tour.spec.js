@@ -22,6 +22,8 @@ const SCREENS = [
 for (const [name, path, owner] of SCREENS) {
   test(`tour: ${name} @mobile`, async ({ page, context }, info) => {
     if (owner) await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+    // The tour business's domain still points at Squarespace (public DNS, mocked).
+    if (name === 'website') await page.request.post(`http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}/__dns`, { data: { type: 'CNAME', name: 'www.harborpool.example', values: ['ext-cust.squarespace.com'] } })
     const errors = []
     page.on('pageerror', (e) => errors.push(e.message))
     await page.goto(path)

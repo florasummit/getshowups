@@ -1348,6 +1348,139 @@
     padding: 12px 10px;
   }
 }
+/* Website: the step-by-step journey (WebsiteJourney.jsx) */
+.wj {
+  margin-top: var(--s-4);
+}
+.wj-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wj-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--s-3);
+  padding-bottom: var(--s-4);
+}
+.wj-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 34px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--surface-muted);
+}
+.wj-step.is-done:not(:last-child)::before {
+  background: color-mix(in srgb, var(--ok-dot) 45%, var(--surface-muted));
+}
+.wj-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.wj-step.is-done .wj-mark {
+  border-color: var(--ok-dot);
+  background: var(--ok-dot);
+  color: var(--white);
+}
+.wj-step.is-current .wj-mark {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 0 0 4px rgb(255 106 26 / 0.15);
+}
+.wj-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 4px;
+}
+.wj-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--s-2);
+  font-weight: 700;
+}
+.wj-step:not(.is-current):not(.is-done) .wj-title {
+  color: var(--text-muted);
+}
+.wj-detail {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  max-width: 64ch;
+}
+.wj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: 6px;
+}
+.site-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 650;
+}
+.site-tools > .card:first-child {
+  margin-top: 20px;
+}
+.wj-check {
+  display: grid;
+  gap: 6px;
+  margin: var(--s-2) 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+.wj-check li {
+  position: relative;
+  padding-left: 26px;
+}
+.wj-check li::before {
+  position: absolute;
+  left: 0;
+  top: 1px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.wj-check li.is-done::before {
+  content: '✓';
+  background: var(--ok-dot);
+  color: var(--white);
+}
+.wj-check li.is-todo::before {
+  content: '!';
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  box-shadow: inset 0 0 0 1.5px var(--warn-dot);
+}
+.after-switch {
+  margin-top: var(--s-2);
+}
+.domain-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
 .ui-page-title--top {
   margin-top: var(--s-3);
 }
@@ -2010,6 +2143,23 @@
 .import-services {
   margin: 4px 0 0;
   padding-left: 18px;
+}
+.import-addresses {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+.import-addresses li {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--surface-muted);
+}
+.import-address code {
+  font-weight: 650;
 }
 .import-services p {
   margin: 2px 0 6px;

@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { validateContent, hostingStatus, HOSTING_GRACE_MS } from '../server/website.js'
 import { renderSite } from '../server/site-render.js'
-import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, TOKEN_REUSE_MS } from '../server/domains.js'
+import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, platformOf, TOKEN_REUSE_MS } from '../server/domains.js'
 import { sniffImage } from '../server/assets.js'
 import { readiness } from '../server/onboarding.js'
 import { customerRows, growth } from '../server/metrics.js'
@@ -359,8 +359,16 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   dns.TXT['_getshowups.www.poolsco.com'] = [d.records[0].value]
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
   assert.deepEqual(provider.calls[0], ['POST', '/client/v4/accounts/acc/pages/projects/getshowups/domains', 'Bearer cf_SECRET_TOKEN'])
+  // Moving from Squarespace: the screen is told where www points today (public DNS, read live, never stored), so it
+  // says to CHANGE that existing record rather than add a second one.
+  dns.CNAME['www.poolsco.com'] = ['ext-cust.squarespace.com']
   const pointing = (await call(domain, 'GET', { cookie: c })).json.domain
   assert.deepEqual([pointing.step, pointing.records[0]], ['point', { type: 'CNAME', name: 'www.poolsco.com', host: 'www', zone: 'poolsco.com', value: 'getshowups.pages.dev' }])
+  assert.deepEqual(pointing.current, { target: 'ext-cust.squarespace.com', ours: false, platform: { id: 'squarespace', name: 'Squarespace' } })
+  assert.equal(db.sql.prepare("SELECT detail FROM website_domains WHERE hostname = 'www.poolsco.com'").get().detail, 'waiting_for_cname')
+  dns.CNAME['www.poolsco.com'] = ['old-host.example.net']
+  assert.deepEqual((await call(domain, 'GET', { cookie: c })).json.domain.current, { target: 'old-host.example.net', ours: false, platform: null })
+  assert.deepEqual(['shops.myshopify.com', 'www123.wixdns.net', 'example.com.evilsquarespace.com.attacker.net', 'squarespace.com'].map((t) => platformOf(t)?.id ?? null), ['shopify', 'wix', null, 'squarespace'])
   // CNAME added and the provider is active, but HTTPS doesn't serve us yet: still securing.
   dns.CNAME['www.poolsco.com'] = ['getshowups.pages.dev']
   provider.domains.get('www.poolsco.com').status = 'active'
@@ -371,7 +379,7 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   Object.assign(provider.domains.get('www.poolsco.com'), { validation_data: { status: 'active' }, verification_data: { status: 'active' } })
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'connected')
   const ok = (await call(domain, 'GET', { cookie: c })).json
-  assert.deepEqual([ok.domain.status, ok.domain.url], ['connected', 'https://www.poolsco.com'])
+  assert.deepEqual([ok.domain.status, ok.domain.url, ok.domain.current], ['connected', 'https://www.poolsco.com', null], 'no live DNS lookup once connected')
   assert.ok(!JSON.stringify(ok).includes('cf_SECRET_TOKEN'))
   // The site's canonical address becomes the domain.
   await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content(), confirm: true } })
@@ -815,6 +823,19 @@ test('connected domain, multi-page AI site: sitemap lists every page; SEO tags; 
   const svg = await siteIcon.onRequestGet({ request: new Request(`https://www.poolsco.com${icon[1]}`), params: { id: 'pools.svg' } })
   assert.equal(svg.headers.get('Content-Type'), 'image/svg+xml')
   assert.match(await svg.text(), /^<svg [^>]+><rect [^>]+\/><text [^>]+>P<\/text><\/svg>$/)
+
+  // Old-site addresses on a multi-page site: a redirect may target one of the site's own pages; one to a page that
+  // doesn't exist is repaired to the home page (never blocks saving); common old addresses reach a page added later.
+  const redirects = [{ from: '/get-a-quote', to: '/contact' }, { from: '/old-about', to: '/about' }, { from: '/request-service', to: 'book' }]
+  const saved = (await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content({ site, redirects }), confirm: true } })).json
+  assert.deepEqual(saved.website.draft.redirects, [{ from: '/get-a-quote', to: '/contact' }, { from: '/old-about', to: '/' }, { from: '/request-service', to: 'book' }])
+  const loc = async (url) => (await run(url)).headers.get('Location')
+  assert.equal(await loc('https://www.poolsco.com/get-a-quote'), 'https://www.poolsco.com/contact')
+  assert.equal(await loc('https://www.poolsco.com/old-about'), 'https://www.poolsco.com/')
+  assert.equal(await loc('https://www.poolsco.com/contact-us'), 'https://www.poolsco.com/contact', 'Squarespace/Wix-style /contact-us reaches the Contact page')
+  assert.equal(await loc('https://www.poolsco.com/privacy-policy'), 'https://www.poolsco.com/', 'no Privacy page yet → home')
+  assert.equal((await run('https://www.poolsco.com/contact')).status, 200, 'an old address that matches a page is simply that page')
+  assert.deepEqual(validateContent(content({ redirects: [{ from: '/x', to: '/contact' }] }))[1].redirects, [{ from: '/x', to: '/' }], 'template content has no pages: page targets fall back to home')
 
   const page = await run('https://www.poolsco.com/contact')
   assert.match(page.text, /<link rel="canonical" href="https:\/\/www\.poolsco\.com\/contact">/)

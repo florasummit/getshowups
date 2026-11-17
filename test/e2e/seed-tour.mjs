@@ -2,7 +2,11 @@
 // screens are reviewed with representative data instead of empty states only. Fake names, 555 numbers, .example
 // addresses. Prints SQL for `wrangler d1 execute --command`.
 //   node test/e2e/seed-tour.mjs <customer id> <session token hash> <now ms>
+import { readFileSync } from 'node:fs'
+
 const [id, tokenHash, nowArg] = process.argv.slice(2)
+// The same AI-designed draft the editor tests use (content.site), as the published version.
+const SITE = JSON.stringify(JSON.parse(readFileSync(new URL('./editor-draft.json', import.meta.url), 'utf8')))
 const now = Number(nowArg)
 const H = 3600_000
 const DAY = 24 * H
@@ -84,6 +88,11 @@ const sql = [
     ['tourconv2', 'save_customer_details', 1, null, -36 * 60_000],
     ['tourconv2', 'request_callback', 1, 'urgent', -35 * 60_000],
   ].map(([c, kind, ok, detail, at]) => row('receptionist_events', { customer: id, conversation_id: c, kind, ok, detail, at: now + at })),
+  // Website, like PoolThru's real state: an AI-designed site that is published, no import yet, and its own domain
+  // verified + attached but still waiting for the owner's www change (DNS still points at the old platform).
+  row('websites', { customer: id, draft: SITE, live_version: 1, published_at: now - 2 * DAY, updated_at: now - 2 * DAY }),
+  row('website_versions', { customer: id, version: 1, content: SITE, created_at: now - 2 * DAY }),
+  row('website_domains', { hostname: 'www.harborpool.example', customer: id, verify_token: 'tourverifytoken000000000000000', status: 'securing', detail: 'waiting_for_cname', verified_at: now - DAY, attached_at: now - DAY, connected_at: null, checked_at: now - 600_000, created_at: now - DAY, updated_at: now - 600_000 }),
   row('receptionist_requests', { id: 'tourreq1', customer: id, conversation_id: 'tourconv2', kind: 'callback', name: 'Morgan Diaz', phone: '+18435550104', email: null, note: 'Pool pump is sparking and smells like burning.', urgent: 1, status: 'open', held: 1, created_at: now - 35 * 60_000, updated_at: now - 35 * 60_000, resolved_at: null }),
 ]
 process.stdout.write(sql.join('\n'))
