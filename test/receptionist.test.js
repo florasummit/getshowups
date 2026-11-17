@@ -216,8 +216,10 @@ test('chat booking end to end: details saved once, real times, read back, explic
     assert.equal(lastToolResults(body)[0].booked, true)
     return say(`You're booked for ${offered.time}.`)
   })
+  assert.equal(t2.json().booked, null, 'no booking card before the booking is persisted')
   const t3 = await chat('alpha', 'Yes please, book it', t2.json())
   assert.deepEqual([t3.status, t3.json().status, Boolean(t3.json().booked)], [200, 'booked', true])
+  assert.deepEqual(t3.json().booked, { time: offered.time, service: 'Weekly pool care', address: null }, 'confirmation card: service + time (no address for visits at the business)')
   assert.match(modelRequests.at(-1).messages.filter((m) => m.role === 'system').at(-1).content, /phone: \+18435550142/)
   const appts = db.sql.prepare('SELECT * FROM appointments').all()
   assert.equal(appts.length, 1)
@@ -228,7 +230,13 @@ test('chat booking end to end: details saved once, real times, read back, explic
   // The owner dashboard shows it, labelled and attributed.
   const o = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: await owner('alpha') })).json()
   assert.equal(o.counts.booked, 1)
-  assert.deepEqual([o.conversations[0].status, o.conversations[0].customerName, o.conversations[0].channel], ['booked', 'Jamie Rivera', 'chat'])
+  assert.deepEqual([o.conversations[0].status, o.conversations[0].customerName, o.conversations[0].channel, o.conversations[0].need], ['booked', 'Jamie Rivera', 'chat', 'Weekly pool care'])
+  assert.equal(o.conversations[0].bookedAt, new Date(db.sql.prepare('SELECT start_at FROM appointments').get().start_at).toISOString())
+  const detail = (await call(ownerApi, 'GET', `/api/dashboard/receptionist?id=${t1.json().conversationId}`, { cookie: await owner('alpha') })).json().conversation
+  assert.deepEqual(detail.collected, { name: 'Jamie Rivera', phone: '+18435550142', email: null, zip: '29403', address: null, need: 'Weekly pool care' })
+  assert.equal(detail.bookedAt, o.conversations[0].bookedAt)
+  assert.equal(detail.request, null)
+  assert.ok(detail.transcript.every((l) => Number.isInteger(l.at)), 'transcript lines carry their time')
   // The confirmation email for a booking with no email is skipped as no_email (never sent to an empty address).
   const { processDueMessages } = await import('../server/messages.js')
   Object.assign(env, { RESEND_API_KEY: 're_x', EMAIL_FROM: 'GetShowUps <b@getshowups.com>', MESSAGES_LIVE: 'true' })
@@ -346,6 +354,8 @@ test('provider-attended visits: the service address is required and goes on the 
   await respond(env, customer, await conv(), 'yes')
   const ev = JSON.parse(fetches.find((f) => f.url.includes('/events?sendUpdates=all')).init.body)
   assert.match(ev.location, /12 King St, Charleston, SC 29401/)
+  const { publicState } = await import('../server/receptionist/engine.js')
+  assert.equal(publicState(await conv(), customer).booked.address, '12 King St, Charleston, SC 29401', 'the confirmation card shows the visit address')
 })
 
 // ---------- people: honest hand-off ----------
@@ -373,6 +383,9 @@ test('"talk to a person": no live transfer is offered; a callback request is one
   await chat('alpha', 'actually it is urgent', t2.json())
   const rows = db.sql.prepare('SELECT * FROM receptionist_requests').all()
   assert.equal(rows.length, 1)
+  // Overview: the open request is counted for the owner's "Needs your attention".
+  const overviewApi = await import('../functions/api/dashboard/overview.js')
+  assert.deepEqual((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().requests, { open: 1, urgent: 1 })
   assert.deepEqual([rows[0].kind, rows[0].phone, rows[0].urgent, rows[0].status, rows[0].held], ['callback', '+18435550142', 1, 'open', 0])
   // Owner: Needs attention. Messaging in test mode → nobody can be emailed → shown as not emailed (never "notified").
   const ownerCookie = await owner('alpha')
@@ -684,6 +697,8 @@ test('before migrations 0026/0027: nothing is offered; before 0027 alone, callba
   await seed('alpha')
   enable('alpha')
   assert.equal((await call(infoApi, 'GET', '/api/receptionist/alpha', { params: { customer: 'alpha' } })).json().callbacks, false)
+  const overviewApi = await import('../functions/api/dashboard/overview.js')
+  assert.equal((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().requests, null, 'unavailable, never a fake 0')
   script.push((body) => (assert.match(body.system[0].text, /offer the business phone \(\(843\) 555-0199\)/), say('You can call (843) 555-0199.')))
   assert.equal((await chat('alpha', 'a person please')).status, 200)
   assert.deepEqual(await syncNote(env, 'alpha', 'lead1', 'k', 'note'), { ok: true, skipped: 'not_connected' })

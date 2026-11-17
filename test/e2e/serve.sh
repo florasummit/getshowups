@@ -124,6 +124,9 @@ for E in "$E2E_EDITOR_CUSTOMER:$E2E_EDITOR_SESSION_TOKEN" "$E2E_EDITOR_M_CUSTOME
   "
 done
 
+# Visual tour: one fictional business with bookings, receptionist conversations and an open callback request.
+d1 "$(node test/e2e/seed-tour.mjs "$E2E_TOUR_CUSTOMER" "$(hash "$E2E_TOUR_SESSION_TOKEN")" "$NOW")"
+
 # Follow-ups: a business per browser project, texting registration APPROVED (as an admin records it) with its own
 # sender, default preferences (answers to their texts aren't held by quiet hours), one lead with texting consent.
 for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TEXTS_ACCOUNT_SID" "$E2E_TEXTS_M_CUSTOMER:$E2E_TEXTS_M_SESSION_TOKEN:$E2E_TEXTS_M_SENDER:$E2E_TEXTS_M_ACCOUNT_SID"; do
@@ -146,7 +149,7 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done

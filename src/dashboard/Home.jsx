@@ -7,6 +7,7 @@ import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
+import { Pill } from './ui.jsx'
 
 const Ads = lazy(() => import('./Ads.jsx'))
 const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
@@ -228,20 +229,23 @@ function WebsiteCard({ me, site, go }) {
   const w = site?.website
   const url = site ? (site.domain?.status === 'connected' ? site.domain.url : site.url) : null
   return (
-    <section className="card card--hero enter" aria-label="Your website">
-      <p className="eyebrow-sm">Your website</p>
+    <section className="card ui-site-card" aria-label="Your website">
+      <div className="ui-site-card-head">
+        <h2 className="card-title">Your website</h2>
+        {site && (w?.published ? <Pill tone="ok">Live</Pill> : <Pill tone="neutral">Not published</Pill>)}
+      </div>
       {!site ? (
         <p className="fine">Checking…</p>
       ) : w?.published ? (
         <>
-          <a className="booking-url" href={url} target="_blank" rel="noreferrer">
-            {url.replace(/^https?:\/\//, '')}
-          </a>
-          <p className="hero-status">
-            <span className="status-dot status-dot--ok" aria-hidden="true" /> Live and taking bookings
+          <p className="ui-site-card-status">
+            <a className="ui-site-url" href={url} target="_blank" rel="noreferrer">
+              {url.replace(/^https?:\/\//, '')}
+            </a>{' '}
+            · Live and taking bookings
           </p>
           <div className="card-actions">
-            <a className="btn btn-primary" href={url} target="_blank" rel="noreferrer">
+            <a className="btn btn-quiet btn-sm" href={url} target="_blank" rel="noreferrer">
               View website
             </a>
             <CopyLink url={url} />
@@ -249,9 +253,9 @@ function WebsiteCard({ me, site, go }) {
         </>
       ) : (
         <>
-          <p className="hero-title">Your website isn’t published yet.</p>
+          <p className="ui-site-card-status">Your website isn’t published yet. Customers can still book with your booking link.</p>
           <div className="card-actions">
-            <button type="button" className="btn btn-primary" onClick={() => go('website')}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => go('website')}>
               Finish my website
             </button>
             <CopyLink url={me.bookingUrl} label="Copy booking link" />
@@ -262,18 +266,24 @@ function WebsiteCard({ me, site, go }) {
   )
 }
 
-function Stats({ stats, visit }) {
+// Results from real records only. A rate appears once there are enough recorded outcomes to mean something;
+// until then it says so instead of showing 0%.
+function Stats({ stats, visit, upcoming }) {
   const recorded = stats.showed + stats.noShow
   const rows = [
-    ['Leads', stats.leads],
-    ['Bookings', stats.booked],
+    ['New inquiries', stats.leads],
+    ['Booked', stats.booked],
     [visit ? 'Visits' : 'Show-ups', stats.showed],
   ]
-  // Rates only once there are enough outcomes to mean something.
   if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`])
   if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`])
+  const pendingRate = visit ? stats.completed + stats.notCompleted < 5 : recorded < 5
   return (
     <section aria-label="Last 30 days">
+      <div className="ui-section-head ui-section-head--flush">
+        <h2 className="ui-section-title">Last 30 days</h2>
+        <span className="fine">{upcoming} upcoming</span>
+      </div>
       <div className={`stats stats--${rows.length}`}>
         {rows.map(([label, value]) => (
           <div key={label} className="stat">
@@ -282,7 +292,46 @@ function Stats({ stats, visit }) {
           </div>
         ))}
       </div>
-      <p className="fine stats-note">Last 30 days</p>
+      {pendingRate && <p className="fine stats-note">{visit ? 'Job completion rate' : 'Show-up rate'} appears after 5 recorded outcomes.</p>}
+    </section>
+  )
+}
+
+// What needs the owner, most urgent first. Each item has one obvious action. Empty → "All caught up".
+function Attention({ data, go }) {
+  const items = []
+  const r = data.requests
+  if (r?.open)
+    items.push({
+      tone: r.urgent ? 'bad' : 'warn',
+      tag: r.urgent ? 'Urgent' : 'Callback',
+      text: `${r.open} ${r.open === 1 ? 'customer is' : 'customers are'} waiting for a call back`,
+      action: ['Open receptionist', 'receptionist'],
+    })
+  const unbooked = data.followUp.filter((l) => !l.test && l.status === 'new').length
+  if (unbooked)
+    items.push({ tone: 'warn', tag: 'Follow up', text: `${unbooked} ${unbooked === 1 ? 'person asked' : 'people asked'} but ${unbooked === 1 ? 'hasn’t' : 'haven’t'} booked yet`, action: ['Review', 'appointments'] })
+  return (
+    <section className="card ui-attention" aria-label="Needs your attention">
+      <h2 className="card-title">Needs your attention</h2>
+      {items.length ? (
+        <ul className="ui-attention-list">
+          {items.map((i) => (
+            <li key={i.text}>
+              <span className="ui-attention-text">
+                <Pill tone={i.tone}>{i.tag}</Pill> {i.text}
+              </span>
+              <button type="button" className="btn btn-sm btn-quiet" onClick={() => go(i.action[1])}>
+                {i.action[0]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="ui-all-clear">
+          <Pill tone="ok">All caught up</Pill> Nobody is waiting on you.
+        </p>
+      )}
     </section>
   )
 }
@@ -330,8 +379,8 @@ function Overview({ me, data, reload, go, site }) {
   const visit = me.customer.appointmentMode === 'at_customer'
   return (
     <>
-      <WebsiteCard me={me} site={site} go={go} />
       <NextStep onOpen={go} skip={site && !site.website?.published ? ['page'] : []} />
+      {!data && <div className="ui-skeleton-block" aria-busy="true" />}
       {data?.failed && (
         <p className="form-error" role="alert">
           Couldn’t load your results.{' '}
@@ -341,8 +390,9 @@ function Overview({ me, data, reload, go, site }) {
         </p>
       )}
       {data && !data.failed && (
-        <div className="enter">
-          <Stats stats={data.stats} visit={visit} />
+        <div className="enter ui-overview">
+          <Attention data={data} go={go} />
+          <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.length} />
           {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">
@@ -372,6 +422,7 @@ function Overview({ me, data, reload, go, site }) {
           </section>
         </div>
       )}
+      <WebsiteCard me={me} site={site} go={go} />
     </>
   )
 }
@@ -523,6 +574,10 @@ export default function Home({ me, reload }) {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // On narrow screens the tab bar scrolls: keep the current tab in view.
+  useEffect(() => {
+    document.querySelector('.tabs [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+  }, [view])
   const go = (where) => {
     const tab = where === 'billing' ? 'settings' : where
     if (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable) return openBilling({ action: 'portal' }, () => {})
@@ -531,7 +586,7 @@ export default function Home({ me, reload }) {
     window.scrollTo(0, 0)
   }
   return (
-    <div className={`app${view === 'website' || view === 'followups' || view === 'receptionist' ? ' app--wide' : ''}`}>
+    <div className={`app${view === 'website' || view === 'followups' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
         <SignOut email={me.email} />
@@ -554,7 +609,7 @@ export default function Home({ me, reload }) {
       <main className="app-main">
         {view === 'overview' && (
           <>
-            <h1 className="title title--page">{me.customer.name}</h1>
+            <h1 className="ui-page-title ui-page-title--top">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} />
             <Overview me={me} data={data} reload={loadOverview} go={go} site={site} />
           </>

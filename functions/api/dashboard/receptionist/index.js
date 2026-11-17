@@ -40,6 +40,8 @@ export async function onRequestGet({ request, env }) {
     if (!c) return json(404, { error: 'not_found' })
     const { results } = await db.prepare('SELECT kind, ok, detail, at FROM receptionist_events WHERE conversation_id = ?1 AND customer = ?2 ORDER BY id').bind(id, customer.id).all()
     const state = JSON.parse(c.state || '{}')
+    const k = state.customer || {}
+    const request = withRequests ? await db.prepare("SELECT id, kind, status, urgent FROM receptionist_requests WHERE conversation_id = ?1 AND customer = ?2 ORDER BY status = 'open' DESC LIMIT 1").bind(id, customer.id).first() : null
     return json(200, {
       conversation: {
         id: c.id,
@@ -47,7 +49,11 @@ export async function onRequestGet({ request, env }) {
         status: c.status,
         outcome: c.outcome,
         summary: c.summary,
-        customerName: state.customer?.name || null,
+        customerName: k.name || null,
+        // What the receptionist collected (the owner's own customer's details; never logged).
+        collected: { name: k.name || null, phone: k.phone || null, email: k.email || null, zip: k.zip || null, address: k.street ? `${k.street}, ${k.city || ''} ${String(k.state || '').toUpperCase()} ${k.zip || ''}`.replace(/\s+/g, ' ').trim() : null, need: k.need || null },
+        bookedAt: state.booked?.start ? new Date(state.booked.start).toISOString() : null,
+        request: request ? { id: request.id, kind: request.kind, open: request.status === 'open', urgent: Boolean(request.urgent) } : null,
         ended: Boolean(state.endedAt),
         appointmentId: c.appointment_id,
         turns: c.turns,
@@ -90,7 +96,7 @@ export async function onRequestGet({ request, env }) {
     requests: requests.map((r) => ({ id: r.id, kind: r.kind, name: r.name, phone: r.phone, email: r.email, note: r.note, urgent: Boolean(r.urgent), status: r.status, notification: notification(r, outbox), conversationId: r.conversation_id, createdAt: r.created_at })),
     conversations: convs.map((r) => {
       const st = JSON.parse(r.state || '{}')
-      return { id: r.id, channel: r.channel, status: r.status, outcome: r.outcome, summary: r.summary, customerName: st.customer?.name || null, ended: Boolean(st.endedAt), turns: r.turns, createdAt: r.created_at, updatedAt: r.updated_at }
+      return { id: r.id, channel: r.channel, status: r.status, outcome: r.outcome, summary: r.summary, customerName: st.customer?.name || null, need: st.customer?.need || null, bookedAt: st.booked?.start ? new Date(st.booked.start).toISOString() : null, ended: Boolean(st.endedAt), turns: r.turns, createdAt: r.created_at, updatedAt: r.updated_at }
     }),
   })
 }
