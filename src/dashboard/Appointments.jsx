@@ -1,7 +1,7 @@
 // Appointments: who to mark, what's coming up, past results (always correctable), and people who
 // haven't booked yet. Test bookings are tagged and never counted.
 import { useState } from 'react'
-import { api, fmt } from '../lib/api.js'
+import { api, fmt, phoneText } from '../lib/api.js'
 
 const when = (iso, tz) => fmt(iso, tz, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const money = (cents) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100)
@@ -21,7 +21,7 @@ export function Appointment({ a, tz, children, compact }) {
           {!compact && (
             <>
               {' '}
-              · <a href={`tel:${a.phone}`}>{a.phone}</a>
+              · <a href={`tel:${a.phone}`}>{phoneText(a.phone)}</a>
             </>
           )}
         </p>
@@ -286,7 +286,7 @@ export default function Appointments({ me, data, reload }) {
                     {l.status === 'unqualified' && <span className="tag">Outside service area</span>}
                   </p>
                   <p className="row-sub">
-                    <a href={`tel:${l.phone}`}>{l.phone}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
+                    <a href={`tel:${l.phone}`}>{phoneText(l.phone)}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
                   </p>
                   {l.address && <p className="row-sub">{l.address}</p>}
                   <p className="row-note">{l.need}</p>

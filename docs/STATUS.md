@@ -2,6 +2,39 @@
 
 _Update at the end of every task. Newest first._
 
+## Product experience, phase 1: receptionist dashboard, customer chat, Overview, design tokens (2026-11-17) — feat/ux-phase-1; no migration
+
+- Design system:
+  - Semantic tokens in `src/index.css` cover status tones, surfaces, focus, spacing and type.
+    The tones are ok / warn / bad / info / neutral, each with text, background and dot.
+  - `src/dashboard/ui.jsx` holds Pill, PageHeader, Section and Ago.
+  - Classes are namespaced `ui-` because `.section` (marketing) and `.page-head` (admin) already existed.
+  - Shared `phoneText()` and `timeAgo()` live in `lib/api.js`.
+  - Inside the app the primary button is calm (no glow or jump), with a consistent focus ring.
+- Receptionist (owner):
+  - Overall status; channel tiles (Website chat / Browser voice / Phone calls: Not connected / Team notifications: Test mode).
+  - Needs attention inbox: who, what, phone, when received, notification state; Call / View conversation / Mark done; a "Done" history.
+  - Booked-by-receptionist list.
+  - Conversations with filters and a side-by-side detail: outcome, collected details, timed transcript, and plain-language "What the receptionist did" (internal events and AI cost hidden).
+  - Settings grouped: Answering / What it says and knows (prices etc. stay in Settings) / When someone asks for a person / Phone calls (not connected).
+  - Save is enabled only when something changed.
+- Customer chat:
+  - Full-height layout with the composer docked at the bottom, safe-area aware, 16px input (no iOS zoom).
+  - Mic button beside Send; call bar with End call.
+  - Booking card (service, time, address), shown only after the server confirmed the booking. Callback card.
+  - End and new conversation; a "Website" link only when the site is live.
+- Overview: Needs your attention first (open callbacks incl. urgent, people who haven't booked), then 30-day results.
+  - Show-up and completion rates say when they will appear, instead of showing 0.
+  - Then Upcoming, then the website as a normal card (it is no longer a black hero).
+- Shell: the active tab is accented; on phones the tab bar fades at the edge and keeps the current tab in view. Phone numbers are formatted.
+- API (additive):
+  - Receptionist list: `need`, `bookedAt`. Detail: `collected`, `bookedAt`, `request`, transcript `at`.
+  - Public state: `booked.service/address`. Info route: `website` (only when live). Overview: `requests` (null when unavailable).
+- Tests: unit 537, browser 106. New: a visual tour of 8 screens × desktop and phone, with a fictional seeded business
+  (`test/e2e/seed-tour.mjs`). It checks one h1, no sideways scroll and no page errors; `TOUR_SHOTS=<dir>` saves screenshots.
+- Not done yet: dark mode (tokens are ready, components are not themed); Appointments / Follow-ups / Settings / Ads restyle.
+  Phase 2 is the website import → domain → publish flow (PoolThru target Nov 20–23).
+
 ## Receptionist repair after the first real test (2026-11-17) — fix/receptionist-journey; migration 0027 (NOT applied)
 
 - Root causes, from the production transcript and Retell call data (no customer contact details recorded here):

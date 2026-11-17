@@ -17,6 +17,25 @@ export const fmt = (iso, timeZone, opts) => new Intl.DateTimeFormat('en-US', { t
 
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+// +18435550104 → (843) 555-0104 for US numbers; anything else is shown as stored. Links keep the E.164 value.
+export function phoneText(p) {
+  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(String(p || ''))
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || '')
+}
+
+// "just now", "12 min ago", "3 h ago", "yesterday", then a date. Always paired with an absolute time in a title.
+export function timeAgo(t, now = Date.now()) {
+  const ms = now - new Date(t).getTime()
+  const min = Math.round(ms / 60_000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min} min ago`
+  const h = Math.round(min / 60)
+  if (h < 24) return `${h} h ago`
+  if (h < 48) return 'yesterday'
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+export const whenFull = (t) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
 export const browserTimeZone = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'

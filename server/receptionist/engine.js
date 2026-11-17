@@ -620,7 +620,15 @@ export function publicState(conv, customer) {
     status: conv.status,
     outcome: conv.outcome,
     ended: Boolean(s.endedAt),
-    booked: s.booked ? { time: slotLabel(s.booked.start, customer.timezone) } : null,
+    // Only after bookAppointment persisted it (s.booked is set from its result). The customer's own details, returned
+    // only with their conversation token.
+    booked: s.booked
+      ? {
+          time: slotLabel(s.booked.start, customer.timezone),
+          service: s.customer?.need || null,
+          address: customer.appointmentMode === 'at_customer' && s.customer?.street ? `${s.customer.street}, ${s.customer.city}, ${String(s.customer.state || '').toUpperCase()} ${s.customer.zip || ''}`.trim() : null,
+        }
+      : null,
     request: s.requests?.callback ? 'callback' : s.requests?.message ? 'message' : null,
   }
 }
@@ -640,7 +648,7 @@ function summaryOf(conv, k) {
 // What the customer saw or heard (state.log), for the customer page and the owner. Older conversations without a log
 // fall back to the final text of each model answer (never text that came with a tool call).
 export function visibleTranscript(transcript, state = {}) {
-  if (Array.isArray(state.log) && state.log.length) return state.log.map((l) => ({ who: l.who, text: l.text, channel: l.channel }))
+  if (Array.isArray(state.log) && state.log.length) return state.log.map((l) => ({ who: l.who, text: l.text, channel: l.channel, at: l.at ?? null }))
   const lines = []
   for (const m of transcript) {
     if (m.role === 'user' && typeof m.content === 'string') lines.push({ who: 'customer', text: m.content })

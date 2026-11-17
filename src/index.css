@@ -22,6 +22,46 @@
   --text-muted: var(--ink-500);
   --border: var(--ink-200);
 
+  /* Semantic tokens (app). Status colors carry meaning only: ok = confirmed working/done, warn = needs review /
+     pending / test mode, bad = failed / urgent, info = informational, neutral = off / not connected / completed.
+     Each *-text is AA on its *-bg and on white. Orange is the brand accent, used sparingly (primary action, focus). */
+  --surface: var(--white);
+  --surface-sunken: var(--ink-50);
+  --surface-muted: var(--ink-100);
+  --border-strong: var(--ink-300);
+  --accent: var(--orange-500);
+  --accent-text: var(--orange-700);
+  --ok-text: #166534;
+  --ok-bg: #e8f6ec;
+  --ok-dot: #16a34a;
+  --warn-text: #92400e;
+  --warn-bg: #fff4e0;
+  --warn-dot: #d97706;
+  --bad-text: #991b1b;
+  --bad-bg: #fdecec;
+  --bad-dot: #dc2626;
+  --info-text: #1e40af;
+  --info-bg: #eaf0ff;
+  --info-dot: #2563eb;
+  --neutral-text: var(--ink-600);
+  --neutral-bg: var(--ink-100);
+  --neutral-dot: var(--ink-400);
+  --focus-ring: 0 0 0 3px rgb(255 106 26 / 0.35);
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --fs-xs: 0.78rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.5rem;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
   --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --radius-sm: 8px;
   --radius: 14px;

@@ -2,7 +2,7 @@
 // The owner can take over from the assistant, reply, pause automatic messages, adjust a few preferences, and see
 // (and prepare) texting setup. No workflow graphs, prompts or technical settings.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../lib/api.js'
+import { api, phoneText } from '../lib/api.js'
 
 const STAGE = { new: 'New', contacted: 'Contacted', replied: 'Replied', booked: 'Booked', closed: 'Closed', opted_out: 'Opted out' }
 const SOURCE = { website_form: 'Website form', booking_page: 'Booking page', sms: 'Text message', google_ads: 'Google Ads', gbp: 'Google Business Profile', call: 'Phone call', other: 'Other' }
@@ -232,7 +232,7 @@ function Conversation({ id, onBack, onChanged }) {
             <Stage stage={t.stage} /> · {SOURCE[t.source] || 'Lead'} · “{t.need}”
           </p>
           <p className="fu-contact">
-            {t.phone && <a href={`tel:${t.phone}`}>{t.phone}</a>}
+            {t.phone && <a href={`tel:${t.phone}`}>{phoneText(t.phone)}</a>}
             {t.phone && t.email && ' · '}
             {t.email && <a href={`mailto:${t.email}`}>{t.email}</a>}
             {t.smsOptedOut && <span className="fu-pill fu-pill--bad">Opted out of texts</span>}
