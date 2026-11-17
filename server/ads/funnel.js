@@ -40,31 +40,36 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
         .first()
     : leads
   const withRevenue = await revenueReady(db)
-  const a = await db
-    .prepare(
-      `SELECT count(*) AS booked,
-              coalesce(sum(p.start_at <= ?4), 0) AS past,
-              coalesce(sum(p.status IN ('showed','no_show')), 0) AS recorded,
-              coalesce(sum(p.status = 'showed'), 0) AS attended,
-              coalesce(sum(p.status = 'no_show'), 0) AS no_show,
-              coalesce(sum(p.status = 'showed' AND o.work = 'completed'), 0) AS completed,
-              sum(CASE WHEN p.status = 'showed' THEN o.value_cents END) AS estimated,
-              coalesce(sum(p.status = 'showed' AND o.value_cents IS NOT NULL), 0) AS estimated_n
-              ${withRevenue ? `, sum(CASE WHEN p.status = 'showed' THEN rev.invoiced END) AS invoiced, coalesce(sum(p.status = 'showed' AND rev.invoiced IS NOT NULL), 0) AS invoiced_n,
-                 sum(CASE WHEN p.status = 'showed' THEN rev.paid END) AS paid, coalesce(sum(p.status = 'showed' AND rev.paid IS NOT NULL), 0) AS paid_n` : ''}
-         FROM appointments p
+  const cohortJoin = `FROM appointments p
          JOIN leads l ON l.id = p.lead_id AND l.customer = p.customer
          LEFT JOIN lead_attribution a ON a.lead_id = l.id AND a.customer = l.customer
-         LEFT JOIN appointment_outcomes o ON o.appointment_id = p.id AND o.customer = p.customer
-         ${withRevenue ? `LEFT JOIN (${CURRENT_REVENUE_SQL}) rev ON rev.appointment_id = p.id` : ''}
-        WHERE p.customer = ?1 AND p.status <> 'cancelled' AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')} ${scopeSql}`,
+         LEFT JOIN appointment_outcomes o ON o.appointment_id = p.id AND o.customer = p.customer`
+  const cohortWhere = `p.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')} ${scopeSql}`
+  // Stages count LEADS, each once, at the furthest real step (a lead that cancelled and rebooked is booked, not
+  // cancelled; a no-show who later showed up attended). Only real bookings count: 'pending' is a reservation in
+  // progress (or abandoned), never a booking.
+  const a = await db
+    .prepare(
+      `SELECT coalesce(sum(live > 0), 0) AS booked, coalesce(sum(past > 0), 0) AS past,
+              coalesce(sum(showed > 0 OR no_show > 0), 0) AS recorded, coalesce(sum(showed > 0), 0) AS attended,
+              coalesce(sum(showed = 0 AND no_show > 0), 0) AS no_show, coalesce(sum(completed > 0), 0) AS completed,
+              coalesce(sum(live = 0 AND cancelled > 0), 0) AS cancelled
+         FROM (SELECT l.id,
+                      sum(p.status IN ('booked','showed','no_show')) AS live,
+                      sum(p.status IN ('booked','showed','no_show') AND p.start_at <= ?4) AS past,
+                      sum(p.status = 'showed') AS showed, sum(p.status = 'no_show') AS no_show,
+                      sum(p.status = 'showed' AND o.work = 'completed') AS completed, sum(p.status = 'cancelled') AS cancelled
+                 ${cohortJoin} WHERE ${cohortWhere} GROUP BY l.id)`,
     )
     .bind(customerId, since, internal, now)
     .first()
-  const cancelled = await db
+  // Money is per VISIT that happened (each is a job): the current amount of each kind, never mixed with another kind.
+  const m = await db
     .prepare(
-      `SELECT count(*) AS n FROM appointments p JOIN leads l ON l.id = p.lead_id AND l.customer = p.customer LEFT JOIN lead_attribution a ON a.lead_id = l.id AND a.customer = l.customer
-        WHERE p.customer = ?1 AND p.status = 'cancelled' AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')} ${scopeSql}`,
+      `SELECT sum(o.value_cents) AS estimated, coalesce(sum(o.value_cents IS NOT NULL), 0) AS estimated_n
+              ${withRevenue ? `, sum(rev.invoiced) AS invoiced, coalesce(sum(rev.invoiced IS NOT NULL), 0) AS invoiced_n, sum(rev.paid) AS paid, coalesce(sum(rev.paid IS NOT NULL), 0) AS paid_n` : ''}
+         ${cohortJoin} ${withRevenue ? `LEFT JOIN (${CURRENT_REVENUE_SQL}) rev ON rev.appointment_id = p.id` : ''}
+        WHERE p.status = 'showed' AND ${cohortWhere}`,
     )
     .bind(customerId, since, internal)
     .first()
@@ -73,7 +78,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
     leads: n(leads?.n),
     qualified: n(leads?.qualified),
     booked: n(a?.booked),
-    cancelled: n(cancelled?.n),
+    cancelled: n(a?.cancelled),
     past: n(a?.past),
     outcomeRecorded: n(a?.recorded),
     attended: n(a?.attended),
@@ -82,12 +87,12 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
   }
   const money = (sum, count) => (n(count) > 0 ? n(sum) : null)
   const revenue = {
-    estimatedCents: money(a?.estimated, a?.estimated_n),
-    estimatedJobs: n(a?.estimated_n),
-    invoicedCents: withRevenue ? money(a?.invoiced, a?.invoiced_n) : null,
-    invoicedJobs: n(a?.invoiced_n),
-    paidCents: withRevenue ? money(a?.paid, a?.paid_n) : null,
-    paidJobs: n(a?.paid_n),
+    estimatedCents: money(m?.estimated, m?.estimated_n),
+    estimatedJobs: n(m?.estimated_n),
+    invoicedCents: withRevenue ? money(m?.invoiced, m?.invoiced_n) : null,
+    invoicedJobs: n(m?.invoiced_n),
+    paidCents: withRevenue ? money(m?.paid, m?.paid_n) : null,
+    paidJobs: n(m?.paid_n),
   }
   // Costs only for ad leads (spend is ad spend), only with measured spend and something to divide by.
   const per = (count) => (adsOnly && measured && count > 0 ? Math.round(spend.s / count) : null)

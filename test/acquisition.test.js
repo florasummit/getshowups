@@ -205,3 +205,47 @@ test('attribution through the AI receptionist: the conversation keeps campaign p
   const row = db.sql.prepare('SELECT source, campaign_id, details FROM lead_attribution WHERE lead_id = ?').get(id)
   assert.deepEqual([row.source, row.campaign_id, JSON.parse(row.details).gclid], ['google_ads', 'camp-pools', 'present'])
 })
+
+test('spend guardrails: no approval → no budget change; never above the ceiling; a lowered approval blocks increases; a created campaign can’t be edited or re-approved (area/keywords can’t widen)', async () => {
+  const { setCampaignBudget, saveDraft, approveCampaign } = await import('../server/ads/campaigns.js')
+  const { approveBudget } = await import('../server/ads/budget.js')
+  const c = cust('pools')
+  db.sql.prepare("INSERT INTO ad_profiles (customer, industry, services, updated_at) VALUES ('pools', 'Pool service', '[\"Weekly pool care\"]', 1)").run()
+  assert.equal((await setCampaignBudget(env, c, 'camp-pools', 2100, 'owner')).error, 'budget_approval_required')
+  assert.equal((await approveBudget(db, 'pools', 60000, 'owner@pools.example', NOW)).ok, true)
+  assert.equal((await setCampaignBudget(env, c, 'camp-pools', 500_000, 'owner')).error, 'exceeds_approved_budget')
+  await approveBudget(db, 'pools', 15000, 'owner@pools.example', NOW + 1) // owner lowers the limit to $150/month
+  assert.equal((await setCampaignBudget(env, c, 'camp-pools', 2100, 'owner')).error, 'exceeds_approved_budget')
+  const wider = { version: 1, platform: 'google', name: 'x', dailyBudgetCents: 500, geo: { zips: ['29403', '90210'] }, finalUrl: 'https://getshowups.com/book/pools', google: { keywords: [{ text: 'pool service', match: 'PHRASE' }], negativeKeywords: [], headlines: ['A', 'B', 'C'], descriptions: ['d one', 'd two'] } }
+  assert.equal((await saveDraft(env, c, { id: 'camp-pools', spec: wider })).error, 'not_editable')
+  assert.equal((await approveCampaign(env, c, 'camp-pools', 'owner')).error, 'not_editable')
+  const row = db.sql.prepare("SELECT spec, daily_budget_cents FROM ad_campaigns WHERE id = 'camp-pools'").get()
+  assert.deepEqual([row.spec, row.daily_budget_cents], ['{}', 2000], 'nothing changed')
+})
+
+test('funnel counts each lead once at its furthest real step: pending is not a booking, rebooked is not cancelled, partial payment is not the invoice (HVAC)', async () => {
+  business('hvac')
+  const extra = (leadId, status, hoursAfter) => {
+    const start = NOW - DAY + hoursAfter * 3_600_000
+    db.sql.prepare("INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES (?, 'hvac', ?, ?, ?, ?, 'e', 1, 1)").run(`X${leadId}${status}`, leadId, start, start + 3_600_000, status)
+  }
+  lead('hvac', { appt: { status: 'pending' } }) // a reservation in progress / abandoned
+  const rebooked = lead('hvac', { appt: { status: 'cancelled' } })
+  extra(rebooked, 'booked', 30)
+  const secondTry = lead('hvac', { appt: { status: 'no_show', past: true } })
+  extra(secondTry, 'showed', 40)
+  const gone = lead('hvac', { appt: { status: 'cancelled' } })
+  const f0 = await funnel(db, 'hvac', { now: NOW })
+  assert.deepEqual([f0.stages.leads, f0.stages.booked, f0.stages.cancelled, f0.stages.attended, f0.stages.noShow, f0.stages.outcomeRecorded], [4, 2, 1, 1, 0, 1])
+  assert.ok(gone)
+  // Money: invoiced $500, paid $300 so far, a corrected invoice; each kind kept apart, the latest entry counted once.
+  const visit = `X${secondTry}showed`
+  const c = cust('hvac')
+  await recordRevenue(db, c, visit, 'invoiced', 45000, 'owner@hvac.example', NOW)
+  await recordRevenue(db, c, visit, 'invoiced', 50000, 'owner@hvac.example', NOW + 1)
+  await recordRevenue(db, c, visit, 'paid', 30000, 'owner@hvac.example', NOW + 2)
+  const f = await funnel(db, 'hvac', { now: NOW })
+  assert.deepEqual([f.revenue.estimatedCents, f.revenue.invoicedCents, f.revenue.paidCents, f.revenue.paidJobs], [null, 50000, 30000, 1])
+  // A cancelled visit can't carry money; a pending one either.
+  assert.equal((await recordRevenue(db, c, `A${gone}`, 'paid', 100, 'o', NOW)).error, 'not_found')
+})

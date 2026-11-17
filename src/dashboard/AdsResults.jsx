@@ -57,7 +57,7 @@ export default function AdsResults({ testAccount }) {
           <table className="ar-table">
             <thead>
               <tr>
-                <th scope="col">Last {days} days</th>
+                <th scope="col">Last {f.range.days} days</th>
                 <th scope="col">Count</th>
                 <th scope="col">Cost each</th>
                 <th scope="col">

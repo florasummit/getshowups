@@ -13,4 +13,5 @@ CREATE TABLE IF NOT EXISTS revenue_entries (
   recorded_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS revenue_entries_appt ON revenue_entries (appointment_id, kind, id);
-CREATE INDEX IF NOT EXISTS revenue_entries_customer ON revenue_entries (customer, recorded_at);
+-- Current amounts per business: latest id per (appointment, kind) within one business (server/revenue.js).
+CREATE INDEX IF NOT EXISTS revenue_entries_customer ON revenue_entries (customer, appointment_id, kind, id);

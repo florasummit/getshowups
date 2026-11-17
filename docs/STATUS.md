@@ -20,6 +20,14 @@ _Update at the end of every task. Newest first._
   - Google Ads developer token at Test level (real accounts need Explorer/Basic access).
   - ADS_LIVE_LAUNCH, ADS_CONVERSIONS_ENABLED (Data Manager scope), ADS_AUTOMATION_ENABLED.
 - Needs approval: migration 0028, merge/deploy.
+- Release audit (2026-11-17):
+  - **Fixed: the funnel counted appointments, not leads.** 'pending' reservations were counted as bookings, and a lead that cancelled and rebooked was counted both booked and cancelled. Stages now count each lead once at its furthest real step; money stays per visit.
+  - Revenue index changed to (customer, appointment_id, kind, id) (covering).
+  - Results header follows the data shown.
+  - Added a regression test and spend-guardrail tests.
+  - Migration 0028, tested on production's exported schema (structure only) with 50k synthetic leads: adds 1 table + 2 indexes, changes nothing existing, is idempotent, and existing rows are byte-identical. Constraints refuse bad kinds, negative amounts and orphan rows.
+  - Old code (main) never touches revenue_entries, so it runs on the migrated schema. Recovery rehearsed: full dump → restore identical; dropping 0028's objects restores the exact schema. D1 Time Travel is available.
+  - Correction: Google retired developer tokens (2026-09-09). Live use is blocked by the Cloud project's Google Ads API access level (Test), not by a token.
 
 ## Website Studio: one content system, legal pages, starter sites, own hosting (2026-11-17) — feat/website-studio-complete; no migration
 
