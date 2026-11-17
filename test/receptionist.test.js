@@ -27,6 +27,7 @@ const MOCK = 'http://127.0.0.1:9911'
 const KEY = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
 const SECRETS = ['sk-ant-test-SECRET', 'retell_SECRET', '1//rt', 'ya29.at', KEY]
 const DAY = 864e5
+const WS_SECRET = 'ws_secret_for_tests_0123456789abcdef0123456789'
 
 function d1({ skip = [] } = {}) {
   const sql = new DatabaseSync(':memory:')
@@ -435,12 +436,14 @@ test('voice (Retell, simulated provider): our server creates the call; the socke
   enable('alpha', { greeting: 'Thanks for calling alpha!' })
   assert.equal((await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })).json().error, 'voice_not_configured')
   Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912' })
+  assert.equal((await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })).json().error, 'voice_not_configured', 'no socket secret → no voice')
+  env.RETELL_WS_SECRET = WS_SECRET
   const v = await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })
   assert.equal(v.status, 200)
   assert.equal(v.json().accessToken, 'web_access_token')
   const create = fetches.find((f) => f.url.endsWith('/v3/create-web-call'))
   assert.equal(create.init.headers.Authorization, 'Bearer retell_SECRET')
-  assert.equal(JSON.parse(create.init.body).agent_id, 'agent_abc123def')
+  assert.deepEqual([JSON.parse(create.init.body).agent_id, JSON.parse(create.init.body).agent_version], ['agent_abc123def', 'latest'], 'the draft agent works without publishing')
   const row = db.sql.prepare('SELECT * FROM receptionist_calls').get()
   assert.equal(row.customer, 'alpha')
   // Fake socket.
@@ -473,6 +476,61 @@ test('voice (Retell, simulated provider): our server creates the call; the socke
   assert.ok(db.sql.prepare('SELECT ended_at FROM receptionist_calls').get().ended_at)
   assert.equal(await attachRetellSocket(env, ws(), row.call_id), false, 'an ended call cannot reconnect')
   void startVoiceCall
+})
+
+test('voice socket route: refuses without the secret path segment (Retell sends no auth), wrong secret, non-WebSocket and IP outside the allowlist', async () => {
+  const route = await import('../functions/api/receptionist/llm/[secret]/[call].js')
+  const get = (secret, headers = { Upgrade: 'websocket' }) => route.onRequestGet({ request: new Request(`${ORIGIN}/api/receptionist/llm/${secret}/call_x`, { headers: { 'CF-Connecting-IP': '100.20.5.228', ...headers } }), env, params: { secret, call: 'call_x' } })
+  assert.equal((await get(WS_SECRET)).status, 503, 'not configured until RETELL_WS_SECRET is set')
+  env.RETELL_WS_SECRET = WS_SECRET
+  assert.equal((await get(WS_SECRET, {})).status, 426)
+  assert.equal((await get('x'.repeat(48))).status, 403)
+  env.RETELL_WS_IPS = '203.0.113.50'
+  assert.equal((await get(WS_SECRET)).status, 403, 'source IP not allowed')
+})
+
+test('Retell setup script: dry run writes nothing; creates the Custom LLM agent once; re-runs update the draft; duplicates stop it; never publishes; secrets never printed', async () => {
+  const { setupAgent, AGENT_NAME } = await import('../scripts/retell-setup.mjs')
+  const R = 'http://127.0.0.1:9913'
+  let agents = []
+  const writes = []
+  const prev = globalThis.fetch
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url)
+    const json = (s, b) => new Response(JSON.stringify(b), { status: s })
+    assert.equal(init.headers.Authorization, 'Bearer key_retell_SECRET_123456')
+    if (u === `${R}/list-voices`) return json(200, [{ voice_id: 'retell-Cimo', voice_name: 'Adrian', provider: 'platform', gender: 'male' }])
+    if (u.startsWith(`${R}/v2/list-agents`)) return json(200, { items: agents.map((a) => ({ agent_id: a.agent_id, agent_name: a.agent_name })), has_more: false })
+    if (u === `${R}/create-agent` && init.method === 'POST') {
+      const b = JSON.parse(init.body)
+      writes.push(['create', b])
+      agents.push({ agent_id: 'agent_new123456', agent_name: b.agent_name })
+      return json(201, { agent_id: 'agent_new123456', version: 0, is_published: false })
+    }
+    if (u === `${R}/update-agent/agent_new123456` && init.method === 'PATCH') {
+      writes.push(['update', JSON.parse(init.body)])
+      return json(200, { agent_id: 'agent_new123456', version: 0, is_published: false })
+    }
+    throw new Error(`unexpected ${init.method} ${u}`)
+  }
+  const lines = []
+  try {
+    const opts = { apiKey: 'key_retell_SECRET_123456', wsSecret: WS_SECRET, base: R, log: (l) => lines.push(l) }
+    assert.deepEqual(await setupAgent({ ...opts, apply: false }), { ok: true, dryRun: true, agentId: null, action: 'create' })
+    assert.equal(writes.length, 0)
+    const created = await setupAgent({ ...opts, apply: true })
+    assert.deepEqual([created.ok, created.action, created.agentId, created.published], [true, 'created', 'agent_new123456', false])
+    assert.deepEqual(writes[0][1], { agent_name: AGENT_NAME, voice_id: 'retell-Cimo', language: 'en-US', response_engine: { type: 'custom-llm', llm_websocket_url: `wss://getshowups.com/api/receptionist/llm/${WS_SECRET}` } })
+    assert.equal((await setupAgent({ ...opts, apply: true })).action, 'updated', 're-run updates, never a second agent')
+    assert.equal(agents.length, 1)
+    agents.push({ agent_id: 'agent_dupe999999', agent_name: AGENT_NAME })
+    assert.deepEqual(await setupAgent({ ...opts, apply: true }), { ok: false, error: 'duplicate_agents', agentIds: ['agent_new123456', 'agent_dupe999999'] })
+    assert.equal((await setupAgent({ ...opts, voiceId: 'nope' })).error, 'voice_not_found')
+    assert.equal((await setupAgent({ ...opts, wsSecret: 'short' })).error, 'ws_secret_missing')
+    assert.ok(!lines.join('\n').includes(WS_SECRET) && !lines.join('\n').includes('key_retell'), 'no secret in output')
+  } finally {
+    globalThis.fetch = prev
+  }
 })
 
 test('CRM: notes are skipped unless GoHighLevel is connected; the visible transcript hides model internals; before migration 0026 nothing is offered', async () => {

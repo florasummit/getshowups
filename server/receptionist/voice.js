@@ -2,9 +2,10 @@
 // conversation, knowledge and tools are OURS — the same engine as website chat).
 //
 // Flow: the customer clicks "Talk" → our server (not the browser) creates a Retell web call for a shared GetShowUps
-// agent whose response engine is a custom LLM pointing at wss://<site>/api/receptionist/llm. We record the call id
-// against the business and a new voice conversation. Retell then connects to /api/receptionist/llm/<call_id>; that
-// call id — unguessable and created by us — is the only thing that routes a call to a business.
+// agent whose response engine is a custom LLM pointing at wss://<site>/api/receptionist/llm/<RETELL_WS_SECRET> (set up
+// by scripts/retell-setup.mjs). We record the call id against the business and a new voice conversation. Retell then
+// connects to /api/receptionist/llm/<secret>/<call_id>; after the secret, that call id — unguessable and created by us —
+// is the only thing that routes a call to a business.
 //
 // Protocol (docs.retellai.com/api-references/llm-websocket): Retell sends JSON text frames with interaction_type
 // ping_pong | update_only | response_required | reminder_required (call_details when asked); we answer with
@@ -17,7 +18,8 @@ import { knowledgeFor } from './knowledge.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.RETELL_API_MOCK_ORIGIN) ? env.RETELL_API_MOCK_ORIGIN : 'https://api.retellai.com')
-export const voiceConfigured = (env) => Boolean(env.RETELL_API_KEY && /^agent_[A-Za-z0-9]{6,80}$/.test(env.RETELL_AGENT_ID || ''))
+// Voice needs the Retell key, our agent, and the socket secret the agent's URL carries.
+export const voiceConfigured = (env) => Boolean(env.RETELL_API_KEY && /^agent_[A-Za-z0-9]{6,80}$/.test(env.RETELL_AGENT_ID || '') && String(env.RETELL_WS_SECRET || '').length >= 32)
 const CALL_TTL_MS = 60 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }
@@ -29,7 +31,9 @@ export async function startVoiceCall(env, customer, now = Date.now()) {
     res = await fetch(`${retellBase(env)}/v3/create-web-call`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, metadata: { business: customer.id, conversation: conv.id } }),
+      // 'latest' = the agent's newest version, draft included (we never publish automatically); override with
+      // RETELL_AGENT_VERSION (e.g. 'latest_published' or a version number) once a version is published.
+      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id } }),
       signal: AbortSignal.timeout(10_000),
     })
   } catch {

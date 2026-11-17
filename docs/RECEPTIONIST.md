@@ -56,12 +56,27 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
    ```
    Estimated cost: about $0.01–0.03 per customer message on Claude Opus 5.5 with prompt caching, capped at $5 per
    business per day.
-3. **Voice** (paid usage): create a Retell account (retellai.com; new accounts get trial credit).
-   - **Create an agent:** in the Retell dashboard → Agents → Create → **Custom LLM**, with LLM WebSocket URL
-     `wss://getshowups.com/api/receptionist/llm`. Choose a voice and copy the agent id (`agent_…`).
-   - **Store the secrets:** put Retell's API key and that agent id into Keychain, then into Cloudflare as
-     `RETELL_API_KEY` and `RETELL_AGENT_ID`.
-   - **Cost:** roughly $0.07–0.15 per minute (Retell platform plus voice; check your Retell plan). Model cost as above.
+3. **Voice** (paid usage when calls are made): Retell account (retellai.com). The dashboard only offers Single-Prompt /
+   Conversational Flow agents; a **Custom LLM** agent is created through Retell's API by `scripts/retell-setup.mjs`
+   (`POST /create-agent` with `response_engine: { type: 'custom-llm', llm_websocket_url }`).
+   - Retell sends no authentication on the LLM WebSocket, so the agent's URL carries a secret path segment:
+     `wss://getshowups.com/api/receptionist/llm/<RETELL_WS_SECRET>`. Retell appends the call id; the server checks the
+     secret, then routes only by a call id it created. Optional `RETELL_WS_IPS` (Retell documents 100.20.5.228)
+     restricts the source IP.
+   - Store the Retell API key (dashboard → API Keys) in Keychain: `security add-generic-password -a getshowups -s getshowups-retell-api-key -w`.
+   - Setup (dry run first; `--apply` creates once or updates the draft; never publishes, calls or buys):
+     ```
+     S=$(openssl rand -hex 32)
+     printf %s "$S" | npx wrangler pages secret put RETELL_WS_SECRET --project-name getshowups
+     { security find-generic-password -a getshowups -s getshowups-retell-api-key -w; printf '%s\n' "$S"; } | node scripts/retell-setup.mjs --apply
+     unset S
+     security find-generic-password -a getshowups -s getshowups-retell-api-key -w | npx wrangler pages secret put RETELL_API_KEY --project-name getshowups
+     printf %s agent_… | npx wrangler pages secret put RETELL_AGENT_ID --project-name getshowups
+     ```
+     Re-running rotates the socket secret (both places are updated together).
+   - Web calls use `agent_version: 'latest'` (the draft); set `RETELL_AGENT_VERSION` after publishing a version.
+   - **Cost:** roughly $0.07–0.15 per minute of calls (Retell platform plus voice; check your plan). Creating the agent
+     is free. Model cost as above.
 4. **Deploy** production (new secrets apply to the next deployment).
 
 Kill switch: `RECEPTIONIST_ENABLED=false` hides chat and voice everywhere. Owners can also switch their own off.
