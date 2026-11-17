@@ -286,6 +286,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   `redirects` content (409 studio_publish_off); drafts/previews unaffected. Never publish a draft automatically.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
+  Money per visit (server/revenue.js, migration 0028): estimated = appointment_outcomes.value_cents; invoiced and paid =
+  revenue_entries (append-only; latest row per kind is current; only for 'showed' visits; recorded_by is a ref, never an
+  email). Never present an estimate or an invoice as money received.
+  Acquisition results have ONE definition: server/ads/funnel.js (cohort = leads created in the period, test records
+  excluded; costs only with measured spend and a non-zero count; ROAS from PAID revenue only; unattributed leads counted
+  as such). adResults/adSummary are views of it; diagnostics (diagnose) are deterministic with minimum samples and never
+  recommend more spend. Ad attribution also rides through website forms (hidden utm/gclid fields) and the receptionist
+  (conversation keeps campaign params + gclidPresent only, never a click id).
   appointments.status 'showed'/'no_show' = it happened or not; appointment_outcomes.work = job completed or not
   (arrival is never completion). value_cents is self-reported booking value: never call it revenue caused by
   GetShowUps. Service addresses never go to logs, events, or platform admin views. Booked times are start times

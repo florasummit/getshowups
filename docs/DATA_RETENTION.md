@@ -88,6 +88,9 @@ Staff identities are kept for accountability. Limits of its tamper evidence: doc
 - `thread_messages` holds conversation text for the owner's inbox. It is never logged, never shown in admin views, and
   is removed after 365 days (cron, `purgeOldMessages`, 500 per run). Delivery counts stay in the audit log (no text).
 - `lead_threads`, `followup_settings`, `sms_registrations`, `sms_registration_extra`, `sms_provider_objects`, `sms_accounts` and `thread_messages` are in `ERASED_TABLES` (account deletion); the business's Twilio subaccount is closed first (integrations step; Twilio releases its numbers).
+- Visit money (migration 0028): `revenue_entries` (invoiced / paid amounts per visit, append-only, recorder stored as a
+  reference) is in `ERASED_TABLES`; kept with the appointment otherwise. Receptionist conversations started from an ad
+  keep only the campaign parameters and whether a click id was present (never the click id).
 - AI receptionist (migration 0026): `receptionist_conversations` (transcripts incl. what customers typed or said),
   `receptionist_events`, `receptionist_calls`, `receptionist_settings` and (migration 0027) `receptionist_requests`
   (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,

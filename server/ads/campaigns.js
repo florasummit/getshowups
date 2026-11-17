@@ -10,6 +10,7 @@ import { normalizeWebsiteUrl } from '../url.js'
 import { conversionsEnabled } from './conversions.js'
 import { adsHold } from './holds.js'
 import { recordEvent } from '../auditlog.js'
+import { funnel } from './funnel.js'
 
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
@@ -513,43 +514,25 @@ export async function syncMetrics(env, now = Date.now(), limit = 25) {
 }
 
 // ---------- results ----------
-// Spend comes from the platforms; leads/bookings/jobs from our own records for attributed leads only.
-// Revenue is the owner-reported booking value; there is no verified payment or incremental figure.
-export async function adResults(db, customer, now = Date.now()) {
-  const since = now - 30 * 86400000
-  const sinceDay = new Date(since).toISOString().slice(0, 10)
-  const one = (sql, ...a) => db.prepare(sql).bind(customer, ...a).first()
-  const spend = await one('SELECT coalesce(sum(spend_cents),0) AS s, count(*) AS n, coalesce(sum(clicks),0) AS c FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2', sinceDay)
-  const leads = await one(
-    `SELECT count(*) AS n, coalesce(sum(CASE WHEN l.status <> 'unqualified' THEN 1 ELSE 0 END),0) AS q FROM lead_attribution a JOIN leads l ON l.id = a.lead_id
-      WHERE a.customer = ?1 AND a.source IN ('google_ads','meta_lead_form','meta_ad_click') AND a.created_at >= ?2`,
-    since,
-  )
-  const appts = await one(
-    `SELECT count(*) AS booked,
-            coalesce(sum(CASE WHEN o.work = 'completed' THEN 1 ELSE 0 END),0) AS completed,
-            coalesce(sum(CASE WHEN o.work = 'completed' THEN o.value_cents ELSE 0 END),0) AS value,
-            coalesce(sum(CASE WHEN o.work = 'completed' AND o.value_cents IS NOT NULL THEN 1 ELSE 0 END),0) AS valued
-       FROM lead_attribution a JOIN appointments p ON p.lead_id = a.lead_id LEFT JOIN appointment_outcomes o ON o.appointment_id = p.id
-      WHERE a.customer = ?1 AND a.source IN ('google_ads','meta_lead_form','meta_ad_click') AND a.created_at >= ?2 AND p.status <> 'cancelled'`,
-    since,
-  )
+// One definition of results: server/ads/funnel.js (spend from the platforms; leads → bookings → visits → jobs → money
+// from our own records, ad-attributed leads only, test records excluded). These keep their existing shapes for callers.
+// Revenue: the owner's estimated job value, plus invoiced/paid amounts recorded per visit; never "caused by ads".
+export async function adResults(db, customer, now = Date.now(), internal = '[]') {
+  const f = await funnel(db, customer, { days: 30, scope: 'ads', internal, now })
   const approval = await currentApproval(db, customer)
-  const hasSpend = (spend?.n ?? 0) > 0
-  const per = (n) => (hasSpend && n > 0 ? Math.round(spend.s / n) : null)
   const { results: actions } = await db.prepare('SELECT kind, status, reason, at FROM ad_actions WHERE customer = ?1 ORDER BY at DESC LIMIT 10').bind(customer).all()
   return {
-    spendCents: hasSpend ? spend.s : null,
-    qualifiedLeads: leads?.q ?? 0,
-    leads: leads?.n ?? 0,
-    booked: appts?.booked ?? 0,
-    completedJobs: appts?.completed ?? 0,
-    reportedRevenueCents: (appts?.valued ?? 0) > 0 ? appts.value : null,
-    verifiedPaymentsCents: null,
+    spendCents: f.spend.cents,
+    qualifiedLeads: f.stages.qualified,
+    leads: f.stages.leads,
+    booked: f.stages.booked,
+    completedJobs: f.stages.completed,
+    reportedRevenueCents: f.revenue.estimatedCents,
+    verifiedPaymentsCents: f.revenue.paidCents,
     incrementalRevenueCents: null,
-    costPerQualifiedLeadCents: per(leads?.q ?? 0),
-    costPerBookingCents: per(appts?.booked ?? 0),
-    costPerCompletedJobCents: per(appts?.completed ?? 0),
+    costPerQualifiedLeadCents: f.cost.perQualified,
+    costPerBookingCents: f.cost.perBooking,
+    costPerCompletedJobCents: f.cost.perCompleted,
     approvedMonthlyCents: approval?.monthly_cents ?? null,
     dailyCeilingCents: approval ? dailyCeilingCents(approval.monthly_cents) : null,
     actions,
@@ -564,38 +547,17 @@ export { logAction }
 //     (lead_attribution), excluding test-marked leads; bookings exclude pending reservations and
 //     cancelled appointments, show-ups are appointments marked 'showed';
 //   - cost per booking / per show-up only when there is spend AND a count to divide by.
-export async function adSummary(db, customerId, now = Date.now()) {
-  const since = now - 30 * 86400000
-  const sinceDay = new Date(since).toISOString().slice(0, 10)
-  const m = await db
-    .prepare('SELECT count(*) AS n, coalesce(sum(spend_cents), 0) AS s, coalesce(sum(clicks), 0) AS c FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2')
-    .bind(customerId, sinceDay)
-    .first()
-  const f = await db
-    .prepare(
-      `SELECT count(DISTINCT a.lead_id) AS leads,
-              count(DISTINCT CASE WHEN p.status IN ('booked', 'showed', 'no_show') THEN p.id END) AS booked,
-              count(DISTINCT CASE WHEN p.status = 'showed' THEN p.id END) AS showed
-         FROM lead_attribution a
-         LEFT JOIN appointments p ON p.lead_id = a.lead_id AND p.customer = a.customer
-        WHERE a.customer = ?1 AND a.source IN ('google_ads', 'meta_ad_click', 'meta_lead_form') AND a.created_at >= ?2
-          AND a.lead_id NOT IN (SELECT lead_id FROM test_marks WHERE customer = ?1 AND is_test = 1)`,
-    )
-    .bind(customerId, since)
-    .first()
-  const measured = (m?.n ?? 0) > 0
-  const per = (n) => (measured && n > 0 ? Math.round(m.s / n) : null)
+export async function adSummary(db, customerId, now = Date.now(), internal = '[]') {
+  const f = await funnel(db, customerId, { days: 30, scope: 'ads', internal, now })
   const conn = await db.prepare("SELECT extra FROM ad_connections WHERE customer = ?1 AND platform = 'google'").bind(customerId).first()
-  const booked = f?.booked ?? 0
-  const showed = f?.showed ?? 0
   return {
-    spendCents: measured ? m.s : null,
-    clicks: measured ? m.c : null,
-    leads: f?.leads ?? 0,
-    booked,
-    showed,
-    costPerBookingCents: per(booked),
-    costPerShowUpCents: per(showed),
+    spendCents: f.spend.cents,
+    clicks: f.spend.clicks,
+    leads: f.stages.leads,
+    booked: f.stages.booked,
+    showed: f.stages.attended,
+    costPerBookingCents: f.cost.perBooking,
+    costPerShowUpCents: f.cost.perAttended,
     // Results come from a Google Ads TEST account: real API data, but no real ads ran (labelled in the UI).
     testAccount: JSON.parse(conn?.extra || '{}').testAccount === true,
   }

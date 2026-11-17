@@ -35,6 +35,13 @@ const VOICE_ERRORS = {
   start: 'Couldn’t start talking. Try again or keep typing.',
 }
 const tel = (p) => `tel:${p.replace(/[^\d+]/g, '')}`
+// The ad parameters this page was opened with (a website link from an ad carries them); validated on the server.
+const adParams = () => {
+  const q = new URLSearchParams(window.location.search)
+  const out = {}
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'gclid']) if (q.get(k)) out[k] = q.get(k).slice(0, 200)
+  return out
+}
 
 function Mic() {
   return (
@@ -103,7 +110,7 @@ export default function ChatPage({ id }) {
     setSending(true)
     if (value === undefined) setText('')
     setLines((l) => [...l, { who: 'customer', text: t, channel: 'chat' }])
-    const { status, data } = await api(`/api/receptionist/${id}/chat`, { method: 'POST', body: { text: t, ...(conv ? { conversationId: conv.id, token: conv.token } : {}) } })
+    const { status, data } = await api(`/api/receptionist/${id}/chat`, { method: 'POST', body: { text: t, ...(conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() }) } })
     setSending(false)
     if (status === 200) {
       setConv({ id: data.conversationId, token: data.token })
@@ -121,7 +128,7 @@ export default function ChatPage({ id }) {
   const startVoice = async () => {
     if (voice.state === 'connecting' || voice.state === 'live' || outcome.ended) return
     setVoice({ state: 'connecting', live: [] })
-    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: conv ? { conversationId: conv.id, token: conv.token } : {} })
+    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() } })
     if (status !== 200) return setVoice({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start })
     const c = { id: data.conversationId, token: data.token }
     setConv(c)

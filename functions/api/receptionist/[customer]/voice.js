@@ -24,7 +24,7 @@ export async function onRequestPost({ request, env, params }) {
       if (!existing) return json(404, { error: 'conversation_not_found' })
       if (existing.state.endedAt) return json(410, { error: 'conversation_ended' })
     }
-    const r = await startVoiceCall(env, customer, Date.now(), existing)
+    const r = await startVoiceCall(env, customer, Date.now(), existing, body?.attribution)
     if (!r.ok) return json(502, { error: r.error })
     return json(200, { accessToken: r.accessToken, callId: r.callId, transport: r.transport, iceServers: r.iceServers, conversationId: r.conversationId, token: await conversationToken(env, r.conversationId) })
   } catch (err) {

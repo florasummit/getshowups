@@ -3,6 +3,7 @@
 // creates it PAUSED and nothing spends until the owner presses Start.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
+import AdsResults from './AdsResults.jsx'
 
 const money = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: c % 100 ? 2 : 0 })}`)
 const toCents = (v) => (v === '' || v == null ? null : Math.round(Number(v) * 100))
@@ -66,36 +67,6 @@ function readReturn() {
   if (!ok && !err) return null
   if (ok) return RETURNS[ok] ? { ok: RETURNS[ok] } : null
   return { error: RETURNS[err] || errorText(err) }
-}
-
-function Results({ r }) {
-  // Every number says where it comes from; "—" = not available yet.
-  const tiles = [
-    ['Ad spend', money(r.spendCents), r.spendCents == null ? 'not available yet' : 'from Google'],
-    ['Qualified leads', r.qualifiedLeads, 'your bookings'],
-    ['Booked', r.booked, 'your bookings'],
-    ['Jobs completed', r.completedJobs, 'you marked'],
-    ['Reported job value', money(r.reportedRevenueCents), r.reportedRevenueCents == null ? 'not reported' : 'you reported'],
-    ['Cost per booking', money(r.costPerBookingCents), r.costPerBookingCents == null ? 'not enough data' : 'calculated'],
-    ['Cost per completed job', money(r.costPerCompletedJobCents), r.costPerCompletedJobCents == null ? 'not enough data' : 'calculated'],
-  ]
-  return (
-    <>
-      <section aria-label="Ad results, last 30 days" className="stats">
-        {tiles.map(([label, value, source]) => (
-          <div key={label} className="stat" data-source={source}>
-            <p className="stat-value stat-value--sm">{value}</p>
-            <p className="stat-label">{label}</p>
-            <p className="stat-source">{source}</p>
-          </div>
-        ))}
-      </section>
-      <p className="fine stats-note">
-        Last 30 days, ad leads only. “—” means not enough data to measure. Job value is what you reported, not verified payments; GetShowUps does not
-        measure how much of it the ads caused.
-      </p>
-    </>
-  )
 }
 
 function ProfileForm({ profile, onSaved }) {
@@ -218,6 +189,19 @@ function BudgetCard({ budget, profile, onSaved }) {
           </span>
         </label>
         <p className="fine">{CHARGING} Lowering the limit also lowers campaigns that are running.</p>
+        <dl className="who-pays" aria-label="Who pays what">
+          <div>
+            <dt>Ad spend</dt>
+            <dd>Charged by Google, directly to the payment method in your Google Ads account.</dd>
+          </div>
+          <div>
+            <dt>Your GetShowUps plan</dt>
+            <dd>Doesn’t include ad spend.</dd>
+          </div>
+        </dl>
+        <p className="muted">
+          Advertising spend is separate from your GetShowUps subscription and is billed by Google. GetShowUps does not currently charge an additional percentage of your ad spend.
+        </p>
         {state.error && <p className="form-error" role="alert">{state.error}</p>}
         {state.note && (
           <p className="fine" role="status">
@@ -1124,7 +1108,7 @@ export default function Ads() {
             : `We couldn’t pause ${d.hold.stillRunning} campaign${d.hold.stillRunning === 1 ? '' : 's'} yet; we keep retrying every few minutes. To stop spend right away, pause ${d.hold.stillRunning === 1 ? 'it' : 'them'} in Google Ads.`}
         </p>
       )}
-      {anyLaunched && <Results r={d.results} />}
+      {anyLaunched && <AdsResults testAccount={d.connections?.google?.testAccount === true} />}
 
       <section className="card">
         <h2 className="card-title">1. Your business</h2>

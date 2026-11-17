@@ -81,6 +81,11 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
   await budget.getByRole('checkbox').check()
   await budget.getByRole('button', { name: 'Approve budget' }).click()
   await expect(budget.getByText('Approved: $300/month')).toBeVisible()
+  // Who pays what, at the moment of approving: Google charges ad spend; the plan doesn't include it; no GetShowUps fee.
+  const pays = budget.getByRole('term').filter({ hasText: /./ })
+  await expect(pays).toHaveText(['Ad spend', 'Your GetShowUps plan'])
+  await expect(budget.getByText('Advertising spend is separate from your GetShowUps subscription and is billed by Google. GetShowUps does not currently charge an additional percentage of your ad spend.')).toBeVisible()
+  await expect(budget.getByText('Charged by Google, directly to the payment method in your Google Ads account.')).toBeVisible()
 
   // The $600/mo draft no longer fits a $300/mo approval → shown as a problem, then fixed by editing.
   const c = page.locator('.campaign').first()
@@ -297,9 +302,14 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await c.getByRole('button', { name: 'Confirm: approve and create (paused)' }).click()
   // Read straight back from Google (MOCK API): budget, area, keywords, ad and landing page all match.
   await expect(c.locator('[data-verification="ok"]')).toHaveText('✓Checked on Google: budget, area, keywords and ad match')
-  // Results say where each number comes from; no spend data yet is shown as such, not as $0.
-  await expect(page.locator('.stat', { hasText: 'Ad spend' })).toContainText('not available yet')
-  await expect(page.locator('.stat', { hasText: 'Booked' }).first()).toContainText('your bookings')
+  // Results say where each number comes from; no spend data yet is shown as such, not as $0; a test account is labelled.
+  const results = page.getByRole('region', { name: 'Ad results' })
+  await expect(results.getByText('No ad spend reported by Google for this period yet.')).toBeVisible()
+  await expect(results.getByText('Test account: no real ads ran, so these aren’t business results.')).toBeVisible()
+  await expect(results.getByRole('row', { name: /^Ad spend/ }).getByRole('cell').first()).toHaveText('—')
+  await expect(results.getByRole('group', { name: 'Money from these jobs' }).or(results.locator('.ar-money')).first()).toContainText('Paid—')
+  await results.getByRole('button', { name: '90 days' }).click()
+  await expect(results.getByRole('columnheader', { name: 'Last 90 days' })).toBeVisible()
   await expect(c.getByText('Google may spend up to twice the average on a busy day')).toBeVisible()
   await expect(c.locator('.chip')).toHaveText('Paused')
   // Duplicate prevention: a second create request for the same campaign is refused; Google has one copy.

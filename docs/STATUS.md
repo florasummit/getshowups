@@ -2,6 +2,33 @@
 
 _Update at the end of every task. Newest first._
 
+## Acquisition engine, phase 3 (2026-11-17) — feat/acquisition-engine; migration 0028 (NOT applied)
+
+- Audit (already built before this phase, unchanged):
+  - Google Ads OAuth (separate adwords scope) and account selection with billing status.
+  - Validated Search specs; campaigns created PAUSED and read back.
+  - Owner budget approvals + ceilings; holds; deterministic optimizer (pause/recommend only).
+  - Data Manager conversion feedback (off); booking-page UTM/gclid attribution.
+- Gaps closed:
+  - **One results definition** (server/ads/funnel.js), replacing two diverging summaries (one counted test leads). Cohort = leads created in the period. Stages: spend → leads → qualified → booked → attended → completed → estimated / invoiced / paid money. Cost per step only with measured spend; ROAS from paid revenue only; staleness, attribution coverage, 7/30/90 days.
+  - **Money kept apart:** estimated (existing) vs invoiced vs paid (revenue_entries, append-only, migration 0028); POST /api/dashboard/revenue; Appointments shows Estimated / Invoiced / Paid per visit.
+  - **Diagnostics** (deterministic, minimum samples, ordered along the funnel): tracking, stale spend, lead→booking, visits not marked, attendance, payments missing. Never recommends more spend; never acts.
+  - **Attribution through the website:** ads land on the published website; its forms (hidden utm/gclid) and the receptionist chat (campaign params only) now credit the campaign. Previously those leads were unattributed.
+  - **Ads tab:** Results panel (GET /api/dashboard/results); "Who pays what" at budget approval (Google bills ad spend; plan excludes it; owner-approved wording 2026-11-17: no additional percentage of ad spend, checked against the only plan = flat $499/month licensed Stripe price, no meter).
+- Tests: unit (test/acquisition.test.js: funnel, honesty/nulls, diagnostics, routes, website + receptionist attribution); browser (ads.spec results + who pays; modes.spec estimated/invoiced/paid; tour screens incl. Ads).
+- Blocked externally (unchanged, approvals):
+  - Google Ads developer token at Test level (real accounts need Explorer/Basic access).
+  - ADS_LIVE_LAUNCH, ADS_CONVERSIONS_ENABLED (Data Manager scope), ADS_AUTOMATION_ENABLED.
+- Needs approval: migration 0028, merge/deploy.
+- Release audit (2026-11-17):
+  - **Fixed: the funnel counted appointments, not leads.** 'pending' reservations were counted as bookings, and a lead that cancelled and rebooked was counted both booked and cancelled. Stages now count each lead once at its furthest real step; money stays per visit.
+  - Revenue index changed to (customer, appointment_id, kind, id) (covering).
+  - Results header follows the data shown.
+  - Added a regression test and spend-guardrail tests.
+  - Migration 0028, tested on production's exported schema (structure only) with 50k synthetic leads: adds 1 table + 2 indexes, changes nothing existing, is idempotent, and existing rows are byte-identical. Constraints refuse bad kinds, negative amounts and orphan rows.
+  - Old code (main) never touches revenue_entries, so it runs on the migrated schema. Recovery rehearsed: full dump → restore identical; dropping 0028's objects restores the exact schema. D1 Time Travel is available.
+  - Correction: Google retired developer tokens (2026-09-09). Live use is blocked by the Cloud project's Google Ads API access level (Test), not by a token.
+
 ## Website Studio: one content system, legal pages, starter sites, own hosting (2026-11-17) — feat/website-studio-complete; no migration
 
 - Audit (before):

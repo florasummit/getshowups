@@ -25,6 +25,7 @@ import { createLead, bookAppointment, openSlots, validateLead } from '../booking
 import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
 import { syncLead, syncStage, syncNote } from '../ghl.js'
+import { keepableAttribution, recordAttribution } from '../ads/attribution.js'
 import { knowledgeFor, systemPrompt, factText } from './knowledge.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
@@ -87,10 +88,13 @@ export async function receptionistOn(env, customer) {
 // ---------- conversations ----------
 
 const conversationToken = (env, id) => linkToken(env, 'receptionist', id)
-export async function startConversation(env, customer, channel, now = Date.now()) {
+// attribution: the ad parameters the chat page was opened with (website link from an ad) — kept as campaign parameters
+// only (keepableAttribution: never a click id), and recorded on the lead if the conversation books.
+export async function startConversation(env, customer, channel, now = Date.now(), { attribution = null } = {}) {
   const id = randomToken(12)
-  await env.ONBOARDING_DB.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES (?1, ?2, ?3, '{}', '[]', ?4, ?4)")
-    .bind(id, customer.id, channel, now)
+  const kept = keepableAttribution(attribution)
+  await env.ONBOARDING_DB.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES (?1, ?2, ?3, ?5, '[]', ?4, ?4)")
+    .bind(id, customer.id, channel, now, JSON.stringify(kept ? { attribution: kept } : {}))
     .run()
   return { id, token: await conversationToken(env, id) }
 }
@@ -375,6 +379,8 @@ async function runTool(ctx, name, input) {
           throw err
         }
         leadId = mine
+        // From an ad (the chat page was opened with its campaign parameters): tie the lead to that campaign.
+        if (s.attribution) await recordAttribution(env, customer.id, mine, s.attribution, now).catch((e) => console.error('receptionist attribution failed:', e?.name))
         ctx.after.push(() => syncLead(env, customer.id, leadId, now))
       } else {
         const row = await db.prepare('SELECT l.id FROM receptionist_conversations c JOIN leads l ON l.id = c.lead_id AND l.customer = c.customer WHERE c.id = ?1 AND c.customer = ?2').bind(conv.id, customer.id).first()

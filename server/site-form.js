@@ -9,6 +9,7 @@
 // A lead is stored before anything downstream (messages, notices) runs, so a messaging failure never loses it.
 import { linkToken, verifyLinkToken } from './links.js'
 import { createLead, validateLead } from './booking.js'
+import { recordAttribution } from './ads/attribution.js'
 
 export const SITE_SMS_WORDING = 'site-form-sms-v1'
 export const MIN_AGE_MS = 3_000
@@ -42,6 +43,8 @@ export async function submitSiteForm(env, customer, fields, now = Date.now()) {
     // Texting consent only from the form's own optional, unchecked box (shown only when the business can text).
     const smsConsent = fields.sms === 'yes' && Boolean(String(fields.phone || '').trim())
     const { id } = await createLead(env, customer, { ...lead, source: 'website_form', smsConsent, smsWording: SITE_SMS_WORDING }, now)
+    // The ad parameters the page carried (hidden fields): tied to this business's own campaign, else a plain lead.
+    await recordAttribution(env, customer.id, id, { utm_source: fields.utm_source, utm_medium: fields.utm_medium, utm_campaign: fields.utm_campaign, gclid: fields.gclid }, now).catch((e) => console.error('site form attribution failed:', e?.name))
     return { state: 'sent', stored: true, leadId: id }
   } catch (err) {
     console.error('site form lead save failed:', err?.name)

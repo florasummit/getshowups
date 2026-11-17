@@ -15,6 +15,7 @@ const SCREENS = [
   ['receptionist', '/dashboard/receptionist', true],
   ['website', '/dashboard/website', true],
   ['settings', '/dashboard/settings', true],
+  ['ads', '/dashboard/ads', true],
   ['chat', `/chat/${ID}`, false],
   ['booking', `/book/${ID}`, false],
 ]

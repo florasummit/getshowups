@@ -16,7 +16,7 @@ export async function onRequestGet({ request, env }) {
   try {
     const data = await overview(env.ONBOARDING_DB, session.customer.id, Date.now(), internalEmails(env))
     // Advertising results appear only for businesses with Ads switched on (ADS_ENABLED + ADS_BUSINESSES).
-    const ads = adsEnabledFor(env, session.customer.id) ? await adSummary(env.ONBOARDING_DB, session.customer.id) : null
+    const ads = adsEnabledFor(env, session.customer.id) ? await adSummary(env.ONBOARDING_DB, session.customer.id, Date.now(), internalEmails(env)) : null
     // Open receptionist callback requests / messages (null = not available, e.g. before migration 0027; never a fake 0).
     const requests = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n, coalesce(sum(urgent), 0) AS urgent FROM receptionist_requests WHERE customer = ?1 AND status = 'open'")
       .bind(session.customer.id)

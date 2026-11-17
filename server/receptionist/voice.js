@@ -24,9 +24,9 @@ const CALL_TTL_MS = 60 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
-export async function startVoiceCall(env, customer, now = Date.now(), existing = null) {
+export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
-  const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now)
+  const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now, { attribution })
   let res
   try {
     res = await fetch(`${retellBase(env)}/v3/create-web-call`, {
