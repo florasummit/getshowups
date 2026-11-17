@@ -169,6 +169,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding DNS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding SITE_IMPORT_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
+  --binding RECEPTIONIST_ANTHROPIC_API_KEY=sk-ant-e2e-fake-key-not-a-secret \
   --binding ACCOUNT_DELETION_ENABLED=true \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN" \
   --binding TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000 \

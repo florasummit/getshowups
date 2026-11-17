@@ -18,7 +18,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "retell-client-js-sdk": "3.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",

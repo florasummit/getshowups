@@ -6,6 +6,7 @@ const Dashboard = lazy(() => import('./dashboard/Dashboard.jsx'))
 const BookingPage = lazy(() => import('./booking/BookingPage.jsx'))
 const Admin = lazy(() => import('./admin/Admin.jsx'))
 const Privacy = lazy(() => import('./legal/Privacy.jsx'))
+const ChatPage = lazy(() => import('./receptionist/ChatPage.jsx'))
 
 // First-touch acquisition source (utm_source or ref), kept on this device for signup attribution.
 try {
@@ -23,6 +24,14 @@ export default function Root() {
     return (
       <Suspense fallback={null}>
         <BookingPage id={booking[1]} />
+      </Suspense>
+    )
+  }
+  const chat = path.match(/^\/chat\/([a-z0-9][a-z0-9-]{1,62})\/?$/)
+  if (chat) {
+    return (
+      <Suspense fallback={null}>
+        <ChatPage id={chat[1]} />
       </Suspense>
     )
   }

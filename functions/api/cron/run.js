@@ -6,6 +6,7 @@ import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server
 import { processDueMessages } from '../../../server/messages.js'
 import { processReplies, sendQueued, purgeOldMessages } from '../../../server/followups/engine.js'
 import { syncPendingRegistrations } from '../../../server/followups/provisioning.js'
+import { purgeOldConversations } from '../../../server/receptionist/engine.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { purgeDesignerRaw } from '../../../server/ai-designer.js'
@@ -48,6 +49,7 @@ export async function onRequestPost({ request, env }) {
       purged: await adsStep('followup retention', () => purgeOldMessages(env)),
       // Texting registrations with Twilio: read what Twilio reports (hourly per business, read-only).
       registrations: await adsStep('texting registrations', () => syncPendingRegistrations(env)),
+      receptionistPurged: await adsStep('receptionist retention', () => purgeOldConversations(env)),
     }
     const onboardingQueued = await queueFollowUps(env)
     // New bookings / unbooked leads → the business's members (queued before the flush so they go out this run).

@@ -12,6 +12,7 @@ const Ads = lazy(() => import('./Ads.jsx'))
 const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
 const WebsiteTab = lazy(() => import('./WebsiteTab.jsx'))
 const FollowUps = lazy(() => import('./FollowUps.jsx'))
+const Receptionist = lazy(() => import('./Receptionist.jsx'))
 
 export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
   const signOut = async () => {
@@ -500,12 +501,13 @@ const TABS = [
   ['overview', 'Overview'],
   ['appointments', 'Appointments'],
   ['followups', 'Follow-ups'],
+  ['receptionist', 'Receptionist'],
   ['website', 'Website'],
   ['settings', 'Settings'],
 ]
 const tabFromPath = () => {
   const t = window.location.pathname.split('/')[2]
-  return ['appointments', 'followups', 'website', 'settings', 'ads'].includes(t) ? t : 'overview'
+  return ['appointments', 'followups', 'receptionist', 'website', 'settings', 'ads'].includes(t) ? t : 'overview'
 }
 
 export default function Home({ me, reload }) {
@@ -515,7 +517,7 @@ export default function Home({ me, reload }) {
   const billing = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()
-  const tabs = me.features?.ads ? [...TABS.slice(0, 4), ['ads', 'Ads'], TABS[4]] : TABS
+  const tabs = me.features?.ads ? [...TABS.slice(0, -1), ['ads', 'Ads'], TABS.at(-1)] : TABS
   useEffect(() => {
     const onPop = () => setView(tabFromPath())
     window.addEventListener('popstate', onPop)
@@ -529,7 +531,7 @@ export default function Home({ me, reload }) {
     window.scrollTo(0, 0)
   }
   return (
-    <div className={`app${view === 'website' || view === 'followups' ? ' app--wide' : ''}`}>
+    <div className={`app${view === 'website' || view === 'followups' || view === 'receptionist' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
         <SignOut email={me.email} />
@@ -561,6 +563,11 @@ export default function Home({ me, reload }) {
         {view === 'followups' && (
           <Suspense fallback={<div aria-busy="true" />}>
             <FollowUps />
+          </Suspense>
+        )}
+        {view === 'receptionist' && (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Receptionist />
           </Suspense>
         )}
         {view === 'website' && (

@@ -2279,3 +2279,36 @@
   .fu-stat dd { font-size: 18px; }
   .fu-head .fu-auto { width: 100%; justify-content: space-between; }
 }
+
+/* ============ AI receptionist (public chat + voice, /chat/:id) ============ */
+.rc-page { max-width: 720px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; gap: 12px; padding: 16px var(--gutter) 12px; background: var(--white); color: var(--text); }
+.rc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.rc-title { font-size: 1.35rem; margin: 0; line-height: 1.25; }
+.rc-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 0.9rem; }
+.rc-human { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.92rem; }
+.rc-human a { color: var(--orange-700); }
+.rc-booked { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); background: #e9f7ef; color: #14532d; font-weight: 600; }
+.rc-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 240px; }
+.rc-msg { margin: 0; max-width: 85%; padding: 10px 14px; border-radius: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rc-msg--receptionist { align-self: flex-start; background: var(--ink-100); border-bottom-left-radius: 4px; }
+.rc-msg--customer { align-self: flex-end; background: var(--ink-900); color: var(--white); border-bottom-right-radius: 4px; }
+.rc-typing { color: var(--text-muted); font-style: italic; }
+.rc-voice-lines { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.rc-error { margin: 0; color: #9f1239; font-size: 0.92rem; }
+.rc-voice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 0.92rem; }
+.rc-dot { width: 12px; height: 12px; border-radius: 50%; background: #16a34a; }
+.rc-dot--talking { background: var(--orange-500); animation: rc-pulse 1s ease-in-out infinite; }
+@keyframes rc-pulse { 50% { transform: scale(1.35); opacity: 0.7; } }
+@media (prefers-reduced-motion: reduce) { .rc-dot--talking { animation: none; } }
+.rc-form { display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--white); padding: 8px 0 4px; }
+.rc-form input { flex: 1; min-width: 0; font: inherit; padding: 12px 14px; border: 1px solid var(--ink-300); border-radius: var(--radius-sm); }
+.rc-form input:focus { outline: 2px solid var(--orange-500); outline-offset: 1px; }
+.rc-foot { margin: 0; text-align: center; }
+.rc-empty { margin: 24px 0; color: var(--text-muted); }
+
+/* Owner: receptionist tab */
+.rx-grid { display: grid; gap: 16px; }
+.rx-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.rx-convo { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.rx-events { margin: 0; padding-left: 18px; font-size: 0.88rem; color: var(--text-muted); }
+.rx-events .bad { color: #9f1239; }

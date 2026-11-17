@@ -33,6 +33,11 @@ export const RULES = {
   smsWebhook: { limit: 1200, windowSec: 600 }, //  POST /api/sms/twilio/* (per IP, before signature check)
   smsInboundPerSender: { limit: 300, windowSec: 3600 }, // inbound texts per business sender (spike guard)
   followupWrite: { limit: 120, windowSec: 600 }, //  POST /api/dashboard/followups/* (per business)
+  receptionistChat: { limit: 40, windowSec: 600 }, //  POST /api/receptionist/:id/chat (per IP; each turn calls the model)
+  receptionistPerBusiness: { limit: 600, windowSec: 3600 }, // receptionist chat turns per business (flood cap)
+  receptionistVoice: { limit: 6, windowSec: 600 }, //  POST /api/receptionist/:id/voice (per IP; each starts a paid call)
+  receptionistVoicePerBusiness: { limit: 60, windowSec: 3600 }, // voice calls started per business
+  receptionistSocket: { limit: 120, windowSec: 600 }, // GET /api/receptionist/llm/:call (per IP, before the call lookup)
   websiteAi: { limit: 30, windowSec: 600 }, //      POST website generate/revise attempts (per business; burst guard,
   //                                                   daily allowances are in server/ai-usage.js)
 }
