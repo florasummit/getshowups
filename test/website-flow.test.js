@@ -212,6 +212,14 @@ for (const id of Object.keys(BIZ)) {
     const names = zipNames(zip.bytes)
     for (const n of ['index.html', 'services/index.html', 'about/index.html', 'contact/index.html', 'privacy/index.html', 'README.txt']) assert.ok(names.includes(n), n)
     assert.ok(names.some((n) => n.startsWith('site-fonts/')), 'fonts included')
+    // Contact forms only work on GetShowUps hosting: the downloaded pages carry none (never a form that can't send),
+    // booking stays an absolute link to GetShowUps, and the README says so.
+    const files = new TextDecoder().decode(zip.bytes)
+    assert.doesNotMatch(files, /<form\b/, 'no contact form in the static files')
+    assert.match(files, new RegExp(`href="https://getshowups\\.com/book/${id}"`))
+    assert.match(files, /Contact forms only work on GetShowUps hosting and are not included here\./)
+    // The same Contact page on GetShowUps hosting has the working form.
+    assert.match((await call(publicPage, 'GET', { params: { customer: id, page: 'contact' }, path: `/p/${id}/contact` })).text, /<form id="f-contact" class="lead-form"/)
   })
 }
 
