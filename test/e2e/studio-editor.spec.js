@@ -197,6 +197,9 @@ test('two tabs: a save from an older tab is refused with a clear choice, never s
   const a = await context.newPage()
   const b = await context.newPage()
   for (const p of [a, b]) await p.goto('/dashboard/website')
+  // Both tabs must have loaded the site BEFORE tab A saves; otherwise tab B may load A's save and isn't "older".
+  for (const p of [a, b]) await expect(p.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 })).toBeVisible()
+  for (const p of [a, b]) await expect(p.locator('section[aria-label="Website Studio editor"] [data-save]').first()).toBeAttached()
   const edit = async (p, text) => {
     const studio = p.locator('section[aria-label="Website Studio editor"]')
     await p.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 }).click()
