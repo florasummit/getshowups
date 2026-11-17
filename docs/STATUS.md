@@ -30,6 +30,25 @@ _Update at the end of every task. Newest first._
   - test/journey.test.js (5 states, incl. PoolThru's exact state).
   - website.test.js: current pointer (Squarespace / unknown / none once connected, platform matching not fooled by look-alike hosts).
   - website-journey.spec.js: PoolThru-like seeded business, desktop and phone; Squarespace instruction; import defaults; nothing changed.
+- Old addresses (planAddresses in server/site-import.js):
+  - Each old page is classified by its own address, then its real title (template titles like "Contact 3" ignored) and headings.
+  - Destinations in order: kept (the new site has the same address) → the matching page (/privacy-policy → /privacy) → booking (request/schedule pages) → home only when nothing is related, saying which page to add to keep the address.
+  - Redirects may target the site's own pages; a page removed later falls back to home and never blocks saving.
+  - The middleware sends common old addresses (/about-us, /contact-us, /privacy-policy, /faqs, …) to a matching page added after the import.
+  - The import review lists every old address, what it was, and where it goes.
+- PoolThru address plan (read-only crawl, 2026-11-17):
+  - /services kept. /contact → booking until a Contact page exists. /request-service (empty) → booking.
+  - /about and /privacy-policy → home until an About / Privacy page exists.
+  - /careers and /new-page ("Our App") → home (nothing similar). /home → home.
+- PoolThru content audit (live = draft, version 8): no placeholder text; booking (4 links), chat link and privacy link work. Missing or uncertain:
+  - no services/prices (profile and site);
+  - no phone/email/address anywhere;
+  - no About, Contact or own Privacy page (the footer links to the GetShowUps policy);
+  - no logo;
+  - name "Poolthru" vs "PoolThru Pool Care";
+  - service area Charleston and ZIP 29403 only vs "Charleston & Surrounding Areas";
+  - generic copy (an odd "Do I need to bring my pool anywhere?" FAQ).
+  - Owner reviews and fixes these in the app; nothing was changed for them.
 - Needs approval: merge/deploy. Then PoolThru, in the app:
   1. Import www.poolthru.com, keeping old addresses (+ any photos).
   2. Publish.

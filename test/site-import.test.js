@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
-import { applyFixes, contentFixes, crawlSite, extractPage, fetchImage, parseRobots, robotsAllows, suggestContent } from '../server/site-import.js'
+import { applyFixes, contentFixes, crawlSite, extractPage, fetchImage, pageKind, parseRobots, planAddresses, robotsAllows, suggestContent } from '../server/site-import.js'
 import { LIMITS } from '../server/website.js'
 import * as importApi from '../functions/api/dashboard/website/import.js'
 import * as website from '../functions/api/dashboard/website/index.js'
@@ -142,6 +142,45 @@ test('suggestion: services with their stated prices and descriptions; nothing in
   ])
   const x = extractPage('<p>Tom &amp; Jerry&#39;s &#x2014; done</p>', 'https://a.example/')
   assert.equal(x.text[0].text, "Tom & Jerry's — done")
+})
+
+test('old addresses: each goes to its closest place (same address kept, matching page, booking), never home by default; template titles ignored', () => {
+  // PoolThru's Squarespace structure (titles/headings only; synthetic, no page text).
+  const pg = (path, title, headings = [], text = 1) => ({ path, title: `${title} — PoolThru Pool Care`, headings: headings.map((t) => ({ level: 2, text: t })), text: Array.from({ length: text }, () => ({ tag: 'p', text: 'x' })), images: [] })
+  const result = {
+    pages: [
+      pg('/', 'PoolThru Pool Care', ['Pool Cleaning & Maintenance']),
+      pg('/contact', 'Contact', ['Get a Free Quote Today!']),
+      pg('/about', 'About', ['Who we are']),
+      pg('/services', 'Pool Care', ['One Time Service', 'Weekly Pool Care']),
+      pg('/new-page', 'Our App', ['DIY Self Care?']),
+      pg('/request-service', 'Request Service', [], 0),
+      pg('/privacy-policy', 'Privacy Policy', ['Privacy Policy for PoolThru']),
+      pg('/careers', 'Contact 3', ['Join the PoolThru Team', 'Why Work With Us?']),
+    ],
+    skipped: [{ url: 'https://www.poolthru.com/home', reason: 'duplicate' }],
+  }
+  const view = (site) => Object.fromEntries(planAddresses(result, site).map((a) => [a.from, [a.kept ? 'kept' : a.to, a.add || (a.nomatch ? 'no match' : ''), a.label]]))
+  // Today: home + services pages.
+  assert.deepEqual(view({ pages: [{ slug: '' }, { slug: 'services' }] }), {
+    '/contact': ['book', 'Contact', 'Get a Free Quote Today!'],
+    '/about': ['/', 'About', 'About'],
+    '/services': ['kept', '', 'Pool Care'],
+    '/new-page': ['/', 'no match', 'Our App'],
+    '/request-service': ['book', '', 'Request Service'],
+    '/privacy-policy': ['/', 'Privacy', 'Privacy Policy'],
+    '/careers': ['/', 'no match', 'Join the PoolThru Team'],
+    '/home': ['/', '', 'Home (duplicate address)'],
+  })
+  assert.equal(pageKind(result.pages[7]), 'careers', '"Contact 3" is a leftover template title, not a contact page')
+  assert.equal(planAddresses(result, { pages: [{ slug: '' }] }).find((a) => a.from === '/request-service').empty, true)
+  // After adding About, Contact and Privacy pages: addresses kept or sent to the matching page.
+  const later = view({ pages: [{ slug: '' }, { slug: 'services' }, { slug: 'about' }, { slug: 'contact' }, { slug: 'privacy' }] })
+  assert.deepEqual([later['/about'][0], later['/contact'][0], later['/privacy-policy'][0], later['/request-service'][0]], ['kept', 'kept', '/privacy', 'book'])
+  // The suggestion's redirects never include kept addresses.
+  const s = suggestContent({ ...result, pages: result.pages.map((p) => ({ ...p, business: null })) }, LIMITS, { site: { pages: [{ slug: '' }, { slug: 'services' }] } })
+  assert.ok(!s.content.redirects.some((r) => r.from === '/services'))
+  assert.equal(s.addresses.length, 8)
 })
 
 test('API: owner-only, confirmation required; apply puts chosen content + offered photos into the PRIVATE draft; claims filtered; isolated', async () => {

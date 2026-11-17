@@ -11,11 +11,11 @@ const ID_RE = /^[a-f0-9]{32}$/
 const newId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 // What the owner sees: pages found, what was skipped and why, flags, and the suggested content + photos.
-export function importView(row) {
+export function importView(row, site = null) {
   if (!row) return null
   if (row.status !== 'done') return { id: row.id, sourceUrl: row.source_url, status: row.status, error: row.error, createdAt: row.created_at }
   const r = JSON.parse(row.result)
-  const suggestion = suggestContent(r, LIMITS)
+  const suggestion = suggestContent(r, LIMITS, { site })
   suggestion.fixes = contentFixes(suggestion.content, r)
   return {
     id: row.id,
@@ -31,9 +31,19 @@ export function importView(row) {
   }
 }
 
+// The current draft's AI-designed site (pages by slug), so old addresses are planned against what exists now.
+async function draftSite(db, customerId) {
+  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
+  try {
+    return JSON.parse(w?.draft || '{}').site || null
+  } catch {
+    return null
+  }
+}
+
 export async function latestImport(db, customerId) {
   const row = await db.prepare('SELECT * FROM website_imports WHERE customer = ?1 ORDER BY created_at DESC LIMIT 1').bind(customerId).first()
-  return importView(row)
+  return importView(row, row ? await draftSite(db, customerId) : null)
 }
 
 export async function runImport(env, customerId, url, now = Date.now()) {
@@ -50,7 +60,7 @@ export async function runImport(env, customerId, url, now = Date.now()) {
     .prepare("INSERT INTO website_imports (id, customer, source_url, platform, status, result, created_at) VALUES (?1, ?2, ?3, ?4, 'done', ?5, ?6)")
     .bind(id, customerId, r.source, r.platform, JSON.stringify(stored), now)
     .run()
-  return { ok: true, import: importView(await db.prepare('SELECT * FROM website_imports WHERE id = ?1').bind(id).first()) }
+  return { ok: true, import: importView(await db.prepare('SELECT * FROM website_imports WHERE id = ?1').bind(id).first(), await draftSite(db, customerId)) }
 }
 
 // Applies chosen fields and photos to the private draft. Photos: only URLs found in THIS import (never arbitrary URLs
@@ -61,7 +71,7 @@ export async function applyImport(env, customer, importId, { fields = [], photos
   if (!ID_RE.test(String(importId))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
   const row = await db.prepare("SELECT * FROM website_imports WHERE id = ?1 AND customer = ?2 AND status = 'done'").bind(importId, customer.id).first()
   if (!row) return { ok: false, httpStatus: 404, error: 'not_found' }
-  const view = importView(row)
+  const view = importView(row, (await loadWebsite(db, customer)).draft?.site || null)
   // Fixes the owner ticked (typos corrected from their own site's spelling; unrelated template text left out).
   const fixIds = (Array.isArray(fixes) ? fixes : []).filter((i) => Number.isInteger(i))
   view.suggestion.content = applyFixes(view.suggestion.content, view.suggestion.fixes, fixIds)

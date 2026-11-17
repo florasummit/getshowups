@@ -52,6 +52,12 @@ test('website journey: where you are, what is next, and exactly which DNS record
   await expect(imp.locator('.import-field', { hasText: 'Old page addresses' }).getByRole('checkbox')).toBeChecked()
   for (const label of ['Headline', 'Services and prices']) await expect(imp.locator('.import-field', { hasText: label }).first().getByRole('checkbox')).not.toBeChecked()
   await expect(imp.getByText(/Photos \(0 selected/)).toBeVisible()
+  // Every old address with its destination: /about is kept (the new site has an About page); /services has no page
+  // yet, so it says which page would keep it.
+  const addresses = imp.getByRole('list', { name: 'Old page addresses' })
+  await expect(addresses.locator('[data-from="/about"]')).toContainText('kept as it is')
+  await expect(addresses.locator('[data-from="/services"]')).toContainText('home page')
+  await expect(addresses.locator('[data-from="/services"]')).toContainText('Add a “Services” page in the editor to keep this address.')
 
   // Nothing changed: still live, domain still waiting.
   const site = await (await page.request.get('/api/dashboard/website')).json()

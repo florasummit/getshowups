@@ -824,6 +824,19 @@ test('connected domain, multi-page AI site: sitemap lists every page; SEO tags; 
   assert.equal(svg.headers.get('Content-Type'), 'image/svg+xml')
   assert.match(await svg.text(), /^<svg [^>]+><rect [^>]+\/><text [^>]+>P<\/text><\/svg>$/)
 
+  // Old-site addresses on a multi-page site: a redirect may target one of the site's own pages; one to a page that
+  // doesn't exist is repaired to the home page (never blocks saving); common old addresses reach a page added later.
+  const redirects = [{ from: '/get-a-quote', to: '/contact' }, { from: '/old-about', to: '/about' }, { from: '/request-service', to: 'book' }]
+  const saved = (await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content({ site, redirects }), confirm: true } })).json
+  assert.deepEqual(saved.website.draft.redirects, [{ from: '/get-a-quote', to: '/contact' }, { from: '/old-about', to: '/' }, { from: '/request-service', to: 'book' }])
+  const loc = async (url) => (await run(url)).headers.get('Location')
+  assert.equal(await loc('https://www.poolsco.com/get-a-quote'), 'https://www.poolsco.com/contact')
+  assert.equal(await loc('https://www.poolsco.com/old-about'), 'https://www.poolsco.com/')
+  assert.equal(await loc('https://www.poolsco.com/contact-us'), 'https://www.poolsco.com/contact', 'Squarespace/Wix-style /contact-us reaches the Contact page')
+  assert.equal(await loc('https://www.poolsco.com/privacy-policy'), 'https://www.poolsco.com/', 'no Privacy page yet → home')
+  assert.equal((await run('https://www.poolsco.com/contact')).status, 200, 'an old address that matches a page is simply that page')
+  assert.deepEqual(validateContent(content({ redirects: [{ from: '/x', to: '/contact' }] }))[1].redirects, [{ from: '/x', to: '/' }], 'template content has no pages: page targets fall back to home')
+
   const page = await run('https://www.poolsco.com/contact')
   assert.match(page.text, /<link rel="canonical" href="https:\/\/www\.poolsco\.com\/contact">/)
   assert.match(page.text, /<form id="f-reach" class="lead-form" method="post" action="https:\/\/getshowups\.com\/api\/site-form\/pools"/)

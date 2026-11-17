@@ -22,6 +22,18 @@ export function isOwnHost(host, env) {
   }
 }
 
+// Common addresses of the same page on other website builders → the page slugs GetShowUps' page templates use.
+const OLD_ADDRESS_ALIASES = {
+  'about-us': 'about',
+  'our-story': 'about',
+  'who-we-are': 'about',
+  'contact-us': 'contact',
+  'privacy-policy': 'privacy',
+  faqs: 'faq',
+  'our-services': 'services',
+  'service-areas': 'service-area',
+  'areas-we-serve': 'service-area',
+}
 const text = (body, type = 'text/plain; charset=utf-8') => new Response(body, { headers: { 'Content-Type': type, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' } })
 
 export async function onRequest(context) {
@@ -57,6 +69,10 @@ export async function onRequest(context) {
   // A page of an AI-designed (multi-page) site, e.g. /services (published pages only; same rules as the home page).
   const slug = p.toLowerCase().replace(/^\/|\/+$/g, '')
   if (slug && live?.content?.site?.pages?.some((pg) => pg.slug === slug)) return serveSite(env, request, site.customer, slug)
+  // A common old-site address for a page this site now has (e.g. /privacy-policy once a Privacy page exists), even when
+  // the page was added after the import — so old links reach the closest page, not the home page.
+  const alias = OLD_ADDRESS_ALIASES[slug]
+  if (alias && live?.content?.site?.pages?.some((pg) => pg.slug === alias)) return Response.redirect(`https://${host}/${alias}`, 301)
   // An address from the business's previous website: send it to the matching place (published redirects only).
   const r = (live?.content?.redirects || []).find((x) => x.from === p.toLowerCase().replace(/\/+$/, ''))
   if (r) return Response.redirect(r.to === 'book' ? `${siteOrigin(env)}/book/${site.customer}` : `https://${host}${r.to}`, 301)

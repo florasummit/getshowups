@@ -23,7 +23,7 @@ test('owner imports their current website into the draft (text, prices, photos);
   const services = card.locator('.import-field', { hasText: 'Services and prices' }).locator('li')
   await expect(services).toHaveCount(3)
   await expect(services.first()).toContainText('Weekly Pool Care · $180+')
-  await expect(card.locator('.import-field', { hasText: 'Old page addresses' })).toContainText('/services → services section')
+  await expect(card.locator('.import-field', { hasText: 'Old page addresses' }).locator('[data-from="/services"]')).toContainText('→ services section')
   await expect(card.getByText('Photos (1 selected, up to 6)')).toBeVisible()
   // Leftover template text is offered for removal, never rewritten.
   const fixes = card.locator('.import-fields', { has: page.getByText('Suggested fixes') })

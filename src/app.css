@@ -2144,6 +2144,23 @@
   margin: 4px 0 0;
   padding-left: 18px;
 }
+.import-addresses {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+.import-addresses li {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--surface-muted);
+}
+.import-address code {
+  font-weight: 650;
+}
 .import-services p {
   margin: 2px 0 6px;
 }
