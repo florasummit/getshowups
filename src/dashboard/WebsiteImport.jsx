@@ -29,6 +29,18 @@ const FIELDS = [
   ['redirects', 'Old page addresses'],
 ]
 
+const PAGE_LABEL = { services: 'Services page', about: 'About page', contact: 'Contact page', privacy: 'Privacy policy page' }
+// Where a new page's content comes from, in words (found / missing / needs review).
+function pageNote(p, host) {
+  if (p.exists) return 'Already on your website.'
+  if (p.kind === 'services') return `Your ${p.count} service${p.count === 1 ? '' : 's'} with their prices, as found on ${host}.`
+  if (p.kind === 'about') return `The About text found on ${host}.`
+  if (p.kind === 'contact') return 'A message form, plus your phone number if it’s in your business details.'
+  if (p.source === 'imported') return `Copied word for word from ${host}${p.path} (${p.words} words). Check it’s still accurate before you publish.`
+  if (p.problem) return `We found ${p.path} but couldn’t copy it completely, so it isn’t imported. You can start from a draft policy instead and review it.`
+  return 'No privacy policy found on your website. You can start from a draft that matches what this website does. It isn’t legal advice: review it before you publish.'
+}
+
 const destination = (a) =>
   a.kept ? 'kept as it is (same page on your new site)' : a.to === 'book' ? 'booking page' : a.to === '/' ? 'home page' : a.to.startsWith('/#') ? `${a.to.slice(2)} section` : `your ${a.to.slice(1).replace(/-/g, ' ')} page`
 
@@ -81,6 +93,7 @@ export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent =
   const [fields, setFields] = useState([])
   const [photos, setPhotos] = useState([])
   const [fixes, setFixes] = useState([])
+  const [pages, setPages] = useState([])
   // An import already put into the draft is summarised in one line; the owner can open it again to re-apply parts.
   const [review, setReview] = useState(false)
   const choose = (i) => {
@@ -89,6 +102,9 @@ export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent =
       setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined && (!hasContent || f === 'redirects')))
       setPhotos(hasContent ? [] : i.suggestion.photos.slice(0, 6).map((p) => p.url))
       setFixes((i.suggestion.fixes || []).map((f) => f.id))
+      // New pages only ADD to the website (never replace a page or its edits): pages built from the old site's own
+      // content are pre-selected; a starter privacy draft is offered but not pre-selected (it must be reviewed).
+      setPages((i.suggestion.pages || []).filter((p) => !p.exists && p.source !== 'starter').map((p) => p.kind))
     }
   }
   // Loads the latest import once on mount (choose only sets state from it).
@@ -109,9 +125,17 @@ export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent =
   }
   const apply = async () => {
     setState({ applying: true })
-    const { status, data } = await api('/api/dashboard/website/import', { method: 'POST', body: { action: 'apply', importId: imp.id, fields, photos, fixes } })
+    const { status, data } = await api('/api/dashboard/website/import', { method: 'POST', body: { action: 'apply', importId: imp.id, fields, photos, fixes, pages } })
     if (status === 200) {
-      const notes = [data.rejected.length ? `${data.rejected.length} item(s) were left out because they make promises we can’t verify or are too long.` : '', data.photosFailed.length ? `${data.photosFailed.length} photo(s) couldn’t be copied.` : ''].filter(Boolean)
+      const added = (data.pagesAdded || []).map((k) => PAGE_LABEL[k])
+      const notes = [
+        data.siteCreated ? 'We built your website pages from this.' : '',
+        added.length ? `New page${added.length === 1 ? '' : 's'}: ${added.join(', ')}.` : '',
+        data.servicesSection ? 'Your services now show on your website.' : '',
+        data.pagesSkipped === 'single_page_site' ? 'New pages need the multi-page editor; your current one-page website kept its look.' : '',
+        data.rejected.length ? `${data.rejected.length} item(s) were left out because they make promises we can’t verify or are too long.` : '',
+        data.photosFailed.length ? `${data.photosFailed.length} photo(s) couldn’t be copied.` : '',
+      ].filter(Boolean)
       setState({ done: `Added to your draft${data.photosAdded ? ` with ${data.photosAdded} photo${data.photosAdded === 1 ? '' : 's'}` : ''}. Your live website hasn’t changed.`, notes })
       setImp((i) => ({ ...i, appliedAt: Date.now() }))
       setReview(false)
@@ -247,6 +271,21 @@ export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent =
         ))}
         {!Object.keys(s.content).length && <p className="fine">We didn’t find text we could use.</p>}
       </fieldset>
+      {(s.pages || []).length > 0 && (
+        <fieldset className="import-fields" aria-label="Pages">
+          <legend>Pages</legend>
+          <p className="fine">New pages are added to your website; pages you already have are never replaced.</p>
+          {s.pages.map((p) => (
+            <label key={p.kind} className="import-field" data-page={p.kind}>
+              <input type="checkbox" checked={!p.exists && pages.includes(p.kind)} disabled={p.exists} onChange={() => toggle(pages, setPages, p.kind)} />
+              <span>
+                <span className="import-label">{PAGE_LABEL[p.kind]}</span>
+                <span className="fine">{pageNote(p, host)}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       {s.photos.length > 0 && (
         <fieldset className="import-photos">
           <legend>Photos ({photos.length} selected, up to 6)</legend>
@@ -271,7 +310,7 @@ export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent =
         </p>
       )}
       <div className="card-actions">
-        <button type="button" className="btn btn-primary" disabled={state.applying || (!fields.length && !photos.length)} onClick={apply}>
+        <button type="button" className="btn btn-primary" disabled={state.applying || (!fields.length && !photos.length && !pages.length)} onClick={apply}>
           {state.applying ? 'Adding to your draft…' : 'Use this in my draft'}
         </button>
       </div>

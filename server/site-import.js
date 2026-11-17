@@ -11,6 +11,7 @@
 //     only through validateContent (claims filter, limits) after the owner reviews and applies it.
 import { normalizeWebsiteUrl } from './url.js'
 import { INDUSTRIES, industryKey } from './site-design.js'
+import { legalSections } from './site-starter.js'
 
 export const USER_AGENT = 'GetShowUpsSiteImport/1.0 (+https://getshowups.com; imports a site at the owner request)'
 const UA_TOKEN = 'getshowupssiteimport'
@@ -328,11 +329,13 @@ const pageLike = (pages, re) => pages.find((p) => re.test(p.path) || re.test(p.t
 
 // A suggested draft from the import. Only text that appears on the owner's site; nothing invented. The caller passes it
 // through validateContent (claims filter + limits) before anything is saved.
-export function suggestContent(result, LIMITS, { site = null } = {}) {
+export function suggestContent(result, LIMITS, { site = null, fresh = false } = {}) {
   const pages = result.pages
   const home = pages[0]
-  const about = pageLike(pages, /about/i)
-  const services = pageLike(pages, /service/i)
+  // The same classification as the old-address plan: a salon's "Menu", a clinic's "Treatments" or a "Pricing" page is
+  // the services page; "About us" / "Our story" is the about page.
+  const about = pages.find((p) => p !== home && pageKind(p) === 'about') || pageLike(pages, /about/i)
+  const services = pages.find((p) => p !== home && pageKind(p) === 'services') || pageLike(pages, /service/i)
   const paras = (p) => (p?.text || []).filter((b) => b.tag === 'p' && b.text.length >= 40).map((b) => b.text)
   const h1 = home.headings.find((h) => h.level === 1)?.text || home.headings[0]?.text || ''
   const out = {}
@@ -376,9 +379,30 @@ export function suggestContent(result, LIMITS, { site = null } = {}) {
     .slice(0, 12)
   // Old page addresses → the closest place on the new site, so links and search results keep working after the domain
   // moves. `addresses` is the full plan the owner reviews (incl. addresses kept as they are).
-  const addresses = planAddresses(result, site)
+  // Pages first (they depend only on what kinds of pages the old site had), then the address plan against the site
+  // the owner will have: today's site, or for a business without one (`fresh`), the site this import builds (home +
+  // the pages offered from its content). The apply step re-plans against the site actually saved.
+  const offers = pageOffers(result, out, planAddresses(result, null), site)
+  const target = site || (fresh ? { pages: [{ slug: '' }, ...offers.filter((p) => p.source !== 'starter').map((p) => ({ slug: p.slug }))] } : null)
+  const addresses = planAddresses(result, target)
   out.redirects = addresses.filter((a) => !a.kept).map((a) => ({ from: a.from, to: a.to }))
-  return { content: out, photos, addresses }
+  return { content: out, photos, addresses, pages: offers }
+}
+
+// Pages the import can create on the new website (server/site-starter.js builds them). Each offer says where its
+// content comes from; a page the new site already has is shown, not offered again (never replaced).
+function pageOffers(result, content, addresses, site) {
+  const have = new Set((site?.pages || []).map((p) => p.slug))
+  const had = (kinds) => addresses.some((a) => kinds.includes(a.kind))
+  const policyPage = result.pages.find((p) => pageKind(p) === 'privacy' && /privacy/i.test(`${p.path} ${p.title}`))
+  const policy = policyPage ? legalSections(policyPage) : null
+  const offers = []
+  if (content.services?.length) offers.push({ kind: 'services', slug: 'services', source: 'imported', count: content.services.length })
+  if (content.about) offers.push({ kind: 'about', slug: 'about', source: 'imported' })
+  if (had(['contact', 'request'])) offers.push({ kind: 'contact', slug: 'contact', source: 'records' })
+  if (policy?.ok) offers.push({ kind: 'privacy', slug: 'privacy', source: 'imported', path: policyPage.path, words: policy.words })
+  else offers.push({ kind: 'privacy', slug: 'privacy', source: 'starter', ...(policyPage ? { path: policyPage.path, problem: policy?.reason || 'empty' } : { missing: true }) })
+  return offers.map((o) => ({ ...o, exists: have.has(o.slug) }))
 }
 
 // ---------- old addresses ----------
@@ -392,7 +416,7 @@ const KINDS = [
   // Asking for service/a time → booking is the closest place; general contact/quote → a Contact page when there is one.
   ['request', /request|book|schedule|appointment/],
   ['contact', /contact|quote|estimate|reach us|get in touch/],
-  ['services', /servic|pricing|prices?\b|rates|packages|what-we-do|pool-care|maintenance|cleaning|repair/],
+  ['services', /servic|pricing|prices?\b|rates|packages|what-we-do|treatments|menu|maintenance|cleaning|repair|installation/],
   ['about', /about|team|who-we|who we are|our story|story\b/],
   ['home', /^\/(home|index(\.html?)?)$/],
 ]
@@ -484,6 +508,7 @@ export function compactResult(r) {
     const p = out.pages.reduce((a, b) => (JSON.stringify(a.text).length >= JSON.stringify(b.text).length ? a : b))
     if (p.text.length <= 3) break
     p.text = p.text.slice(0, Math.ceil(p.text.length / 2))
+    p.truncated = true // never imported as a legal page (it would be incomplete)
   }
   return out
 }

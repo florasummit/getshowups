@@ -7,7 +7,7 @@
 // only when the owner publishes. Imported website text is given to the model as quoted DATA, never as instructions.
 import Anthropic from '@anthropic-ai/sdk'
 import { credentialFor, markCredential, providerMock } from './ai-credentials.js'
-import { FONTS, ICONS, LIMITS, SECTION_TYPES, validateSpec } from './site-spec.js'
+import { FONTS, ICONS, keepLegalPages, LIMITS, SECTION_TYPES, validateSpec } from './site-spec.js'
 import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
@@ -475,7 +475,8 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   }
   const { spec, warnings, report, r } = chosen
   const reply = String(r.raw?.reply || '').replace(/\s+/g, ' ').trim().slice(0, 600) || 'Here is the design.'
-  const [errors, content] = validateContent({ ...ctx.draft, site: spec }, ctx.claims, ctx.assetIds)
+  // The owner's legal pages (privacy policy, terms) are kept word for word through any redesign.
+  const [errors, content] = validateContent({ ...ctx.draft, site: keepLegalPages(spec, current) }, ctx.claims, ctx.assetIds)
   if (errors.length) return { ok: false, httpStatus: 502, error: 'ai_invalid_output' }
   await ctx.db.batch([
     ctx.db

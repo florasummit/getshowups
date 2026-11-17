@@ -303,7 +303,19 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Google scopes are least-privilege (`calendar.events.owned`, `calendar.freebusy`). Adding a scope needs approval.
 - Tests use the fake values in `test/e2e/fixtures.env` and mocked Google. Never real credentials.
 
-- Websites: one renderer, no scripts on business sites, every text through the claims filter, drafts private until
+- One website content system (server/site-starter.js): imported or profile content becomes the multi-page site spec
+  (content.site) the editor, preview, publishing and export use. A business without a site gets a deterministic starter
+  site (no AI, no key) on import or "I'm starting fresh"; a business with one gets only missing pages added (never
+  replaced) and a services section if approved services had nowhere to show. Precedence: owner edits > records >
+  approved imported content > starter text. Nothing invents services, prices, claims or legal text.
+- Legal pages (page.legal: privacy policy, terms): text sections only, escaped and length-limited but NOT run through
+  the marketing-claims / invented-number filters (owner decision 2026-11-17: legal wording must be kept exactly).
+  Only set by import (word for word, provenance source {imported, url}) or the starter (source starter); AI output can
+  never set it and redesigns keep legal pages unchanged (keepLegalPages). An incomplete or over-long crawled policy is
+  refused, never shortened. Publishing a draft with a legal page needs legalReviewed: true every time.
+- Static export (server/site-export.js, GET /api/dashboard/website/export?format=static): the PUBLISHED site as a .zip
+  for the owner's own hosting; same renderer; this business's images only; forms left out; booking/chat absolute links.
+- Websites: one renderer, no scripts on business sites, every text through the claims filter (legal pages: see above), drafts private until
   an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content
   (only exception: permanent account deletion, server/deletion.js).
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and

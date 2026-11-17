@@ -343,7 +343,9 @@ createServer(async (req, res) => {
   if (url.pathname.startsWith('/__site/')) {
     const [, , host, ...rest] = url.pathname.split('/')
     const path = '/' + rest.join('/')
-    const html = (title, body) => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Weekly pool care in Charleston, booked online."></head><body>${body}</body></html>`
+    // Each mock site has its own description (the importer uses a site's meta description).
+    const description = host === 'www.northwindair.example' ? 'Heating and cooling service in Minneapolis, booked online.' : 'Weekly pool care in Charleston, booked online.'
+    const html = (title, body) => `<!doctype html><html><head><title>${title}</title><meta name="description" content="${description}"></head><body>${body}</body></html>`
     const pages = {
       '/robots.txt': ['text/plain', 'User-agent: *\nDisallow: /config\nSitemap: https://www.harborpools.example/sitemap.xml'],
       '/sitemap.xml': ['application/xml', '<urlset><url><loc>https://www.harborpools.example/services</loc></url><url><loc>https://www.harborpools.example/about</loc></url></urlset>'],
@@ -355,7 +357,18 @@ createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'image/png' })
       return res.end(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]))
     }
-    const p = host === 'www.harborpools.example' ? pages[path] : null
+    // A second, non-pool business (HVAC) with its own privacy policy, contact and about-us pages.
+    const hvacPolicy = '<h1>Privacy Policy</h1><h2>What we collect</h2><p>Your name, phone number and address when you request service.</p><h2>Reviews and offers</h2><p>We may ask for reviews. Asking us a question is always free.</p>'
+    const hvac = {
+      '/robots.txt': ['text/plain', 'User-agent: *\nAllow: /\nSitemap: https://www.northwindair.example/sitemap.xml'],
+      '/sitemap.xml': ['application/xml', ['/services', '/about-us', '/contact-us', '/privacy-policy'].map((p) => `<url><loc>https://www.northwindair.example${p}</loc></url>`).join('').replace(/^/, '<urlset>').concat('</urlset>')],
+      '/': ['text/html', html('Northwind Air', '<h1>Heating and cooling in Minneapolis</h1><p>Furnace and air conditioning service for Minneapolis homes, from tune-ups to repairs.</p>')],
+      '/services': ['text/html', html('Services — Northwind Air', '<h1>What we do</h1><h3>AC Tune-Up</h3><p>$129</p><p>A full check of your air conditioner before summer, with a written report.</p><h3>Furnace Repair</h3><p>$95 diagnostic</p><p>We find the fault and quote the repair before any work starts.</p>')],
+      '/about-us': ['text/html', html('About us — Northwind Air', '<h2>About Northwind Air</h2><p>Northwind Air is a family heating and cooling company working across Minneapolis and nearby towns.</p>')],
+      '/contact-us': ['text/html', html('Contact us — Northwind Air', '<h1>Contact us</h1><p>Call or send a message.</p>')],
+      '/privacy-policy': ['text/html', html('Privacy Policy — Northwind Air', hvacPolicy)],
+    }
+    const p = host === 'www.harborpools.example' ? pages[path] : host === 'www.northwindair.example' ? hvac[path] : null
     if (!p) return send(res, 404, { error: 'not found' })
     res.writeHead(200, { 'Content-Type': p[0] })
     return res.end(p[1])

@@ -88,7 +88,7 @@ img{max-width:100%;display:block}a{color:var(--accent-text)}a:focus-visible,.btn
 h1,h2,h3{font-family:var(--hf);font-weight:${t.headingWeight};letter-spacing:${t.headingTracking}em;line-height:1.08;margin:0;overflow-wrap:break-word;${t.headingCase === 'upper' ? 'text-transform:uppercase;' : ''}text-wrap:balance}
 h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line-height:1.25}p{margin:0 0 1em}p:last-child{margin-bottom:0}
 .wrap{width:min(var(--max),100% - 40px);margin-inline:auto}.w-narrow .wrap{max-width:720px}.w-wide .wrap{width:min(var(--max),100% - 40px)}.w-full .wrap{width:100%;max-width:none;padding-inline:max(20px,(100% - var(--max)) / 2)}
-.sec{padding-block:var(--py)}.sp-s{--py:${pad[0]}px}.sp-m{--py:${pad[1]}px}.sp-l{--py:${pad[2]}px}.sp-xl{--py:${pad[3]}px}@media(max-width:700px){.sec{--py:${pad[0]}px}}
+.sec{padding-block:var(--py)}.legal-doc{--py:${pad[1]}px}.legal-doc article{max-width:70ch}.legal-doc h1{font-size:clamp(1.9rem,4.5vw,2.6rem);margin:0 0 .6em}.legal-doc h2{font-size:1.25rem;line-height:1.3;margin:1.8em 0 .4em}.legal-doc p,.legal-doc li{margin:.6em 0;line-height:1.65}.legal-doc ul{padding-left:1.2em}.sp-s{--py:${pad[0]}px}.sp-m{--py:${pad[1]}px}.sp-l{--py:${pad[2]}px}.sp-xl{--py:${pad[3]}px}@media(max-width:700px){.sec{--py:${pad[0]}px}}
 .bg-bg{background:var(--bg)}.bg-surface{background:var(--surface)}.bg-accent{background:var(--accent);color:var(--on-accent)}.bg-accent a,.bg-ink a{color:inherit}.bg-ink .btn:not(.ghost){color:var(--on-accent)}.bg-ink{background:var(--ink);color:var(--bg)}
 .bg-ink .muted,.bg-accent .muted{color:inherit;opacity:.82}.bg-image{position:relative;color:#fff;isolation:isolate}.bg-image>.bgimg{position:absolute;inset:0;z-index:-2}.bg-image>.bgimg img{width:100%;height:100%;object-fit:cover}.bg-image::before{content:"";position:absolute;inset:0;background:#000;opacity:.55;z-index:-1}
 .al-center{text-align:center}.al-center .head{margin-inline:auto}.al-center .actions{justify-content:center}
@@ -231,7 +231,8 @@ export function renderV2(biz, spec, opts = {}) {
     const done = form.state === 'sent'
     const fid = `f-${s.id}`
     const field = (name, label, type = 'text', extra = '') => `<label class="lf-field" for="${fid}-${name}"><span>${label}</span><input id="${fid}-${name}" name="${name}" type="${type}" ${extra}></label>`
-    const privacy = spec.pages.some((p) => p.slug === 'privacy') ? href('privacy') : privacyUrl
+    const own = spec.pages.find((p) => p.slug === 'privacy') || spec.pages.find((p) => p.legal && /privacy/.test(p.slug))
+    const privacy = own ? href(own.slug) : privacyUrl
     if (done) return `<div id="${fid}" class="lead-form lf-done" role="status"><h3>Thanks, your ${quote ? 'quote request' : 'message'} is on its way.</h3><p class="muted">${esc(biz.name)} will get back to you soon. If you’d like a time now, you can <a href="${esc(bookUrl)}">book online</a>.</p></div>`
     const err = form.state && FORM_ERRORS[form.state] ? `<p class="lf-error" role="alert">${FORM_ERRORS[form.state]}</p>` : ''
     return `<form id="${fid}" class="lead-form" method="post" action="${esc(form.action)}" aria-labelledby="${fid}-title"><h3 id="${fid}-title">${quote ? 'Request a quote' : 'Send a message'}</h3>${err}<input type="hidden" name="t" value="${esc(form.token)}"><input type="hidden" name="page" value="${esc(pg.slug)}"><input type="hidden" name="section" value="${esc(s.id)}"><input type="hidden" name="kind" value="${quote ? 'quote' : 'contact'}"><div class="lf-grid">${field('name', 'Your name', 'text', 'autocomplete="name" required maxlength="80"')}${field('email', 'Email', 'email', 'autocomplete="email" required maxlength="254"')}${field('phone', 'Phone', 'tel', 'autocomplete="tel" required maxlength="25"')}${field('zip', 'ZIP code', 'text', 'autocomplete="postal-code" inputmode="numeric" maxlength="10"')}</div><label class="lf-field" for="${fid}-need"><span>${quote ? 'What would you like a quote for?' : 'How can we help?'}</span><textarea id="${fid}-need" name="need" rows="4" required maxlength="500"></textarea></label><label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>${biz.offerSms ? `<label class="lf-check" for="${fid}-sms"><input id="${fid}-sms" type="checkbox" name="sms" value="yes"><span>Text me about my request from ${esc(biz.name)} via GetShowUps. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help. Not required. <a href="${esc(biz.smsTermsUrl || '#')}">Texting terms</a> · <a href="${esc(privacy)}">Privacy</a></span></label>` : ''}<p class="fine muted">We use these details only to reply to your request. <a href="${esc(privacy)}">Privacy</a></p><button class="btn" type="submit">${quote ? 'Request a quote' : 'Send message'}</button></form>`
@@ -257,7 +258,8 @@ export function renderV2(biz, spec, opts = {}) {
       case 'text':
         return `${open()}<div class="wrap">${head({ ...s, text: '' })}<div class="${s.lead ? 'lead ' : ''}${s.columns === 2 ? 'grid" style="--cols:2' : ''}"${E(s.id, s.body ? 'body' : 'text')}>${paras(s.body || s.text)}</div></div></section>`
       case 'services': {
-        const items = s.items.map((it, i) => ({ ...it, ...svc(it), n: i + 1 }))
+        // The service's own description shows unless the design wrote a line for it (imported services keep their words).
+        const items = s.items.map((it, i) => ({ ...it, ...svc(it), text: it.text || svc(it).description || '', n: i + 1 }))
         const price = (it) => (s.showPrices && it.price ? `<span class="price"${it.serviceId ? E('svc', `${it.serviceId}.price`) : ''}>${esc(it.price)}</span>` : '')
         let body
         if (s.layout === 'list') body = `<div class="list">${items.map((it) => `<div class="row"><h3${it.serviceId ? E('svc', `${it.serviceId}.name`) : ''}>${esc(it.name)}</h3>${price(it)}${it.text ? `<p class="muted"${E(s.id, `items.${it.n - 1}.text`)}>${esc(it.text)}</p>` : ''}</div>`).join('')}</div>`
@@ -296,18 +298,46 @@ export function renderV2(biz, spec, opts = {}) {
   }
 
   // Hidden sections are left out of the website; the owner's editor shows them dimmed so they can be shown again.
-  const body = pg.sections
-    .filter((s) => editing || !s.hidden)
-    .map((s) => (s.hidden ? `<div class="ge-hidden" data-hidden-section="${esc(s.id)}"><p class="ge-hidden-label">Hidden · not on your website</p>${section(s)}</div>` : section(s)))
-    .join('')
-  const navLinks = spec.pages.length > 1 ? `<ul>${spec.pages.map((p) => `<li><a href="${esc(href(p.slug))}"${p.slug === pg.slug ? ' aria-current="page"' : ''}>${esc(p.navLabel)}</a></li>`).join('')}</ul>` : ''
+  // A legal page (privacy policy, terms) reads as one document: one page heading, modest section headings, a comfortable
+  // line length, "•" lines as lists. Still editable in place (same field paths as any text section).
+  const legalBody = (text) =>
+    String(text || '')
+      .split(/\n{2,}/)
+      .filter(Boolean)
+      .reduce((out, p) => {
+        if (p.startsWith('• ')) {
+          const li = `<li>${esc(p.slice(2))}</li>`
+          return out.endsWith('</ul>') ? `${out.slice(0, -5)}${li}</ul>` : `${out}<ul>${li}</ul>`
+        }
+        return `${out}<p>${esc(p)}</p>`
+      }, '')
+  const legalDoc = () => {
+    const shown = pg.sections.filter((s) => editing || !s.hidden)
+    const parts = shown.map((s, i) => `${s.heading ? `<${i === 0 ? 'h1' : 'h2'} id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</${i === 0 ? 'h1' : 'h2'}>` : ''}<div${E(s.id, 'body')}>${legalBody(s.body)}</div>`)
+    const title = shown[0]?.heading ? '' : `<h1>${esc(pg.navLabel)}</h1>`
+    return `<section class="sec legal-doc" id="${esc(shown[0]?.id || 'policy')}"><div class="wrap"><article>${title}${parts.join('')}</article></div></section>`
+  }
+  const body = pg.legal
+    ? legalDoc()
+    : pg.sections
+        .filter((s) => editing || !s.hidden)
+        .map((s) => (s.hidden ? `<div class="ge-hidden" data-hidden-section="${esc(s.id)}"><p class="ge-hidden-label">Hidden · not on your website</p>${section(s)}</div>` : section(s)))
+        .join('')
+  // Legal pages (privacy policy, terms) live in the footer, not the main navigation.
+  const navPages = spec.pages.filter((p) => !p.legal)
+  const navLinks = navPages.length > 1 ? `<ul>${navPages.map((p) => `<li><a href="${esc(href(p.slug))}"${p.slug === pg.slug ? ' aria-current="page"' : ''}>${esc(p.navLabel)}</a></li>`).join('')}</ul>` : ''
+  // Footer legal links: the business's own legal pages; GetShowUps' privacy page only when it has none of its own.
+  const legalPages = spec.pages.filter((p) => p.legal)
+  const legalLinks = [...(legalPages.some((p) => p.slug === 'privacy' || /privacy/.test(p.slug)) ? [] : [[privacyUrl, 'Privacy']]), ...legalPages.map((p) => [href(p.slug), p.navLabel])]
+    .map(([u, l]) => `<a href="${esc(u)}">${esc(l)}</a>`)
+    .join(' · ')
   const nav = `<header class="nav nav-${spec.nav.layout}${spec.nav.sticky ? ' sticky' : ''}"><div class="wrap"><a class="brand" href="${esc(href(''))}">${esc(biz.name)}</a>${navLinks}${spec.nav.showBook ? `<a class="btn" href="${esc(bookUrl)}">${visit ? 'Book a visit' : 'Book'}</a>` : ''}</div></header>`
   // The footer names the brand once: a tagline that starts with the name again ("Poolthru LLC · Pool care…") loses it.
   const names = [biz.name, biz.legalName].filter(Boolean).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
   // What remains starts a sentence ("PoolThru: pool cleaning…" → "Pool cleaning…", live Claude answer 2026-11-16).
   const tagline = (spec.footer.text || '').replace(new RegExp(`^(?:${names})(?:[,\\s]+(?:llc|inc|ltd|co)\\.?)?\\s*[·|:,.–—-]\\s*(\\S?)`, 'i'), (_, c) => c.toUpperCase()).trim()
   const repeat = new RegExp(`^(?:${names})\\.?$`, 'i').test(tagline)
-  const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(tagline || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && tagline && !repeat ? ` · ${esc(tagline)}` : ''}</span><span><a href="${esc(privacyUrl)}">Privacy</a> · Website by GetShowUps</span></div></footer>`
+  const foot = `<footer class="foot foot-${spec.footer.layout}"><div class="wrap">${spec.footer.layout === 'statement' ? `<p class="big">${esc(tagline || biz.name)}</p>` : ''}<span>© ${year} ${esc(biz.name)}${spec.footer.layout !== 'statement' && tagline && !repeat ? ` · ${esc(tagline)}` : ''}</span><span>${legalLinks} · Website by GetShowUps</span></div></footer>`
   const title = pg.seoTitle || (pg.slug ? `${pg.navLabel} · ${biz.name}` : biz.name)
   const desc = pg.seoDescription || spec.pages[0].seoDescription || ''
   // Absolute URLs (social previews, structured data) come from the canonical address; none in private previews.

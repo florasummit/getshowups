@@ -242,14 +242,46 @@ export function validateSpec(raw, ctx = {}) {
   }
   let total = 0
   const outPages = []
+  // Legal pages (privacy policy, terms): the owner's own legal text, kept word for word. Only plain text sections; the
+  // text is escaped and length-limited but NOT run through the marketing-claims / invented-number filters, which would
+  // silently drop sentences of a policy ("free", "reviews", "within 30 days"). AI output can never mark a page legal.
+  const plain = (v, max, where, body = false) => {
+    const s = (body ? cleanBody : clean)(v)
+    if (s.length > max) {
+      warnings.push({ where, reason: 'too_long' })
+      return ''
+    }
+    return s
+  }
+  const sourceOf = (v) => {
+    if (!v || typeof v !== 'object' || !['imported', 'starter', 'owner'].includes(v.kind)) return null
+    const url = typeof v.url === 'string' && /^https:\/\/[^\s"'<>]{1,290}$/.test(v.url) ? v.url : null
+    return { kind: v.kind, ...(url && v.kind === 'imported' ? { url } : {}), ...(Number.isFinite(v.at) ? { at: Math.trunc(v.at) } : {}) }
+  }
   for (const { p, slug, pi } of pages) {
     const sections = []
+    const legal = pi > 0 && p.legal === true && !ctx.factsText
     for (const [si, s] of arr(p.sections).slice(0, LIMITS.sectionsPerPage).entries()) {
       if (total >= LIMITS.sections) {
         warnings.push({ where: 'sections', reason: 'limit' })
         break
       }
       const where = `pages.${pi}.sections.${si}`
+      if (legal) {
+        if (!s || s.type !== 'text') {
+          warnings.push({ where, reason: 'type' })
+          continue
+        }
+        let lid = SLUG.test(clean(s.id).toLowerCase()) ? clean(s.id).toLowerCase() : `legal-${si + 1}`
+        while (ids.has(lid)) lid = `${lid}-x`
+        ids.add(lid)
+        const body = plain(s.body, LIMITS.body, `${where}.body`, true)
+        const heading = plain(s.heading, LIMITS.heading, `${where}.heading`)
+        if (!body && !heading) continue
+        sections.push({ type: 'text', id: lid, background: 'bg', backgroundImage: null, spacing: 'm', align: 'left', width: 'narrow', animate: 'none', heading, eyebrow: '', text: '', body, columns: 1, lead: false, ...(s.hidden === true ? { hidden: true } : {}) })
+        total++
+        continue
+      }
       if (!s || typeof s !== 'object' || !SECTION_TYPES.includes(s.type)) {
         warnings.push({ where, reason: 'type' })
         continue
@@ -424,12 +456,14 @@ export function validateSpec(raw, ctx = {}) {
       warnings.push({ where: `pages.${pi}`, reason: 'empty' })
       continue
     }
+    const gate = legal ? plain : txt
     outPages.push({
       slug,
-      navLabel: txt(p.navLabel, LIMITS.navLabel, `pages.${pi}.navLabel`) || (slug ? slug.replace(/-/g, ' ') : 'Home'),
-      seoTitle: txt(p.seoTitle, LIMITS.seoTitle, `pages.${pi}.seoTitle`),
-      seoDescription: txt(p.seoDescription, LIMITS.seoDescription, `pages.${pi}.seoDescription`),
+      navLabel: gate(p.navLabel, LIMITS.navLabel, `pages.${pi}.navLabel`) || (slug ? slug.replace(/-/g, ' ') : 'Home'),
+      seoTitle: gate(p.seoTitle, LIMITS.seoTitle, `pages.${pi}.seoTitle`),
+      seoDescription: gate(p.seoDescription, LIMITS.seoDescription, `pages.${pi}.seoDescription`),
       sections,
+      ...(legal ? { legal: true, ...(sourceOf(p.source) ? { source: sourceOf(p.source) } : {}) } : {}),
     })
   }
   // Every site has a home page with a hero, and a way to book on every page.
@@ -445,6 +479,7 @@ export function validateSpec(raw, ctx = {}) {
     outPages[0].sections.unshift(validateSpec({ pages: [{ sections: [{ type: 'hero' }] }] }, ctx).spec.pages[0].sections[0])
   }
   for (const pg of outPages) {
+    if (pg.legal) continue // a policy page is just the policy (the navigation's Book button is still there)
     const linksToBook = pg.sections.some((s) => !s.hidden && (s.type === 'hero' || s.type === 'cta' || s.type === 'contact' || (s.type === 'composition' && s.blocks.some((b) => b.kind === 'button' && b.target === 'book'))))
     if (!linksToBook) pg.sections.push({ type: 'cta', id: `book-${pg.slug || 'home'}`, background: 'accent', backgroundImage: null, spacing: 'l', align: 'center', width: 'normal', animate: 'none', heading: 'Ready when you are.', eyebrow: '', text: '', layout: 'band', image: null, cta: { label: 'Book now', target: 'book' } })
   }
@@ -472,6 +507,16 @@ export function validateSpec(raw, ctx = {}) {
     spec.pages = spec.pages.slice(0, 1)
   }
   return { spec, warnings }
+}
+
+// A new design (AI designer) never rewrites or drops the owner's legal pages: they are carried over unchanged from the
+// previous site (replacing any page the design put at the same address), within the page limit.
+export function keepLegalPages(next, previous) {
+  const legal = (previous?.pages || []).filter((p) => p.legal)
+  if (!next || !legal.length) return next
+  const slugs = new Set(legal.map((p) => p.slug))
+  const others = next.pages.filter((p) => !slugs.has(p.slug)).slice(0, Math.max(1, LIMITS.pages - legal.length))
+  return { ...next, pages: [...others, ...legal] }
 }
 
 // Every image the spec uses (for asset serving: a published site's images are public).
