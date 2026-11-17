@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, noIndex } from '../lib/api.js'
 import '../app.css'
 
-// Public AI receptionist for one business: website chat and a browser voice call, both answered by the same engine
-// on our server (real model, the business's verified facts, real calendar). Nothing here decides anything: the page
-// shows what the server says.
+// Public AI receptionist for one business: one conversation the customer can type in and/or talk in (browser voice).
+// The server is the source of truth for what was said and what happened (booked / callback recorded / ended); this page
+// only shows it. Ending a conversation closes it on the server and clears this browser's copy.
 const KEY = (id) => `gsu_rcpt_${id}`
 const load = (id) => {
   try {
@@ -15,64 +15,106 @@ const load = (id) => {
 }
 const save = (id, v) => {
   try {
-    sessionStorage.setItem(KEY(id), JSON.stringify(v))
+    if (v) sessionStorage.setItem(KEY(id), JSON.stringify(v))
+    else sessionStorage.removeItem(KEY(id))
   } catch {
     // storage unavailable: the conversation still works, it just won't survive a reload
   }
 }
 const ERRORS = {
   network_error: 'Connection problem. Check your internet and try again.',
-  rate_limited: 'That was a lot of messages at once. Wait a moment and try again.',
+  rate_limited: 'That was a lot of messages at once. Wait a moment, then try again.',
   busy: 'Still working on your last message. Try again in a moment.',
+}
+const VOICE_ERRORS = {
+  voice_not_configured: 'Voice isn’t available right now. You can keep typing.',
+  conversation_ended: 'This conversation has ended. Start a new one to call.',
+  mic: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
+  dropped: 'The call dropped. You can call again or keep typing.',
+  start: 'Couldn’t start the call. Try again or keep typing.',
 }
 
 export default function ChatPage({ id }) {
   const [info, setInfo] = useState(null)
-  const [msgs, setMsgs] = useState(() => load(id)?.msgs || [])
-  const [conv, setConv] = useState(() => load(id)?.conv || null)
+  const [conv, setConv] = useState(() => load(id))
+  const [lines, setLines] = useState([])
+  const [outcome, setOutcome] = useState({ booked: null, request: null, ended: false })
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
-  const [booked, setBooked] = useState(() => load(id)?.booked || null)
-  const [voice, setVoice] = useState({ state: 'idle' })
+  const [voice, setVoice] = useState({ state: 'idle', live: [] })
+  const [confirmEnd, setConfirmEnd] = useState(false)
   const listRef = useRef(null)
+  const inputRef = useRef(null)
   const callRef = useRef(null)
 
   useEffect(() => noIndex(), [])
   useEffect(() => {
     api(`/api/receptionist/${id}`).then(({ status, data }) => setInfo(status === 200 ? data : { missing: true }))
   }, [id])
-  useEffect(() => save(id, { msgs, conv, booked }), [id, msgs, conv, booked])
+  useEffect(() => save(id, conv), [id, conv])
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [msgs, sending, voice.lines])
+  }, [lines, sending, voice.live])
   useEffect(() => () => callRef.current?.stopCall(), [])
+
+  const applyState = (d) => setOutcome({ booked: d.booked || null, request: d.request || null, ended: Boolean(d.ended) })
+  // The server's record of this conversation (what was typed AND said on calls).
+  const refresh = useCallback(
+    async (c = conv) => {
+      if (!c) return
+      const { status, data } = await api(`/api/receptionist/${id}/conversation`, { method: 'POST', body: { action: 'view', conversationId: c.id, token: c.token } })
+      if (status === 200) {
+        setLines(data.transcript)
+        applyState(data)
+      } else if (status === 404) {
+        setConv(null)
+        setLines([])
+      }
+    },
+    [conv, id],
+  )
+  // Restore after a reload.
+  useEffect(() => {
+    if (conv) api(`/api/receptionist/${id}/conversation`, { method: 'POST', body: { action: 'view', conversationId: conv.id, token: conv.token } }).then(({ status, data }) => {
+      if (status === 200) {
+        setLines(data.transcript)
+        applyState(data)
+      } else if (status === 404) setConv(null)
+    })
+    // only on first load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const send = async (value) => {
     const t = (value ?? text).trim()
-    if (!t || sending) return
+    if (!t || sending || outcome.ended) return
     setError(null)
     setSending(true)
-    if (value === undefined) {
-      setMsgs((m) => [...m, { who: 'customer', text: t }])
-      setText('')
-    }
+    if (value === undefined) setText('')
+    setLines((l) => [...l, { who: 'customer', text: t, channel: 'chat' }])
     const { status, data } = await api(`/api/receptionist/${id}/chat`, { method: 'POST', body: { text: t, ...(conv ? { conversationId: conv.id, token: conv.token } : {}) } })
     setSending(false)
     if (status === 200) {
       setConv({ id: data.conversationId, token: data.token })
-      setMsgs((m) => [...m, { who: 'receptionist', text: data.reply }])
-      if (data.booked) setBooked(data.booked)
+      setLines((l) => [...l, { who: 'receptionist', text: data.reply, channel: 'chat' }])
+      applyState(data)
+      inputRef.current?.focus()
       return
     }
+    setLines((l) => l.slice(0, -1))
+    if (status === 410) return refresh()
     if (status === 404 && data.error === 'conversation_not_found') setConv(null)
     setError({ text: t, message: ERRORS[status === 429 ? 'rate_limited' : data.error] || 'Something went wrong. Try again.' })
   }
 
   const startVoice = async () => {
-    setVoice({ state: 'connecting', lines: [] })
-    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: {} })
-    if (status !== 200) return setVoice({ state: 'error', message: data.error === 'voice_not_configured' ? 'Voice isn’t switched on yet.' : 'Couldn’t start the call. Try again or use chat.' })
+    if (voice.state === 'connecting' || voice.state === 'live' || outcome.ended) return
+    setVoice({ state: 'connecting', live: [] })
+    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: conv ? { conversationId: conv.id, token: conv.token } : {} })
+    if (status !== 200) return setVoice({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start })
+    const c = { id: data.conversationId, token: data.token }
+    setConv(c)
     try {
       const { RetellWebClient } = await import('retell-client-js-sdk')
       const call = new RetellWebClient()
@@ -81,22 +123,51 @@ export default function ChatPage({ id }) {
       call.on('agent_start_talking', () => setVoice((v) => ({ ...v, talking: true })))
       call.on('agent_stop_talking', () => setVoice((v) => ({ ...v, talking: false })))
       call.on('update', (u) => {
-        if (Array.isArray(u?.transcript)) setVoice((v) => ({ ...v, lines: u.transcript.map((l) => ({ who: l.role === 'agent' ? 'receptionist' : 'customer', text: l.content })) }))
+        if (Array.isArray(u?.transcript)) setVoice((v) => ({ ...v, live: u.transcript.map((l) => ({ who: l.role === 'agent' ? 'receptionist' : 'customer', text: l.content, channel: 'voice' })) }))
       })
       call.on('call_ended', () => {
         callRef.current = null
-        setVoice((v) => ({ state: 'ended', lines: v.lines || [] }))
+        setVoice({ state: 'ended', live: [] })
+        refresh(c)
       })
-      call.on('error', () => setVoice((v) => ({ ...v, state: 'error', message: 'The call dropped. You can try again or use chat.' })))
+      call.on('error', () => {
+        callRef.current = null
+        setVoice({ state: 'error', live: [], message: VOICE_ERRORS.dropped })
+        refresh(c)
+      })
       await call.startCall({ accessToken: data.accessToken, callId: data.callId, transport: data.transport, iceServers: data.iceServers })
-    } catch {
-      setVoice({ state: 'error', message: 'Microphone or connection problem. Allow the microphone and try again.' })
+    } catch (err) {
+      callRef.current = null
+      setVoice({ state: 'error', live: [], message: err?.name === 'NotAllowedError' || /permission|microphone/i.test(String(err?.message)) ? VOICE_ERRORS.mic : VOICE_ERRORS.start })
     }
   }
   const endVoice = () => {
     callRef.current?.stopCall()
+  }
+
+  const endConversation = async () => {
+    setConfirmEnd(false)
+    callRef.current?.stopCall()
+    if (conv) {
+      const { status, data } = await api(`/api/receptionist/${id}/conversation`, { method: 'POST', body: { action: 'end', conversationId: conv.id, token: conv.token } })
+      if (status === 200) {
+        setLines(data.transcript)
+        applyState(data)
+        return
+      }
+    }
+    setOutcome((o) => ({ ...o, ended: true }))
+  }
+  const startNew = () => {
+    callRef.current?.stopCall()
     callRef.current = null
-    setVoice((v) => ({ state: 'ended', lines: v.lines || [] }))
+    setConv(null)
+    setLines([])
+    setOutcome({ booked: null, request: null, ended: false })
+    setVoice({ state: 'idle', live: [] })
+    setError(null)
+    setText('')
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   if (!info) return <main className="rc-page" aria-busy="true" />
@@ -113,51 +184,71 @@ export default function ChatPage({ id }) {
         <h1 className="rc-title">{info.name}</h1>
         <p className="rc-empty">
           Chat isn’t available right now. <a href={`/book/${id}`}>Book online</a>
+          {info.phone && (
+            <>
+              {' '}
+              or call <a href={`tel:${info.phone.replace(/[^\d+]/g, '')}`}>{info.phone}</a>
+            </>
+          )}
         </p>
       </main>
     )
   }
-  const voiceLive = voice.state === 'connecting' || voice.state === 'live'
+  const onCall = voice.state === 'connecting' || voice.state === 'live'
+  const started = Boolean(conv) || lines.length > 0
   return (
     <main className="rc-page">
       <header className="rc-head">
         <div>
           <h1 className="rc-title">{info.name}</h1>
-          <p className="rc-sub">AI receptionist · answers from {info.name}’s own information</p>
+          <p className="rc-sub">AI receptionist</p>
         </div>
-        <nav className="rc-human" aria-label="Other ways to reach us">
-          {info.phone && <a href={`tel:${info.phone.replace(/[^\d+]/g, '')}`}>Call {info.phone}</a>}
-          <button type="button" className="link-btn" onClick={() => send('I would like to talk to a person, please.')} disabled={sending}>
-            Talk to a person
-          </button>
-          <a href={`/book/${id}`}>Book online</a>
-        </nav>
+        {started && !outcome.ended && (
+          <div className="rc-end">
+            {confirmEnd ? (
+              <>
+                <button type="button" className="btn btn-sm btn-quiet" onClick={endConversation}>
+                  End conversation
+                </button>
+                <button type="button" className="link-btn" onClick={() => setConfirmEnd(false)}>
+                  Keep going
+                </button>
+              </>
+            ) : (
+              <button type="button" className="link-btn" onClick={() => setConfirmEnd(true)}>
+                End conversation
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
-      {booked && (
-        <p className="rc-booked" role="status">
-          Booked: {booked.time}. A confirmation is on its way to your email.
+      {outcome.booked && (
+        <p className="rc-banner rc-banner--ok" role="status">
+          Booked: {outcome.booked.time}.
+        </p>
+      )}
+      {outcome.request && !outcome.booked && (
+        <p className="rc-banner" role="status">
+          {outcome.request === 'callback' ? 'Your callback request is recorded for the team.' : 'Your message is recorded for the team.'}
         </p>
       )}
 
       <section className="rc-list" ref={listRef} aria-label="Conversation" aria-live="polite">
         <p className="rc-msg rc-msg--receptionist">{info.greeting}</p>
-        {msgs.map((m, i) => (
+        {lines.map((m, i) => (
           <p key={i} className={`rc-msg rc-msg--${m.who}`}>
+            {m.channel === 'voice' && <span className="rc-tag">said</span>}
             {m.text}
           </p>
         ))}
-        {sending && <p className="rc-msg rc-msg--receptionist rc-typing">Thinking…</p>}
-        {voice.lines?.length > 0 && (
-          <div className="rc-voice-lines" aria-label="Call transcript">
-            <p className="fine">Call transcript</p>
-            {voice.lines.map((l, i) => (
-              <p key={i} className={`rc-msg rc-msg--${l.who}`}>
-                {l.text}
-              </p>
-            ))}
-          </div>
-        )}
+        {voice.live.map((m, i) => (
+          <p key={`v${i}`} className={`rc-msg rc-msg--${m.who} rc-msg--live`}>
+            <span className="rc-tag">said</span>
+            {m.text}
+          </p>
+        ))}
+        {sending && <p className="rc-msg rc-msg--receptionist rc-typing">Typing…</p>}
       </section>
 
       {error && (
@@ -169,44 +260,79 @@ export default function ChatPage({ id }) {
         </p>
       )}
 
-      {info.voice && (
-        <div className="rc-voice">
-          {voiceLive ? (
-            <>
-              <span className={`rc-dot${voice.talking ? ' rc-dot--talking' : ''}`} aria-hidden="true" />
-              <span>{voice.state === 'connecting' ? 'Connecting…' : voice.talking ? 'Speaking…' : 'Listening — just talk'}</span>
-              <button type="button" className="btn btn-sm btn-quiet" onClick={endVoice}>
-                End call
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn btn-sm btn-quiet" onClick={startVoice}>
-                Talk instead (uses your microphone)
-              </button>
-              {voice.message && <span className="fine">{voice.message}</span>}
-            </>
+      {outcome.ended ? (
+        <section className="rc-done" aria-label="Conversation ended">
+          <p>
+            <strong>This conversation has ended.</strong> {outcome.booked ? `Your appointment is booked for ${outcome.booked.time}.` : outcome.request === 'callback' ? 'Your callback request is recorded.' : ''}
+          </p>
+          <button type="button" className="btn btn-primary" onClick={startNew}>
+            Start a new conversation
+          </button>
+        </section>
+      ) : (
+        <>
+          {info.voice && (
+            <div className="rc-voice" aria-live="polite">
+              {onCall ? (
+                <>
+                  <span className={`rc-dot${voice.talking ? ' rc-dot--talking' : ''}`} aria-hidden="true" />
+                  <span>{voice.state === 'connecting' ? 'Connecting your microphone…' : voice.talking ? 'Speaking…' : 'On a call: just talk. You can also type below.'}</span>
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={endVoice}>
+                    End call
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={startVoice}>
+                    {voice.state === 'ended' ? 'Call again' : 'Talk instead (uses your microphone)'}
+                  </button>
+                  {voice.state === 'ended' && <span className="fine">Call ended. Your microphone is off; you can keep typing.</span>}
+                  {voice.message && <span className="fine">{voice.message}</span>}
+                </>
+              )}
+            </div>
           )}
-        </div>
+          <form
+            className="rc-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              send()
+            }}
+          >
+            <label className="sr-only" htmlFor="rc-input">
+              Your message
+            </label>
+            <input
+              id="rc-input"
+              ref={inputRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={onCall ? 'Type while you talk, for example your phone number' : 'Ask about services, prices or a time…'}
+              maxLength={1500}
+              autoComplete="off"
+            />
+            <button type="submit" className="btn btn-primary" disabled={!text.trim() || sending}>
+              Send
+            </button>
+          </form>
+          <p className="fine rc-foot">
+            Want a person?{' '}
+            <button type="button" className="link-btn" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
+              Ask for a person
+            </button>
+            {info.phone && (
+              <>
+                {' · '}
+                <a href={`tel:${info.phone.replace(/[^\d+]/g, '')}`}>Call {info.phone}</a>
+              </>
+            )}
+            {' · '}
+            <a href={`/book/${id}`}>Book online</a>
+          </p>
+        </>
       )}
-
-      <form
-        className="rc-form"
-        onSubmit={(e) => {
-          e.preventDefault()
-          send()
-        }}
-      >
-        <label className="sr-only" htmlFor="rc-input">
-          Your message
-        </label>
-        <input id="rc-input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about services, prices or a time…" maxLength={1500} autoComplete="off" disabled={voiceLive} />
-        <button type="submit" className="btn btn-primary" disabled={!text.trim() || sending || voiceLive}>
-          Send
-        </button>
-      </form>
       <p className="fine rc-foot">
-        Powered by GetShowUps. Messages are kept for {info.name}. <a href="/privacy">Privacy</a>
+        Powered by GetShowUps. Conversations are kept for {info.name}. <a href="/privacy">Privacy</a>
       </p>
     </main>
   )

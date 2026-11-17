@@ -2287,7 +2287,14 @@
 .rc-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 0.9rem; }
 .rc-human { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.92rem; }
 .rc-human a { color: var(--orange-700); }
-.rc-booked { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); background: #e9f7ef; color: #14532d; font-weight: 600; }
+.rc-banner { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--ink-100); color: var(--text); font-weight: 600; }
+.rc-banner--ok { background: #e9f7ef; color: #14532d; }
+.rc-end { display: flex; gap: 8px; align-items: center; }
+.rc-tag { display: inline-block; margin-right: 8px; padding: 0 6px; border-radius: 6px; background: rgb(0 0 0 / 0.08); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; vertical-align: 1px; }
+.rc-msg--customer .rc-tag { background: rgb(255 255 255 / 0.18); }
+.rc-msg--live { opacity: 0.85; }
+.rc-done { display: grid; gap: 12px; justify-items: start; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+.rc-done p { margin: 0; }
 .rc-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; min-height: 240px; }
 .rc-msg { margin: 0; max-width: 85%; padding: 10px 14px; border-radius: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rc-msg--receptionist { align-self: flex-start; background: var(--ink-100); border-bottom-left-radius: 4px; }
@@ -2312,3 +2319,11 @@
 .rx-convo { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
 .rx-events { margin: 0; padding-left: 18px; font-size: 0.88rem; color: var(--text-muted); }
 .rx-events .bad { color: #9f1239; }
+.rx-head { justify-content: space-between; }
+.rx-statuses { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 0.95rem; }
+.rx-status { color: var(--text-muted); }
+.rx-status--ok { color: var(--text); }
+.rx-status--ok span { color: #16a34a; }
+.rx-open { text-align: left; display: grid; gap: 2px; width: 100%; }
+.rx-phone summary { cursor: pointer; font-weight: 600; }
+.rx-phone fieldset[disabled] { opacity: 0.6; }

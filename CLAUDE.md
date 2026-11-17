@@ -350,6 +350,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Every tool action/refusal/failure/hand-off is a receptionist_events row (codes only). Owner sees spoken/typed lines,
   never model internals. Cost caps per conversation and per business/day. Phone numbers/forwarding: not provisioned
   (routing.js is provider-neutral and simulated only). Never claim a booking the tool did not return.
+  Customer details are saved once (save_customer_details, deterministic checks) and re-sent as known each turn: never
+  re-ask. Email is optional for a booking (no email → no invitee, confirmation skipped no_email). One lead per
+  conversation (lead id claimed on the conversation row first). NO live transfer exists: "a person" → a recorded
+  receptionist_requests row (migration 0027; callback/message, owner Needs attention, Mark done) and the customer is told
+  only that it was recorded — never a call time, never "the team was notified". Owner notification (owner_callback via
+  the outbox) is tracked separately: recorded / pending / sent / failed / not_sent (held). Phone routing settings stay
+  disabled and labelled "not connected" until a line exists. Voice: an interrupted turn that did nothing is never
+  saved; a call continues the page's conversation; ending the conversation ends the call.
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
   the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the

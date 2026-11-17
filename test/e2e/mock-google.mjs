@@ -292,9 +292,16 @@ createServer(async (req, res) => {
     if (results.length) {
       const times = results.find((r) => r.options)?.options
       if (times) return reply([{ type: 'text', text: times.length ? `I can do ${times[0].time}. Would that work?` : 'No open times right now.' }], 'end_turn')
-      if (results.some((r) => r.handed_off)) return reply([{ type: 'text', text: 'I have let the team know. Someone will follow up shortly.' }], 'end_turn')
+      if (results.some((r) => r.recorded)) return reply([{ type: 'text', text: 'I’ve recorded your callback request for the team with your number.' }], 'end_turn')
+      if (results.some((r) => r.error === 'name_needed' || r.error === 'phone_needed')) return reply([{ type: 'text', text: 'I can’t transfer you, but I can take a callback request. What’s your name and best number?' }], 'end_turn')
     }
-    if (/person|human/i.test(userText)) return reply([{ type: 'tool_use', id: 'toolu_h1', name: 'request_human', input: { reason: 'customer_asked', urgent: false, note_for_staff: 'Customer asked for a person.' } }], 'tool_use')
+    // "Name, phone" typed → saved, then the callback request is recorded (the real tools run on the server).
+    const contact = userText.match(/^([A-Za-z]+ [A-Za-z]+),\s*([\d() .-]{10,})$/)
+    if (contact) return reply([
+      { type: 'tool_use', id: 'toolu_d1', name: 'save_customer_details', input: { name: contact[1], phone: contact[2], email: '', zip: '', street: '', city: '', state: '', need: '' } },
+      { type: 'tool_use', id: 'toolu_h2', name: 'request_callback', input: { reason: 'Customer asked for a person.', urgent: false } },
+    ], 'tool_use')
+    if (/person|human/i.test(userText)) return reply([{ type: 'tool_use', id: 'toolu_h1', name: 'request_callback', input: { reason: 'Customer asked for a person.', urgent: false } }], 'tool_use')
     if (/time|available|when/i.test(userText)) return reply([{ type: 'tool_use', id: 'toolu_t1', name: 'find_available_times', input: { date: '', part_of_day: 'any' } }], 'tool_use')
     return reply([{ type: 'text', text: 'Weekly pool care is $280. Want me to find a time?' }], 'end_turn')
   }

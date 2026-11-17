@@ -2,6 +2,30 @@
 
 _Update at the end of every task. Newest first._
 
+## Receptionist repair after the first real test (2026-11-17) — fix/receptionist-journey; migration 0027 (NOT applied)
+
+- Root causes, from the production transcript and Retell call data (no customer contact details recorded here):
+  - "Hello?" ~22 s after the first message: the first answer took about 22 s (Retell llm p50 2.9 s, e2e p50 4.6 s,
+    max 6.3 s), with no streaming.
+  - The caller's words were duplicated in the model's history: replies that Retell discarded (the caller talked over
+    them) were saved anyway.
+  - Phone asked repeatedly: no saved-details state, so every turn re-collected; the caller never actually said digits
+    (Retell transcript: "Call me at let's see."). Spoken digits ("two nine four…") would also have failed the check.
+  - No booking: email was required, which is hard by voice.
+  - "A person will call back": the hand-off tool returned "a team member will follow up", but no notice existed.
+    It was called 3 times.
+  - Dashboard showed 0: it loaded once, before the conversations existed.
+  - Voice "no symbols" let a price in words bypass the $ check; pre-tool narration showed in the owner transcript.
+- Fixes: save_customer_details + known-details note each turn + targeted re-checks + spoken digits; optional email;
+  streamed voice with sentence checks; interrupted turns dropped; request_callback / leave_message →
+  receptionist_requests (0027) + owner_callback notice with tracked state; end / new conversation, voice↔text in one
+  conversation, text usable during calls; owner screen with real statuses, Needs attention, auto-refresh, phone
+  routing disabled until connected; knowledge conflicts flagged (Settings win); one lead per conversation under
+  concurrent turns.
+- Tests: unit 537 (18 receptionist incl. regressions for each root cause; 100-scenario adversarial eval), browser 90
+  (receptionist journey desktop + phone). Model, Google and Retell MOCKED; no new paid run.
+- Needs approval: migration 0027, then deploy. Then a real chat + voice test (costs reported before).
+
 ## AI receptionist: real chat + voice, real calendar booking (2026-11-17) — feature/receptionist; migration 0026 (NOT applied)
 
 - Built (docs/RECEPTIONIST.md): one multi-tenant engine (server/receptionist/) for website chat (/chat/<id>, linked

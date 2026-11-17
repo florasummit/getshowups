@@ -89,7 +89,8 @@ Staff identities are kept for accountability. Limits of its tamper evidence: doc
   is removed after 365 days (cron, `purgeOldMessages`, 500 per run). Delivery counts stay in the audit log (no text).
 - `lead_threads`, `followup_settings`, `sms_registrations`, `sms_registration_extra`, `sms_provider_objects`, `sms_accounts` and `thread_messages` are in `ERASED_TABLES` (account deletion); the business's Twilio subaccount is closed first (integrations step; Twilio releases its numbers).
 - AI receptionist (migration 0026): `receptionist_conversations` (transcripts incl. what customers typed or said),
-  `receptionist_events`, `receptionist_calls`, `receptionist_settings` are in `ERASED_TABLES`; conversations (with their
-  events and calls) are purged 365 days after their last update (cron).
+  `receptionist_events`, `receptionist_calls`, `receptionist_settings` and (migration 0027) `receptionist_requests`
+  (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,
+  calls and requests) are purged 365 days after their last update (cron).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
   for as long as the lead exists.

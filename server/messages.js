@@ -349,6 +349,8 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
       skipReason(m, now) ??
       (m.channel === 'sms' && (await textsViaGhl(m.customer)) ? 'ghl_sms' : null) ??
       (configured[m.channel] ? null : 'no_provider') ??
+      // A receptionist booking may have no email (the caller gave a phone number only).
+      (m.channel === 'email' && !m.lead_email ? 'no_email' : null) ??
       (m.channel === 'sms' && !(await readyFor(m.customer)).ok ? 'sms_not_ready' : null) ??
       (recipientAllowed(env, m.channel === 'email' ? m.lead_email : m.lead_phone, { testOnly }) ? null : 'test_mode') ??
       (FOLLOW_UP_KINDS.includes(m.kind) ? optOutReason(await isOptedOut(env, m.customer, m.channel, m.channel === 'email' ? m.lead_email : m.lead_phone)) : null) ??
