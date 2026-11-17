@@ -7,12 +7,27 @@ import { getProfile } from '../../../../server/onboarding.js'
 import { loadWebsite } from '../../../../server/website.js'
 import { exportAssets } from '../../../../server/assets.js'
 import { domainFor } from '../../../../server/domains.js'
+import { staticExport } from '../../../../server/site-export.js'
+import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
   const db = env.ONBOARDING_DB
   const c = session.customer
+  // ?format=static: the PUBLISHED website as plain files (.zip) for the owner's own hosting (server/site-export.js).
+  if (new URL(request.url).searchParams.get('format') === 'static') {
+    const rl = await hit(env, 'websiteExport', c.id)
+    if (rl.limited) return tooManyJson(rl.retryAfter)
+    try {
+      const r = await staticExport(env, c, request.url)
+      if (!r.ok) return json(409, { error: r.error })
+      return new Response(r.bytes, { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${r.filename}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
+    } catch (err) {
+      console.error('static export failed:', err?.name)
+      return json(503, { error: 'export_failed' })
+    }
+  }
   try {
     const [website, profile, images, domain, versions] = await Promise.all([
       loadWebsite(db, c),

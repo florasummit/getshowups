@@ -17,10 +17,12 @@ const go = (id) => {
 
 export default function WebsiteJourney({ data, onPublish, canPublish = true }) {
   const [imp, setImp] = useState(null)
+  // Re-read whenever the draft changes (e.g. right after an import is applied), so step 1 is never stale.
+  const updatedAt = data.website?.updatedAt ?? null
   useEffect(() => {
     if (!data.studio) return
     api('/api/dashboard/website/import').then(({ status, data: d }) => status === 200 && setImp(d.import))
-  }, [data.studio])
+  }, [data.studio, updatedAt])
   const steps = journeySteps(data, imp, { canPublish })
   const current = steps.findIndex((s) => !s.done)
   const run = ([, target]) => (target === 'publish' ? onPublish() : /^https?:/.test(target) ? window.open(target, '_blank', 'noopener') : go(target))

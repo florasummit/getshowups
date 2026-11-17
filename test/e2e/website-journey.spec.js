@@ -44,7 +44,7 @@ test('website journey: where you are, what is next, and exactly which DNS record
   // Importing the old (Squarespace-style, mocked) site into a business that already has a website: only the old page
   // addresses are pre-ticked, no photos, so the current text is never replaced by accident. Not applied here.
   if (await imp.getByText('Import a different website').isVisible()) await imp.getByText('Import a different website').click()
-  await imp.getByLabel('Your current website').fill('www.harborpools.example')
+  await imp.getByLabel('Your current website', { exact: true }).fill('www.harborpools.example')
   await imp.getByLabel('This is my business’s website and I can use its content.').check()
   await imp.getByRole('button', { name: /^Import (my website|again)$/ }).click()
   await expect(imp.getByText('Found 3 pages on www.harborpools.example.')).toBeVisible({ timeout: 30_000 })

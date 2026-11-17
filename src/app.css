@@ -1475,6 +1475,56 @@
 .after-switch {
   margin-top: var(--s-2);
 }
+/* Website Studio: start chooser (WebsiteStart.jsx) and hosting notes */
+.ws-start {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+}
+.ws-start-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s-3);
+}
+.ws-start-card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ws-start-card strong {
+  font-size: var(--fs-lg);
+}
+.ws-start-card span {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.ws-start-card:hover:not(:disabled) {
+  border-color: var(--ink-400);
+}
+.ws-start-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent);
+}
+.ws-start-card:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.hosting-notes {
+  display: grid;
+  gap: 6px;
+  margin: var(--s-2) 0 0;
+  padding-left: 18px;
+}
 .domain-status {
   display: flex;
   flex-wrap: wrap;

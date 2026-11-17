@@ -124,6 +124,20 @@ for E in "$E2E_EDITOR_CUSTOMER:$E2E_EDITOR_SESSION_TOKEN" "$E2E_EDITOR_M_CUSTOME
   "
 done
 
+# Website Studio full journey: a fresh HVAC business per browser project (no website yet; calendar + hours ready).
+for E in "$E2E_FLOW_CUSTOMER:$E2E_FLOW_SESSION_TOKEN" "$E2E_FLOW_M_CUSTOMER:$E2E_FLOW_M_SESSION_TOKEN"; do
+  FC=${E%%:*}
+  FT=${E#*:}
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$FC', 'Northwind Air', 'America/Chicago', '', '08:00', '18:00', '1,2,3,4,5', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$FC.example', '$FC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$FT")', 'owner@$FC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$FC', '(612) 555-0142', 'HVAC', '', '[]', '[\"Minneapolis\"]', $NOW);
+  "
+done
+
 # Visual tour: one fictional business with bookings, receptionist conversations and an open callback request.
 d1 "$(node test/e2e/seed-tour.mjs "$E2E_TOUR_CUSTOMER" "$(hash "$E2E_TOUR_SESSION_TOKEN")" "$NOW")"
 
@@ -149,7 +163,7 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done

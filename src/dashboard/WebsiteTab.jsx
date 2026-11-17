@@ -9,6 +9,8 @@ import WebsiteDesigner from './WebsiteDesigner.jsx'
 import SiteStudio from './SiteStudio.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 import WebsiteJourney from './WebsiteJourney.jsx'
+import WebsiteStart from './WebsiteStart.jsx'
+import WebsiteHosting from './WebsiteHosting.jsx'
 import { Pill } from './ui.jsx'
 
 const day = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -18,11 +20,14 @@ const studioOutput = (c) => Boolean(c && (c.site || c.redirects?.length))
 
 export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
   const [ok, setOk] = useState(false)
+  const [legalOk, setLegalOk] = useState(false)
   const [state, setState] = useState({})
   const address = (data.domain?.status === 'connected' ? data.domain.url : data.url).replace(/^https?:\/\//, '')
+  // Legal pages need their own explicit review before they go public (server: legal_review_required).
+  const legal = (data.website.draft?.site?.pages || []).filter((p) => p.legal)
   const publish = async () => {
     setState({ busy: true })
-    const { status, data: d } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'publish', content: data.website.draft, confirm: true } })
+    const { status, data: d } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'publish', content: data.website.draft, confirm: true, ...(legal.length ? { legalReviewed: legalOk } : {}) } })
     if (status === 200) return onDone(d)
     setState({
       error:
@@ -45,12 +50,21 @@ export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
         <input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
         <span>The details are accurate and I want this to be public at {address}.</span>
       </label>
+      {legal.length > 0 && (
+        <label className="check">
+          <input type="checkbox" checked={legalOk} onChange={(e) => setLegalOk(e.target.checked)} />
+          <span>
+            I’ve read my {legal.map((p) => p.navLabel.toLowerCase()).join(' and ')} page and it’s accurate for my business
+            {legal.some((p) => p.source?.kind === 'starter') ? ' (it started as a draft from GetShowUps, not legal advice)' : ''}.
+          </span>
+        </label>
+      )}
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
         </p>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!ok || state.busy} onClick={publish}>
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={!ok || (legal.length > 0 && !legalOk) || state.busy} onClick={publish}>
         {state.busy ? 'Publishing…' : label}
       </button>
       {secondary}
@@ -103,11 +117,27 @@ export default function WebsiteTab() {
     document.getElementById('site-publish')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   // The import + AI designer tools: collapsed under a labelled row only when an AI-designed site is being edited.
-  const ToolsWrap = studioMode ? 'details' : 'div'
-  const toolsProps = studioMode ? { className: 'card site-more', open: moreOpen ?? false, onToggle: (e) => setMoreOpen(e.currentTarget.open) } : { className: 'site-tools' }
+  // Always the same element (a <details>), so the import/designer state (e.g. "Added to your draft…") survives the moment
+  // a site becomes AI-designed; without a site to edit it simply stays open with its toggle hidden.
+  const ToolsWrap = 'details'
+  const toolsProps = studioMode ? { className: 'card site-more', open: moreOpen ?? false, onToggle: (e) => setMoreOpen(e.currentTarget.open) } : { className: 'site-tools', open: true }
   return (
     <div className="enter">
       <h1 className="ui-page-title ui-page-title--top">Website</h1>
+      {/* Before there's a website, the first decision comes first; the step-by-step overview follows. */}
+      {data.studio && !designed && !w.published && (
+        <WebsiteStart
+          onImport={() => {
+            const el = document.getElementById('site-import')
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            el?.querySelector('input')?.focus({ preventScroll: true })
+          }}
+          onCreated={(d) => {
+            refresh(d)
+            setEditorKey((k) => k + 1)
+          }}
+        />
+      )}
       <WebsiteJourney data={data} onPublish={openPublish} canPublish={!w.generated && !pending && !publishing && !unsaved && !(studioOutput(w.draft) && !data.studioPublish)} />
       <section id="site-publish" className={`card site-status${studioMode ? ' site-status--bar' : ''}`} aria-label="Website status">
         <p className="site-status-line">
@@ -156,7 +186,7 @@ export default function WebsiteTab() {
           AI-designed site it is a one-line row above the editor, open while the owner is using it. */}
       {data.studio && (
         <ToolsWrap {...toolsProps}>
-          {studioMode && <summary>Import your current website · AI designer</summary>}
+          <summary hidden={!studioMode}>Import your current website · AI designer</summary>
       {/* Website Studio (internal pilot, server/website-studio.js): import + AI designer only for businesses in it. */}
       {data.studio && (
       <section id="site-import" className="card" aria-label="Bring your current website">
@@ -282,6 +312,8 @@ export default function WebsiteTab() {
           }}
         />
       </section>
+
+      {data.studio && <WebsiteHosting published={Boolean(w.published)} />}
 
       <section className="card">
         <details className="more more--flat">

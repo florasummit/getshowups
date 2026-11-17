@@ -71,7 +71,7 @@ export const INDUSTRIES = {
     direction: 'tools and craftsmanship; strong, dependable, practical; navy, charcoal and warm accents',
   },
 }
-const NEUTRAL = { palettes: ['lagoon', 'graphite', 'sand'], names: ['Fresh', 'Bold', 'Classic'], direction: 'clean, confident, text-led layouts' }
+const NEUTRAL = { palettes: ['graphite', 'navy', 'sand'], names: ['Fresh', 'Bold', 'Classic'], direction: 'clean, confident, text-led layouts' }
 
 // Recognises the industry from the business's own details, most specific source first: the industry they
 // chose, then their service names, then their description and name. Returns a key of INDUSTRIES or null.

@@ -8,7 +8,7 @@ import { offerSmsFor } from './followups/settings.js'
 import { receptionistOn } from './receptionist/engine.js'
 
 // Floating "Chat or talk with us" link (inline styles only; the site CSP allows no scripts and no frames).
-const chatLink = (href) =>
+export const chatLink = (href) =>
   `<a href="${href.replace(/[&<>"']/g, '')}" data-gsu-chat style="position:fixed;right:16px;bottom:16px;z-index:50;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;background:#111113;color:#fff;font:600 15px/1.2 system-ui,-apple-system,sans-serif;text-decoration:none;box-shadow:0 8px 24px rgb(0 0 0 / .25)">Chat or talk with us</a>`
 import { getCustomer } from './customers.js'
 import { hitByIp } from './ratelimit.js'

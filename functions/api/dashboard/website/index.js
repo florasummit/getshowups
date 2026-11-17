@@ -25,6 +25,9 @@ import { credentialView } from '../../../../server/ai-credentials.js'
 import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../../server/website-studio.js'
 import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } from '../../../../server/website-history.js'
 import { renderSite } from '../../../../server/site-render.js'
+import { starterSite } from '../../../../server/site-starter.js'
+import { getProfile } from '../../../../server/onboarding.js'
+import { receptionistOn } from '../../../../server/receptionist/engine.js'
 import { siteBusinessInfo } from '../../../../server/site-serve.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
@@ -34,6 +37,15 @@ async function guardStudioFields(env, customer, content) {
   const { site: _s, redirects: _r, ...rest } = content
   const current = (await loadWebsite(env.ONBOARDING_DB, customer)).draft
   return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
+}
+
+// Legal pages (exempt from the claims filter) are created only by the server (import word for word, or the starter).
+// A save from the page may keep a page legal that already was, never mark a new one: otherwise any text could be
+// published unfiltered by calling it a policy. A page whose flag is dropped goes through the normal filters.
+function guardLegalPages(content, saved) {
+  if (!content?.site?.pages) return content
+  const legal = new Set((saved?.site?.pages || []).filter((p) => p.legal).map((p) => p.slug))
+  return { ...content, site: { ...content.site, pages: content.site.pages.map((p) => (p?.legal && !legal.has(p.slug) ? (({ legal: _l, source: _s, ...rest }) => rest)(p) : p)) } }
 }
 
 // Pre-publish check: every page of the content renders (no exception) with this business's details. A content that
@@ -161,11 +173,27 @@ export async function onRequestPost({ request, env }) {
       await saveDraft(db, customer.id, content)
       return json(200, await state(env, customer, session.email))
     }
+    // "I'm starting fresh": a multi-page website from what GetShowUps already knows about the business (records only; no AI,
+    // no key, no cost) → PRIVATE draft. Never replaces a designed site.
+    if (action === 'starter') {
+      if (!(await studioAccess(env, customer))) return json(404, { error: 'not_found' })
+      const loaded = await loadWebsite(db, customer)
+      if (loaded.draft.site) return json(409, { error: 'designed_site' })
+      const profile = await getProfile(db, customer.id).catch(() => null)
+      const biz = { name: customer.name, industry: profile?.industry || '', description: profile?.description || '', phone: profile?.phone || '', chat: await receptionistOn(env, customer).catch(() => false), visit: customer.appointmentMode === 'at_customer' }
+      const { site } = starterSite(loaded.draft, biz, { kinds: ['contact', 'privacy'], now: Date.now() })
+      const [errors, content] = validateContent({ ...loaded.draft, site }, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior: loaded.draft.services })
+      if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
+      await saveDraft(db, customer.id, content)
+      await track(env, 'website_starter', { customer: customer.id })
+      return json(200, await state(env, customer, session.email))
+    }
     if (action === 'save' || action === 'publish') {
       // `prior`: the saved services, so an AI-designed site keeps each service's id (and its description) whatever the
       // page sends back (server/website.js assignServiceIds).
-      const prior = (await loadWebsite(db, customer)).draft.services
-      const [errors, content] = validateContent(await guardStudioFields(env, customer, body.content), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
+      const savedDraft = (await loadWebsite(db, customer)).draft
+      const prior = savedDraft.services
+      const [errors, content] = validateContent(guardLegalPages(await guardStudioFields(env, customer, body.content), savedDraft), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       if (action === 'save') {
         // baseUpdatedAt: the draft version the page is editing; a newer draft (another tab, the AI designer) → 409
@@ -178,6 +206,9 @@ export async function onRequestPost({ request, env }) {
         return json(200, await state(env, customer, session.email))
       }
       if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
+      // Legal pages (privacy policy, terms; imported word for word or a starter draft) go public only after the owner
+      // confirms they reviewed them, every time they publish.
+      if (content.site?.pages?.some((p) => p.legal) && body.legalReviewed !== true) return json(400, { error: 'legal_review_required' })
       const s = await state(env, customer, session.email)
       if (!s.ready) return json(409, { error: 'not_ready' })
       if (!isHosted(s.hosting)) return json(402, { error: 'plan_required' })

@@ -2,6 +2,35 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio: one content system, legal pages, starter sites, own hosting (2026-11-17) — feat/website-studio-complete; no migration
+
+- Audit (before):
+  - Imported content landed in fields the AI-designed site didn't necessarily render. A design without a services section showed no services (PoolThru's Services page).
+  - A business without an own AI key could only get the one-page template site: no About/Contact/Privacy pages, no kept addresses.
+  - Legal text would have lost sentences to the marketing-claims filter.
+  - The privacy link went to GetShowUps' policy.
+  - No "use my own hosting" path.
+- Built:
+  - **site-starter.js:** a deterministic multi-page site from records + approved content. Industry look from site-design presets; neutral industries lead with Graphite.
+  - **Page builders:** Services / About / Contact / Privacy. `ensureServices` and `withPages` never replace and never duplicate.
+  - **Import:** offers pages with their source (imported / records / starter); privacy is copied word for word with headings, refused if incomplete. Old addresses are planned against the site the owner will have and re-planned against the saved one. Services/about found on "Menu", "Treatments", "Pricing", "About us" pages too.
+  - **Legal pages:** validateSpec `legal` (exempt from the claims filter, text only, provenance); renderer shows them as one readable document, out of the main nav and linked in the footer. Publish requires `legalReviewed`.
+  - **Renderer:** service descriptions shown in every layout.
+  - **"I'm starting fresh":** POST website action `starter`.
+  - **Start chooser** (WebsiteStart), **hosting choice** (WebsiteHosting) and **static .zip export** (site-export.js, zip.js, rate-limited).
+- Fixed along the way:
+  - The import confirmation vanished as the site became designed.
+  - The journey's step 1 stayed stale after an import.
+  - The start choice was below the fold.
+  - The salon's /menu services weren't found.
+- Tests: unit 551 (incl. website-flow.test.js: pool / HVAC / salon end to end, repeated + selective import, fresh start, legal text, isolation); browser 110 (website-flow.spec.js: HVAC journey on desktop and phone, import.spec repeat path).
+- Not done:
+  - Terms pages (only privacy is detected/offered).
+  - Editing navigation labels/visibility of pages in the editor (pages can be added; legal pages stay footer-only).
+  - Own-hosting export of contact forms (by design).
+  - Logo/brand colours are not imported.
+- Needs approval: merge/deploy. PoolThru content is not touched (the owner imports and publishes in the app).
+
 ## Website migration journey, phase 2 (2026-11-17) — feat/website-journey; no migration; nothing published, no DNS change
 
 - PoolThru's production state (read-only check, 2026-11-17):
