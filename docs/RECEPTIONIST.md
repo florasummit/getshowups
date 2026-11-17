@@ -14,22 +14,43 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
   "what customers should know" and the owner's receptionist notes. A generic industry playbook (pool, HVAC, plumbing,
   cleaning) shapes which questions to ask and what counts as urgent.
 - **Tools, run on our server and bound to the conversation's business:**
+  - `save_customer_details`: name, phone, email (optional), ZIP, address (visits at the customer), need. Checked
+    deterministically (phone/ZIP digits must be in what the customer typed or said, spoken digits like "two nine four
+    zero three" included; email must be typed) and kept in the conversation's state. Every turn tells the model what is
+    already known, so nothing is asked twice; a value that fails a check gets a targeted re-ask of just that value;
   - `check_service_area`;
-  - `find_available_times`: real Google free/busy through `openSlots`;
-  - `book_appointment`: the existing `bookAppointment`, with its double-booking guard, Google event, confirmation and reminders;
-  - `request_human`.
+  - `find_available_times`: real Google free/busy through `openSlots` (labels carry the time zone);
+  - `book_appointment {slot_id, confirmation_quote}`: uses the saved details; the existing `bookAppointment`, with its
+    double-booking guard, Google event, confirmation and reminders. Email is optional (no email → no invitee, no
+    confirmation email, `no_email`);
+  - `request_callback {reason, urgent}` / `leave_message {message, urgent}` (migration 0027, `receptionist_requests`):
+    a durable record the owner sees under **Needs attention**. One per kind per conversation (a repeat revises it).
+- **People, honestly:** the receptionist cannot transfer anyone (no phone line is connected). Asked for a person, it
+  says so and offers a callback request, a message, or booking. It never promises when someone will call or that
+  anyone was notified. Owner notification is separate and tracked (`owner_callback` notice through the outbox):
+  recorded → pending → sent | failed, or not_sent (`held`: nobody could be emailed, e.g. messaging test mode).
+  Before 0027 the receptionist gives the business phone instead.
 - **Guards the model can't bypass:**
   - only times this conversation was shown can be booked;
   - the customer's own confirming words must be in their latest message;
   - ZIP and phone (and the email, in chat) must come from what the customer said;
-  - one booking per conversation;
+  - one booking and one lead per conversation, even when two turns land at once (the lead id is claimed on the
+    conversation row before the lead is created);
   - out-of-area bookings are refused;
-  - a $ amount not in the records is never shown (the model is corrected on the next turn);
+  - a $ amount not in the records, or a price said in words, is never shown or spoken (voice is checked sentence by
+    sentence before it is spoken; the model is corrected on the next turn); a note that contradicts a listed price is
+    flagged to the owner and the listed price wins (Settings are authoritative, notes supplement);
+  - narration about tools or rules is never shown, and the owner's transcript shows only what the customer saw/heard;
   - cost caps: $1 per conversation and $5 per business per day (`RECEPTIONIST_DAILY_MICROS`);
   - 60 turns per conversation, plus rate limits.
 - **Voice:** Retell handles speech recognition, the voice, turn-taking and interruptions. Our engine is Retell's
   *custom LLM*: GetShowUps creates each web call server-side (`RETELL_API_KEY`, `RETELL_AGENT_ID`) and records the call
-  id. Retell then connects to `wss://getshowups.com/api/receptionist/llm/<call_id>`, and that id alone routes the call.
+  id. Retell then connects to `wss://getshowups.com/api/receptionist/llm/<secret>/<call_id>`, and that id alone routes the call.
+  - A call continues the page's chat conversation (same record, no second greeting); typing during a call goes into
+    the same conversation; replies stream sentence by sentence.
+  - A turn the caller talked over is dropped unless it acted (booked / recorded a request), so the next turn hears
+    the caller's words once.
+  - Ending the conversation from the page ends the call. "Start a new conversation" starts a clean record.
 - **Routing** (`routing.js`, provider-neutral): AI first, human first (AI on no-answer), or AI after hours. Web chat and
   browser voice are always AI. **Phone numbers, forwarding and transfers are not provisioned**; routing is unit-tested
   only (simulated).
@@ -38,16 +59,23 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
   - the receptionist adds a note per booking and per hand-off (idempotent);
   - everything stays off unless `GHL_ENABLED=true` and the business has connected GHL.
 - **Owner:** Dashboard → Receptionist.
-  - Turn it on (off by default).
-  - Choose the answering mode, write a greeting and approved answers, and set a team phone.
-  - Review every conversation: what was said, what the receptionist did (each tool action, refusal, failure, hand-off), outcome and cost.
-- **Data:** stored in `receptionist_*` tables (migration 0026), kept 365 days (purged by the scheduler) and erased with
+  - Real statuses first: chat, browser voice, "Phone calls: no phone number connected yet", what happens when
+    someone asks for a person.
+  - Needs attention: callback requests/messages with how the team was (or wasn't) told; Mark done.
+  - Conversations (Booked / Needs attention / Completed, customer name, channel), refreshed on focus and every 20 s.
+    Each one: what was said and heard, what the receptionist did, cost.
+  - Settings: on/off, greeting, notes (with conflict warnings). Phone routing and the transfer number sit under
+    "Phone calls (not connected)", disabled, until a line exists. Nothing is ever dialed.
+- **Data:** stored in `receptionist_*` tables (migrations 0026, 0027), kept 365 days (purged by the scheduler) and erased with
   the account. The privacy policy names Anthropic and Retell.
 
 ## Activation (each step needs approval)
 
 1. **Migration 0026** (4 additive tables):
-   `npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0026_receptionist.sql`
+   `npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0026_receptionist.sql` (applied)
+   **Migration 0027** (1 additive table, `receptionist_requests`; apply before deploying the callback build; until
+   then callbacks are not offered and the phone number is given instead):
+   `npx wrangler d1 execute getshowups-onboarding --remote --file migrations/0027_receptionist_requests.sql`
 2. **Model key** (paid usage): create an Anthropic API key (console.anthropic.com → API keys), then store it the same
    way as the other secrets, so it is never shown:
    ```

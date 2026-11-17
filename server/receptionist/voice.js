@@ -22,10 +22,11 @@ const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && M
 export const voiceConfigured = (env) => Boolean(env.RETELL_API_KEY && /^agent_[A-Za-z0-9]{6,80}$/.test(env.RETELL_AGENT_ID || '') && String(env.RETELL_WS_SECRET || '').length >= 32)
 const CALL_TTL_MS = 60 * 60 * 1000
 
-// → { ok, accessToken, callId, conversationId } | { ok: false, error }
-export async function startVoiceCall(env, customer, now = Date.now()) {
+// → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
+// conversation (already verified by its token) — the call continues it, so nothing they said is lost.
+export async function startVoiceCall(env, customer, now = Date.now(), existing = null) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
-  const conv = await startConversation(env, customer, 'voice', now)
+  const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now)
   let res
   try {
     res = await fetch(`${retellBase(env)}/v3/create-web-call`, {
@@ -83,12 +84,15 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now()) {
   }
   const settings = await getSettings(db, customer.id)
   const k = await knowledgeFor(env, customer, settings)
+  const start = await loadConversation(env, customer, call.conversation_id)
   send({ response_type: 'config', config: { auto_reconnect: true, call_details: false } })
-  // Begin message (response_id 0): the owner's greeting, else a plain one.
-  send({ response_type: 'response', response_id: 0, content: k.greeting || `Thanks for calling ${customer.name}. How can I help you today?`, content_complete: true, end_call: false })
+  // Begin message (response_id 0): continuing a chat → no second greeting; otherwise the owner's greeting.
+  const continuing = (start?.state?.log || []).length > 0
+  send({ response_type: 'response', response_id: 0, content: continuing ? 'Hi, I’m here. Go ahead whenever you’re ready.' : k.greeting || `Thanks for calling ${customer.name}. How can I help you today?`, content_complete: true, end_call: false })
 
   let latest = 0
   let busy = Promise.resolve()
+  const say = (id, content, last = true) => send({ response_type: 'response', response_id: id, content, content_complete: last, end_call: false })
   ws.addEventListener('message', (evt) => {
     let msg
     try {
@@ -100,16 +104,24 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now()) {
     if (msg.interaction_type !== 'response_required' && msg.interaction_type !== 'reminder_required') return
     const id = Number(msg.response_id)
     latest = Math.max(latest, id)
-    // One turn at a time; a turn that a newer one superseded before it started is skipped.
+    // One turn at a time. A turn the caller has already talked over (newer response_id) is skipped before it starts,
+    // and dropped mid-way unless it acted — Retell discards that answer, so it must not enter the history either.
     busy = busy.then(async () => {
       if (id < latest) return
-      if (msg.interaction_type === 'reminder_required') return send({ response_type: 'response', response_id: id, content: 'Are you still there? I can help with questions or find you a time.', content_complete: true, end_call: false })
+      if (msg.interaction_type === 'reminder_required') return say(id, 'Take your time, I’m still here. You can also type in the chat if that’s easier.')
       const text = latestUserText(msg.transcript)
-      if (!text) return send({ response_type: 'response', response_id: id, content: 'Sorry, I didn’t catch that. Could you say it again?', content_complete: true, end_call: false })
-      const conv = await loadConversation(env, customer, call.conversation_id)
-      if (!conv) return send({ response_type: 'response', response_id: id, content: 'Sorry, something went wrong on our side.', content_complete: true, end_call: true })
-      const r = await respond(env, customer, conv, text).catch(() => ({ ok: false }))
-      send({ response_type: 'response', response_id: id, content: r.ok ? r.reply : 'Sorry, give me one moment and try again.', content_complete: true, end_call: false })
+      if (!text) return say(id, 'Sorry, I didn’t catch that. Could you say it again?')
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const conv = await loadConversation(env, customer, call.conversation_id)
+        if (!conv) return send({ response_type: 'response', response_id: id, content: 'Sorry, something went wrong on our side.', content_complete: true, end_call: true })
+        if (conv.state.endedAt) return send({ response_type: 'response', response_id: id, content: 'This conversation has ended. Thanks for calling!', content_complete: true, end_call: true })
+        let spoke = false
+        const r = await respond(env, customer, conv, text, { channel: 'voice', onText: (s) => ((spoke = true), say(id, s, false)), isStale: () => latest > id }).catch(() => ({ ok: false, error: 'failed' }))
+        if (r.error === 'stale') return
+        if (r.error === 'busy' && attempt === 0 && !spoke) continue // a typed message landed at the same moment: retry once on the fresh record
+        if (!r.ok && !spoke) return say(id, 'Sorry, give me a moment and try that again.')
+        return say(id, '', true)
+      }
     })
   })
   ws.addEventListener('close', () => {

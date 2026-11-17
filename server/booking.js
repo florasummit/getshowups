@@ -48,7 +48,9 @@ export const formatAddress = (a) => (a ? `${a.street}${a.unit ? `, ${a.unit}` : 
 
 // Returns [error, value] for a booking-page lead submission. For 'at_customer' businesses a service
 // address is required and its ZIP is the one checked against the service area.
-export function validateLead(body, mode = 'at_business') {
+// requireEmail: false only for the AI receptionist (a caller may book with a phone number; email messages are then
+// skipped as no_email and the calendar event has no invitee). Every other entry point requires an email.
+export function validateLead(body, mode = 'at_business', { requireEmail = true } = {}) {
   const lead = {
     name: clean(body?.name, 80),
     email: clean(body?.email, 254).toLowerCase(),
@@ -58,7 +60,7 @@ export function validateLead(body, mode = 'at_business') {
     smsConsent: body?.smsConsent === true,
   }
   if (lead.name.length < 2) return ['invalid_name']
-  if (!EMAIL_RE.test(lead.email)) return ['invalid_email']
+  if ((requireEmail || lead.email) && !EMAIL_RE.test(lead.email)) return ['invalid_email']
   if (!PHONE_RE.test(lead.phone) || lead.phone.replace(/\D/g, '').length < 7) return ['invalid_phone']
   if (lead.need.length < 2) return ['invalid_need']
   if (mode === 'at_customer') {
@@ -72,10 +74,11 @@ export function validateLead(body, mode = 'at_business') {
 
 // lead.source: where it came from (booking_page by default; website_form from the site's contact/quote forms).
 // lead.smsWording: the consent text version shown (booking page or website form).
-export async function createLead(env, customer, lead, now = Date.now()) {
+// opts.id: a caller-chosen id (the receptionist claims it on its conversation first, so overlapping turns make one lead).
+export async function createLead(env, customer, lead, now = Date.now(), opts = {}) {
   const db = env.ONBOARDING_DB
   const qualified = customer.serviceZips.length === 0 || customer.serviceZips.includes(lead.zip)
-  const id = randomToken(12)
+  const id = opts.id || randomToken(12)
   const token = randomToken(32)
   const insertLead = db
     .prepare(
@@ -209,7 +212,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
     description: [
       `Name: ${lead.name}`,
       `Phone: ${lead.phone}`,
-      `Email: ${lead.email}`,
+      ...(lead.email ? [`Email: ${lead.email}`] : []),
       ...(where ? [`Service address: ${where}`] : lead.zip ? [`ZIP: ${lead.zip}`] : []),
       '',
       lead.need,
@@ -217,7 +220,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
       'Booked with GetShowUps',
     ].join('\n'),
     location: where || undefined,
-    attendee: { email: lead.email, displayName: lead.name },
+    attendee: lead.email ? { email: lead.email, displayName: lead.name } : null,
   }
   let event = await createEvent(env, conn.accessToken, details)
   if (!event.ok && event.retryable) event = await createEvent(env, conn.accessToken, details)

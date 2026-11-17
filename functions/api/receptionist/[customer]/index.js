@@ -3,7 +3,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
-import { getSettings, receptionistOn } from '../../../../server/receptionist/engine.js'
+import { getSettings, receptionistOn, receptionistRequestsReady } from '../../../../server/receptionist/engine.js'
 import { voiceConfigured } from '../../../../server/receptionist/voice.js'
 import { getProfile } from '../../../../server/onboarding.js'
 
@@ -16,5 +16,12 @@ export async function onRequestGet({ request, env, params }) {
   if (!on) return json(200, { enabled: false, name: customer.name })
   const s = await getSettings(env.ONBOARDING_DB, customer.id)
   const profile = await getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
-  return json(200, { enabled: true, name: customer.name, greeting: s.greeting || `Hi! I'm the ${customer.name} assistant. Ask me anything or I can find you a time.`, phone: profile?.phone || '', voice: voiceConfigured(env) })
+  return json(200, {
+    enabled: true,
+    name: customer.name,
+    greeting: s.greeting || `Hi! I'm the ${customer.name} assistant. Ask me anything, or I can find you a time.`,
+    phone: profile?.phone || '',
+    voice: voiceConfigured(env),
+    callbacks: await receptionistRequestsReady(env.ONBOARDING_DB),
+  })
 }

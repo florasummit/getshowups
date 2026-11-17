@@ -1,9 +1,11 @@
 // POST /api/receptionist/:customer/voice — start a browser voice call with the AI receptionist (Retell web call,
-// created by our server; the browser only receives the call's access token).  → { accessToken, conversationId }
+// created by our server; the browser only receives the call's access token).
+//   Body: { conversationId?, token? } — continue the customer's chat conversation (context kept) or start a new one.
+//   → { accessToken, callId, transport, iceServers, conversationId, token }
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { hit, hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
-import { receptionistOn } from '../../../../server/receptionist/engine.js'
+import { conversationToken, loadConversation, receptionistOn } from '../../../../server/receptionist/engine.js'
 import { startVoiceCall, voiceConfigured } from '../../../../server/receptionist/voice.js'
 
 export async function onRequestPost({ request, env, params }) {
@@ -14,10 +16,17 @@ export async function onRequestPost({ request, env, params }) {
   }
   if (!(await receptionistOn(env, customer))) return json(404, { error: 'receptionist_off' })
   if (!voiceConfigured(env)) return json(503, { error: 'voice_not_configured' })
+  const body = await request.json().catch(() => ({}))
   try {
-    const r = await startVoiceCall(env, customer)
+    let existing = null
+    if (body?.conversationId) {
+      existing = await loadConversation(env, customer, String(body.conversationId), String(body.token || ''))
+      if (!existing) return json(404, { error: 'conversation_not_found' })
+      if (existing.state.endedAt) return json(410, { error: 'conversation_ended' })
+    }
+    const r = await startVoiceCall(env, customer, Date.now(), existing)
     if (!r.ok) return json(502, { error: r.error })
-    return json(200, { accessToken: r.accessToken, callId: r.callId, transport: r.transport, iceServers: r.iceServers, conversationId: r.conversationId })
+    return json(200, { accessToken: r.accessToken, callId: r.callId, transport: r.transport, iceServers: r.iceServers, conversationId: r.conversationId, token: await conversationToken(env, r.conversationId) })
   } catch (err) {
     console.error('receptionist voice failed:', customer.id, err?.name)
     return json(503, { error: 'storage_error' })

@@ -16,7 +16,7 @@ const MIN = 60 * 1000
 export const LEAD_GRACE_MS = 10 * MIN
 export const WINDOW_MS = 2 * 60 * MIN
 const LIMIT = 200
-export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce']
+export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce', 'owner_callback']
 
 const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, n)
 // Still owed to at least one member (one held by the launch gate, or added since, is not skipped).
@@ -52,6 +52,14 @@ const BOUNCES_SQL = `
   WHERE s.created_at > ?1 AND c.status = 'active'
     AND ${notQueued('owner_bounce', 'm.id', 'm.customer')}
   ORDER BY s.created_at LIMIT ${LIMIT}`
+// AI receptionist callback requests / messages (migration 0027). The request itself is the durable record; this is the
+// staff notification, tracked through email_outbox (owner_callback:<request>:<member>).
+const CALLBACKS_SQL = `
+  SELECT r.id AS item, r.customer, r.created_at, r.kind, r.name, r.phone, r.email, r.note, r.urgent, c.name AS biz, c.timezone
+  FROM receptionist_requests r JOIN customers c ON c.id = r.customer
+  WHERE r.created_at > ?1 AND r.status = 'open' AND r.held = 0 AND c.status = 'active' AND r.phone IS NOT NULL
+    AND ${notQueued('owner_callback', 'r.id', 'r.customer')}
+  ORDER BY r.created_at LIMIT ${LIMIT}`
 const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', reminder_2h: 'reminder', lead_followup_1: 'follow-up', lead_followup_2: 'follow-up', no_show_rebook: 'rebooking email' }
 
 export function ownerNotice(kind, r, origin) {
@@ -75,6 +83,13 @@ export function ownerNotice(kind, r, origin) {
       }\n\nIf you need to reach them: ${clean(r.phone, 40)}\n\nAll appointments: ${origin}/dashboard/appointments\n\n— GetShowUps`,
     }
   }
+  if (kind === 'owner_callback') {
+    const what = r.kind === 'message' ? 'left a message' : 'asked for a call back'
+    return {
+      subject: clean(`${r.urgent ? 'URGENT: ' : ''}${name || 'A customer'} ${what}`, 150),
+      body: `${name || 'A customer'} ${what} through the ${clean(r.biz, 80)} AI receptionist.\n\n${clean(r.note, 400)}\n\nPhone: ${clean(r.phone, 40)}${r.email ? `\nEmail: ${clean(r.email, 120)}` : ''}\n\nMark it done when you've called: ${origin}/dashboard/receptionist\n\n— GetShowUps`,
+    }
+  }
   if (kind === 'owner_cancel') {
     const when = longWhen(r.start_at, r.timezone)
     return {
@@ -91,14 +106,22 @@ export function ownerNotice(kind, r, origin) {
 export async function queueOwnerNotices(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const out = { queued: 0, held: 0 }
-  const [bookings, leads, cancels, bounces] = await Promise.all([
+  const [bookings, leads, cancels, bounces, callbacks] = await Promise.all([
     db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
     db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
     // Before migration 0020 there are no suppressions: the other notices must still go out.
     db.prepare(BOUNCES_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
+    // Before migration 0027 there are no receptionist requests.
+    db.prepare(CALLBACKS_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
   ])
-  const items = [...bookings.results.map((r) => ['owner_booking', r]), ...leads.results.map((r) => ['owner_lead', r]), ...cancels.results.map((r) => ['owner_cancel', r]), ...bounces.results.map((r) => ['owner_bounce', r])]
+  const items = [
+    ...bookings.results.map((r) => ['owner_booking', r]),
+    ...leads.results.map((r) => ['owner_lead', r]),
+    ...cancels.results.map((r) => ['owner_cancel', r]),
+    ...bounces.results.map((r) => ['owner_bounce', r]),
+    ...callbacks.results.map((r) => ['owner_callback', r]),
+  ]
   if (!items.length) return out
   const customers = [...new Set(items.map(([, r]) => r.customer))]
   const { results: members } = await db
@@ -109,14 +132,18 @@ export async function queueOwnerNotices(env, now = Date.now()) {
   const origin = siteOrigin(env)
   for (const [kind, r] of items) {
     const testOnly = sandboxed(statusIn(tests, r.customer), r.created_at)
+    let sendable = 0
     for (const m of members.filter((x) => x.customer === r.customer)) {
       if (!recipientAllowed(env, m.email, { testOnly })) {
         out.held++
         continue
       }
+      sendable++
       const id = `${kind}:${r.item}:${(await sha256Hex(`owner:${m.email}`)).slice(0, 16)}`
       if (await enqueue(env, { id, to: m.email, customer: r.customer, template: kind, ...ownerNotice(kind, r, origin) }, now)) out.queued++
     }
+    // A callback nobody could be notified about is marked, so the owner's screen never implies staff were told.
+    if (kind === 'owner_callback' && !sendable) await db.prepare('UPDATE receptionist_requests SET held = 1, updated_at = ?2 WHERE id = ?1').bind(r.item, now).run()
   }
   return out
 }

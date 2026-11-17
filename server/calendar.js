@@ -120,7 +120,7 @@ export async function createEvent(env, accessToken, { id, start, end, timeZone, 
         ...(location ? { location } : {}),
         start: { dateTime: new Date(start).toISOString(), timeZone },
         end: { dateTime: new Date(end).toISOString(), timeZone },
-        attendees: [attendee],
+        attendees: attendee ? [attendee] : [],
         reminders: { useDefault: false, overrides: [{ method: 'email', minutes: 24 * 60 }, { method: 'popup', minutes: 60 }] },
       }),
     })
