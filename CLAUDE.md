@@ -339,6 +339,17 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   data: anything created up to unmarked_at stays sandboxed and Ads connections must be chosen again. Fails closed
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
+- AI receptionist (server/receptionist/, migration 0026; docs/RECEPTIONIST.md): ONE engine for website chat
+  (/chat/<id>, linked from the business site — still no script on the site) and voice (Retell custom LLM over
+  /api/receptionist/llm/<call_id>; calls are created by our server and routed ONLY by that call id). Real Claude
+  inference (RECEPTIONIST_ANTHROPIC_API_KEY, its own secret; RECEPTIONIST_ENABLED=false = kill switch); off per business
+  until the owner turns it on. Knowledge = the business's records + owner notes only. Tools run server-side, bound to
+  the conversation's business: availability only from openSlots, bookings only via bookAppointment, only for a time this
+  conversation was shown, only with the customer's own confirming words in their latest message, ZIP/phone (+ email in
+  chat) only from what the customer said, one booking per conversation; $ amounts not in the records are never shown.
+  Every tool action/refusal/failure/hand-off is a receptionist_events row (codes only). Owner sees spoken/typed lines,
+  never model internals. Cost caps per conversation and per business/day. Phone numbers/forwarding: not provisioned
+  (routing.js is provider-neutral and simulated only). Never claim a booking the tool did not return.
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
   the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the

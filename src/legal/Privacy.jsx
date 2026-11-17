@@ -2,7 +2,7 @@
 // exactly what the product does with Google user data. Keep it in sync with server/ behaviour.
 import '../app.css'
 
-const UPDATED = 'November 16, 2026'
+const UPDATED = 'November 17, 2026'
 
 export default function Privacy() {
   return (
@@ -52,6 +52,13 @@ export default function Privacy() {
           12 months and then deleted.
         </li>
         <li>
+          <strong>AI receptionist conversations:</strong> if a business turns on its AI receptionist, what you type in its
+          chat or say on a voice call with it (and what you share there, such as your name, phone, email and ZIP code) is
+          used to answer you from that business’s own information, check its calendar and book the appointment you
+          confirm. The conversation, what the receptionist did and the outcome are kept for that business for up to 12
+          months and then deleted. Voice calls use your microphone only while the call is on.
+        </li>
+        <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
           contact details, the campaign source of a first visit (for example a utm_source link), the ad campaign tags of a
           booking request that came from an ad (and whether a Google click identifier was present) so the business can see
@@ -97,8 +104,9 @@ export default function Privacy() {
       <h2>Sharing</h2>
       <p>
         Appointment requests are shared with the business the request was made to. We use service providers to run
-        GetShowUps: Cloudflare for hosting and storage, Google for sign-in and calendars, Resend to deliver email, and
-        Twilio to deliver text messages. If we turn on paid plans, we will also use Stripe to process payments; we never
+        GetShowUps: Cloudflare for hosting and storage, Google for sign-in and calendars, Resend to deliver email,
+        Twilio to deliver text messages, Anthropic to run the AI receptionist’s language model, and Retell for its voice
+        calls (speech recognition and voice). If we turn on paid plans, we will also use Stripe to process payments; we never
         receive or store full card numbers. We do not sell or share personal information for advertising. We do not
         share mobile phone numbers or text-message consent with third parties for their marketing. We may disclose
         information if required by law.

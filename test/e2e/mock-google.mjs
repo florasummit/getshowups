@@ -281,6 +281,23 @@ createServer(async (req, res) => {
     return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
   }
   // AI designer (Claude, streamed): a first design, or a darker revision when the prompt carries CURRENT_SITE.
+  if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST' && JSON.parse(raw).tools?.some((t) => t.name === 'find_available_times')) {
+    // AI receptionist stand-in: calls the real server-side tools (availability from the mocked Google calendar,
+    // hand-off), then answers from their results. Non-streaming JSON like the Messages API.
+    const body = JSON.parse(raw)
+    const last = body.messages.at(-1)
+    const userText = [...body.messages].reverse().find((m) => m.role === 'user' && typeof m.content === 'string')?.content || ''
+    const reply = (content, stop) => send(res, 200, { id: `msg_r${events.length}`, type: 'message', role: 'assistant', model: body.model, content, stop_reason: stop, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
+    const results = Array.isArray(last.content) ? last.content.filter((b) => b.type === 'tool_result').map((b) => JSON.parse(b.content)) : []
+    if (results.length) {
+      const times = results.find((r) => r.options)?.options
+      if (times) return reply([{ type: 'text', text: times.length ? `I can do ${times[0].time}. Would that work?` : 'No open times right now.' }], 'end_turn')
+      if (results.some((r) => r.handed_off)) return reply([{ type: 'text', text: 'I have let the team know. Someone will follow up shortly.' }], 'end_turn')
+    }
+    if (/person|human/i.test(userText)) return reply([{ type: 'tool_use', id: 'toolu_h1', name: 'request_human', input: { reason: 'customer_asked', urgent: false, note_for_staff: 'Customer asked for a person.' } }], 'tool_use')
+    if (/time|available|when/i.test(userText)) return reply([{ type: 'tool_use', id: 'toolu_t1', name: 'find_available_times', input: { date: '', part_of_day: 'any' } }], 'tool_use')
+    return reply([{ type: 'text', text: 'Weekly pool care is $280. Want me to find a time?' }], 'end_turn')
+  }
   if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST') {
     const prompt = JSON.parse(raw).messages?.[0]?.content || ''
     const revise = prompt.includes('CURRENT_SITE')

@@ -245,6 +245,32 @@ export async function syncLead(env, customerId, leadId, now = Date.now()) {
   }
 }
 
+// Adds one note to the lead's GHL contact (e.g. the receptionist's hand-off or conversation summary). Idempotent per
+// key (ghl_links). POST /contacts/{contactId}/notes { body } (scope contacts.write). Never throws.
+export async function syncNote(env, customerId, leadId, key, body, now = Date.now()) {
+  try {
+    const cfg = await getGhlConfig(env, customerId)
+    if (!cfg) return { ok: true, skipped: 'not_connected' }
+    const db = env.ONBOARDING_DB
+    const noteKey = `${leadId}:note:${String(key).slice(0, 60)}`
+    if (await getLink(db, customerId, 'contact', noteKey)) return { ok: true, skipped: 'already_synced' }
+    let contact = await getLink(db, customerId, 'contact', leadId)
+    if (!contact) {
+      const created = await syncLead(env, customerId, leadId, now)
+      if (!created.ok) return created
+      contact = await getLink(db, customerId, 'contact', leadId)
+      if (!contact) return fail('not_synced')
+    }
+    const r = await call(env, cfg.token, 'POST', `/contacts/${encodeURIComponent(contact.ghl_id)}/notes`, { body: String(body).slice(0, 2000) })
+    if (!r.ok) return fail(r.error)
+    await putLink(db, customerId, 'contact', noteKey, r.data?.note?.id || r.data?.id || 'note', now)
+    return { ok: true }
+  } catch (err) {
+    console.error('ghl: sync note failed:', err?.name)
+    return fail('storage_error')
+  }
+}
+
 // Moves the lead's opportunity to a stage: 'new' | 'booked' | 'showed' | 'noShow' | 'completed'.
 // monetaryValueCents (optional) is the owner-reported job value.
 export async function syncStage(env, customerId, leadId, stage, monetaryValueCents, now = Date.now()) {

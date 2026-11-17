@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## AI receptionist: real chat + voice, real calendar booking (2026-11-17) — feature/receptionist; migration 0026 (NOT applied)
+
+- Built (docs/RECEPTIONIST.md): one multi-tenant engine (server/receptionist/) for website chat (/chat/<id>, linked
+  from the business site) and browser voice (Retell, custom LLM = our engine). Claude Opus 5.5, real inference,
+  server-side tools on the existing booking code (openSlots / bookAppointment / createLead), owner Receptionist tab
+  (on/off, answering mode, greeting, approved answers, team phone, every conversation with actions + outcome), GHL notes
+  on booking/hand-off (existing connector), provider-neutral routing (AI first / human first / after hours).
+- Guards (all tested): only shown times bookable; customer's own confirming words required; ZIP/phone(/email) must come
+  from the customer; one booking per conversation; out of area refused; invented $ never shown; cost/turn limits;
+  tenant-bound tools; prompt-injection text never in the system prompt.
+- Tests: unit 530 (11 receptionist + 100-scenario adversarial eval: 0 unauthorized bookings, 0 unoffered times, 0
+  invented prices shown, 0 cross-tenant exposure), browser 90 (receptionist journey desktop + phone). Model and
+  Retell are MOCKED in tests; no real-model or real-voice run yet.
+- Blocked on approvals/accounts: migration 0026, RECEPTIONIST_ANTHROPIC_API_KEY (paid), Retell account + agent
+  (RETELL_API_KEY / RETELL_AGENT_ID, paid), production deploy, the paid real-model eval. Phone numbers/forwarding not
+  provisioned (routing simulated only). GHL: no account connected (connector tested with mocks only).
+
 ## Paid launch preparation (2026-11-17) — docs/PAID_LAUNCH.md; nothing activated
 
 - Twilio trial (real, read-only): credentials valid, account active, type Trial, 0 owned numbers, 0 verified caller IDs

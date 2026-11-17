@@ -5,6 +5,11 @@ import { testStatus } from './testbusiness.js'
 import { CUSTOMER_RE } from './invites.js'
 import { customerFromRow, siteOrigin } from './auth.js'
 import { offerSmsFor } from './followups/settings.js'
+import { receptionistOn } from './receptionist/engine.js'
+
+// Floating "Chat or talk with us" link (inline styles only; the site CSP allows no scripts and no frames).
+const chatLink = (href) =>
+  `<a href="${href.replace(/[&<>"']/g, '')}" data-gsu-chat style="position:fixed;right:16px;bottom:16px;z-index:50;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;background:#111113;color:#fff;font:600 15px/1.2 system-ui,-apple-system,sans-serif;text-decoration:none;box-shadow:0 8px 24px rgb(0 0 0 / .25)">Chat or talk with us</a>`
 import { getCustomer } from './customers.js'
 import { hitByIp } from './ratelimit.js'
 import { hostingStatus, isHosted, liveContent } from './website.js'
@@ -61,7 +66,10 @@ export async function serveSite(env, request, id, page = '') {
     // A page showing a send result is personal to that visitor: not cached.
     // Website forms offer texting only when this business can text (own sender + approved registration).
     const info = { ...(await siteBusinessInfo(db, customer)), offerSms: await offerSmsFor(env, customer), smsTermsUrl: `${origin}/sms-terms/${customer.id}` }
-    return htmlResponse(200, renderSite(info, live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form }), { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
+    let html = renderSite(info, live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form })
+    // AI receptionist on: one plain link to the business's chat/voice page on GetShowUps (no script on the site).
+    if (await receptionistOn(env, customer).catch(() => false)) html = html.replace('</body>', `${chatLink(`${origin}/chat/${customer.id}`)}</body>`)
+    return htmlResponse(200, html, { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })
