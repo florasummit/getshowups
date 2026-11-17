@@ -56,7 +56,9 @@ function Preview({ field, value }) {
   return <p className="import-text">{value}</p>
 }
 
-export default function WebsiteImport({ defaultUrl = '', onApplied }) {
+// hasContent: the business already has website text (a designed or published site). Then the import pre-selects only the
+// old page addresses and no photos, so moving a domain never replaces current text unless the owner ticks it.
+export default function WebsiteImport({ defaultUrl = '', onApplied, hasContent = false }) {
   const [imp, setImp] = useState(undefined)
   const [url, setUrl] = useState(defaultUrl)
   const [mine, setMine] = useState(false)
@@ -69,13 +71,15 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
   const choose = (i) => {
     setImp(i)
     if (i?.status === 'done') {
-      setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined))
-      setPhotos(i.suggestion.photos.slice(0, 6).map((p) => p.url))
+      setFields(FIELDS.map(([f]) => f).filter((f) => i.suggestion.content[f] !== undefined && (!hasContent || f === 'redirects')))
+      setPhotos(hasContent ? [] : i.suggestion.photos.slice(0, 6).map((p) => p.url))
       setFixes((i.suggestion.fixes || []).map((f) => f.id))
     }
   }
+  // Loads the latest import once on mount (choose only sets state from it).
   useEffect(() => {
     api('/api/dashboard/website/import').then(({ status, data }) => choose(status === 200 ? data.import : null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   if (imp === undefined) return <div aria-busy="true" />
 
@@ -216,6 +220,7 @@ export default function WebsiteImport({ defaultUrl = '', onApplied }) {
       )}
       <fieldset className="import-fields">
         <legend>Text</legend>
+        {hasContent && <p className="fine">Your current website text stays as it is unless you tick it here. Old page addresses are ticked so links from Google keep working.</p>}
         {FIELDS.filter(([f]) => s.content[f] !== undefined).map(([f, label]) => (
           <label key={f} className="import-field">
             <input type="checkbox" checked={fields.includes(f)} onChange={() => toggle(fields, setFields, f)} />

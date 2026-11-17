@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { validateContent, hostingStatus, HOSTING_GRACE_MS } from '../server/website.js'
 import { renderSite } from '../server/site-render.js'
-import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, TOKEN_REUSE_MS } from '../server/domains.js'
+import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, platformOf, TOKEN_REUSE_MS } from '../server/domains.js'
 import { sniffImage } from '../server/assets.js'
 import { readiness } from '../server/onboarding.js'
 import { customerRows, growth } from '../server/metrics.js'
@@ -359,8 +359,16 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   dns.TXT['_getshowups.www.poolsco.com'] = [d.records[0].value]
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
   assert.deepEqual(provider.calls[0], ['POST', '/client/v4/accounts/acc/pages/projects/getshowups/domains', 'Bearer cf_SECRET_TOKEN'])
+  // Moving from Squarespace: the screen is told where www points today (public DNS, read live, never stored), so it
+  // says to CHANGE that existing record rather than add a second one.
+  dns.CNAME['www.poolsco.com'] = ['ext-cust.squarespace.com']
   const pointing = (await call(domain, 'GET', { cookie: c })).json.domain
   assert.deepEqual([pointing.step, pointing.records[0]], ['point', { type: 'CNAME', name: 'www.poolsco.com', host: 'www', zone: 'poolsco.com', value: 'getshowups.pages.dev' }])
+  assert.deepEqual(pointing.current, { target: 'ext-cust.squarespace.com', ours: false, platform: { id: 'squarespace', name: 'Squarespace' } })
+  assert.equal(db.sql.prepare("SELECT detail FROM website_domains WHERE hostname = 'www.poolsco.com'").get().detail, 'waiting_for_cname')
+  dns.CNAME['www.poolsco.com'] = ['old-host.example.net']
+  assert.deepEqual((await call(domain, 'GET', { cookie: c })).json.domain.current, { target: 'old-host.example.net', ours: false, platform: null })
+  assert.deepEqual(['shops.myshopify.com', 'www123.wixdns.net', 'example.com.evilsquarespace.com.attacker.net', 'squarespace.com'].map((t) => platformOf(t)?.id ?? null), ['shopify', 'wix', null, 'squarespace'])
   // CNAME added and the provider is active, but HTTPS doesn't serve us yet: still securing.
   dns.CNAME['www.poolsco.com'] = ['getshowups.pages.dev']
   provider.domains.get('www.poolsco.com').status = 'active'
@@ -371,7 +379,7 @@ test('domain: ownership TXT first; nothing attached before proof; then CNAME + c
   Object.assign(provider.domains.get('www.poolsco.com'), { validation_data: { status: 'active' }, verification_data: { status: 'active' } })
   assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'connected')
   const ok = (await call(domain, 'GET', { cookie: c })).json
-  assert.deepEqual([ok.domain.status, ok.domain.url], ['connected', 'https://www.poolsco.com'])
+  assert.deepEqual([ok.domain.status, ok.domain.url, ok.domain.current], ['connected', 'https://www.poolsco.com', null], 'no live DNS lookup once connected')
   assert.ok(!JSON.stringify(ok).includes('cf_SECRET_TOKEN'))
   // The site's canonical address becomes the domain.
   await call(website, 'POST', { cookie: c, body: { action: 'publish', content: content(), confirm: true } })

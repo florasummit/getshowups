@@ -3,6 +3,7 @@
 // for the one record the owner must add, with copy buttons.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
+import { Pill } from './ui.jsx'
 
 const STATUS = {
   pending: ['Waiting for your record', 'pending'],
@@ -112,7 +113,64 @@ function Finding({ d }) {
   return checked ? <p className="fine">Last checked {checked}.</p> : null
 }
 
-function Steps({ d }) {
+// Where the address points today, in words: which existing record to change (providers allow one www record).
+function CurrentPointer({ d }) {
+  const c = d.current
+  const r = d.records[0]
+  if (!c || !r || c.ours) return null
+  if (c.platform)
+    return (
+      <p className="ui-callout ui-callout--info" role="note">
+        Right now <strong>{d.hostname}</strong> points to <strong>{c.platform.name}</strong> (<code>{c.target}</code>). In your {c.platform.name} domain’s DNS settings, find the existing{' '}
+        <strong>CNAME</strong> record with Host <code>{r.host}</code> and change its value to <code>{r.value}</code>. Don’t add a second <code>{r.host}</code> record. Your email and other records stay
+        as they are.
+      </p>
+    )
+  if (c.target)
+    return (
+      <p className="ui-callout ui-callout--info" role="note">
+        Right now <strong>{d.hostname}</strong> points to <code>{c.target}</code>. Edit that existing CNAME record (Host <code>{r.host}</code>) and change its value to <code>{r.value}</code>, rather than
+        adding a second one.
+      </p>
+    )
+  return null
+}
+
+// Before the switch: the new site must be live (otherwise visitors see "not available"), and old page addresses
+// should be imported so links from Google and bookmarks keep working.
+function BeforeSwitch({ d, site }) {
+  if (!site) return null
+  return (
+    <ul className="wj-check" aria-label="Before you switch">
+      <li className={site.published ? 'is-done' : 'is-todo'}>
+        {site.published ? 'Your new website is published.' : <strong>Publish your website first.</strong>}
+        {!site.published && <> Until it’s published, {d.hostname} would show “not available” to visitors.</>}
+      </li>
+      <li className={site.redirects > 0 ? 'is-done' : 'is-todo'}>
+        {site.redirects > 0 ? (
+          `${site.redirects} old page address${site.redirects === 1 ? '' : 'es'} will forward to your new pages.`
+        ) : (
+          <>
+            <strong>Recommended:</strong> import your current site first (Bring your content, above), so old page addresses from Google and bookmarks forward to your new pages.
+          </>
+        )}
+      </li>
+    </ul>
+  )
+}
+
+function AfterSwitch({ d }) {
+  return (
+    <div className="after-switch">
+      <p className="fine">
+        <strong>After you’ve checked {d.hostname} shows your new website:</strong> keep your domain registration (that’s what keeps {d.hostname.replace(/^www\./, '')} yours). Cancel only your old
+        website plan, so nothing is lost if you need to switch back.
+      </p>
+    </div>
+  )
+}
+
+function Steps({ d, site }) {
   if (d.status === 'connected') {
     return (
       <>
@@ -120,10 +178,11 @@ function Steps({ d }) {
           Your website is live at{' '}
           <a href={d.url} target="_blank" rel="noreferrer">
             {d.hostname}
-          </a>
-          .
+          </a>{' '}
+          with a secure (https) connection.
         </p>
         <BareDomain d={d} />
+        <AfterSwitch d={d} />
       </>
     )
   }
@@ -154,8 +213,10 @@ function Steps({ d }) {
   return (
     <>
       <p>
-        <strong>Step 2 of 2: point {d.hostname} to your new website.</strong> Add (or change) this record. Once it’s in place, {d.hostname} shows your GetShowUps website instead of anything that was there before.
+        <strong>Step 2 of 2: point {d.hostname} to your new website.</strong> Once this record is in place, {d.hostname} shows your GetShowUps website instead of anything that was there before.
       </p>
+      <BeforeSwitch d={d} site={site} />
+      <CurrentPointer d={d} />
       {d.records.map((r) => (
         <Record key={r.type} r={r} />
       ))}
@@ -179,7 +240,7 @@ function BareDomain({ d }) {
 
 const NEEDS_FIX = ['record_doubled', 'cname_doubled', 'wrong_value', 'not_verified']
 
-export default function DomainSettings({ siteUrl, compact = false, onChange }) {
+export default function DomainSettings({ siteUrl, compact = false, onChange, site = null }) {
   const [data, setData] = useState(null)
   const [mode, setMode] = useState(null)
   const [state, setState] = useState({})
@@ -202,16 +263,22 @@ export default function DomainSettings({ siteUrl, compact = false, onChange }) {
     } else setState({ error: ERRORS[d.error] || 'Something went wrong. Please try again.', suggestion: d.suggestion })
   }
   const d = data.domain
-  const [label, tone] = d ? (NEEDS_FIX.includes(d.detail) ? ['Record needs a fix', 'bad'] : STATUS[d.status] || ['Checking', 'pending']) : []
+  // "Securing" only once the record is found; before that we're waiting on the owner's DNS change, and say so.
+  const [label, tone] = d
+    ? NEEDS_FIX.includes(d.detail)
+      ? ['Record needs a fix', 'bad']
+      : d.detail === 'waiting_for_cname'
+        ? ['Waiting for your DNS change', 'pending']
+        : STATUS[d.status] || ['Checking', 'pending']
+    : []
 
   if (d) {
     return (
       <div className="form">
-        <p className={`status status--${tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : 'pending'}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {d.hostname} · {label}
+        <p className="domain-status">
+          <strong>{d.hostname}</strong> <Pill tone={tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : d.detail === 'certificate_pending' || d.step === 'activate' ? 'info' : 'warn'}>{label}</Pill>
         </p>
-        <Steps d={d} />
+        <Steps d={d} site={site} />
         {state.error && (
           <p className="form-error" role="alert">
             {state.error}
