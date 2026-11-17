@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Paid launch preparation (2026-11-17) — docs/PAID_LAUNCH.md; nothing activated
+
+- Twilio trial (real, read-only): credentials valid, account active, type Trial, 0 owned numbers, 0 verified caller IDs
+  visible via API, 0 subaccounts. Credentials stored as production secrets (not active until the next deploy). Real
+  SMS through GetShowUps is blocked on the trial (shared numbers, template-only bodies, A2P needs a paid account).
+  Texting is not needed for launch.
+- Stripe (sandbox, read-only): founding price verified $499.00 USD monthly; sandbox webhook has exactly the 6 handled
+  events; portal cancels at period end. No live account connected; live configuration steps in docs/PAID_LAUNCH.md.
+- Verified (simulated): billing/webhook/access/cancellation/recovery/isolation unit tests 33/33; browser journey
+  get started → pay → onboard → Calendar → publish → book → billing 12/12; CI green on main 4bc81f8.
+- Finding (decision, no code change): access does not depend on Stripe mode, so toys-for-us (self-serve, not the
+  founder, SANDBOX "active" subscription) keeps free access after live billing and its portal would fail.
+- Monitoring: Cloudflare "Project updates" (Pages deployment failed), Incident/Maintenance alerts, Workers Observability
+  Issues on the scheduler; no push alert exists for a silently stopped scheduler (Business Review shows it stale).
+- Needs approval: live Stripe secrets + STRIPE_LIVE_ENABLED + deploy + live price; the $499 real-payment test (~$14.77
+  Stripe fee kept after refund); MESSAGES_LIVE.
+
 ## Migration 0025 applied (2026-11-16, founder approval) — production 66a294d
 
 - Applied the reviewed file (SHA-256 e073a335…076d) to `getshowups-onboarding` (8137dd39-53c5-4bad-8a46-3d20a43670bd).
