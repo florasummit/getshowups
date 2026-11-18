@@ -51,9 +51,11 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
   const add = (type, customer, extra = {}) => issues.push({ type, customer: customer ?? null, ...extra })
 
   const seen = new Set()
+  const running = new Map() // our customer → ids of Stripe subscriptions still running or pending (LIVE)
   for (const s of subs.data) {
     seen.add(s.id)
     const customer = bySubId.get(s.id)?.customer ?? s.metadata?.customer ?? byStripeCustomer.get(s.customer) ?? null
+    if (customer && LIVE.includes(s.status)) running.set(customer, [...(running.get(customer) || []), s.id])
     if (customer && deleted.has(customer) && LIVE.includes(s.status)) {
       add('billing_after_deletion', customer, { subscription: s.id, stripe: s.status })
       continue
@@ -92,10 +94,17 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
   // The one difference applied automatically: Stripe says a subscription we still treat as paid has ENDED (e.g. the
   // final failed-payment retry canceled it and that webhook never arrived). Decrease-only, through the same path as
   // the admin "Resync from Stripe" (Stripe is asked again first); everything else stays report-only.
+  // Never when Stripe also lists another running/pending subscription for that business (a resubscription whose
+  // webhook is still on its way): reported only. The change is stamped with Stripe's own end time, not this run's,
+  // so any later real webhook (e.g. that new subscription's) still wins over it.
   const applied = []
   for (const i of issues) {
     if (i.type !== 'status_mismatch' || i.stripe !== 'canceled' || !PAID.includes(i.ours) || !i.customer) continue
-    const r = await resyncFromStripe(env, i.customer, now).catch(() => ({ ok: false, error: 'resync_failed' }))
+    if ((running.get(i.customer) || []).some((id) => id !== i.subscription)) {
+      applied.push({ customer: i.customer, subscription: i.subscription, ok: false, status: null, error: 'other_subscription_running' })
+      continue
+    }
+    const r = await resyncFromStripe(env, i.customer, now, { stampAtEnd: true }).catch(() => ({ ok: false, error: 'resync_failed' }))
     applied.push({ customer: i.customer, subscription: i.subscription, ok: r.ok === true, status: r.status ?? null, error: r.ok ? undefined : r.error })
     if (r.ok && r.status === 'canceled') i.applied = true
   }
@@ -126,7 +135,9 @@ export async function dailyReconciliation(env, now = Date.now()) {
 }
 
 // Admin fix for one business: take Stripe's current subscription and apply it exactly like a webhook would.
-export async function resyncFromStripe(env, customerId, now = Date.now()) {
+// stampAtEnd (reconciliation only): an ended subscription is applied as of Stripe's ended_at/canceled_at, so a newer
+// real event is never ignored as "older" than the resync. The admin resync keeps "now" (an explicit override).
+export async function resyncFromStripe(env, customerId, now = Date.now(), { stampAtEnd = false } = {}) {
   if (!stripeConfigured(env)) return { ok: false, error: 'not_configured' }
   const o = await env.ONBOARDING_DB.prepare('SELECT stripe_subscription_id FROM subscriptions WHERE customer = ?1').bind(customerId).first()
   if (!o?.stripe_subscription_id) return { ok: false, error: 'no_subscription' }
@@ -135,9 +146,11 @@ export async function resyncFromStripe(env, customerId, now = Date.now()) {
   if (r.body.livemode === true && !stripeLiveEnabled(env)) return { ok: false, error: 'livemode_not_enabled' }
   const sub = { ...r.body, metadata: { ...(r.body.metadata || {}), customer: customerId } }
   const later = []
+  const endedSec = Number(sub.ended_at || sub.canceled_at) || 0
+  const created = stampAtEnd && sub.status === 'canceled' && endedSec > 0 ? Math.min(endedSec, Math.floor(now / 1000)) : Math.floor(now / 1000)
   await handleEvent(
     env,
-    { id: `resync_${customerId}_${now}`, type: sub.status === 'canceled' ? 'customer.subscription.deleted' : 'customer.subscription.updated', created: Math.floor(now / 1000), livemode: r.body.livemode === true, data: { object: sub } },
+    { id: `resync_${customerId}_${now}`, type: sub.status === 'canceled' ? 'customer.subscription.deleted' : 'customer.subscription.updated', created, livemode: r.body.livemode === true, data: { object: sub } },
     { after: (fn) => later.push(fn) },
   )
   for (const fn of later) await Promise.resolve().then(fn).catch(() => {}) // ads hold check; the cron sweep retries
