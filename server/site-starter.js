@@ -5,7 +5,7 @@
 // Precedence (applied by the callers): the owner's own edits > the business's records (name, phone, hours, area,
 // services and prices) > approved imported content > generated starter text. Nothing here invents a service, price,
 // claim, review or credential; empty content simply leaves a section out.
-import { FONTS as LOOKS, PALETTES, industryKey, presetDesigns } from './site-design.js'
+import { FONTS as LOOKS, INDUSTRIES, PALETTES, industryKey, presetDesigns } from './site-design.js'
 import { LIMITS } from './site-spec.js'
 
 const BOOK = { label: 'Book online', target: 'book' }
@@ -14,7 +14,9 @@ const cta = (id) => ({ type: 'cta', id, background: 'accent', align: 'center', l
 export function starterTheme(key) {
   const preset = presetDesigns(key)[0]
   const p = PALETTES[preset.palette] || PALETTES.graphite
-  const f = LOOKS[preset.fonts] || LOOKS.modern
+  // The industry's own starter look (type, shape, buttons); unknown industries keep the neutral default.
+  const s = INDUSTRIES[key]?.starter || {}
+  const f = LOOKS[s.fonts || preset.fonts] || LOOKS.modern
   return {
     name: preset.name || 'Starter',
     theme: {
@@ -27,10 +29,10 @@ export function starterTheme(key) {
       baseSize: 17,
       scale: 1.25,
       lineHeight: 1.6,
-      radius: 14,
+      radius: s.radius ?? 14,
       density: 'comfortable',
       maxWidth: 1200,
-      buttons: 'solid',
+      buttons: s.buttons || 'solid',
       motion: 'none',
     },
     heroImage: preset.heroImage,
@@ -153,10 +155,11 @@ export function ensureServices(site, content) {
 export function starterSite(content, biz, { kinds = [], privacy = null, now = Date.now() } = {}) {
   const key = industryKey({ industry: biz.industry, services: content.services || [], description: biz.description, name: biz.name })
   const look = starterTheme(key)
-  const image = content.hero ? `asset:${content.hero}` : look.heroImage
+  // The logo is never the first-screen photo (it stays in the header).
+  const image = content.hero && content.hero !== content.logo ? `asset:${content.hero}` : look.heroImage
   const aboutPage = kinds.includes('about') && content.about
   const home = [
-    { type: 'hero', id: 'top', layout: image ? 'split' : 'minimal', image, imageAlt: '', heading: content.headline || biz.name, text: content.intro || '', primaryCta: BOOK },
+    { type: 'hero', id: 'top', layout: image ? 'split' : 'minimal', height: image ? 'tall' : 'auto', image, imageAlt: '', heading: content.headline || biz.name, text: content.intro || '', primaryCta: BOOK },
     ...(content.services?.length ? [{ type: 'services', id: 'services', heading: 'Services', layout: 'cards', showPrices: true, items: [] }] : []),
     ...(content.about && !aboutPage ? [{ type: 'text', id: 'about', heading: `About ${biz.name}`.slice(0, 120), body: content.about }] : []),
     ...(content.area ? [{ type: 'area', id: 'area', heading: 'Where we work' }] : []),

@@ -67,8 +67,12 @@ function css(t, { composition = false } = {}) {
   const fs = (n) => `${(t.baseSize * k ** n).toFixed(1)}px`
   // Display sizes shrink with the screen: the floor is also capped by the viewport width, so a large scale or a wide
   // display font can't push a headline word past a phone's edge (seen at 390px: 75px Cormorant, 54px uppercase Syne).
-  const cap = (n) => (n >= 5 ? 11 : n >= 3 ? 8.5 : 100)
-  const fluid = (n) => `clamp(min(${(t.baseSize * k ** Math.max(1, n - 2)).toFixed(1)}px, ${cap(n)}vw), ${(t.baseSize * k ** n * 0.16).toFixed(2)}vw + ${(t.baseSize * k ** (n - 1) * 0.55).toFixed(1)}px, min(${fs(n)}, ${cap(n)}vw))`
+  const cap = (n) => (n >= 6 ? 9.5 : n >= 5 ? 11 : n >= 3 ? 8.5 : 100)
+  // ...and an absolute ceiling: the width cap alone let a large scale grow with the screen (PoolThru, 2026-11-17: a
+  // 158px three-line headline at 1440px, 211px at 1920px). Headlines stay inside a professional range on wide screens.
+  const ceiling = (n) => (n >= 6 ? 96 : n >= 5 ? 80 : n >= 3 ? 60 : Infinity)
+  const top = (n) => `min(${Math.min(t.baseSize * k ** n, ceiling(n)).toFixed(1)}px, ${cap(n)}vw)`
+  const fluid = (n) => `clamp(min(${Math.min(t.baseSize * k ** Math.max(1, n - 2), ceiling(n)).toFixed(1)}px, ${cap(n)}vw), ${(t.baseSize * k ** n * 0.16).toFixed(2)}vw + ${(t.baseSize * k ** (n - 1) * 0.55).toFixed(1)}px, ${top(n)})`
   const btn = {
     solid: `background:var(--accent);color:var(--on-accent);border:2px solid var(--accent);border-radius:${Math.min(t.radius, 14)}px`,
     pill: `background:var(--accent);color:var(--on-accent);border:2px solid var(--accent);border-radius:999px`,
@@ -99,10 +103,10 @@ h1{font-size:${fluid(5)}}h2{font-size:${fluid(3.4)}}h3{font-size:${fs(1.3)};line
 .ico{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;color:var(--accent-text)}.bg-accent .ico,.bg-ink .ico{color:inherit}
 .nav{position:${'relative'};z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}.nav.sticky{position:sticky;top:0}.nav .wrap{display:flex;align-items:center;gap:24px;min-height:72px}
 .nav .brand{font:700 ${fs(0.6)}/1 var(--hf);color:var(--ink);text-decoration:none;letter-spacing:${t.headingTracking}em;${t.headingCase === 'upper' ? 'text-transform:uppercase;' : ''}}.nav ul{display:flex;gap:22px;list-style:none;margin:0;padding:0}.nav ul a{color:var(--ink);text-decoration:none;font-size:${fs(-0.3)}}.nav ul a[aria-current]{color:var(--accent-text)}
-.nav-left .brand,.nav-split .brand{margin-right:auto}.nav-center .wrap{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:24px;row-gap:2px;padding-block:8px}.nav-center .brand{grid-column:2;grid-row:1;text-align:center}.nav-center .btn{grid-column:3;grid-row:1;justify-self:end}.nav-center ul{grid-column:1/-1;grid-row:2;justify-content:center}.nav-split ul{flex:1;justify-content:center}.nav .btn{padding:10px 18px;min-height:44px}
+.nav-left .brand,.nav-split .brand{margin-right:auto}.nav-center .wrap{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:24px;row-gap:2px;padding-block:8px}.nav-center .brand{grid-column:2;grid-row:1;text-align:center}.nav-center .btn{grid-column:3;grid-row:1;justify-self:end}.nav-center ul{grid-column:1/-1;grid-row:2;justify-content:center}.nav-split ul{flex:1;justify-content:center}.nav .btn{padding:10px 18px;min-height:44px;white-space:nowrap;flex:none}
 @media(max-width:820px){.nav ul{display:none}.nav .wrap{justify-content:space-between}.nav-center .wrap{grid-template-columns:1fr auto;padding-block:0}.nav-center .brand{grid-column:1;text-align:left}.nav-center .btn{grid-column:2}}
 .hero{position:relative}.h-auto{min-height:0}.h-tall{min-height:min(calc(85vh - 72px),760px);min-height:min(calc(85svh - 72px),760px)}.h-screen{min-height:calc(100vh - 72px);min-height:calc(100svh - 72px)}.hero .wrap{display:grid;align-items:center;gap:clamp(28px,5vw,72px)}.hero.h-tall,.hero.h-screen{display:flex;flex-direction:column;justify-content:center;padding-block:clamp(32px,6vh,var(--py))}
-.hero p.sub{font-size:${fs(0.6)};max-width:620px}.al-center .hero-copy p.sub{margin-inline:auto}
+.hero p.sub{font-size:${fs(0.6)};max-width:620px;margin-top:clamp(14px,1.6vw,22px)}.al-center .hero-copy p.sub{margin-inline:auto}
 .l-split .wrap{grid-template-columns:1.05fr .95fr}.l-split.side-left .hero-media{order:-1}.hero-media img{width:100%;height:100%;max-height:min(560px,64vh);object-fit:cover;border-radius:var(--r)}
 .l-overlay{color:#fff}.l-overlay .hero-bg{position:absolute;inset:0}.l-overlay .hero-bg img{width:100%;height:100%;object-fit:cover}.l-overlay .hero-bg::after{content:"";position:absolute;inset:0;background:#000;opacity:var(--ov)}.l-overlay .wrap{position:relative}.l-overlay .eyebrow{color:#fff}
 .l-overlay .btn.ghost{color:#fff}.l-stacked .hero-media img{max-height:min(480px,56vh);margin-top:40px}.l-editorial h1{font-size:${fluid(6)};line-height:.98}.l-editorial .wrap{grid-template-columns:1fr}.l-editorial .hero-copy{display:grid;grid-template-columns:1.4fr 1fr;gap:48px;align-items:end}

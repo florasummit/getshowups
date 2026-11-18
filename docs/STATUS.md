@@ -2,6 +2,32 @@
 
 _Update at the end of every task. Newest first._
 
+## Product completion pass (2026-11-18) — feat/product-completion (no migration)
+
+- **PoolThru graphic, root cause** (traced in production data, read-only):
+  - The purple/orange/green PNG (asset 6a63…, uploaded 2026-11-11) was PoolThru's LOGO (content.logo in v2–v4).
+  - By v5 it was no longer the logo but stayed in the image library.
+  - The AI designer (2026-11-16 16:34 UTC) offered "all assets except the CURRENT logo" as owner photos and placed it on the first screen. Every later save, import and redesign carried it.
+  - The editor's "No photo" was ignored for those pictures (PhotoPop: `v && change`), so the owner could swap but never remove it.
+- **Fixes:**
+  - Every past logo is excluded from photo choices everywhere.
+  - "No photo" removes the picture (composition: its photo block).
+  - The photo picker shows the picture in use.
+  - Headline ceilings 96/80/60px: was 158px at 1440px, 211px at 1920px.
+  - Spacing under the first-screen heading; a content-height first screen without a photo.
+  - The header Book button never wraps.
+- **Industries:** professional + wellness added (text-led); the spa→pool misclassification is fixed; per-industry starter looks.
+- **Editor:** full screen (/dashboard/website?full=1, Esc), tablet view. Root cause of the "editor stuck in a box": `.enter{animation: … both}` kept an identity transform that confines fixed-position children → `backwards`.
+- **Security headers:** /dashboard and /admin could be framed by any site (clickjacking) → X-Frame-Options DENY + frame-ancestors 'none'. HSTS added.
+- **NOT changed:** PoolThru's draft or live site (needs approval); no AI calls; no migrations.
+- **Open:**
+  - Section-scoped AI editing (P2).
+  - Full CSP for app pages (P2).
+  - WAF/DDoS settings not inspectable with the current token.
+  - Licensed photos for professional/wellness.
+  - A timed human onboarding run.
+  - The receptionist and Ads are not part of onboarding (dashboard tabs after it).
+
 ## Service-area requests (2026-11-17) — feat/service-area-requests; migration 0029 (NOT applied)
 
 - **Root cause of lost leads:**

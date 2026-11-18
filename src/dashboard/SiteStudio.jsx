@@ -53,11 +53,12 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   const page = site.pages[pageIndex]
   const sectionIndex = page.sections.findIndex((s) => s.id === selected)
   const section = sectionIndex >= 0 ? page.sections[sectionIndex] : null
-  // Photos to choose from: the owner's photos, not their phone-sized copies (content.variants values).
+  // Photos to choose from: the owner's photos, not their phone-sized copies (content.variants values) and never a logo
+  // (current or earlier: the server marks them), which belongs in the header, not in a photo slot.
   const photoAssets = useMemo(() => {
     const copies = new Set(Object.values(content.variants || {}))
-    return assets.filter((a) => !copies.has(a.id))
-  }, [assets, content.variants])
+    return assets.filter((a) => !copies.has(a.id) && !a.logo && a.id !== content.logo)
+  }, [assets, content.variants, content.logo])
   const biz = useMemo(
     () => ({ name: brand || 'Our business', services: content.services || [], area: content.area || '', about: content.about || '', photos: photoAssets.map((a) => a.id), visit: Boolean(visit) }),
     [brand, visit, content.services, content.area, content.about, photoAssets],
@@ -179,6 +180,29 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   // editable from outside: text in place (data-edit), buttons and photos with a small panel (data-btn / data-img), and
   // sections with compact controls. "Preview" mode turns all of that off.
   const [mode, setMode] = useState('edit')
+  // Full screen: the same editor filling the browser window (also reachable as its own tab: /dashboard/website?full=1).
+  const [full, setFull] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('full') === '1')
+  const toggleFull = (on) => {
+    setFull(on)
+    try {
+      const u = new URL(window.location.href)
+      if (on) u.searchParams.set('full', '1')
+      else u.searchParams.delete('full')
+      window.history.replaceState(window.history.state, '', u)
+    } catch {
+      // URL update is a convenience only
+    }
+  }
+  useEffect(() => {
+    if (!full) return undefined
+    const onKey = (e) => e.key === 'Escape' && !e.target.closest?.('[contenteditable],input,textarea,select') && toggleFull(false)
+    document.addEventListener('keydown', onKey)
+    document.body.classList.add('studio-full-open')
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.classList.remove('studio-full-open')
+    }
+  }, [full])
   const [hover, setHover] = useState(null) // { id, rect }
   const [selRect, setSelRect] = useState(null)
   const [pop, setPop] = useState(null) // { kind: 'btn'|'img', sid, path, rect }
@@ -404,7 +428,7 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   const popValue = pop ? readAt(pop.sid, pop.path) : null
 
   return (
-    <section className="studio" aria-label="Website Studio editor">
+    <section className={`studio${full ? ' studio--full' : ''}`} aria-label="Website Studio editor">
       <div className="studio-bar">
         <label className="studio-page">
           <span className="sr-only">Page</span>
@@ -438,12 +462,15 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
           </button>
         </div>
         <div className="segmented segmented--sm" role="group" aria-label="Preview size">
-          {['desktop', 'phone'].map((d) => (
+          {['desktop', 'tablet', 'phone'].map((d) => (
             <button key={d} type="button" aria-pressed={device === d} onClick={() => setDevice(d)}>
-              {d === 'phone' ? 'Phone' : 'Desktop'}
+              {{ desktop: 'Desktop', tablet: 'Tablet', phone: 'Phone' }[d]}
             </button>
           ))}
         </div>
+        <button type="button" className="studio-icon-btn" aria-pressed={full} onClick={() => toggleFull(!full)} title={full ? 'Exit full screen (Esc)' : 'Edit in full screen'}>
+          {full ? 'Exit full screen' : 'Full screen'}
+        </button>
         <div className="studio-history">
           <button type="button" className="studio-icon-btn" onClick={undo} disabled={!past.length} title="Undo" aria-label="Undo">
             <Ico d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /> Undo
@@ -523,7 +550,15 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
                   }, { merge: `btn|${pop.sid}|${pop.path}` })}
                 />
               ) : (
-                <PhotoPop sid={pop.sid} path={pop.path} section={page.sections.find((x) => x.id === pop.sid)} assets={photoAssets} change={(fn) => editPage((p) => fn(p.sections.find((x) => x.id === pop.sid)))} onMore={() => setTab('photos')} />
+                <PhotoPop
+                  sid={pop.sid}
+                  path={pop.path}
+                  section={page.sections.find((x) => x.id === pop.sid)}
+                  assets={photoAssets}
+                  change={(fn) => editPage((p) => fn(p.sections.find((x) => x.id === pop.sid)))}
+                  onRemoved={() => setPop(null)}
+                  onMore={() => setTab('photos')}
+                />
               )}
             </Popover>
           )}
@@ -697,7 +732,9 @@ function Popover({ rect, stage, tall = false, onClose, children }) {
 }
 
 // The clicked photo: choose another, frame it (focus point + shape), describe it.
-function PhotoPop({ path, section, assets, change, onMore }) {
+// "No photo" really removes it: a section photo is cleared; an opening's photo block is removed (a photo block without a
+// photo would be empty). It used to be ignored, so an unwanted picture could be swapped but never removed.
+function PhotoPop({ path, section, assets, change, onMore, onRemoved }) {
   const block = /^blocks\.\d+$/.test(path) ? Number(path.split('.')[1]) : null
   const b = block !== null ? section?.blocks?.[block] : null
   const value = b ? b.image : section?.image
@@ -707,7 +744,11 @@ function PhotoPop({ path, section, assets, change, onMore }) {
       value={value}
       alt={b ? b.alt : section?.imageAlt}
       assets={assets}
-      onChange={(v) => v && change((s2) => (b ? (s2.blocks[block].image = v) : (s2.image = v)))}
+      onChange={(v) => {
+        if (v) return change((s2) => (b ? (s2.blocks[block].image = v) : (s2.image = v)))
+        change((s2) => (b ? s2.blocks.splice(block, 1) : delete s2.image))
+        onRemoved?.()
+      }}
       onAlt={(v) => change((s2) => (b ? (s2.blocks[block].alt = v) : (s2.imageAlt = v)))}
       focus={b ? b.focus : section?.imageFocus}
       aspect={b ? b.aspect : section?.imageAspect}
@@ -820,11 +861,19 @@ function Framing({ src, focus, aspect, onFocus, onAspect }) {
 
 function ImageField({ label, value, alt, assets, onChange, onAlt, focus, aspect, onFocus, onAspect }) {
   const id = value?.startsWith('asset:') ? value.slice(6) : null
+  // The picture in use, when it isn't one of the choices (a stock photo, or a logo that was placed as a photo): shown so
+  // the owner can see exactly what "No photo" removes.
+  const current = value && !assets.some((a) => a.id === id) ? (id ? `/site-assets/${id}` : value.startsWith('stock:') ? `/site-stock/${value.slice(6)}-sm.jpg` : null) : null
   return (
     <fieldset className="field studio-group">
       <legend>{label}</legend>
       {value && onFocus && <Framing src={id ? `/site-assets/${id}` : null} focus={focus} aspect={aspect} onFocus={onFocus} onAspect={onAspect} />}
       <div className="studio-thumbs">
+        {current && (
+          <span className="studio-thumb studio-thumb--current" aria-pressed="true" title="Current photo">
+            <img src={current} alt="Current photo" />
+          </span>
+        )}
         {assets.map((a) => (
           <button key={a.id} type="button" className="studio-thumb" aria-pressed={a.id === id} onClick={() => onChange(`asset:${a.id}`)} aria-label="Use this photo">
             <img src={a.url} alt="" />
@@ -890,7 +939,7 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
           ) : b.kind === 'button' ? (
             <ButtonFields key={i} title="Button" cta={{ label: b.label, target: b.target }} site={site} page={page} autoFocus={focus === 'button'} onChange={(c) => onChange((x) => Object.assign(x.blocks[i], c))} />
           ) : b.kind === 'media' ? (
-            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => v && onChange((x) => (x.blocks[i].image = v))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
+            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => onChange((x) => (v ? (x.blocks[i].image = v) : x.blocks.splice(i, 1)))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
           ) : null,
         )}
       {s.type === 'hero' && (

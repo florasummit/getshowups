@@ -1,7 +1,7 @@
 // Website images (logo and photos). The browser resizes before upload; the server accepts only real
 // JPEG/PNG/WebP files (checked by their bytes, never by the declared type; no SVG), within size and
 // count limits. Stored per business; served only when published or to the business's own owner.
-import { liveContent } from './website.js'
+import { liveContent, logoAssetIdsFor } from './website.js'
 import { specImages } from './site-spec.js'
 
 // Media policy (Website Studio, 2026-11-16): photos only (no hosted video), resized in the browser to ≤1600 px before
@@ -92,9 +92,13 @@ export async function cleanupAssets(db, customerId) {
   return { removed, kept: results.length - removed, bytesFreed }
 }
 
+// logo: true for an image that is or was the business's logo (photo pickers leave it out; server/website.js).
 export async function listAssets(db, customerId) {
-  const { results } = await db.prepare('SELECT id, size, created_at FROM website_assets WHERE customer = ?1 ORDER BY created_at DESC').bind(customerId).all()
-  return results.map((r) => ({ id: r.id, url: `/site-assets/${r.id}`, size: r.size, createdAt: r.created_at }))
+  const [{ results }, logos] = await Promise.all([
+    db.prepare('SELECT id, size, created_at FROM website_assets WHERE customer = ?1 ORDER BY created_at DESC').bind(customerId).all(),
+    logoAssetIdsFor(db, customerId),
+  ])
+  return results.map((r) => ({ id: r.id, url: `/site-assets/${r.id}`, size: r.size, createdAt: r.created_at, ...(logos.has(r.id) ? { logo: true } : {}) }))
 }
 
 // D1 may return a BLOB as an ArrayBuffer, a typed array or a plain number array.

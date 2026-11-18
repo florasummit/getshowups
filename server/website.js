@@ -279,6 +279,23 @@ export async function assetIdsFor(db, customerId) {
   return new Set(results.map((r) => r.id))
 }
 
+// Images that are, or ever were, this business's logo (current draft + every saved version). Uploaded images carry no
+// role, so "logo" was judged only from the CURRENT draft: once a logo was replaced or cleared, the old file stayed in the
+// library and was offered as a photo (PoolThru, 2026-11-16: an old logo became the first-screen photo of an AI design).
+// A logo is never placed as a photo by the AI or offered in a photo picker; it stays available as the logo.
+export async function logoAssetIdsFor(db, customerId, draft = null) {
+  const ids = new Set()
+  const add = (v) => typeof v === 'string' && ASSET_RE.test(v) && ids.add(v)
+  add(draft?.logo)
+  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
+  if (w?.draft) add(parse(w.draft).logo)
+  const { results } = await db.prepare("SELECT json_extract(content, '$.logo') AS logo FROM website_versions WHERE customer = ?1").bind(customerId).all()
+  for (const r of results) add(r.logo)
+  return ids
+}
+// Owned images that may be used as photos: everything the business uploaded except its logos.
+export const photoIds = (assetIds, logoIds) => new Set([...assetIds].filter((id) => !logoIds.has(id)))
+
 // What the public sees: the live version, or (for businesses that published before websites existed)
 // their published landing page. null = not published.
 export async function liveContent(db, customerId) {
