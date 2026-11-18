@@ -10,6 +10,11 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
   - Effort is `low` for conversational latency.
   - The per-business system prompt is cached.
   - No server-side model fallback (owner decision 2026-11-16).
+  - Voice: when the model's first move is a calendar lookup or a booking and it has said nothing yet, a fixed holding
+    line ("One moment while I check the calendar." / "One moment, please.") is spoken before the tool runs, so the
+    caller doesn't talk over the seconds of silence (lost turns are recorded as `turn:talked_over`). It is never an
+    answer by itself (`model:no_reply` still applies). `RECEPTIONIST_VOICE_MODEL` can point voice at a faster model
+    (approval; cost is still estimated at Opus prices, so caps stay conservative).
 - **Knowledge:** only the business's records: services and prices, ZIPs, towns, hours, appointment mode, phone,
   "what customers should know" and the owner's receptionist notes. A generic industry playbook (pool, HVAC, plumbing,
   cleaning) shapes which questions to ask and what counts as urgent.
