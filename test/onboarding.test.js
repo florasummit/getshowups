@@ -145,6 +145,16 @@ test('billing half-configured (live key without STRIPE_LIVE_ENABLED, or no webho
   // Fully configured again: the tester's signup is created and billed (self_signups row).
   assert.equal((await attempt()).status, 201)
   assert.equal(db.sql.prepare('SELECT count(*) n FROM self_signups').get().n, 1)
+  // Existing businesses are not disrupted while billing is half-configured: the owner still loads the dashboard and
+  // saves business changes (only NEW businesses are refused).
+  const id = db.sql.prepare('SELECT id FROM customers').get().id
+  env.STRIPE_SECRET_KEY = 'sk_live_HALFWAY'
+  const mine = (await call(me, 'GET', { cookie: tester })).json
+  assert.equal(mine.customer.id, id)
+  const upd = await call(business, 'POST', { cookie: tester, body: { name: 'New Pools Renamed', timezone: 'America/New_York', serviceZips: '' } })
+  assert.deepEqual([upd.status, upd.json.id], [200, id])
+  assert.equal(db.sql.prepare('SELECT name FROM customers WHERE id = ?').get(id).name, 'New Pools Renamed')
+  env.STRIPE_SECRET_KEY = sk
 })
 
 test('get started: name only creates the business on the founding plan; payment comes before anything else', async () => {
