@@ -133,6 +133,32 @@ test('differences: every kind is reported (never fixed automatically)', async ()
   assert.ok(logs.some((l) => l.startsWith('billing reconciliation: issues')))
 })
 
+test('missed cancellation webhook: a paid subscription Stripe reports as ended is applied (decrease-only); a late or duplicate webhook changes nothing', async () => {
+  const s = (id) => stripeSubs.find((x) => x.id === id)
+  // The final failed-payment retry canceled sub_a in Stripe; our webhook never arrived (ours still past_due).
+  db.sql.prepare("UPDATE subscriptions SET status = 'past_due' WHERE customer = 'alpha'").run()
+  Object.assign(s('sub_a'), { status: 'canceled', ended_at: Math.floor(Date.now() / 1000) })
+  // An abandoned checkout placeholder that Stripe expired is NOT touched (never paid: nothing to take away).
+  db.sql.prepare("UPDATE subscriptions SET status = 'incomplete' WHERE customer = 'beta'").run()
+  Object.assign(s('sub_b'), { status: 'incomplete_expired' })
+  const r = await reconcileBilling(env)
+  assert.deepEqual(r.applied, [{ customer: 'alpha', subscription: 'sub_a', ok: true, status: 'canceled', error: undefined }])
+  assert.equal(db.sql.prepare("SELECT status FROM subscriptions WHERE customer = 'alpha'").get().status, 'canceled')
+  assert.equal(db.sql.prepare("SELECT status FROM subscriptions WHERE customer = 'beta'").get().status, 'incomplete')
+  assert.ok(fetches.every((f) => f.method === 'GET'), 'still never writes to Stripe')
+  assert.ok(db.sql.prepare("SELECT 1 FROM audit_log WHERE action = 'billing.subscription_status' AND customer = 'alpha'").get(), 'status change audited')
+  assert.ok(JSON.parse(db.sql.prepare("SELECT details FROM audit_log WHERE action = 'billing.reconciliation' ORDER BY seq DESC").get().details).applied.length === 1)
+  // Next run: nothing left to apply for alpha.
+  const again = await reconcileBilling(env)
+  assert.deepEqual(again.applied, [])
+  // The real webhook arriving late (older event) or twice changes nothing.
+  const { handleEvent } = await import('../server/stripe.js')
+  const late = { id: 'evt_late', type: 'customer.subscription.updated', created: Math.floor(Date.now() / 1000) - 3600, livemode: false, data: { object: { ...s('sub_a'), status: 'past_due' } } }
+  await handleEvent(env, late)
+  await handleEvent(env, late)
+  assert.equal(db.sql.prepare("SELECT status FROM subscriptions WHERE customer = 'alpha'").get().status, 'canceled')
+})
+
 test('admin route: run now + resync one business from Stripe (audited); admin only; not configured → 409', async () => {
   const c = await cookie('founder@getshowups.example')
   assert.equal((await call('GET', null, await cookie('owner@alpha.example'))).status, 403)

@@ -458,7 +458,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   separately approved retention schedule (RETENTION_SCHEDULE_ENABLED AND ACCOUNT_DELETION_ENABLED; never pilots/test).
 - Billing reconciliation (server/reconcile.js): daily cron + /admin "Run now": Stripe subscriptions + 35 days of paid
   invoices vs our records (status, amount, cancellation, mode, missing either side, payments, billing after deletion).
-  Read-only toward Stripe; recorded in audit_log; never auto-fixes. "Resync from Stripe" (admin, confirm, audited) applies
+  Read-only toward Stripe; recorded in audit_log. Auto-applies ONE thing (owner decision 2026-11-18): a subscription we
+  treat as paid (active/trialing/past_due) that Stripe reports ENDED is resynced (decrease-only; `applied` in the run),
+  so a missed cancellation webhook can't keep a business hosted. Everything else is report-only. "Resync from Stripe" (admin, confirm, audited) applies
   Stripe's current subscription like a webhook (refused for live mode while live billing is off).
 
 ## Business Review and operational events (/admin/review)

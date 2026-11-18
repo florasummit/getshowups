@@ -1,5 +1,7 @@
 // Billing reconciliation: Stripe (where the money is) against our records. Read-only toward Stripe; it reports
-// differences and never fixes them by itself. A platform admin can resync one business from Stripe (audited).
+// differences and fixes only one by itself: a paid subscription Stripe reports as ENDED is applied (decrease-only,
+// via resyncFromStripe), so a missed cancellation webhook can't keep a business hosted. Everything else is report-only;
+// a platform admin can resync one business from Stripe (audited).
 // Runs daily from the cron and on demand from /admin; every run is recorded in the permanent audit log
 // (ids, statuses and amounts only, no personal data).
 import { appendAudit } from './auditlog.js'
@@ -8,6 +10,7 @@ import { fetchStripeSubscription, handleEvent, listPaidInvoices, listStripeSubsc
 const DAY = 86400000
 const WINDOW_DAYS = 35
 const LIVE = ['active', 'trialing', 'past_due', 'incomplete']
+const PAID = ['active', 'trialing', 'past_due'] // states that keep a business hosted (see hostingStatus)
 
 export const ISSUE_TEXT = {
   billing_after_deletion: 'Stripe still has a running subscription for a deleted account',
@@ -86,9 +89,19 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
   }
   for (const r of revenue) if (!stripeInvoices.has(r.id)) add('payment_unknown', r.customer, { invoice: r.id.replace(/^revenue:/, '') })
 
+  // The one difference applied automatically: Stripe says a subscription we still treat as paid has ENDED (e.g. the
+  // final failed-payment retry canceled it and that webhook never arrived). Decrease-only, through the same path as
+  // the admin "Resync from Stripe" (Stripe is asked again first); everything else stays report-only.
+  const applied = []
+  for (const i of issues) {
+    if (i.type !== 'status_mismatch' || i.stripe !== 'canceled' || !PAID.includes(i.ours) || !i.customer) continue
+    const r = await resyncFromStripe(env, i.customer, now).catch(() => ({ ok: false, error: 'resync_failed' }))
+    applied.push({ customer: i.customer, subscription: i.subscription, ok: r.ok === true, status: r.status ?? null, error: r.ok ? undefined : r.error })
+    if (r.ok && r.status === 'canceled') i.applied = true
+  }
   const byType = {}
   for (const i of issues) byType[i.type] = (byType[i.type] || 0) + 1
-  const result = { ok: true, at: now, checked: { subscriptions: subs.data.length, records: ours.length, invoices: paid.length, windowDays: WINDOW_DAYS }, issues: issues.length, byType, list: issues.slice(0, 50) }
+  const result = { ok: true, at: now, checked: { subscriptions: subs.data.length, records: ours.length, invoices: paid.length, windowDays: WINDOW_DAYS }, issues: issues.length, byType, list: issues.slice(0, 50), applied }
   await appendAudit(db, { actorType: actor.startsWith('system') ? 'system' : 'admin', actor, action: 'billing.reconciliation', details: result, at: now })
   if (issues.length) console.error('billing reconciliation: issues', JSON.stringify(byType))
   return result
