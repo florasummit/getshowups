@@ -1,7 +1,66 @@
 # Paid launch runbook: first paying customer
 
 Smallest safe paid launch: live Stripe billing for the existing founding plan, real emails, monitoring. Texting and Ads
-stay off (not needed for launch). Every step marked (approval) needs the founder's explicit yes. Verified 2026-11-17.
+stay off (not needed for launch). Every step marked (approval) needs the founder's explicit yes. Verified 2026-11-17;
+preconditions and effects updated 2026-11-18 after PRs #64–#68 (production 64d9d47, deployment c77c658d).
+
+## 0. Preconditions (verified 2026-11-18)
+
+- [x] Code in production: sandbox checkout gate (#63), "sign-up opens soon" (#64), go-live access rule (#65:
+  `billingSubscription`, test-mode subscriptions are not paid once live), outbox closes held mail (#66).
+- [x] Migration 0013 (`subscription_modes`) applied; webhook records live/test per subscription.
+- [x] Production backup routine verified (latest: `prod-20261118T145816Z-pre-pr64-68.sql`).
+- [x] Owner decision (2026-11-18): bob-electrical and toys-for-us are left unchanged (not marked test; ownership and
+  intended use not verified). At go-live they see "test payment only, choose a plan" (table below).
+- [x] **#70 merged and deployed** (2026-11-18, da23ecb, deployment 70b701af): a half-configured Stripe (live key without `STRIPE_LIVE_ENABLED`, or no
+  webhook secret) now refuses new signups instead of letting them in unbilled; existing businesses unaffected.
+- [ ] **Terms of service page** (founder/legal, BLOCKER): `https://getshowups.com/terms` does not exist (it falls through
+  to the marketing home page). Needed for the live portal and for a paid subscription offer: subscription terms,
+  monthly renewal, cancellation at period end, refund policy. Claude does not write legal text; provide it and it can
+  be published as a page.
+- [ ] §1 done in the Stripe Dashboard (live account verified, live price, live webhook, live portal, retries, emails,
+  live key). The connector here reaches the SANDBOX only, so none of the live settings are verified by Claude.
+- [ ] A rollback window: the founder available for ~1 hour after activation.
+
+## Review findings behind this checklist (read-only, 2026-11-18)
+
+- **Entitlements:** access reads `billingSubscription` (onboarding payment step, readiness, billing card/portal, Ads
+  live launch) and `hostingStatus(…, env)` (website, Studio, AI allowance, receptionist, assets). Test-mode
+  subscriptions don't count once live; pilots/invited are never billed; test businesses never reach live Stripe.
+- **Checkout recovery:** abandoned/expired checkout → still `incomplete`, retry resumes the open session or opens a new
+  one on the SAME Stripe customer (idempotency key, Stripe asked first); return page polls "Confirming your payment…"
+  until the webhook lands; `?billing=canceled` shows a plain message; other errors say "try again".
+- **Webhooks:** signature + 5-minute tolerance; idempotent per event id; older events ignored (`last_event_at`); storage
+  errors return 500 so Stripe retries; live events refused (400) until `STRIPE_LIVE_ENABLED=true`.
+- **Cancellation:** portal cancels at period end (`cancel_at` recorded as scheduled); `deleted` → `canceled`; site stays
+  up until period end + 14 days; 90-day recovery; nothing deleted.
+- **Duplicates:** one Stripe customer per business (idempotency key; live replacement uses `-live`), Stripe asked for
+  an existing subscription before every checkout (`use_portal`), open sessions resumed.
+- **Customer-facing errors:** plan step: specific ("Confirming your payment…", "sign-up isn't open", "try again");
+  dashboard billing card: one generic "Billing is unavailable right now" for every error (P2 polish, not a blocker).
+- **Gap fixed in #70 (not deployed):** half-configured Stripe → free unbilled signups.
+- **Retries gap (Stripe setting, BLOCKER):** our code treats `past_due`/`unpaid` as still hosted (no automatic
+  lock-out). If Stripe is set to leave a subscription past-due after all retries fail, an unpaying business stays
+  hosted indefinitely. Set Stripe to **cancel the subscription** after the final retry (§1.6): the site then follows
+  the 14-day grace and 90-day recovery rules.
+- **Activation changes no stored data:** the switch writes no rows. Websites (onboarded businesses stay hosted;
+  renderer unchanged), appointments, leads and settings are untouched. Daily reconciliation only reads Stripe (it
+  will report the sandbox rows as `ours_only`; it never fixes anything). Ads holds, recovery and deletion read stored
+  status or are off. The only writes come later from real events: live webhooks, and an owner choosing the plan
+  (sandbox record replaced, audited).
+
+## What changes for existing businesses at go-live (code in production since 2026-11-18)
+
+| Business | Subscription today | After STRIPE_LIVE_ENABLED=true |
+| --- | --- | --- |
+| poolthru-llc | none (pilot; an old `incomplete` placeholder) | unchanged: never billed, never asked to pay |
+| gsu-stripe-test-pools, gsu-journey-test | sandbox, admin-marked TEST | unchanged: keep sandbox access; never reach live Stripe |
+| bob-electrical | sandbox `active` (test mode recorded) | shown as "test payment only, choose a plan"; site stays up (onboarded); Ads live launch and billing portal refused until a real subscription |
+| toys-for-us | sandbox `active` (mode never recorded → treated as test) | same as bob-electrical |
+
+Nobody is charged by the switch. An owner who chooses the plan gets a NEW live Stripe customer (audited
+`billing.sandbox_replaced`); their sandbox data stays in Stripe test mode. Alternatives per business (each an approval):
+mark as a test business (keeps sandbox access, out of metrics) or leave as above.
 
 ## Current configuration (verified read-only)
 
@@ -17,20 +76,43 @@ stay off (not needed for launch). Every step marked (approval) needs the founder
 
 ## 1. Stripe live account (founder, Stripe Dashboard in LIVE mode)
 
-1. Activate the live account (business details, bank account for payouts).
-2. Product catalog → add product "GetShowUps Founding" → price **$499.00 USD, recurring, monthly**, lookup key
-   `getshowups_monthly_499`. Copy the live price id (`price_…`).
-3. Developers → Webhooks → add endpoint `https://getshowups.com/api/stripe/webhook`, select exactly the 6 events above.
-   Copy its signing secret (`whsec_…`).
-4. Settings → Billing → Customer portal (live): same settings as sandbox (cancel at period end, no proration, no plan
-   switching, payment method + invoices on); set privacy policy `https://getshowups.com/privacy` and terms
-   `https://getshowups.com/terms`.
-5. Developers → API keys: the live secret key (`sk_live_…`), or a restricted key with Checkout Sessions, Customers,
-   Subscriptions, Customer portal, Invoices (read) and Prices (read) access.
+1. **Account:** activate live payments (business details, identity, bank account for payouts). Confirm the Dashboard
+   shows payments AND payouts enabled, and set the statement descriptor (e.g. `GETSHOWUPS`) and support email/phone.
+2. **Price:** Product catalog → product "GetShowUps Founding" → price **$499.00 USD, recurring, monthly**, lookup key
+   `getshowups_monthly_499`. Decide tax behavior (see Tax) before creating it: a price's tax behavior can't be changed
+   later. Copy the live price id (`price_…`).
+3. **Webhook:** Developers → Webhooks → add endpoint `https://getshowups.com/api/stripe/webhook`, exactly these 6 events:
+   `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`. Copy its signing secret (`whsec_…`).
+4. **Customer portal (live):** cancel at period end, no proration, cancellation reasons on, plan switching off, pause
+   off, payment method + invoice history on (same as sandbox); privacy `https://getshowups.com/privacy`; terms
+   `https://getshowups.com/terms` only once that page exists (precondition).
+5. **Customer emails:** Settings → Emails: turn on receipts for successful payments and emails for failed payments /
+   expiring cards (our own payment-recovery email also goes out once MESSAGES_LIVE is on).
+6. **Retries (Revenue recovery):** Smart Retries on; after all retries fail → **cancel the subscription** (see review
+   finding). Not "leave past-due".
+7. **API key:** Developers → API keys → Create restricted key "GetShowUps production", taken from every Stripe call in
+   server/stripe.js (2026-11-18):
+
+   | Resource | Permission | Used for |
+   | --- | --- | --- |
+   | Checkout Sessions | Write | create checkout; list open sessions to resume one |
+   | Customers | Write | create the business's customer; retrieve (go-live check); delete (account deletion) |
+   | Subscriptions | Write | list/retrieve (duplicate check, reconciliation, resync); cancel (account deletion) |
+   | Customer portal | Write | open the billing portal |
+   | Invoices | Read | reconciliation (paid invoices, last 35 days) |
+   | Everything else | None | no Prices, PaymentIntents, Webhook endpoints, Payouts or Balance access is needed |
+
+   Rotate: create the new key, put it in Keychain and `STRIPE_SECRET_KEY`, redeploy, then roll the old one in Stripe.
+   A missing permission shows as a `stripe_error` in /admin reconciliation or a failed checkout (no data is changed).
+8. **Leave the sandbox webhook enabled** (needed for rollback). After the switch it will get 400s (wrong secret) for
+   sandbox renewals of the two sandbox subscriptions; harmless, and Stripe sandbox may email about failing deliveries.
 
 ## 2. Activation (approval: live billing + production deploy), in this order
 
-1. Store the live secrets the same way as Twilio (Keychain → pipe; never shown):
+0. #70 is in production (precondition). Take a backup (`wrangler d1 export … --remote`, integrity check).
+1. Store the live secrets the same way as Twilio (Keychain → pipe; never shown). Set ALL THREE before deploying (never
+   deploy between them):
    ```
    security add-generic-password -a getshowups -s getshowups-stripe-live-secret-key -w
    security add-generic-password -a getshowups -s getshowups-stripe-live-webhook-secret -w
@@ -39,34 +121,72 @@ stay off (not needed for launch). Every step marked (approval) needs the founder
    printf 'true' | npx wrangler pages secret put STRIPE_LIVE_ENABLED --project-name getshowups
    ```
    Keep the sandbox key in Keychain to roll back.
-2. Deploy production (secrets apply only to a new deployment).
-3. Right after the deploy is live: /admin → Plans → `founding` → set the **live** price id (audited). Prices are saved by
-   id only, so between steps 2 and 3 a checkout would fail (no customer is lost: they can retry).
-4. /admin → Reconciliation → Run now: expect `ours_only` for the old sandbox subscriptions (see decision below), no
-   other issues.
+2. /admin → Plans → `founding` → set the **live** price id (audited) immediately BEFORE the deploy. Until the deploy,
+   only authorized testers can check out (sandbox) and theirs would fail for those minutes; nobody else can buy.
+3. Deploy production (secrets apply only to a new deployment): Cloudflare dashboard → Pages → getshowups → latest
+   production deployment → Retry deployment (same commit, new secrets).
+4. Smoke checks (below). /admin → Reconciliation → Run now: expect `ours_only` for the sandbox rows only.
 
-Rollback: put the sandbox key + sandbox webhook secret back, `STRIPE_LIVE_ENABLED` unset, plan back to the sandbox price,
-redeploy. Live subscriptions created meanwhile stay in Stripe (refund/cancel there).
+**Rollback** (≈5 minutes, no data loss): put the sandbox key + sandbox webhook secret back from Keychain, set
+`STRIPE_LIVE_ENABLED` to anything but `true` (or delete it), plan back to the sandbox price id, retry the deployment.
+Self-serve sign-up closes again ("opens soon") for non-testers. Live customers/subscriptions created meanwhile stay in
+Stripe: refund/cancel them in the live Dashboard; their rows stay recorded as live and are reconciled later.
 
-**Decision needed — toys-for-us:** a self-serve business (one member, not the founder) whose "active" subscription is a
-SANDBOX subscription. Access does not depend on Stripe mode, so after live billing it keeps full access without paying,
-and its billing portal will fail (its Stripe customer exists only in the sandbox). Options: (a) leave it as a free
-founding pilot, (b) contact the owner to subscribe for real (the admin can then resync from Stripe), (c) if it was a
-test, mark it as a test business. No code change until decided.
+**Superseded (2026-11-18):** the toys-for-us note that sandbox subscriptions keep full access no longer applies: since
+#65 they count as not paid under live billing (table above). The decision left is per business: leave, or mark as test.
+
+### Smoke checks right after activation (read-only unless noted)
+
+1. `https://getshowups.com/build.json` shows the new deployment; `/`, `/dashboard`, `/p/poolthru-llc` → 200.
+2. A signed-in non-tester account: the first setup step shows the business-name form (no "Online sign-up opens soon");
+   `/api/dashboard/me` → `checkoutOpen: true`.
+3. /admin → Plans: `founding` points at the LIVE price id.
+4. /admin → Reconciliation → Run now: only the expected sandbox rows differ; no live mismatches.
+5. Stripe Dashboard (live) → Webhooks → endpoint shows no failed deliveries after §3's payment.
+6. Logs (`wrangler pages deployment tail`): no `livemode_not_enabled`, no 5xx on `/api/stripe/webhook`.
+
+### Stop and roll back if
+
+A live checkout fails for a reason other than the owner abandoning it; a webhook is refused or 5xx; an existing
+business loses its website; or any charge happens that nobody started.
 
 ## 3. Controlled real-payment test (approval: a real charge)
 
-- Business: a NEW, non-test business created by the founder through "Get started" (test businesses are refused live
-  checkout by design), e.g. "GetShowUps Launch Check".
-- Steps: Get started → pay $499 with the founder's own card → verify the webhook moved it to paid (onboarding unlocks;
-  /admin shows a live subscription; audit `billing.payment_succeeded`) → connect Google Calendar → publish → book one
-  appointment as a customer (founder's second email) → confirmation email arrives (needs §4) → Billing → portal →
-  cancel → in Stripe Dashboard refund the $499 payment and cancel the subscription immediately → verify `canceled`
-  recorded and access follows the rules → mark the business as a test business (keeps it out of metrics).
-- Cost: $499 charged, refunded in full; **Stripe keeps its processing fee (~2.9% + $0.30 ≈ $14.77)**. Refund reaches the
-  card in ~5–10 business days.
-- Risks: forgetting to cancel → a second $499 next month (mitigated: cancel immediately in the Dashboard); the test
-  business counts in metrics until marked as test.
+Run right after activation, inside the rollback window.
+
+- **Account:** a separate Google account of the founder's that is NOT a platform admin (admin accounts are sent to
+  /admin) and a NEW business, e.g. "GetShowUps Launch Check". Not a test business (those can't reach live Stripe).
+- **Steps and what to verify:**
+  1. getshowups.com → Get started → sign in → business name → plan step shows "Start your founding plan".
+  2. Pay $499 with the founder's own card. Return page: "Confirming your payment…" then onboarding continues.
+  3. Stripe live Dashboard → Webhooks → endpoint: `checkout.session.completed`, `customer.subscription.created`,
+     `invoice.paid` delivered with 200 (no retries).
+  4. /admin → the business shows Paying / live subscription; audit log has `billing.subscription_status`
+     (incomplete → active, `livemode: true`) and `billing.payment_succeeded`. Revenue metrics now count it (live mode).
+  5. Dashboard → Settings → Plan: "Active · Renews <date>"; Manage billing opens the live portal.
+  6. Portal → cancel → webhook `customer.subscription.updated` → dashboard says it ends at period end (`cancel_at`).
+  7. Stripe Dashboard → the payment → Refund $499 (full) → then the subscription → Cancel immediately. Webhook
+     `customer.subscription.deleted` → status `canceled`; site stays up 14 days after the period end.
+  8. /admin → mark the business as a test business (audited) so it leaves metrics. Do this AFTER step 7 (a test
+     business is refused live Stripe actions from our side).
+- **Expected cost:** card processing 2.9% + $0.30 = **$14.77** on $499 (US card, standard pricing; +1.5% for an
+  international card), not returned on refund (Stripe docs). A refund issued shortly after the charge can be processed
+  as a reversal, for which Stripe withholds no fees, so the actual cost may be lower. If the account is on
+  pay-as-you-go Stripe Billing pricing, a Billing fee on the invoice may also apply (confirm the rate on the account's
+  pricing page; not verified here). No Stripe Tax fee (automatic tax is not enabled). Refund reaches the card in ~5–10
+  business days.
+- **Rollback / abort:** if any step fails, stop, refund and cancel in the Dashboard, then decide whether to roll back
+  activation (§2). Risk: forgetting to cancel → $499 again next month (step 7 cancels immediately).
+
+## Tax (decision before broad paid launch; not a blocker for the controlled test)
+
+- Today: checkout does NOT enable Stripe automatic tax; the sandbox price's tax behavior is `unspecified`; Stripe Tax
+  isn't set up (head office missing in the sandbox). So $499 is charged with no sales tax added.
+- Whether GetShowUps owes sales tax depends on where Flora Summit LLC and its customers are and how each state treats
+  SaaS/marketing services: a question for the accountant, not something the code can decide.
+- If tax must be collected: set the head office and registrations in Stripe Tax, choose price tax behavior (exclusive:
+  tax added on top; inclusive: inside $499), then a small code change (`automatic_tax[enabled]=true` plus
+  address collection in Checkout). Stripe Tax monitors registration thresholds at no charge.
 
 ## 4. Email delivery (approvals: none for the controlled test; MESSAGES_LIVE for real customers)
 

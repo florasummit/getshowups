@@ -124,6 +124,19 @@ for E in "$E2E_EDITOR_CUSTOMER:$E2E_EDITOR_SESSION_TOKEN" "$E2E_EDITOR_M_CUSTOME
   "
 done
 
+# Publish/restore test: its own business whose site is already published (version 1 = "Pool care in Charleston").
+PUBLISHED=$(node -e "const d=JSON.parse(require('fs').readFileSync('test/e2e/editor-draft.json','utf8')); delete d.site; process.stdout.write(JSON.stringify(d).replace(/'/g, \"''\"))")
+d1 "
+INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+  ('$E2E_PUBLISH_CUSTOMER', 'Publish Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$E2E_PUBLISH_CUSTOMER.example', '$E2E_PUBLISH_CUSTOMER', $NOW);
+INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_PUBLISH_SESSION_TOKEN")', 'owner@$E2E_PUBLISH_CUSTOMER.example', $NOW, $FAR);
+INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+  ('$E2E_PUBLISH_CUSTOMER', '(843) 555-0111', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280+\"}]', '[\"Charleston\"]', $NOW);
+INSERT INTO website_versions (customer, version, content, created_at) VALUES ('$E2E_PUBLISH_CUSTOMER', 1, '$PUBLISHED', $NOW);
+INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES ('$E2E_PUBLISH_CUSTOMER', '$PUBLISHED', 1, $NOW, $NOW);
+"
+
 # Website Studio full journey: a fresh HVAC business per browser project (no website yet; calendar + hours ready).
 for E in "$E2E_FLOW_CUSTOMER:$E2E_FLOW_SESSION_TOKEN" "$E2E_FLOW_M_CUSTOMER:$E2E_FLOW_M_SESSION_TOKEN"; do
   FC=${E%%:*}
@@ -163,7 +176,7 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
