@@ -125,7 +125,8 @@ test('owner edits, previews and publishes the website; visitors book through it 
 })
 
 test('changes stay private until published again; an earlier version can be restored', async ({ page, context }) => {
-  await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  // Its own business with an already-published site: never shares state with the edit-and-publish test above.
+  await useSession(context, fixtures.E2E_PUBLISH_SESSION_TOKEN)
   await page.goto('/dashboard/website')
   // Website Studio is available to every eligible business (no allowlist, and no Studio variable set, as in production):
   // the import, the AI designer and the Claude/OpenAI key choice are offered; manual editing works without any key.
@@ -137,15 +138,15 @@ test('changes stay private until published again; an earlier version can be rest
   await page.getByLabel('Headline').fill('A brand new headline')
   await expect(page.getByText('All changes saved')).toBeVisible()
   await expect(page.getByText('you have changes that aren’t published yet')).toBeVisible()
-  expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).not.toContain('A brand new headline')
+  expect(await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).not.toContain('A brand new headline')
   await page.getByRole('button', { name: 'Publish changes' }).first().click()
   await page.getByRole('checkbox', { name: /details are accurate/ }).check()
   await page.getByRole('button', { name: 'Publish changes' }).last().click()
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
-  expect(await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).toContain('A brand new headline')
+  expect(await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).toContain('A brand new headline')
 
   await page.getByText('Earlier versions and more').click()
   page.once('dialog', (d) => d.accept()) // restoring replaces the live site: the owner confirms
   await page.getByRole('button', { name: 'Restore' }).first().click()
-  await expect.poll(async () => (await (await page.request.get(`/p/${fixtures.E2E_CUSTOMER}`)).text()).includes('Pool care in Charleston')).toBe(true)
+  await expect.poll(async () => (await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).includes('Pool care in Charleston')).toBe(true)
 })
