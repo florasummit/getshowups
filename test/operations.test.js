@@ -360,6 +360,11 @@ test('billing: checkout offers the trial once, then the portal manages changes',
   const owner = await session('owner@alpha.example')
   const info = (await call(billing, 'GET', '/api/dashboard/billing', { cookie: owner })).json()
   assert.deepEqual(info.plans, [{ id: 'starter', name: 'Starter', trialDays: 14, entitlements: { bookingPage: true } }])
+  // Sandbox keys: an ordinary owner can't unlock the product with a test card; nothing reaches Stripe.
+  const refused = await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })
+  assert.deepEqual([refused.status, refused.json().error], [403, 'billing_not_live'])
+  assert.ok(!fetches.some((f) => f.url.includes('api.stripe.com')))
+  env.MESSAGE_TEST_RECIPIENTS = '+15550100000, Owner@Alpha.example' // an authorized tester
   const r = await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })
   assert.equal(r.json().url, 'https://checkout.stripe.com/c/test')
   const sent = new URLSearchParams(fetches.find((f) => f.url.endsWith('/checkout/sessions')).init.body)
@@ -387,6 +392,32 @@ test('billing: checkout offers the trial once, then the portal manages changes',
   assert.equal(portal.json().url, 'https://billing.stripe.com/p/test')
   assert.equal(new URLSearchParams(fetches.at(-1).init.body).get('customer'), 'cus_1')
   assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, origin: 'https://evil.example', body: { action: 'portal' } })).status, 403)
+})
+
+test('billing: sandbox checkout only for authorized testers until live billing is on (test card ≠ access)', async () => {
+  const { sandboxCheckoutAllowed } = await import('../server/stripe.js')
+  seed('alpha')
+  configureStripe()
+  // Ordinary customer, sandbox keys: refused.
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), false)
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', ''), false)
+  // Authorized: platform admin (case-insensitive), listed test recipient email (phone entries ignored).
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'OPS@getshowups.com'), true)
+  env.MESSAGE_TEST_RECIPIENTS = '+15550100000,tester@example.com'
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'tester@example.com'), true)
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', '+15550100000'), false)
+  // A business a platform admin marked as a test business: allowed; unmarked again: refused.
+  db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha', 1, 'ref:x', 1)").run()
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), true)
+  db.sql.prepare("UPDATE test_businesses SET is_test = 0, unmarked_by = 'ref:x', unmarked_at = 2 WHERE customer = 'alpha'").run()
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), false)
+  // An unreadable test table never authorizes.
+  db.sql.exec('DROP TABLE test_businesses')
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), false)
+  // Live billing: every customer may subscribe.
+  env.STRIPE_LIVE_ENABLED = 'true'
+  assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), true)
+  delete env.STRIPE_LIVE_ENABLED
 })
 
 async function signed(event, { secret = WHSEC, t = Math.floor(Date.now() / 1000) } = {}) {

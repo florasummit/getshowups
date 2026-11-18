@@ -598,7 +598,10 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
       break
     }
     // The caller already spoke again: stop before acting, unless something was done this turn.
-    if (opts.isStale?.() && !ctx.committed) return { ok: false, error: 'stale' }
+    if (opts.isStale?.() && !ctx.committed) {
+      await event(env, conv, 'turn', false, 'talked_over', now)
+      return { ok: false, error: 'stale' }
+    }
     const results = []
     for (const u of uses) {
       let out
@@ -613,6 +616,12 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
       results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out), ...(out.ok ? {} : { is_error: true }) })
     }
     transcript.push({ role: 'user', content: results })
+  }
+  // Voice: the caller spoke again before this turn answered. Retell discards the answer, so this is not a model
+  // failure (never 'no_reply', no fallback generated); record it as talked over so slow answers are diagnosable.
+  if (opts.isStale?.() && !ctx.committed && !failed) {
+    await event(env, conv, 'turn', false, 'talked_over', now)
+    return { ok: false, error: 'stale' }
   }
   if (!reply && !failed) failed = 'no_reply'
   if (failed) {

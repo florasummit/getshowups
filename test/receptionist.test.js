@@ -633,6 +633,11 @@ test('voice: a turn the caller talked over is dropped (not saved), so the next t
   const conv = await loadConversation(env, await cust('alpha'), row.conversation_id)
   assert.ok(!JSON.stringify(conv.transcript).includes('nobody heard'), 'the interrupted answer is not in the history')
   assert.deepEqual(conv.state.log.map((l) => l.text), ['My pool is green. Hello?', 'Sorry for the wait. A green pool, got it.'])
+  // Recorded as talked over (diagnosable latency), never as a model failure with a fallback answer.
+  const evs = db.sql.prepare('SELECT kind, detail FROM receptionist_events WHERE conversation_id = ?').all(row.conversation_id).map((e) => `${e.kind}:${e.detail}`)
+  assert.ok(evs.includes('turn:talked_over'), evs.join(','))
+  assert.ok(!evs.includes('model:no_reply'), evs.join(','))
+  assert.ok(!s.sent.some((m) => m.response_id === 1 && /can’t answer right now|can't answer right now/.test(m.content || '')), 'no fallback spoken into the discarded answer')
   assert.equal(latestUserText([{ role: 'agent', content: 'a' }, { role: 'user', content: 'b' }, { role: 'user', content: 'c' }]), 'b c')
   // Ending the conversation (from the page) ends the call on the next turn.
   await call(convApi, 'POST', '/api/receptionist/alpha/conversation', { params: { customer: 'alpha' }, body: { action: 'end', conversationId: v.json().conversationId, token: v.json().token } })

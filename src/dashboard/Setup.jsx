@@ -165,6 +165,7 @@ function PaymentStep({ me, onDone }) {
     const { status, data } = await api('/api/dashboard/billing', { method: 'POST', body: { action: 'checkout', plan: me.progress.planId } })
     if (status === 200 && data.url) return window.location.assign(data.url)
     if (data.error === 'use_portal') return setState({ confirming: true })
+    if (data.error === 'billing_not_live') return setState({ notOpen: true })
     setState({ error: 'Checkout is unavailable right now. Please try again in a moment.' })
   }
 
@@ -210,7 +211,13 @@ function PaymentStep({ me, onDone }) {
           {state.error}
         </p>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={checkout}>
+      {state.notOpen && (
+        <p className="notice-soft" role="status">
+          Online sign-up isn’t open yet, so we can’t take payment here and you haven’t been charged. To get started now,{' '}
+          <a href="/#book">book a call with us</a>.
+        </p>
+      )}
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || state.notOpen} onClick={checkout}>
         {state.busy ? 'Opening checkout…' : 'Continue to secure checkout'}
       </button>
     </div>
