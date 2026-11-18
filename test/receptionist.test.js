@@ -273,6 +273,36 @@ test('spoken numbers: "two nine four zero three" and a spoken phone are understo
   assert.equal(checkDetails({ email: 'other@example.net' }, fake, 'chat').problems.email, 'email_not_typed')
 })
 
+test('voice: a calendar lookup with nothing said first gets a fixed holding line (spoken before the tool runs); chat never does', async () => {
+  await seed('alpha')
+  enable('alpha')
+  const customer = await cust('alpha')
+  const c = await startConversation(env, customer, 'voice')
+  const conv = () => loadConversation(env, customer, c.id)
+  const spoken = []
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), () => (assert.deepEqual(spoken, ['One moment while I check the calendar.'], 'held before the second model call'), say('I have Tuesday at 10 AM.')))
+  const r = await respond(env, customer, await conv(), 'What times do you have?', { channel: 'voice', onText: (s) => spoken.push(s) })
+  assert.deepEqual(spoken, ['One moment while I check the calendar.', 'I have Tuesday at 10 AM.'])
+  assert.equal(r.reply, 'One moment while I check the calendar. I have Tuesday at 10 AM.')
+  assert.equal((await conv()).state.log.at(-1).text, r.reply, 'the owner sees what was actually said')
+  // A tool that isn't slow (details) gets no holding line.
+  spoken.length = 0
+  script.push(calls(details({ zip: '29403' })), say('Thanks.'))
+  await respond(env, customer, await conv(), 'two nine four zero three', { channel: 'voice', onText: (s) => spoken.push(s) })
+  assert.deepEqual(spoken, ['Thanks.'])
+  // The holding line is not an answer: no text after it still falls back (model:no_reply).
+  spoken.length = 0
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), say(''))
+  await respond(env, customer, await conv(), 'any other times?', { channel: 'voice', onText: (s) => spoken.push(s) })
+  assert.equal(spoken[0], 'One moment while I check the calendar.')
+  assert.ok(spoken.length === 2 && spoken[1] !== 'One moment while I check the calendar.', 'fallback spoken after it')
+  assert.ok(db.sql.prepare("SELECT 1 FROM receptionist_events WHERE kind = 'model' AND detail = 'no_reply'").get())
+  // Chat: no holding line.
+  const chat = await startConversation(env, customer, 'chat')
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), say('Tuesday at 10 AM works.'))
+  assert.equal((await respond(env, customer, await loadConversation(env, customer, chat.id), 'times?')).reply, 'Tuesday at 10 AM works.')
+})
+
 test('booking guards: never-offered, unconfirmed, missing details, out of area, a second booking and two simultaneous turns all fail closed — exactly one appointment', async () => {
   await seed('alpha')
   enable('alpha')

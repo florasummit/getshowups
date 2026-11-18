@@ -14,6 +14,40 @@ _Update at the end of every task. Newest first._
   only where a golden had to change (frozen CSS blocks keyed by version), and the owner's next publish adopts the
   current renderer. Build it the first time a golden must change for an existing content system.
 
+## Voice: holding line before slow tools (2026-11-18) — fix/voice-holding-line (no migration)
+
+- **Cause of lost voice turns (from code + the 2026-11-18 production call):** a calendar question is model call →
+  Google freeBusy → second model call before any speech. Several seconds of silence; the caller speaks again, Retell
+  issues a newer response id and the turn is discarded (bob-electrical call: 2 turns lost to talk-over; which step
+  was slow isn't recorded, so the silence before tools is the likeliest cause, not a proven one).
+- **Fix:** voice speaks a fixed holding line before `find_available_times` / `book_appointment` when nothing was said
+  yet this turn; logged in the transcript; not counted as an answer. Chat unchanged.
+- **Not verified live:** needs one real browser call (Retell + Anthropic) to confirm. Faster voice model
+  (`RECEPTIONIST_VOICE_MODEL`) remains an approval item.
+
+## Account outbox: refused mail is closed, not held (2026-11-18) — fix/outbox-held-mail (no migration)
+
+- **Problem:** `flushOutbox` left mail the launch gate refused (test mode, or a test business writing to a real
+  address) `pending` forever. Turning MESSAGES_LIVE on would send it days or weeks late in one burst (production
+  backup: one setup reminder pending since 2026-11-12), and once 20+ such rows existed they filled every batch
+  (`ORDER BY created_at LIMIT 20`) so no other account email (invites, recovery, owner notices) would ever send.
+- **Fix:** refused mail becomes `failed` / `test_mode` with 0 attempts (shown truthfully in /admin), never sent later.
+- **After deploy:** the one old pending setup reminder in production is closed as test_mode by the next cron run (not sent).
+- Tests: held → closed; going live later sends nothing; 25 refused rows don't starve a deliverable one (fails on old code).
+
+## Go-live billing: sandbox subscriptions stop counting as paid (2026-11-18) — fix/golive-sandbox-subscriptions (no migration)
+
+- **Problem (found in review, not yet reachable in production):** once STRIPE_LIVE_ENABLED=true, a test-card
+  subscription (bob-electrical, toys-for-us, test businesses) would still count as paid for onboarding, Ads live
+  launch and the billing card, and live checkout would refuse (`use_portal`) or send a test-mode Stripe customer id to
+  live Stripe (fails). So a sandbox business could never become a real paying one.
+- **Fix:** `billingSubscription(env, id)` (server/stripe.js) is the access view: under live billing a subscription not
+  recorded live is `sandbox` (admin-marked test businesses excepted). Used by onboarding steps/readiness, the billing
+  route, portal, checkout and `billingAllowsAds`. Checkout replaces a sandbox record with a new live customer (audited)
+  and verifies an unrecorded stored customer with live Stripe first. Hosting is unchanged (onboarded businesses stay up).
+- **Live billing off (today):** no behaviour change. Tests: 3 new unit tests (578 pass).
+- **Next:** approval to merge; at go-live, owners of sandbox businesses see "Choose a plan" (no charge until they do).
+
 ## Launch readiness: sandbox billing gate + voice diagnostics (2026-11-18) — fix/sandbox-billing-access (no migration)
 
 - **Released before this:** PR #62 merged (f9aca6d) and deployed (5a57c9ff). PoolThru's DRAFT had the old-logo block

@@ -113,7 +113,7 @@ function DeleteAccount({ name }) {
 function BillingCard({ billing }) {
   const [state, setState] = useState({})
   const sub = billing.subscription
-  const live = sub && sub.status !== 'canceled' && sub.status !== 'incomplete'
+  const live = sub && !['canceled', 'incomplete', 'sandbox'].includes(sub.status)
   return (
     <section className="card">
       <h2 className="card-title">Plan</h2>
@@ -142,6 +142,11 @@ function BillingCard({ billing }) {
                   ? 'The 90-day recovery period is over, so this account and its data are being removed under our retention policy.'
                   : 'The 90-day recovery period is over. Reactivate to keep using GetShowUps, or contact us about your data.'
                 : `Everything is kept until ${shortDate(billing.recovery.until)}. Reactivate before then and your website, bookings and settings come back as they were.${billing.recovery.retentionScheduled ? ' After that date the account and its data are removed under our retention policy.' : ''}`}
+            </p>
+          )}
+          {sub?.status === 'sandbox' && (
+            <p className="notice-info" role="status" data-billing="sandbox">
+              Your earlier sign-up used a test payment, so no plan is active yet. Choose a plan to keep using GetShowUps. You haven’t been charged.
             </p>
           )}
           {billing.plans.map((p) => (

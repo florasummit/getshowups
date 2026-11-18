@@ -69,7 +69,7 @@ async function state(env, customer, email) {
   const studio = await studioAccess(env, customer)
   const [website, hosting, domain, assets, usage, aiKey] = await Promise.all([
     loadWebsite(db, customer),
-    hostingStatus(db, customer.id),
+    hostingStatus(db, customer.id, Date.now(), env),
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),

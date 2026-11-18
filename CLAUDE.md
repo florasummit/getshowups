@@ -220,7 +220,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   status ready/pending/approved, kill switch off (carriers review the live opt-in BEFORE approval; collecting consent
   sends nothing). Messages to leads re-check relevance at send time (`skipReason()`).
 - Launch gate fails closed: unless `MESSAGES_LIVE` is exactly `true`, email/SMS go only to `MESSAGE_TEST_RECIPIENTS`
-  (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval.
+  (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval. Account outbox mail the
+  gate refuses is closed as failed/test_mode (never attempted, never sent later in a burst, never blocks the batch).
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
@@ -270,9 +271,16 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Sandbox checkout ≠ open sign-up: while STRIPE_LIVE_ENABLED is off, a test-card subscription would unlock the real
   product, so createCheckout refuses (403 billing_not_live; the plan step says online sign-up isn't open yet) unless
   sandboxCheckoutAllowed(): platform admin email, an email in MESSAGE_TEST_RECIPIENTS, or an admin-marked test business
-  (readable mark only). Existing subscriptions are never touched by this check (2026-11-18: bob-electrical, a test
-  subscription from before the gate, is an open owner decision). Go-live note: test-mode rows in `subscriptions` still
-  grant access after STRIPE_LIVE_ENABLED=true; review subscription_modes livemode=0 businesses at go-live.
+  (readable mark only). /api/dashboard/me returns checkoutOpen, so a visitor who can't buy is told before naming a
+  business ("Online sign-up opens soon"), and POST /api/dashboard/business refuses that billed signup (403
+  signup_not_open: no orphan businesses). Existing subscriptions are never touched by this check (2026-11-18: bob-electrical, a test
+  subscription from before the gate, is an open owner decision). Go-live: ACCESS reads billingSubscription(env, id), not getSubscription: with
+  STRIPE_LIVE_ENABLED=true a subscription not recorded live (subscription_modes) is status 'sandbox' (not paid, not
+  manageable, "choose a plan" notice) except for admin-marked test businesses; live checkout replaces a sandbox record
+  with a new live Stripe customer (audited billing.sandbox_replaced) and checks an unrecorded stored customer with live
+  Stripe first (only resource_missing replaces it; any other error stops, so no duplicate live customer). Stored rows
+  are only changed by that owner-initiated checkout. hostingStatus(db, id, now, env) uses the same view (every caller
+  passes env): not onboarded + sandbox only → 'unpaid'; onboarded businesses stay hosted (no automatic lock-out).
 - STRIPE_API_MOCK_ORIGIN and STRIPE_LIVE_ENABLED: mock is loopback-only (e2e); live billing needs STRIPE_LIVE_ENABLED=true
   (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
 - Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +

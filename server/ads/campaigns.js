@@ -4,7 +4,7 @@ import { randomToken } from '../google-oauth.js'
 import { validateSpec, dailyCeilingCents, LIMITS } from './spec.js'
 import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
-import { stripeConfigured, getSubscription } from '../stripe.js'
+import { stripeConfigured, billingSubscription } from '../stripe.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 import { normalizeWebsiteUrl } from '../url.js'
 import { conversionsEnabled } from './conversions.js'
@@ -240,7 +240,7 @@ async function serveMode(env, platform, customerId, a, row) {
 // test account) launches/resumes skip it: they cannot spend, and pilots such as PoolThru are never billed.
 export async function billingAllowsAds(env, customerId) {
   if (!stripeConfigured(env)) return true
-  const sub = await getSubscription(env.ONBOARDING_DB, customerId)
+  const sub = await billingSubscription(env, customerId)
   return ['active', 'trialing'].includes(sub?.status)
 }
 

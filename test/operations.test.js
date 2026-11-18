@@ -103,6 +103,7 @@ beforeEach(async () => {
     customer: () => [200, { id: 'cus_new' }],
     subscriptions: () => [200, { data: [] }],
     openSessions: () => [200, { data: [] }],
+    getCustomer: () => [404, { error: { code: 'resource_missing' } }],
   }
   resend = () => [200, { id: 'email_1' }]
   origFetch = globalThis.fetch
@@ -116,6 +117,7 @@ beforeEach(async () => {
     else if (u === 'https://api.stripe.com/v1/checkout/sessions') out = stripe.checkout(new URLSearchParams(init.body))
     else if (u.startsWith('https://api.stripe.com/v1/checkout/sessions?')) out = stripe.openSessions(new URL(u).searchParams)
     else if (u === 'https://api.stripe.com/v1/customers') out = stripe.customer(new URLSearchParams(init.body), init.headers)
+    else if (u.startsWith('https://api.stripe.com/v1/customers/')) out = stripe.getCustomer(decodeURIComponent(new URL(u).pathname.split('/').pop()))
     else if (u.startsWith('https://api.stripe.com/v1/subscriptions?')) out = stripe.subscriptions(new URL(u).searchParams)
     else if (u === 'https://api.stripe.com/v1/billing_portal/sessions') out = stripe.portal(new URLSearchParams(init.body))
     else if (u === 'https://api.resend.com/emails') out = resend(JSON.parse(init.body))
@@ -417,6 +419,101 @@ test('billing: sandbox checkout only for authorized testers until live billing i
   // Live billing: every customer may subscribe.
   env.STRIPE_LIVE_ENABLED = 'true'
   assert.equal(await sandboxCheckoutAllowed(env, 'alpha', 'owner@alpha.example'), true)
+  delete env.STRIPE_LIVE_ENABLED
+})
+
+test('go-live: a test-mode subscription stops counting as paid once live billing is on, and live checkout replaces it', async () => {
+  const { billingSubscription } = await import('../server/stripe.js')
+  seed('alpha')
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('alpha', 'starter', 1)").run()
+  configureStripe()
+  await addPlan(await admin(), { trialDays: 0 })
+  // A sandbox (test card) subscription from before go-live, recorded in test mode by the webhook.
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, current_period_end, cancel_at_period_end, last_event_at, updated_at) VALUES ('alpha', 'cus_test1', 'sub_test1', 'starter', 'active', 49900, 1900000000000, 0, 5, 5)").run()
+  db.sql.prepare("INSERT INTO subscription_modes (customer, livemode, updated_at) VALUES ('alpha', 0, 1)").run()
+  const owner = await session('owner@alpha.example')
+  // Live billing off: nothing changes (the sandbox subscription still counts, as today).
+  assert.equal((await billingSubscription(env, 'alpha')).status, 'active')
+  assert.equal((await call(billing, 'GET', '/api/dashboard/billing', { cookie: owner })).json().subscription.status, 'active')
+
+  Object.assign(env, { STRIPE_LIVE_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_live_SECRET' })
+  const sub = await billingSubscription(env, 'alpha')
+  assert.deepEqual([sub.status, sub.sandbox, sub.livemode], ['sandbox', true, false])
+  const info = (await call(billing, 'GET', '/api/dashboard/billing', { cookie: owner })).json()
+  assert.deepEqual([info.subscription.status, info.subscription.manageable, info.billed], ['sandbox', false, true])
+  // Not paid for access: Ads live launch needs a real subscription; portal refused (no live billing account).
+  const { billingAllowsAds } = await import('../server/ads/campaigns.js')
+  assert.equal(await billingAllowsAds(env, 'alpha'), false)
+  // Hosting (website, Studio, AI allowance): not onboarded + sandbox only → unpaid under live billing; once onboarded
+  // it stays up (no automatic lock-out). With live billing off the sandbox subscription still hosts, as today.
+  const { hostingStatus } = await import('../server/website.js')
+  assert.equal((await hostingStatus(db, 'alpha', Date.now(), env)).status, 'unpaid')
+  db.sql.prepare("UPDATE self_signups SET onboarded_at = 1 WHERE customer = 'alpha'").run()
+  assert.equal((await hostingStatus(db, 'alpha', Date.now(), env)).status, 'active')
+  db.sql.prepare("UPDATE self_signups SET onboarded_at = NULL WHERE customer = 'alpha'").run()
+  delete env.STRIPE_LIVE_ENABLED
+  assert.equal((await hostingStatus(db, 'alpha', Date.now(), env)).status, 'active')
+  env.STRIPE_LIVE_ENABLED = 'true'
+  assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'portal' } })).json().error, 'no_billing_account')
+  // Live checkout: a new LIVE customer (never the test-mode one), the old test sub is not queried in live mode.
+  const r = await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })
+  assert.equal(r.json().url, 'https://checkout.stripe.com/c/test')
+  assert.ok(!fetches.some((f) => f.url.includes('cus_test1')), 'test-mode customer never sent to live Stripe')
+  const created = fetches.find((f) => f.url.endsWith('/v1/customers'))
+  assert.equal(created.init.headers['Idempotency-Key'], 'gsu-customer-alpha-live')
+  assert.equal(new URLSearchParams(fetches.find((f) => f.url.endsWith('/checkout/sessions')).init.body).get('customer'), 'cus_new')
+  const row = db.sql.prepare("SELECT stripe_customer_id c, stripe_subscription_id s, status, mrr_cents m, last_event_at e FROM subscriptions WHERE customer = 'alpha'").get()
+  assert.deepEqual({ ...row }, { c: 'cus_new', s: null, status: 'incomplete', m: 0, e: 0 })
+  assert.ok(db.sql.prepare("SELECT 1 FROM audit_log WHERE action = 'billing.sandbox_replaced' AND customer = 'alpha'").get())
+  // Abandoned or expired live checkout: still not paid; trying again reuses the same live customer (live Stripe knows
+  // it), opens a new session, and never creates a second customer or replaces anything again.
+  assert.equal((await billingSubscription(env, 'alpha')).status, 'incomplete')
+  assert.equal(await billingAllowsAds(env, 'alpha'), false)
+  stripe.getCustomer = (cid) => [200, { id: cid, livemode: true }]
+  const customersBefore = fetches.filter((f) => f.url.endsWith('/v1/customers')).length
+  assert.equal((await call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })).json().url, 'https://checkout.stripe.com/c/test')
+  assert.equal(fetches.filter((f) => f.url.endsWith('/v1/customers')).length, customersBefore)
+  assert.equal(new URLSearchParams(fetches.filter((f) => f.url.endsWith('/checkout/sessions')).at(-1).init.body).get('customer'), 'cus_new')
+  assert.equal(db.sql.prepare("SELECT count(*) c FROM audit_log WHERE action = 'billing.sandbox_replaced'").get().c, 1)
+  // The live webhook then records the real subscription, which counts.
+  assert.equal((await signed({ ...subEvent('evt_go1', 'customer.subscription.created', 200, { status: 'active', id: 'sub_live', customer: 'cus_new' }), livemode: true })).status, 200)
+  assert.deepEqual([(await billingSubscription(env, 'alpha')).status, await billingAllowsAds(env, 'alpha')], ['active', true])
+  delete env.STRIPE_LIVE_ENABLED
+})
+
+test('go-live: a placeholder customer is checked with live Stripe; a live one is reused, an unknown one replaced, errors stop', async () => {
+  seed('alpha')
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('alpha', 'starter', 1)").run()
+  configureStripe()
+  await addPlan(await admin())
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, status, last_event_at, updated_at) VALUES ('alpha', 'cus_placeholder', 'incomplete', 0, 1)").run()
+  Object.assign(env, { STRIPE_LIVE_ENABLED: 'true', STRIPE_SECRET_KEY: 'sk_live_SECRET' })
+  const owner = await session('owner@alpha.example')
+  const checkout = () => call(billing, 'POST', '/api/dashboard/billing', { cookie: owner, body: { action: 'checkout', plan: 'starter' } })
+  // Live Stripe can't be reached: stop (never create a possible duplicate customer).
+  stripe.getCustomer = () => [500, {}]
+  assert.equal((await checkout()).status, 502)
+  assert.ok(!fetches.some((f) => f.url.endsWith('/v1/customers')))
+  // Live Stripe knows it (an earlier live checkout): reused, no new customer.
+  stripe.getCustomer = (id) => [200, { id, livemode: true }]
+  assert.equal((await checkout()).json().url, 'https://checkout.stripe.com/c/test')
+  assert.ok(!fetches.some((f) => f.url.endsWith('/v1/customers')))
+  assert.equal(new URLSearchParams(fetches.find((f) => f.url.endsWith('/checkout/sessions')).init.body).get('customer'), 'cus_placeholder')
+  // Unknown to live Stripe (a test-mode placeholder): replaced by a live customer.
+  stripe.getCustomer = () => [404, { error: { code: 'resource_missing' } }]
+  assert.equal((await checkout()).json().url, 'https://checkout.stripe.com/c/test')
+  assert.equal(db.sql.prepare("SELECT stripe_customer_id c FROM subscriptions WHERE customer = 'alpha'").get().c, 'cus_new')
+  delete env.STRIPE_LIVE_ENABLED
+})
+
+test('go-live: an admin-marked test business keeps its sandbox subscription', async () => {
+  const { billingSubscription } = await import('../server/stripe.js')
+  seed('alpha')
+  configureStripe()
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, status, last_event_at, updated_at) VALUES ('alpha', 'cus_t', 'sub_t', 'active', 1, 1)").run()
+  db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha', 1, 'ref:x', 1)").run()
+  env.STRIPE_LIVE_ENABLED = 'true'
+  assert.equal((await billingSubscription(env, 'alpha')).status, 'active')
   delete env.STRIPE_LIVE_ENABLED
 })
 

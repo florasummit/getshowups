@@ -4,7 +4,7 @@
 // same unapproved-claims filter as ads, so a site never invents reviews, guarantees or credentials.
 import { unapprovedClaims } from './ads/spec.js'
 import { approvedClaimsFor } from './landing.js'
-import { getSubscription } from './stripe.js'
+import { billingSubscription, getSubscription } from './stripe.js'
 import { validateDesign } from './site-design.js'
 import { validateSpec } from './site-spec.js'
 
@@ -403,10 +403,12 @@ export async function websiteSummary(db, customerId) {
 // subscription ends, the site stays up for a 14-day transition, then shows "unavailable". Content is
 // never deleted, and resubscribing brings the site straight back.
 export const HOSTING_GRACE_MS = 14 * 24 * 60 * 60 * 1000
-export async function hostingStatus(db, customerId, now = Date.now()) {
+// env: pass it (every production caller does) so that, once live billing is on, a test-mode subscription doesn't count
+// as paid (billingSubscription → 'sandbox'): a business that never finished onboarding is then 'unpaid', not hosted.
+export async function hostingStatus(db, customerId, now = Date.now(), env = null) {
   const signup = await db.prepare('SELECT onboarded_at FROM self_signups WHERE customer = ?1').bind(customerId).first()
   if (!signup) return { status: 'active', exempt: true }
-  const sub = await getSubscription(db, customerId)
+  const sub = env ? await billingSubscription(env, customerId) : await getSubscription(db, customerId)
   if (sub && ['active', 'trialing', 'past_due'].includes(sub.status)) return { status: 'active', endsAt: sub.cancelAtPeriodEnd ? sub.currentPeriodEnd : null }
   if (sub?.status === 'canceled') {
     const until = (sub.currentPeriodEnd || now) + HOSTING_GRACE_MS
