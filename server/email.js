@@ -85,6 +85,9 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
     // Mail queued by (or while it was) a test business only ever goes to test recipients.
     const testOnly = msg.customer ? sandboxed(statusIn(tests, msg.customer), msg.created_at) : tests === null
     if (!recipientAllowed(env, msg.to_email, { testOnly })) {
+      // Closed only on a definite refusal. If test-business status couldn't be read (a temporary storage error),
+      // nothing is sent (fails closed) but the message stays pending and is decided on a later run.
+      if (tests === null) continue
       await db.prepare("UPDATE email_outbox SET status = 'failed', error = 'test_mode' WHERE id = ?1 AND status = 'pending'").bind(msg.id).run()
       continue
     }
