@@ -569,6 +569,7 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   let reply = ''
   let failed = null
   let blocked = null
+  let held = null // voice holding line spoken while a slow tool ran (not an answer: no_reply still applies without one)
   const anthropic = client(env)
   const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools: TOOLS, messages: transcript })
   for (let i = 0; i < LIMITS.modelCallsPerTurn; i++) {
@@ -601,6 +602,15 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     if (opts.isStale?.() && !ctx.committed) {
       await event(env, conv, 'turn', false, 'talked_over', now)
       return { ok: false, error: 'stale' }
+    }
+    // Voice: a calendar lookup or booking is two model calls plus Google, several seconds of silence. A caller who
+    // hears nothing talks again and the turn is lost (talked_over), so say a fixed holding line first (never a claim).
+    if (opts.onText && !reply && !held) {
+      const line = uses.some((u) => u.name === 'find_available_times') ? 'One moment while I check the calendar.' : uses.some((u) => u.name === 'book_appointment') ? 'One moment, please.' : null
+      if (line) {
+        opts.onText(line)
+        held = line
+      }
     }
     const results = []
     for (const u of uses) {
@@ -649,6 +659,7 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   }
   if (opts.isStale?.() && !ctx.committed) return { ok: false, error: 'stale' }
   if (!conv.outcome && !failed) conv.outcome = 'info'
+  if (held) reply = `${held} ${reply}`.trim()
   log('customer', text)
   log('receptionist', reply)
   conv.summary = summaryOf(conv, k)

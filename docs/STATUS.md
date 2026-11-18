@@ -2,6 +2,17 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice: holding line before slow tools (2026-11-18) — fix/voice-holding-line (no migration)
+
+- **Cause of lost voice turns (from code + the 2026-11-18 production call):** a calendar question is model call →
+  Google freeBusy → second model call before any speech. Several seconds of silence; the caller speaks again, Retell
+  issues a newer response id and the turn is discarded (bob-electrical call: 2 turns lost to talk-over; which step
+  was slow isn't recorded, so the silence before tools is the likeliest cause, not a proven one).
+- **Fix:** voice speaks a fixed holding line before `find_available_times` / `book_appointment` when nothing was said
+  yet this turn; logged in the transcript; not counted as an answer. Chat unchanged.
+- **Not verified live:** needs one real browser call (Retell + Anthropic) to confirm. Faster voice model
+  (`RECEPTIONIST_VOICE_MODEL`) remains an approval item.
+
 ## Launch readiness: sandbox billing gate + voice diagnostics (2026-11-18) — fix/sandbox-billing-access (no migration)
 
 - **Released before this:** PR #62 merged (f9aca6d) and deployed (5a57c9ff). PoolThru's DRAFT had the old-logo block
