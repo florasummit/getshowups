@@ -81,9 +81,22 @@ async function stripePost(env, path, params, { idempotencyKey, method = 'POST' }
 
 export async function getSubscription(db, customerId) {
   const s = await db.prepare('SELECT * FROM subscriptions WHERE customer = ?1').bind(customerId).first()
-  return s
-    ? { status: s.status, planId: s.plan_id, currentPeriodEnd: s.current_period_end, cancelAtPeriodEnd: Boolean(s.cancel_at_period_end), stripeCustomerId: s.stripe_customer_id, stripeSubscriptionId: s.stripe_subscription_id }
-    : null
+  if (!s) return null
+  // livemode from the webhook (subscription_modes, 0013): true | false | null (never recorded / table missing).
+  const m = await db.prepare('SELECT livemode FROM subscription_modes WHERE customer = ?1').bind(customerId).first().catch(() => null)
+  return { status: s.status, planId: s.plan_id, currentPeriodEnd: s.current_period_end, cancelAtPeriodEnd: Boolean(s.cancel_at_period_end), stripeCustomerId: s.stripe_customer_id, stripeSubscriptionId: s.stripe_subscription_id, livemode: m ? m.livemode === 1 : null }
+}
+
+// The subscription as it counts for ACCESS. Once live billing is on, a subscription Stripe recorded in test mode
+// (sandbox checkout before go-live) is not payment: it is reported as status 'sandbox' (not paid, not manageable),
+// so the owner is asked to subscribe for real and live checkout can start. Admin-marked test businesses keep their
+// sandbox subscription (they never use live Stripe). An 'incomplete' placeholder (checkout opened, never paid) is
+// unchanged. With live billing off nothing changes. Stored rows are never modified here.
+export async function billingSubscription(env, customerId) {
+  const sub = await getSubscription(env.ONBOARDING_DB, customerId)
+  if (!sub || !stripeLiveEnabled(env) || sub.livemode === true || sub.status === 'incomplete') return sub
+  if ((await testStatus(env, customerId)).test) return sub
+  return { ...sub, status: 'sandbox', sandbox: true, cancelAtPeriodEnd: false }
 }
 
 // Starts (or resumes) Stripe Checkout for one business. The business's Stripe customer is created once
@@ -97,22 +110,39 @@ export async function createCheckout(env, { customer, email, planId, origin }) {
   const db = env.ONBOARDING_DB
   const plan = await db.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()
   if (!plan) return { ok: false, httpStatus: 404, error: 'plan_not_found' }
-  const existing = await getSubscription(db, customer.id)
-  if (existing && existing.status !== 'canceled' && existing.status !== 'incomplete') return { ok: false, httpStatus: 409, error: 'use_portal' }
-  const neverSubscribed = !existing || (existing.status === 'incomplete' && !existing.stripeSubscriptionId)
+  const existing = await billingSubscription(env, customer.id)
+  if (existing && !['canceled', 'incomplete', 'sandbox'].includes(existing.status)) return { ok: false, httpStatus: 409, error: 'use_portal' }
+  const neverSubscribed = !existing || existing.sandbox === true || (existing.status === 'incomplete' && !existing.stripeSubscriptionId)
 
   let stripeCustomer = existing?.stripeCustomerId
+  // Live billing: a stored Stripe customer that was not recorded live may be a test-mode customer (sandbox
+  // checkout before go-live), which live Stripe doesn't know. Ask live Stripe; only "no such customer" replaces
+  // it (any other answer stops, so a live customer is never duplicated). A known sandbox subscription is replaced.
+  let replace = existing?.sandbox === true
+  if (stripeCustomer && !replace && stripeLiveEnabled(env) && existing.livemode !== true) {
+    const c = await stripePost(env, `/customers/${encodeURIComponent(stripeCustomer)}`, {}, { method: 'GET' })
+    if (!c.ok && c.error !== 'resource_missing') return c
+    replace = !c.ok || c.body.deleted === true || c.body.livemode === false
+  }
+  if (replace) stripeCustomer = null
   if (!stripeCustomer) {
-    const c = await stripePost(env, '/customers', { email, metadata: { customer: customer.id } }, { idempotencyKey: `gsu-customer-${customer.id}` })
+    const c = await stripePost(env, '/customers', { email, metadata: { customer: customer.id } }, { idempotencyKey: `gsu-customer-${customer.id}${replace ? '-live' : ''}` })
     if (!c.ok) return c
     stripeCustomer = c.body.id
+    // A replaced sandbox record starts over as a live placeholder; the webhook fills in the live subscription.
     await db
       .prepare(
         `INSERT INTO subscriptions (customer, stripe_customer_id, status, last_event_at, updated_at) VALUES (?1, ?2, 'incomplete', 0, ?3)
-         ON CONFLICT(customer) DO UPDATE SET stripe_customer_id = coalesce(subscriptions.stripe_customer_id, ?2), updated_at = ?3`,
+         ON CONFLICT(customer) DO UPDATE SET stripe_customer_id = CASE WHEN ?4 = 1 THEN ?2 ELSE coalesce(subscriptions.stripe_customer_id, ?2) END,
+           stripe_subscription_id = CASE WHEN ?4 = 1 THEN NULL ELSE subscriptions.stripe_subscription_id END,
+           status = CASE WHEN ?4 = 1 THEN 'incomplete' ELSE subscriptions.status END,
+           cancel_at_period_end = CASE WHEN ?4 = 1 THEN 0 ELSE subscriptions.cancel_at_period_end END,
+           mrr_cents = CASE WHEN ?4 = 1 THEN 0 ELSE subscriptions.mrr_cents END,
+           last_event_at = CASE WHEN ?4 = 1 THEN 0 ELSE subscriptions.last_event_at END, updated_at = ?3`,
       )
-      .bind(customer.id, stripeCustomer, Date.now())
+      .bind(customer.id, stripeCustomer, Date.now(), replace ? 1 : 0)
       .run()
+    if (replace) await recordEvent(db, { type: 'billing.sandbox_replaced', actor: 'owner', actorType: 'owner', customer: customer.id, capability: 'billing.stripe', resource: { type: 'customer', id: customer.id }, outcome: 'success', details: { from: existing?.status ?? null } })
   } else {
     const subs = await stripePost(env, '/subscriptions', { customer: stripeCustomer, status: 'all', limit: 10 }, { method: 'GET' })
     if (!subs.ok) return subs
@@ -137,8 +167,8 @@ export async function createCheckout(env, { customer, email, planId, origin }) {
 
 export async function createPortal(env, { customer, origin }) {
   if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
-  const existing = await getSubscription(env.ONBOARDING_DB, customer.id)
-  if (!existing?.stripeCustomerId) return { ok: false, httpStatus: 409, error: 'no_billing_account' }
+  const existing = await billingSubscription(env, customer.id)
+  if (!existing?.stripeCustomerId || existing.sandbox) return { ok: false, httpStatus: 409, error: 'no_billing_account' }
   const r = await stripePost(env, '/billing_portal/sessions', { customer: existing.stripeCustomerId, return_url: `${origin}/dashboard` })
   return r.ok ? { ok: true, url: r.body.url } : r
 }

@@ -48,7 +48,7 @@ export async function serveSite(env, request, id, page = '') {
   try {
     const customer = await businessForSite(env, id)
     if (!customer) return unavailable()
-    if (!isHosted(await hostingStatus(db, customer.id))) return unavailable()
+    if (!isHosted(await hostingStatus(db, customer.id, Date.now(), env))) return unavailable()
     const live = await liveContent(db, customer.id)
     if (!live) return unavailable()
     if (page && !live.content.site?.pages?.some((p) => p.slug === page)) return unavailable()

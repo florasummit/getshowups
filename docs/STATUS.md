@@ -2,6 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
+## Go-live billing: sandbox subscriptions stop counting as paid (2026-11-18) — fix/golive-sandbox-subscriptions (no migration)
+
+- **Problem (found in review, not yet reachable in production):** once STRIPE_LIVE_ENABLED=true, a test-card
+  subscription (bob-electrical, toys-for-us, test businesses) would still count as paid for onboarding, Ads live
+  launch and the billing card, and live checkout would refuse (`use_portal`) or send a test-mode Stripe customer id to
+  live Stripe (fails). So a sandbox business could never become a real paying one.
+- **Fix:** `billingSubscription(env, id)` (server/stripe.js) is the access view: under live billing a subscription not
+  recorded live is `sandbox` (admin-marked test businesses excepted). Used by onboarding steps/readiness, the billing
+  route, portal, checkout and `billingAllowsAds`. Checkout replaces a sandbox record with a new live customer (audited)
+  and verifies an unrecorded stored customer with live Stripe first. Hosting is unchanged (onboarded businesses stay up).
+- **Live billing off (today):** no behaviour change. Tests: 3 new unit tests (578 pass).
+- **Next:** approval to merge; at go-live, owners of sandbox businesses see "Choose a plan" (no charge until they do).
+
 ## Launch readiness: sandbox billing gate + voice diagnostics (2026-11-18) — fix/sandbox-billing-access (no migration)
 
 - **Released before this:** PR #62 merged (f9aca6d) and deployed (5a57c9ff). PoolThru's DRAFT had the old-logo block

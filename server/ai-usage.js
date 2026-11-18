@@ -29,7 +29,7 @@ const testingIds = (env) =>
 export async function tierFor(env, customer, email) {
   if (email && adminEmails(env).includes(String(email).toLowerCase())) return 'testing'
   if (testingIds(env).includes(customer.id)) return 'testing'
-  return isHosted(await hostingStatus(env.ONBOARDING_DB, customer.id)) ? 'paying' : 'starter'
+  return isHosted(await hostingStatus(env.ONBOARDING_DB, customer.id, Date.now(), env)) ? 'paying' : 'starter'
 }
 
 // { tier, generation: { used, limit, remaining }, revision: {...}, resetsAt, monthlyCapReached }

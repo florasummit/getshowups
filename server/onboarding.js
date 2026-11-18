@@ -2,7 +2,7 @@
 // device resumes at the right place), the business profile collected during onboarding, and the
 // launch-readiness checklist shown at the end of onboarding and on the dashboard.
 import { unapprovedClaims } from './ads/spec.js'
-import { getSubscription, listPlans, stripeConfigured } from './stripe.js'
+import { billingSubscription, listPlans, stripeConfigured } from './stripe.js'
 import { websiteSummary } from './website.js'
 import { domainFor } from './domains.js'
 import { internalEmails, isTestLead } from './testdata.js'
@@ -88,7 +88,7 @@ export async function onboardingSteps(env, customer, { calendar }) {
     return { selfServe: false, steps, billing: 'not_required' }
   }
   const [sub, profile, site, marks, domain] = await Promise.all([
-    getSubscription(db, customer.id),
+    billingSubscription(env, customer.id),
     getProfile(db, customer.id),
     websiteSummary(db, customer.id),
     db.prepare('SELECT step, value FROM onboarding_marks WHERE customer = ?1').bind(customer.id).all(),
@@ -136,7 +136,7 @@ export async function markSignup(db, customerId, field, now = Date.now()) {
 export async function readiness(env, customer, { calendarStatus } = {}) {
   const db = env.ONBOARDING_DB
   const [sub, site, signup, appts, domain, keep] = await Promise.all([
-    getSubscription(db, customer.id),
+    billingSubscription(env, customer.id),
     websiteSummary(db, customer.id),
     getSignup(db, customer.id),
     // Real bookings only (test records never count).

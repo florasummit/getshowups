@@ -14,7 +14,7 @@ export async function onRequestGet({ request, env, params }) {
     const session = await getSession(request, env).catch(() => null)
     const found = await readAsset(db, String(params.id || ''), session?.customer?.id || null)
     if (!found) return notFound()
-    if (found.published && !isHosted(await hostingStatus(db, found.asset.customer))) return notFound()
+    if (found.published && !isHosted(await hostingStatus(db, found.asset.customer, Date.now(), env))) return notFound()
     return new Response(found.asset.bytes, {
       headers: {
         'Content-Type': found.asset.content_type,

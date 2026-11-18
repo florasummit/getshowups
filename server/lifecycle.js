@@ -42,7 +42,7 @@ export async function lifecycle(env, customerId, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const [sub, hosting, hold, recovery, deletion] = await Promise.all([
     getSubscription(db, customerId),
-    hostingStatus(db, customerId, now),
+    hostingStatus(db, customerId, now, env),
     adsHold(env, customerId).catch(() => null),
     recoveryFor(env, customerId, now),
     deletionStatus(db, customerId),

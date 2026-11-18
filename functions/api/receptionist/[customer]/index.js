@@ -21,7 +21,7 @@ export async function onRequestGet({ request, env, params }) {
   const profile = await getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
   // A way back to the business's own website, only when it is actually live (same checks as serving it).
   const website = await (async () => {
-    if (!isHosted(await hostingStatus(env.ONBOARDING_DB, customer.id)) || !(await liveContent(env.ONBOARDING_DB, customer.id))) return null
+    if (!isHosted(await hostingStatus(env.ONBOARDING_DB, customer.id, Date.now(), env)) || !(await liveContent(env.ONBOARDING_DB, customer.id))) return null
     const host = await connectedHost(env.ONBOARDING_DB, customer.id)
     return host ? `https://${host}/` : `${siteOrigin(env)}/p/${customer.id}`
   })().catch(() => null)

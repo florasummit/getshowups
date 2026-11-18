@@ -11,6 +11,7 @@ const TEXT = {
     past_due: 'Payment failed. Update your card in billing.',
     canceled: 'Ended. Reactivate in billing.',
     incomplete: 'Payment not completed',
+    sandbox: 'Test payment only. Choose a plan in billing.',
     not_started: 'Not started',
   },
   calendar: { label: 'Google Calendar', healthy: 'Connected', default: 'Needs reconnecting' },
