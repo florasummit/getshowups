@@ -12,8 +12,8 @@ preconditions and effects updated 2026-11-18 after PRs #64–#68 (production 64d
 - [x] Production backup routine verified (latest: `prod-20261118T145816Z-pre-pr64-68.sql`).
 - [x] Owner decision (2026-11-18): bob-electrical and toys-for-us are left unchanged (not marked test; ownership and
   intended use not verified). At go-live they see "test payment only, choose a plan" (table below).
-- [ ] **#70 merged and deployed** (approval): a half-configured Stripe (live key without `STRIPE_LIVE_ENABLED`, or no
-  webhook secret) currently lets new signups in UNBILLED, for good. #70 refuses them instead.
+- [x] **#70 merged and deployed** (2026-11-18, da23ecb, deployment 70b701af): a half-configured Stripe (live key without `STRIPE_LIVE_ENABLED`, or no
+  webhook secret) now refuses new signups instead of letting them in unbilled; existing businesses unaffected.
 - [ ] **Terms of service page** (founder/legal, BLOCKER): `https://getshowups.com/terms` does not exist (it falls through
   to the marketing home page). Needed for the live portal and for a paid subscription offer: subscription terms,
   monthly renewal, cancellation at period end, refund policy. Claude does not write legal text; provide it and it can
@@ -91,8 +91,20 @@ mark as a test business (keeps sandbox access, out of metrics) or leave as above
    expiring cards (our own payment-recovery email also goes out once MESSAGES_LIVE is on).
 6. **Retries (Revenue recovery):** Smart Retries on; after all retries fail → **cancel the subscription** (see review
    finding). Not "leave past-due".
-7. **API key:** a restricted live key with write access to Checkout Sessions, Customers, Subscriptions (cancel is used
-   by account deletion), Customer portal sessions; read access to Invoices and Prices. Or the standard `sk_live_…`.
+7. **API key:** Developers → API keys → Create restricted key "GetShowUps production", taken from every Stripe call in
+   server/stripe.js (2026-11-18):
+
+   | Resource | Permission | Used for |
+   | --- | --- | --- |
+   | Checkout Sessions | Write | create checkout; list open sessions to resume one |
+   | Customers | Write | create the business's customer; retrieve (go-live check); delete (account deletion) |
+   | Subscriptions | Write | list/retrieve (duplicate check, reconciliation, resync); cancel (account deletion) |
+   | Customer portal | Write | open the billing portal |
+   | Invoices | Read | reconciliation (paid invoices, last 35 days) |
+   | Everything else | None | no Prices, PaymentIntents, Webhook endpoints, Payouts or Balance access is needed |
+
+   Rotate: create the new key, put it in Keychain and `STRIPE_SECRET_KEY`, redeploy, then roll the old one in Stripe.
+   A missing permission shows as a `stripe_error` in /admin reconciliation or a failed checkout (no data is changed).
 8. **Leave the sandbox webhook enabled** (needed for rollback). After the switch it will get 400s (wrong secret) for
    sandbox renewals of the two sandbox subscriptions; harmless, and Stripe sandbox may email about failing deliveries.
 
