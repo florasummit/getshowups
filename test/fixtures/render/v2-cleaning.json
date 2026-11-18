@@ -1,0 +1,207 @@
+{
+  "biz": {
+    "id": "golden-v2-cleaning",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-cleaning",
+    "name": "Sparrow Cleaning",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Home cleaning",
+    "intro": "Recurring and deep cleans.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v1o4iwp11gq84",
+        "name": "Deep clean",
+        "price": "$240",
+        "description": ""
+      },
+      {
+        "id": "vzxpr86zqlmfi",
+        "name": "Recurring clean",
+        "price": "",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Spotless",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#f6fbfc",
+          "surface": "#e4f2f4",
+          "ink": "#0d2a33",
+          "muted": "#486570",
+          "accent": "#0b6f78",
+          "onAccent": "#ffffff",
+          "line": "#cfe3e7",
+          "accentText": "#0b6f78"
+        },
+        "headingFont": "space-grotesk",
+        "bodyFont": "inter",
+        "headingWeight": 700,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 14,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "solid",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Sparrow Cleaning · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Sparrow Cleaning",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Home cleaning",
+              "eyebrow": "",
+              "text": "Recurring and deep cleans.",
+              "layout": "split",
+              "image": "stock:clean-kitchen",
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "tall",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": null
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v1o4iwp11gq84",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "vzxpr86zqlmfi",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "about",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Sparrow Cleaning",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Where we work",
+              "eyebrow": "",
+              "text": ""
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

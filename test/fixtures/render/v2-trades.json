@@ -1,0 +1,207 @@
+{
+  "biz": {
+    "id": "golden-v2-trades",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-trades",
+    "name": "Bright Electric",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Electrical repairs",
+    "intro": "Panels, outlets and lighting.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v13wvvo6vx50n",
+        "name": "Panel upgrade",
+        "price": "",
+        "description": ""
+      },
+      {
+        "id": "vv5remi1m40yq",
+        "name": "Outlet repair",
+        "price": "$129",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Pro Trade",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#f7f8fb",
+          "surface": "#e8ecf5",
+          "ink": "#121a2c",
+          "muted": "#525d77",
+          "accent": "#1f3a8a",
+          "onAccent": "#ffffff",
+          "line": "#d8deeb",
+          "accentText": "#1f3a8a"
+        },
+        "headingFont": "archivo",
+        "bodyFont": "inter",
+        "headingWeight": 800,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 6,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "solid",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Bright Electric · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Bright Electric",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Electrical repairs",
+              "eyebrow": "",
+              "text": "Panels, outlets and lighting.",
+              "layout": "split",
+              "image": "stock:tools-flat",
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "tall",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": null
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v13wvvo6vx50n",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "vv5remi1m40yq",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "about",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Bright Electric",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Where we work",
+              "eyebrow": "",
+              "text": ""
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

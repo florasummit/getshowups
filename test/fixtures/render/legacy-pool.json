@@ -1,0 +1,53 @@
+{
+  "biz": {
+    "id": "golden-legacy-pool",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-legacy-pool",
+    "name": "Harbor Pools",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Pool care in Charleston",
+    "intro": "Weekly pool care and one-time cleanings.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "name": "Weekly pool care",
+        "price": "$280+",
+        "description": ""
+      },
+      {
+        "name": "One-time cleaning",
+        "price": "$150+",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": ""
+  }
+}

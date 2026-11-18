@@ -349,6 +349,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Websites: one renderer, no scripts on business sites, every text through the claims filter (legal pages: see above), drafts private until
   an explicit publish (confirm: true). Images only via assets.js. Hosting follows hostingStatus(); never delete content
   (only exception: permanent account deletion, server/deletion.js).
+  Live sites render per request from stored content, so a renderer change changes every live site. Guard:
+  test/render-golden.test.js (frozen stored-content fixtures in test/fixtures/render/*.json → exact HTML goldens; never
+  regenerate the .json) + test/e2e/site-layout.spec.js (desktop/phone: no sideways scroll, headline + booking button on
+  the first screen, no clipped headings). A golden diff = "this PR changes live customer sites": only update it
+  (UPDATE_RENDER_GOLDEN=1) when intended, and say so in the PR.
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
   the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
   at a doubled name is never accepted as proof.

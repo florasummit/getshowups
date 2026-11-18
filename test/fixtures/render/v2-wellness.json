@@ -1,0 +1,207 @@
+{
+  "biz": {
+    "id": "golden-v2-wellness",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-wellness",
+    "name": "Calm Day Spa",
+    "appointmentMode": "at_business"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Massage and facials",
+    "intro": "Book a calm hour.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v88boxd2xv3cf",
+        "name": "60-minute massage",
+        "price": "$110",
+        "description": ""
+      },
+      {
+        "id": "vw17boc1gxnnn",
+        "name": "Facial",
+        "price": "$95",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Calm Studio",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#fbf7f1",
+          "surface": "#f2e9dc",
+          "ink": "#2b2118",
+          "muted": "#6b5d4e",
+          "accent": "#a8481f",
+          "onAccent": "#ffffff",
+          "line": "#e4d8c6",
+          "accentText": "#a8481f"
+        },
+        "headingFont": "playfair-display",
+        "bodyFont": "dm-sans",
+        "headingWeight": 700,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 24,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "pill",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Calm Day Spa · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Calm Day Spa",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Massage and facials",
+              "eyebrow": "",
+              "text": "Book a calm hour.",
+              "layout": "minimal",
+              "image": null,
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "auto",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": null
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v88boxd2xv3cf",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "vw17boc1gxnnn",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "about",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Calm Day Spa",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Where we work",
+              "eyebrow": "",
+              "text": ""
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

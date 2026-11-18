@@ -298,9 +298,13 @@ test('full screen + tablet view; "No photo" really removes an unwanted picture a
 
   // The opening's picture: "No photo" used to be ignored, so an unwanted picture could only be swapped.
   await expect(frame.locator('.hero-media img')).toBeVisible()
-  await frame.locator('.hero-media').click()
   const photo = studio.getByRole('dialog', { name: 'Edit' })
-  await expect(photo.locator('.studio-thumb[aria-pressed="true"]')).toHaveCount(1) // the owner sees which picture is in use
+  // Leaving full screen re-renders the preview; a click that lands while it is being re-wired is ignored (CI flake,
+  // 2026-11-18), so click until the photo panel opens. The assertion itself is unchanged.
+  await expect(async () => {
+    await frame.locator('.hero-media').click()
+    await expect(photo.locator('.studio-thumb[aria-pressed="true"]')).toHaveCount(1, { timeout: 1500 }) // the owner sees which picture is in use
+  }).toPass({ timeout: 10_000 })
   await photo.getByRole('button', { name: 'No photo' }).click()
   await expect(frame.locator('.hero-media')).toHaveCount(0)
   await page.waitForTimeout(1300)

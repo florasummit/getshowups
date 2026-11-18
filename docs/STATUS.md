@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Published-site protection: render goldens + layout checks (2026-11-18) — test/render-goldens (tests only)
+
+- **Why:** public sites render per request from stored content (site-serve → renderSite), so every renderer PR changes
+  every live customer site at once with no review signal (PR #62 changed PoolThru's live CSS this way).
+- **Added:** 9 frozen content fixtures (legacy, content.design, v2 starter sites for wellness / pool / cleaning / lawn /
+  trades / professional, both appointment modes, a 5-page site) → 13 exact-HTML goldens; plus a desktop + phone
+  Playwright layout check of every golden page (26 runs). No production code changed.
+- **Proposed next (not built): renderer versioning.** Smallest compatible step: record `rendererVersion` on each
+  published version; site-serve keeps rendering stored versions with the renderer revision they were published with
+  only where a golden had to change (frozen CSS blocks keyed by version), and the owner's next publish adopts the
+  current renderer. Build it the first time a golden must change for an existing content system.
+
 ## Voice: holding line before slow tools (2026-11-18) — fix/voice-holding-line (no migration)
 
 - **Cause of lost voice turns (from code + the 2026-11-18 production call):** a calendar question is model call →
