@@ -2,6 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
+## Reconciliation applies missed cancellations (2026-11-18) — fix/reconcile-ended-subscriptions (no migration)
+
+- **Finding:** delayed webhooks (Stripe retries ~3 days; older events ignored) and duplicates (idempotent per event)
+  were already handled. A webhook missed for good was only REPORTED (daily `status_mismatch`); the business stayed
+  "active" and hosted until an admin clicked Resync.
+- **Fix:** the daily reconciliation applies exactly one case automatically: Stripe says ended, we say paid → the
+  existing `resyncFromStripe` (Stripe asked again; audited; ads hold check). Never-paid placeholders and every other
+  difference stay report-only. Reflected within ≤ 1 day of the cancellation.
+- **Safety review before merge:** (1) stamped with Stripe's `ended_at`, not the run time: a resubscription whose webhook
+  was delayed past the run is no longer ignored as "older"; (2) skipped, report-only, when Stripe lists another
+  running/pending subscription for the business; (3) transient Stripe errors (listing or confirming fetch) change
+  nothing; (4) a scheduled cancellation stays active and hosted until Stripe ends it, then 14-day grace. Tested.
+
 ## Billing fails closed when Stripe is half-configured (2026-11-18) — fix/billing-fail-closed (no migration)
 
 - Found in the live-billing readiness review: with a key set but billing unusable (live key without
