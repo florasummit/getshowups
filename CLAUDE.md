@@ -220,7 +220,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   status ready/pending/approved, kill switch off (carriers review the live opt-in BEFORE approval; collecting consent
   sends nothing). Messages to leads re-check relevance at send time (`skipReason()`).
 - Launch gate fails closed: unless `MESSAGES_LIVE` is exactly `true`, email/SMS go only to `MESSAGE_TEST_RECIPIENTS`
-  (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval.
+  (`recipientAllowed()` in server/email.js). Setting `MESSAGES_LIVE=true` requires approval. Account outbox mail the
+  gate refuses is closed as failed/test_mode (never attempted, never sent later in a burst, never blocks the batch).
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.

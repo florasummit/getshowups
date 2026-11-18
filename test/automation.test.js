@@ -585,14 +585,26 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
   assert.equal(sentEmails().length, 1)
   delete env.MESSAGES_LIVE
 
-  // Defense in depth at the provider call, and the account outbox holds (does not fail) other recipients.
+  // Defense in depth at the provider call; the account outbox closes mail for other recipients (failed/test_mode,
+  // never attempted) so it can't go out late when messaging goes live, nor block other mail.
   assert.deepEqual(await sendEmail(env, { id: 'x', to: 'someone@example.net', subject: 's', text: 't' }), { ok: false, error: 'test_mode', permanent: true })
   assert.deepEqual(await sendTwilio({ ...env, TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't' }, { to: '8435550142', text: 't', sender: { from: '+18435550100', accountSid: 'AC'.padEnd(34, '0') } }), { ok: false, error: 'test_mode', permanent: true })
   await enqueue(env, { id: 'held', to: 'owner@other.example', template: 't', subject: 's', body: 'b' })
   const before = sentEmails().length
   assert.deepEqual(await flushOutbox(env), { configured: true, sent: 0, failed: 0 })
   assert.equal(sentEmails().length, before)
-  assert.deepEqual({ ...db.sql.prepare("SELECT status, attempts FROM email_outbox WHERE id = 'held'").get() }, { status: 'pending', attempts: 0 })
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, attempts, error FROM email_outbox WHERE id = 'held'").get() }, { status: 'failed', attempts: 0, error: 'test_mode' })
+  env.MESSAGES_LIVE = 'true' // going live later must not deliver the held account mail either
+  await flushOutbox(env)
+  assert.equal(sentEmails().length, before)
+  delete env.MESSAGES_LIVE
+  // 25 messages the gate refuses never starve a deliverable one queued after them.
+  for (let i = 0; i < 25; i++) await enqueue(env, { id: `held-${i}`, to: `someone${i}@example.net`, template: 't', subject: 's', body: 'b' }, 1000 + i)
+  await enqueue(env, { id: 'deliverable', to: 'tester@example.org', template: 't', subject: 's', body: 'b' }, 5000)
+  await flushOutbox(env)
+  await flushOutbox(env)
+  assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'deliverable'").get().status, 'sent')
+  assert.equal(db.sql.prepare("SELECT count(*) c FROM email_outbox WHERE id LIKE 'held-%' AND status = 'failed' AND error = 'test_mode' AND attempts = 0").get().c, 25)
 
   const ov = (await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await session('owner@alpha.example') })).json()
   assert.equal(ov.automation.testMode, true)
@@ -624,11 +636,11 @@ test('test business: even with MESSAGES_LIVE, only test recipients; unmarking ne
   const before = sentEmails().length
   await processDueMessages(env, Date.now() + 20 * MIN)
   assert.equal(sentEmails().slice(before).filter((e) => e.to[0] === 'later@example.net').length, 0, 'sandbox message not released by unmarking')
-  // Account outbox: mail queued for a test business is held for real recipients.
+  // Account outbox: mail queued for a test business never reaches real recipients (closed, not attempted).
   await setTestBusiness(env, 'alpha', true, 'ops@getshowups.com')
   await enqueue(env, { id: 'tb-held', to: 'owner@alpha.example', customer: 'alpha', template: 't', subject: 's', body: 'b' })
   await flushOutbox(env)
-  assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'tb-held'").get().status, 'pending')
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, error, attempts FROM email_outbox WHERE id = 'tb-held'").get() }, { status: 'failed', error: 'test_mode', attempts: 0 })
 })
 
 test('repeated and overlapping scheduler runs never send a message twice', async () => {

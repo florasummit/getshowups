@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## Account outbox: refused mail is closed, not held (2026-11-18) — fix/outbox-held-mail (no migration)
+
+- **Problem:** `flushOutbox` left mail the launch gate refused (test mode, or a test business writing to a real
+  address) `pending` forever. Turning MESSAGES_LIVE on would send it days or weeks late in one burst (production
+  backup: one setup reminder pending since 2026-11-12), and once 20+ such rows existed they filled every batch
+  (`ORDER BY created_at LIMIT 20`) so no other account email (invites, recovery, owner notices) would ever send.
+- **Fix:** refused mail becomes `failed` / `test_mode` with 0 attempts (shown truthfully in /admin), never sent later.
+- **After deploy:** the one old pending setup reminder in production is closed as test_mode by the next cron run (not sent).
+- Tests: held → closed; going live later sends nothing; 25 refused rows don't starve a deliverable one (fails on old code).
+
 ## Launch readiness: sandbox billing gate + voice diagnostics (2026-11-18) — fix/sandbox-billing-access (no migration)
 
 - **Released before this:** PR #62 merged (f9aca6d) and deployed (5a57c9ff). PoolThru's DRAFT had the old-logo block
