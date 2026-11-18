@@ -18,3 +18,5 @@ CREATE TABLE IF NOT EXISTS coverage_requests (
   decided_by  TEXT
 );
 CREATE INDEX IF NOT EXISTS coverage_requests_customer ON coverage_requests (customer, status, created_at);
+-- Owner notices (cron, every 5 minutes): recent pending requests across businesses without scanning the table.
+CREATE INDEX IF NOT EXISTS coverage_requests_pending ON coverage_requests (status, created_at);

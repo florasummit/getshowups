@@ -259,7 +259,9 @@ async function answer(env, customerId, leadId, now) {
     await db.prepare('UPDATE lead_threads SET needs_owner = ?3, updated_at = ?4 WHERE lead_id = ?1 AND customer = ?2').bind(leadId, customerId, reason, now).run()
     await recordEvent(db, { type: 'followups.handoff', actor: 'system:assistant', customer: customerId, capability: 'followups.assistant', resource: { type: 'lead', id: leadId }, outcome: 'success', details: { reason }, at: now })
   }
-  const link = lead?.status === 'booked' ? null : bookUrl
+  // Only a lead that can book gets the booking link: not booked ones, and not out-of-area ones still waiting for the
+  // owner's coverage decision (server/coverage.js) — a link they can't use would promise service.
+  const link = lead?.status === 'new' ? bookUrl : null
   // Automatic messages paused by the owner: nothing automatic goes out; the owner is asked to answer.
   const paused = await db.prepare('SELECT coalesce((SELECT automations FROM customer_settings WHERE customer = ?1), 1) AS on_').bind(customerId).first()
   if (!paused?.on_) {

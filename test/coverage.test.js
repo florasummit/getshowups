@@ -180,6 +180,16 @@ test('owner decision: approve lets the SAME lead book with its own token or emai
   assert.deepEqual([msg.kind, msg.channel, msg.status], ['coverage_ok', 'email', 'scheduled'])
   const r = await render(env, { kind: 'coverage_ok', biz: 'HVAC Co', customer: 'hvac', lead_id: a.leadId, lead_name: 'Jamie Rivera', need: 'AC not cooling' })
   assert.match(r.text, /can help with "AC not cooling" in your area\. Your details are saved, so you only need to pick a time:\n.*\/book\/hvac\?lead=/)
+  // The message obeys the launch gate: messaging isn't live and the visitor isn't a test recipient → never sent.
+  env.RESEND_API_KEY = 're_test_key'
+  env.EMAIL_FROM = 'GetShowUps <hello@getshowups.com>'
+  const { processDueMessages } = await import('../server/messages.js')
+  await processDueMessages(env, Date.now() + 1000)
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, error FROM messages WHERE lead_id = ? AND kind = 'coverage_ok'").get(a.leadId) }, { status: 'skipped', error: 'test_mode' })
+  // The link is scoped: its token opens this lead on THIS business only (another business's page → not found).
+  const k = new URL(ok.json.bookingUrl).searchParams.get('k')
+  const elsewhere = await call(apptApi, 'POST', '/api/book/salon/appointment', { params: { customer: 'salon' }, body: { leadId: a.leadId, leadToken: k, start: new Date(Date.now() + DAY).toISOString() } })
+  assert.deepEqual([elsewhere.status, elsewhere.json.error], [404, 'lead_not_found'])
   // Same lead books with the token it already had, or the emailed link's token (no new details).
   const slots = (await call(slotsApi, 'GET', '/api/book/hvac', { params: { customer: 'hvac' } })).json.slots
   const booked = await call(apptApi, 'POST', '/api/book/hvac/appointment', { params: { customer: 'hvac' }, body: { leadId: a.leadId, leadToken: a.leadToken, start: slots[0] } })
