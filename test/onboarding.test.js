@@ -129,6 +129,34 @@ test('sandbox billing: an ordinary visitor is told up front online sign-up isnâ€
   assert.equal((await call(me, 'GET', { cookie })).json.checkoutOpen, null)
 })
 
+test('billing half-configured (live key without STRIPE_LIVE_ENABLED, or no webhook secret): signup refused, never a free unbilled business', async () => {
+  const tester = await cookieFor('owner@newpools.example') // even an authorized tester
+  const attempt = () => call(business, 'POST', { cookie: tester, body: { name: 'New Pools', timezone: 'America/New_York', serviceZips: '', plan: 'founding' } })
+  const sk = env.STRIPE_SECRET_KEY
+  env.STRIPE_SECRET_KEY = 'sk_live_HALFWAY'
+  assert.equal((await call(me, 'GET', { cookie: tester, path: '/api/dashboard/me?plan=founding' })).json.checkoutOpen, false)
+  assert.deepEqual([(await attempt()).status, (await attempt()).json.error], [403, 'signup_not_open'])
+  env.STRIPE_SECRET_KEY = sk
+  const wh = env.STRIPE_WEBHOOK_SECRET
+  delete env.STRIPE_WEBHOOK_SECRET
+  assert.equal((await attempt()).status, 403)
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM customers').get().n, 0, 'nothing created unbilled')
+  env.STRIPE_WEBHOOK_SECRET = wh
+  // Fully configured again: the tester's signup is created and billed (self_signups row).
+  assert.equal((await attempt()).status, 201)
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM self_signups').get().n, 1)
+  // Existing businesses are not disrupted while billing is half-configured: the owner still loads the dashboard and
+  // saves business changes (only NEW businesses are refused).
+  const id = db.sql.prepare('SELECT id FROM customers').get().id
+  env.STRIPE_SECRET_KEY = 'sk_live_HALFWAY'
+  const mine = (await call(me, 'GET', { cookie: tester })).json
+  assert.equal(mine.customer.id, id)
+  const upd = await call(business, 'POST', { cookie: tester, body: { name: 'New Pools Renamed', timezone: 'America/New_York', serviceZips: '' } })
+  assert.deepEqual([upd.status, upd.json.id], [200, id])
+  assert.equal(db.sql.prepare('SELECT name FROM customers WHERE id = ?').get(id).name, 'New Pools Renamed')
+  env.STRIPE_SECRET_KEY = sk
+})
+
 test('get started: name only creates the business on the founding plan; payment comes before anything else', async () => {
   const { cookie, id } = await newSignup()
   assert.equal(db.sql.prepare('SELECT plan_id FROM self_signups WHERE customer = ?').get(id).plan_id, 'founding')

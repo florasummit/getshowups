@@ -3,7 +3,7 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../server/auth.js'
 import { progress } from '../../../server/customers.js'
 import { signupPlan } from '../../../server/onboarding.js'
-import { listPlans, sandboxCheckoutAllowed, stripeConfigured } from '../../../server/stripe.js'
+import { billingMisconfigured, listPlans, sandboxCheckoutAllowed, stripeConfigured } from '../../../server/stripe.js'
 import { adsEnabledFor } from '../../../server/ads/access.js'
 import { deletionEnabled } from '../../../server/deletion.js'
 
@@ -18,7 +18,7 @@ export async function onRequestGet({ request, env }) {
     signupPlan: plan ? { id: plan.id, name: plan.name, trialDays: plan.trialDays } : null,
     // Whether this person can buy online now (false while billing is sandbox-only and they aren't an authorized tester),
     // so the signup says so BEFORE a business is created. null when billing isn't configured.
-    checkoutOpen: stripeConfigured(env) ? await sandboxCheckoutAllowed(env, customer?.id || null, email) : null,
+    checkoutOpen: stripeConfigured(env) ? await sandboxCheckoutAllowed(env, customer?.id || null, email) : billingMisconfigured(env) ? false : null,
     email,
     customer,
     progress: await progress(env, customer),

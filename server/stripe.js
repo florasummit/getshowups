@@ -33,6 +33,9 @@ export async function sandboxCheckoutAllowed(env, customerId, email) {
   const t = await testStatus(env, customerId)
   return t.test === true && !t.unreadable
 }
+// A Stripe key is set but billing isn't usable (a live key without STRIPE_LIVE_ENABLED, or no webhook secret). New
+// self-serve signups must then be refused, not created unbilled: an unbilled self-serve business never pays (fail closed).
+export const billingMisconfigured = (env) => Boolean(env.STRIPE_SECRET_KEY) && !stripeConfigured(env)
 export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && (testKey(env.STRIPE_SECRET_KEY) || stripeLiveEnabled(env)))
 // STRIPE_API_MOCK_ORIGIN is a loopback-only test override (e2e); never set in production.
 const apiBase = (env) => {

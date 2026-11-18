@@ -2,6 +2,13 @@
 
 _Update at the end of every task. Newest first._
 
+## Billing fails closed when Stripe is half-configured (2026-11-18) — fix/billing-fail-closed (no migration)
+
+- Found in the live-billing readiness review: with a key set but billing unusable (live key without
+  STRIPE_LIVE_ENABLED, or no webhook secret) `signupPlan` returned null, so new self-serve businesses were created
+  UNBILLED (never asked to pay). Now refused (403 signup_not_open, page shows "opens soon"); existing businesses keep
+  working. No production behaviour change today (test key + webhook secret = configured).
+
 ## Published-site protection: render goldens + layout checks (2026-11-18) — test/render-goldens (tests only)
 
 - **Why:** public sites render per request from stored content (site-serve → renderSite), so every renderer PR changes

@@ -282,7 +282,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   are only changed by that owner-initiated checkout. hostingStatus(db, id, now, env) uses the same view (every caller
   passes env): not onboarded + sandbox only → 'unpaid'; onboarded businesses stay hosted (no automatic lock-out).
 - STRIPE_API_MOCK_ORIGIN and STRIPE_LIVE_ENABLED: mock is loopback-only (e2e); live billing needs STRIPE_LIVE_ENABLED=true
-  (approval). Only sk_test_/rk_test_ keys count as configured otherwise.
+  (approval). Only sk_test_/rk_test_ keys count as configured otherwise. Fails closed: billingMisconfigured(env) (a key
+  set but billing unusable: live key without the flag, or no webhook secret) refuses NEW self-serve businesses (403
+  signup_not_open, me.checkoutOpen false); existing businesses are unaffected. Never let a signup through unbilled.
 - Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
   /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
   per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
