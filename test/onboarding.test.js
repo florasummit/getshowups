@@ -84,6 +84,8 @@ beforeEach(() => {
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k), list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
     STRIPE_SECRET_KEY: 'sk_test_x',
     STRIPE_WEBHOOK_SECRET: WHSEC,
+    // Sandbox billing: these signups are authorized testers (stripe.js sandboxCheckoutAllowed).
+    MESSAGE_TEST_RECIPIENTS: 'owner@newpools.example,a@x.example,b@x.example,c@x.example,owner@other.example,owner@pilot.example',
   }
   db.sql.prepare("INSERT INTO plans (id, name, stripe_price_id, trial_days, entitlements, active, created_at) VALUES ('founding', 'GetShowUps Founding', 'price_FOUNDING', 0, '{}', 1, 1)").run()
   origFetch = globalThis.fetch
@@ -109,6 +111,23 @@ async function newSignup(email = 'owner@newpools.example', name = 'New Pools') {
 async function connectCalendar(id) {
   kv.set(`google:${id}`, JSON.stringify({ customer: id, refreshToken: await encrypt(env, '1//rt'), scope: 'https://www.googleapis.com/auth/calendar.events.owned https://www.googleapis.com/auth/calendar.freebusy', email: 'cal@example.com' }))
 }
+
+test('sandbox billing: an ordinary visitor is told up front online sign-up isn’t open, and no business is created', async () => {
+  const cookie = await cookieFor('stranger@example.org')
+  const first = (await call(me, 'GET', { cookie, path: '/api/dashboard/me?plan=founding' })).json
+  assert.equal(first.checkoutOpen, false)
+  const r = await call(business, 'POST', { cookie, body: { name: 'Stranger Pools', timezone: 'America/New_York', serviceZips: '', plan: 'founding' } })
+  assert.deepEqual([r.status, r.json.error], [403, 'signup_not_open'])
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM customers').get().n, 0, 'no orphan business')
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM self_signups').get().n, 0)
+  // An authorized tester sees checkout as open; with live billing everyone does; without Stripe it is null.
+  assert.equal((await call(me, 'GET', { cookie: await cookieFor('owner@newpools.example'), path: '/api/dashboard/me?plan=founding' })).json.checkoutOpen, true)
+  env.STRIPE_LIVE_ENABLED = 'true'
+  assert.equal((await call(me, 'GET', { cookie, path: '/api/dashboard/me?plan=founding' })).json.checkoutOpen, true)
+  delete env.STRIPE_LIVE_ENABLED
+  delete env.STRIPE_SECRET_KEY
+  assert.equal((await call(me, 'GET', { cookie })).json.checkoutOpen, null)
+})
 
 test('get started: name only creates the business on the founding plan; payment comes before anything else', async () => {
   const { cookie, id } = await newSignup()
