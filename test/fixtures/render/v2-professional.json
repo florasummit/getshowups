@@ -1,0 +1,207 @@
+{
+  "biz": {
+    "id": "golden-v2-professional",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-professional",
+    "name": "Ledger & Co",
+    "appointmentMode": "at_business"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Bookkeeping for small businesses",
+    "intro": "Monthly books and tax prep.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v1esdvvf150fa",
+        "name": "Monthly bookkeeping",
+        "price": "$300",
+        "description": ""
+      },
+      {
+        "id": "v1f6swcp198cl",
+        "name": "Tax preparation",
+        "price": "",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Counsel",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#ffffff",
+          "surface": "#f1f1ee",
+          "ink": "#141414",
+          "muted": "#5c5c58",
+          "accent": "#141414",
+          "onAccent": "#ffffff",
+          "line": "#e2e2dd",
+          "accentText": "#141414"
+        },
+        "headingFont": "fraunces",
+        "bodyFont": "inter",
+        "headingWeight": 600,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 4,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "solid",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Ledger & Co · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Ledger & Co",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Bookkeeping for small businesses",
+              "eyebrow": "",
+              "text": "Monthly books and tax prep.",
+              "layout": "minimal",
+              "image": null,
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "auto",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": null
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v1esdvvf150fa",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "v1f6swcp198cl",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "about",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Ledger & Co",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Where we work",
+              "eyebrow": "",
+              "text": ""
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "biz": {
+    "id": "golden-legacy-salon-in-store",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-legacy-salon-in-store",
+    "name": "Studio Nine",
+    "appointmentMode": "at_business"
+  },
+  "content": {
+    "template": "bold",
+    "color": "plum",
+    "headline": "Haircuts downtown",
+    "intro": "Cuts and color by appointment.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "name": "Haircut",
+        "price": "$45",
+        "description": ""
+      },
+      {
+        "name": "Color",
+        "price": "",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": ""
+  }
+}

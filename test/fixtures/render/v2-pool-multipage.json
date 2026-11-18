@@ -1,0 +1,343 @@
+{
+  "biz": {
+    "id": "golden-v2-pool-multipage",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-pool-multipage",
+    "name": "Harbor Pools",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Pool care in Charleston",
+    "intro": "Weekly pool care and one-time cleanings.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v17338r8lbvtr",
+        "name": "Weekly pool care",
+        "price": "$280+",
+        "description": ""
+      },
+      {
+        "id": "v49o71kgk6cbf",
+        "name": "Green pool cleanup",
+        "price": "$350",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Clear Water",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#f6fbfc",
+          "surface": "#e4f2f4",
+          "ink": "#0d2a33",
+          "muted": "#486570",
+          "accent": "#0b6f78",
+          "onAccent": "#ffffff",
+          "line": "#cfe3e7",
+          "accentText": "#0b6f78"
+        },
+        "headingFont": "dm-sans",
+        "bodyFont": "dm-sans",
+        "headingWeight": 650,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 18,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "pill",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Harbor Pools · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Harbor Pools",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Pool care in Charleston",
+              "eyebrow": "",
+              "text": "Weekly pool care and one-time cleanings.",
+              "layout": "split",
+              "image": "stock:pool-water",
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "tall",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": null
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v17338r8lbvtr",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "v49o71kgk6cbf",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Where we work",
+              "eyebrow": "",
+              "text": ""
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        },
+        {
+          "slug": "services",
+          "navLabel": "Services",
+          "seoTitle": "Services | Harbor Pools",
+          "seoDescription": "Services from Harbor Pools.",
+          "sections": [
+            {
+              "type": "services",
+              "id": "services-list",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "rows",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v17338r8lbvtr",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "v49o71kgk6cbf",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "cta",
+              "id": "services-book",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        },
+        {
+          "slug": "about",
+          "navLabel": "About",
+          "seoTitle": "About | Harbor Pools",
+          "seoDescription": "About Harbor Pools.",
+          "sections": [
+            {
+              "type": "text",
+              "id": "about-text",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Harbor Pools",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "cta",
+              "id": "about-book",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        },
+        {
+          "slug": "contact",
+          "navLabel": "Contact",
+          "seoTitle": "Contact | Harbor Pools",
+          "seoDescription": "Contact Harbor Pools.",
+          "sections": [
+            {
+              "type": "contact",
+              "id": "contact",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Contact us",
+              "eyebrow": "",
+              "text": "",
+              "showPhone": true,
+              "form": "contact"
+            }
+          ]
+        },
+        {
+          "slug": "privacy",
+          "navLabel": "Privacy policy",
+          "seoTitle": "Privacy policy | Harbor Pools",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "text",
+              "id": "privacy-text",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "m",
+              "align": "left",
+              "width": "narrow",
+              "animate": "none",
+              "heading": "Privacy policy",
+              "eyebrow": "",
+              "text": "",
+              "body": "This page explains how Harbor Pools uses the details you share on this website.\n\nWhat we collect: when you send a message, request a quote or book a time, we receive the name, email address, phone number and message you enter, and the time you book. For visits at your property, we also receive the address you give us.\n\nHow we use it: only to reply to you, to arrange and confirm your appointment, and to send reminders about it. We do not sell your details.\n\nThis website does not use advertising trackers. It is hosted by GetShowUps, which stores the details you send on our behalf; bookings are added to our calendar.\n\nTo see, correct or delete the details we hold about you, contact Harbor Pools.",
+              "columns": 1,
+              "lead": false
+            }
+          ],
+          "legal": true,
+          "source": {
+            "kind": "starter",
+            "at": 1700000000000
+          }
+        }
+      ]
+    }
+  }
+}

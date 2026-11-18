@@ -1,0 +1,70 @@
+{
+  "biz": {
+    "id": "golden-designed-hvac",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-designed-hvac",
+    "name": "Lowcountry Air",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Heating and cooling repair",
+    "intro": "Same-week repairs and tune-ups.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "name": "AC repair",
+        "price": "",
+        "description": ""
+      },
+      {
+        "name": "Furnace tune-up",
+        "price": "$99",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "design": {
+      "name": "Pro Trade",
+      "palette": "navy",
+      "fonts": "modern",
+      "hero": "split",
+      "services": "cards",
+      "about": "split",
+      "shape": "round",
+      "sections": [
+        "services",
+        "process",
+        "about",
+        "gallery"
+      ],
+      "heroImage": "stock:tools-flat",
+      "aboutImage": "stock:tools-blue"
+    }
+  }
+}
