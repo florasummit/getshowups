@@ -41,13 +41,25 @@ export const stockById = (id) => STOCK.find((s) => s.id === id)
 // Industries we have a visual direction for. Each one has ONLY its own photos (never another industry's),
 // palettes and names that suit it, and a short art direction for the AI. Unknown industry → no stock photo
 // at all (text-led layouts), never a generic house or interior.
+// starter: the look of the deterministic starter site (server/site-starter.js) — its own type, shape and buttons, so
+// different industries don't get the same template with different headings. Order matters (first match wins):
+// wellness comes before pool so a day spa or med spa is never given pool photos.
 export const INDUSTRIES = {
+  wellness: {
+    re: /wellness|day ?spa|med ?spa|massage|yoga|pilates|chiropract|physio|physical therap|acupunct|therapist|counsel|salon|beauty|facial|esthetic|nails?\b|barber|fitness|personal train/i,
+    photos: /^$/, // no licensed wellness photos yet: text-led, never unrelated imagery
+    palettes: ['sand', 'citrus', 'forest'],
+    names: ['Calm Studio', 'Bright Space', 'Grounded'],
+    direction: 'calm, warm and personal; generous space, soft shapes, warm neutrals',
+    starter: { fonts: 'classic', radius: 24, buttons: 'pill' },
+  },
   pool: {
     re: /pool|\bspas?\b|hot ?tubs?/i,
     photos: /^pool-/,
     palettes: ['lagoon', 'midnight', 'navy'],
     names: ['Clear Water', 'Deep End', 'Poolside Classic'],
     direction: 'clear blue water, sunlit pools and outdoor living; fresh, clean, calm; blues and teals',
+    starter: { fonts: 'friendly', radius: 18, buttons: 'pill' },
   },
   cleaning: {
     re: /clean|maid|janitor|housekeep/i,
@@ -55,6 +67,7 @@ export const INDUSTRIES = {
     palettes: ['lagoon', 'graphite', 'sand'],
     names: ['Spotless', 'Crisp Modern', 'Warm Home'],
     direction: 'bright, tidy, airy rooms; light backgrounds, crisp type, a sense of calm order',
+    starter: { fonts: 'modern', radius: 14, buttons: 'solid' },
   },
   lawn: {
     re: /lawn|landscap|garden|\btrees?\b|\byards?\b|mow|hedge|irrigat/i,
@@ -62,6 +75,7 @@ export const INDUSTRIES = {
     palettes: ['forest', 'sand', 'graphite'],
     names: ['Green Lawn', 'Natural Earth', 'Clean Cut'],
     direction: 'healthy green lawns and gardens; natural greens and earth tones; grounded and dependable',
+    starter: { fonts: 'editorial', radius: 10, buttons: 'solid' },
   },
   trades: {
     re: /hvac|heating|air condition|plumb|electric|handyman|roof|repair|contractor|construction|remodel|paint|carpent/i,
@@ -69,6 +83,15 @@ export const INDUSTRIES = {
     palettes: ['navy', 'graphite', 'ember'],
     names: ['Pro Trade', 'Workshop', 'Solid Build'],
     direction: 'tools and craftsmanship; strong, dependable, practical; navy, charcoal and warm accents',
+    starter: { fonts: 'strong', radius: 6, buttons: 'solid' },
+  },
+  professional: {
+    re: /account|bookkeep|\btax(es)?\b|\bcpa\b|\blaw\b|lawyer|attorney|legal|consult|financ|insur|real estate|realtor|architect|notary|advis/i,
+    photos: /^$/, // no licensed office photos yet: text-led
+    palettes: ['graphite', 'navy', 'sand'],
+    names: ['Counsel', 'Trusted Advice', 'Established'],
+    direction: 'credible, precise and calm; restrained colour, editorial type, plenty of structure',
+    starter: { fonts: 'editorial', radius: 4, buttons: 'solid' },
   },
 }
 const NEUTRAL = { palettes: ['graphite', 'navy', 'sand'], names: ['Fresh', 'Bold', 'Classic'], direction: 'clean, confident, text-led layouts' }

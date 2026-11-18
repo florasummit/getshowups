@@ -11,7 +11,7 @@ import { FONTS, ICONS, keepLegalPages, LIMITS, SECTION_TYPES, validateSpec } fro
 import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
-import { displayBrand, loadWebsite, saveDraft, validateContent } from './website.js'
+import { displayBrand, loadWebsite, logoAssetIdsFor, photoIds, saveDraft, validateContent } from './website.js'
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
@@ -311,7 +311,8 @@ export async function designContext(env, customer) {
   const cities = profile ? JSON.parse(profile.cities || '[]') : []
   const services = (draft.services || []).map((s) => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: s.price || '' }))
   const industry = industryOf(customer, profile ? { ...profile, services: JSON.parse(profile.services || '[]') } : null, draft)
-  const assetIds = new Set(assets.results.map((a) => a.id).filter((id) => id !== draft.logo))
+  // Photos only: never a current OR earlier logo (server/website.js logoAssetIdsFor).
+  const assetIds = photoIds(new Set(assets.results.map((a) => a.id)), await logoAssetIdsFor(db, customer.id, draft))
   const facts = {
     businessName: customer.name,
     brandName: displayBrand(customer.name, draft),

@@ -70,13 +70,25 @@ test('industry is recognised from the business details; PoolThru without a profi
   assert.equal(industryKey({ industry: 'House cleaning', services: ['Pool deck wash'] }), 'cleaning', 'their chosen industry wins over a service name')
   assert.equal(industryKey({ industry: 'Lawn care' }), 'lawn')
   assert.equal(industryKey({ industry: 'Plumbing', services: [{ name: 'Drain cleaning' }] }), 'trades')
-  assert.equal(industryKey({ industry: 'Bookkeeping', name: 'Ledger & Co' }), null)
+  // Professional services and wellness have their own direction (text-led: no licensed photos for them yet).
+  assert.equal(industryKey({ industry: 'Bookkeeping', name: 'Ledger & Co' }), 'professional')
+  assert.equal(industryKey({ industry: 'Massage therapy' }), 'wellness')
+  // A day spa or med spa is wellness, never a pool business (it used to get pool photos via "spa").
+  assert.equal(industryKey({ industry: 'Day spa' }), 'wellness')
+  assert.equal(industryKey({ name: 'Glow Med Spa' }), 'wellness')
+  assert.equal(industryKey({ industry: 'Pool & spa service' }), 'pool', 'a pool and hot-tub business is still pool')
+  assert.equal(industryKey({ industry: 'Dog grooming' }), null)
 })
+const PHOTOLESS = new Set(['professional', 'wellness'])
 
 test('stock photo sets are disjoint per industry; unknown industries get none (no generic houses or interiors)', () => {
   const seen = new Map()
   for (const key of Object.keys(INDUSTRIES)) {
     const ids = stockFor(key).map((s) => s.id)
+    if (PHOTOLESS.has(key)) {
+      assert.deepEqual(ids, [], `${key}: no photos rather than unrelated ones`)
+      continue
+    }
     assert.ok(ids.length >= 2, `${key} has photos`)
     assert.ok(ids.every((id) => PREFIX[key].test(id) && STOCK_IDS.has(id)), `${key} uses only its own photos`)
     for (const id of ids) {
@@ -92,7 +104,8 @@ test('stock photo sets are disjoint per industry; unknown industries get none (n
 test('presets: each industry gets its own photos, palette and named direction; unknown → text-led, no photo', () => {
   for (const key of Object.keys(INDUSTRIES)) {
     const p = presetDesigns(key)
-    assert.ok(stockIn(p).length > 0 && stockIn(p).every((id) => PREFIX[key].test(id)), key)
+    if (PHOTOLESS.has(key)) assert.ok(p.every((d) => d.heroImage === null && d.aboutImage === null), `${key}: text-led`)
+    else assert.ok(stockIn(p).length > 0 && stockIn(p).every((id) => PREFIX[key].test(id)), key)
     assert.deepEqual(p.map((d) => d.palette), INDUSTRIES[key].palettes)
     assert.deepEqual(p.map((d) => d.name), INDUSTRIES[key].names)
     assert.equal(new Set(p.map((d) => d.hero)).size, 3)
@@ -182,6 +195,44 @@ test('generate: the business logo is never offered or placed as a hero/About pho
   addAsset(PHOTO, 'poolthru-llc')
   const g2 = (await generateWebsite(env, customer('poolthru-llc'), { logo: LOGO, draftPhotos: [PHOTO] })).generation
   assert.ok(!g2.designs.flatMap((d) => [d.heroImage, d.aboutImage]).includes(`asset:${LOGO}`))
+})
+
+test('an EARLIER logo (saved in a version, since cleared from the draft) is still never a photo: AI designer, older generator, photo pickers (PoolThru 2026-11-16)', async () => {
+  // PoolThru's history: v2 saved the upload as the logo; later the draft no longer had a logo; the AI designer then
+  // offered the old file as an "owner photo" and put it on the first screen.
+  addAsset(LOGO, 'poolthru-llc')
+  addAsset(PHOTO, 'poolthru-llc')
+  const now = Date.now()
+  db.sql.prepare('INSERT INTO website_versions (customer, version, content, created_at) VALUES (?, 2, ?, ?)').run('poolthru-llc', JSON.stringify({ headline: 'x', logo: LOGO }), now)
+  db.sql.prepare('INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES (?, ?, 2, ?, ?)').run('poolthru-llc', JSON.stringify({ headline: 'x', logo: null, photos: [PHOTO] }), now, now)
+  const { logoAssetIdsFor } = await import('../server/website.js')
+  assert.deepEqual([...(await logoAssetIdsFor(db, 'poolthru-llc'))], [LOGO])
+  // AI designer: only real photos are offered and accepted.
+  const { designContext } = await import('../server/ai-designer.js')
+  const ctx = await designContext(env, customer('poolthru-llc'))
+  assert.deepEqual([...ctx.assetIds], [PHOTO])
+  assert.ok(!JSON.stringify(ctx.images).includes(LOGO), 'not offered to the model')
+  const { validateSpec } = await import('../server/site-spec.js')
+  const placed = validateSpec({ pages: [{ slug: '', sections: [{ type: 'hero', id: 'top', heading: 'Pool care', layout: 'split', image: `asset:${LOGO}` }] }] }, { assetIds: ctx.assetIds })
+  assert.ok(!JSON.stringify(placed.spec).includes(LOGO), 'a model that places it anyway is refused')
+  // Older generator: the same rule with no logo passed in.
+  env.AI = { run: async () => ({ response: { ...reply(), designs: reply().designs.map((d) => ({ ...d, heroImage: `asset:${LOGO}` })) }, usage: {} }) }
+  const g = (await generateWebsite(env, customer('poolthru-llc'), { logo: null })).generation
+  assert.ok(!JSON.stringify(g.designs).includes(LOGO))
+  // Photo pickers: the asset list marks it, so it's never offered as a photo (it stays usable as the logo).
+  const { listAssets } = await import('../server/assets.js')
+  assert.deepEqual((await listAssets(db, 'poolthru-llc')).map((a) => [a.id, a.logo === true]).sort(), [[LOGO, true], [PHOTO, false]])
+})
+
+test('render: display headlines have an absolute ceiling on wide screens (PoolThru: 158px at 1440px)', async () => {
+  const { renderV2 } = await import('../server/site-render-v2.js')
+  const { validateSpec } = await import('../server/site-spec.js')
+  // The largest type scale and base size the validator allows (PoolThru's live design used a large scale).
+  const { spec } = validateSpec({ theme: { baseSize: 20, scale: 1.6 }, pages: [{ slug: '', sections: [{ type: 'hero', id: 'top', heading: 'A cleaner pool, without the chore', layout: 'minimal' }] }] }, { assetIds: new Set() })
+  const html = renderV2({ id: 'poolthru-llc', name: 'PoolThru', phone: '', cities: [] }, spec, { pageBase: '/p/poolthru-llc', bookUrl: '/book/x', year: 2026 })
+  const tops = [...html.matchAll(/clamp\([^;{}]*?,\s*min\(([\d.]+)px,\s*[\d.]+vw\)\)/g)].map((m) => Number(m[1]))
+  assert.ok(tops.length > 0, 'fluid sizes present')
+  assert.ok(Math.max(...tops) <= 96, `largest heading ceiling ${Math.max(...tops)}px`)
 })
 
 test('render: a saved design that placed the logo as the hero shows the design\'s other photo; the logo stays in the header', async () => {

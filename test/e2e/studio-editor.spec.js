@@ -265,3 +265,51 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   await expect(studio.getByText('Phone version ready')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
+
+test('full screen + tablet view; "No photo" really removes an unwanted picture and it stays removed after saving and reloading (PoolThru) @mobile', async ({ page, context }, info) => {
+  await useSession(context, tokenFor(info))
+  await page.goto('/dashboard/website')
+  const studio = page.locator('section[aria-label="Website Studio editor"]')
+  const frame = page.frameLocator('iframe[title="Editable website preview"]')
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
+
+  // Full screen: the same editor fills the window (and is a URL of its own); Esc returns.
+  await studio.getByRole('button', { name: 'Full screen' }).click()
+  await expect(studio).toHaveClass(/studio--full/)
+  await expect(page).toHaveURL(/[?&]full=1/)
+  if (process.env.STUDIO_SHOTS) await page.screenshot({ path: `${process.env.STUDIO_SHOTS}/${info.project.name}-studio-full.png` })
+  const box = await studio.boundingBox()
+  const vp = page.viewportSize()
+  expect(box.width).toBeGreaterThanOrEqual(vp.width - 1)
+  expect((await page.locator('iframe[title="Editable website preview"]').boundingBox()).height).toBeGreaterThan(vp.height * 0.6)
+  await page.keyboard.press('Escape')
+  await expect(studio).not.toHaveClass(/studio--full/)
+  await expect(page).not.toHaveURL(/full=1/)
+  await page.goto('/dashboard/website?full=1')
+  await expect(page.locator('section.studio--full')).toBeVisible()
+  await page.locator('section.studio--full').getByRole('button', { name: 'Exit full screen' }).click()
+
+  // Tablet view (desktop browser): an 820px-wide preview.
+  if (info.project.name !== 'mobile') {
+    await studio.getByRole('group', { name: 'Preview size' }).getByRole('button', { name: 'Tablet' }).click()
+    expect(Math.round((await page.locator('iframe[title="Editable website preview"]').boundingBox()).width)).toBe(820)
+    await studio.getByRole('group', { name: 'Preview size' }).getByRole('button', { name: 'Desktop' }).click()
+  }
+
+  // The opening's picture: "No photo" used to be ignored, so an unwanted picture could only be swapped.
+  await expect(frame.locator('.hero-media img')).toBeVisible()
+  await frame.locator('.hero-media').click()
+  const photo = studio.getByRole('dialog', { name: 'Edit' })
+  await expect(photo.locator('.studio-thumb[aria-pressed="true"]')).toHaveCount(1) // the owner sees which picture is in use
+  await photo.getByRole('button', { name: 'No photo' }).click()
+  await expect(frame.locator('.hero-media')).toHaveCount(0)
+  await page.waitForTimeout(1300)
+  await expect(studio.locator('[data-save="saved"]')).toBeVisible({ timeout: 15_000 })
+  await page.reload()
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(frame.locator('.hero-media')).toHaveCount(0)
+  await studio.getByRole('group', { name: 'Mode' }).getByRole('button', { name: 'Preview' }).click()
+  await expect(frame.locator('.hero-media')).toHaveCount(0)
+  // Undo brings it back (removal is reversible until the owner publishes).
+  await studio.getByRole('group', { name: 'Mode' }).getByRole('button', { name: 'Edit' }).click()
+})

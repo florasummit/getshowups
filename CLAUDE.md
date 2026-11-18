@@ -353,6 +353,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   generic scenes, no identifiable people), never in the "Our work" gallery (owner photos only); the owner's
   uploaded main photo always beats a stock choice. The business logo is never a photo: generation never offers it as an image, and a saved
   design that placed it as hero/About falls back to the design's other photo (logo stays in the header). Fonts are self-hosted OFL files in public/site-fonts.
+  "Logo" = current OR any earlier logo (website.js logoAssetIdsFor: draft + every version's content.logo; images carry no
+  role). Both AI generators, the starter and the Studio photo pickers (listAssets marks logo: true) use it (PoolThru
+  2026-11-16: an old logo became the first-screen photo). "No photo" in the editor removes the picture (a composition's
+  photo block is removed). Display headlines have absolute ceilings (96/80/60px) besides the viewport cap.
+  Industries (site-design.js INDUSTRIES, first match wins; wellness before pool so a day/med spa never gets pool photos)
+  each have their own starter look (fonts, radius, buttons); professional + wellness have no licensed photos yet → text-led.
+  App headers (functions/_middleware.js withAppHeaders): /dashboard and /admin are never frameable (X-Frame-Options DENY +
+  frame-ancestors 'none'); HSTS on our host; WebSocket upgrades pass through untouched.
 - AI website copy: the model writes prose only; names, services, prices, area and phone always come from records.
   Every field passes the claims filter and the invented-number check, otherwise the template text is used. A
   generation never changes the draft or live site (apply → private draft; publish → live). Previews, design

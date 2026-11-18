@@ -36,11 +36,27 @@ const OLD_ADDRESS_ALIASES = {
 }
 const text = (body, type = 'text/plain; charset=utf-8') => new Response(body, { headers: { 'Content-Type': type, 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' } })
 
+// Our own host: the signed-in areas can't be framed by another site (clickjacking: a hidden frame tricking an owner into
+// "Publish" or "Approve budget"), and browsers are told to use HTTPS only. Business websites set their own strict CSP
+// (no scripts at all, frame-ancestors 'none') in their renderer; booking/chat pages stay embeddable for now.
+export const FRAME_PROTECTED = /^\/(dashboard|admin)(\/|$)/
+export async function withAppHeaders(res, url) {
+  // A WebSocket upgrade (voice receptionist) must be returned as is: re-wrapping would drop the socket.
+  if (res.status === 101 || res.webSocket) return res
+  const headers = new Headers(res.headers)
+  if (url.protocol === 'https:') headers.set('Strict-Transport-Security', 'max-age=15552000')
+  if (FRAME_PROTECTED.test(url.pathname)) {
+    headers.set('X-Frame-Options', 'DENY')
+    if (!headers.has('Content-Security-Policy')) headers.set('Content-Security-Policy', "frame-ancestors 'none'")
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+}
+
 export async function onRequest(context) {
   const { request, env, next } = context
   const url = new URL(request.url)
   // Preview deployments have no bindings: nothing to route.
-  if (missingConfig(env).length || isOwnHost(url.hostname, env)) return next()
+  if (missingConfig(env).length || isOwnHost(url.hostname, env)) return withAppHeaders(await next(), url)
   // Certificate validation and platform paths are left to the hosting platform.
   if (url.pathname.startsWith('/.well-known/acme-challenge/') || url.pathname.startsWith('/cdn-cgi/')) return next()
 

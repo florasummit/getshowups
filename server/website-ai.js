@@ -10,7 +10,7 @@ import { markCredential, storedCredential } from './ai-credentials.js'
 import { studioAccess } from './website-studio.js'
 import { runWithOwnKey } from './ai-providers.js'
 import { inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
-import { brandName, generateContent, validateContent, LIMITS } from './website.js'
+import { brandName, generateContent, logoAssetIdsFor, photoIds, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
 import { FONTS, LAYOUTS, PALETTES, SECTIONS, SHAPES, directionFor, diversify, industryKey, presetDesigns, stockFor, validateDesign } from './site-design.js'
@@ -254,7 +254,8 @@ async function context(env, customer) {
     profile.services = JSON.parse(profile.services || '[]')
     profile.cities = JSON.parse(profile.cities || '[]')
   }
-  const assetIds = new Set(assets.results.map((a) => a.id))
+  // Photos only: never a current or earlier logo (server/website.js logoAssetIdsFor).
+  const assetIds = photoIds(new Set(assets.results.map((a) => a.id)), await logoAssetIdsFor(db, customer.id))
   const industry = industryOf(customer, profile, base)
   const allowedStock = new Set(stockFor(industry).map((s) => s.id))
   return { db, base, profile, claims, assetIds, industry, allowedStock }
