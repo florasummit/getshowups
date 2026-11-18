@@ -6,7 +6,7 @@
 // so no placeholder billing record is ever created for them.
 import { json } from '../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../server/auth.js'
-import { createCheckout, createPortal, getSubscription, listPlans, stripeConfigured } from '../../../server/stripe.js'
+import { billingSubscription, createCheckout, createPortal, getSubscription, listPlans, stripeConfigured } from '../../../server/stripe.js'
 import { getSignup } from '../../../server/onboarding.js'
 import { recoveryFor } from '../../../server/lifecycle.js'
 
@@ -16,13 +16,14 @@ export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
   if (!stripeConfigured(env)) return json(200, { configured: false })
-  const sub = await getSubscription(env.ONBOARDING_DB, session.customer.id)
+  // Access view: after go-live a test-mode subscription shows as 'sandbox' (subscribe for real; not manageable).
+  const sub = await billingSubscription(env, session.customer.id)
   const plans = (await listPlans(env.ONBOARDING_DB)).map(({ id, name, trialDays, entitlements }) => ({ id, name, trialDays, entitlements }))
   return json(200, {
     configured: plans.length > 0,
     billed: await isBilled(env.ONBOARDING_DB, session.customer.id, sub),
     plans,
-    subscription: sub && { status: sub.status, planId: sub.planId, currentPeriodEnd: sub.currentPeriodEnd, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, manageable: Boolean(sub.stripeCustomerId) },
+    subscription: sub && { status: sub.status, planId: sub.planId, currentPeriodEnd: sub.currentPeriodEnd, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, manageable: Boolean(sub.stripeCustomerId) && !sub.sandbox },
     recovery: await recoveryFor(env, session.customer.id),
   })
 }

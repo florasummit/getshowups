@@ -68,7 +68,10 @@ export default function Setup({ me, reload }) {
 
 function Step({ id, me, done, back }) {
   const { progress, customer } = me
-  if (id === 'business') return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} /> : <LegacyBusiness customer={customer} onDone={done} />
+  if (id === 'business') {
+    if (me.signupPlan && !customer && me.checkoutOpen === false) return <SignupClosed />
+    return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} /> : <LegacyBusiness customer={customer} onDone={done} />
+  }
   if (id === 'payment') return <PaymentStep me={me} onDone={done} />
   if (id === 'details') return <DetailsStep customer={customer} onDone={done} />
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
@@ -91,6 +94,21 @@ function LegacyBusiness({ customer, onDone }) {
   )
 }
 
+// Billing is sandbox-only and this person isn't an authorized tester: say so before anything is created.
+const NOT_OPEN = 'Online sign-up isn’t open yet, so we can’t take payment here and you haven’t been charged. To get started now,'
+function SignupClosed() {
+  return (
+    <div className="form">
+      <h1 id="step-title" className="title">
+        Online sign-up opens soon
+      </h1>
+      <p className="notice-soft" role="status">
+        {NOT_OPEN} <a href="/#book">book a call with us</a>.
+      </p>
+    </div>
+  )
+}
+
 // ---------- 1. Business name (creates the account's business on the chosen plan) ----------
 function NameStep({ onDone, plan }) {
   const [name, setName] = useState('')
@@ -106,6 +124,7 @@ function NameStep({ onDone, plan }) {
     }
     const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone: browserTimeZone(), serviceZips: '', plan: plan?.id || storedPlan(), source } })
     if (status === 200 || status === 201 || data.error === 'already_exists') return onDone()
+    if (data.error === 'signup_not_open') return setState({ error: `${NOT_OPEN} book a call with us from our home page.` })
     setState({ error: data.error === 'invalid_name' ? 'Enter your business name.' : 'Something went wrong. Please try again.' })
   }
   return (
@@ -134,7 +153,7 @@ function NameStep({ onDone, plan }) {
 function PaymentStep({ me, onDone }) {
   const params = new URLSearchParams(window.location.search)
   const returned = params.get('billing')
-  const [state, setState] = useState(returned === 'success' ? { confirming: true } : {})
+  const [state, setState] = useState(returned === 'success' ? { confirming: true } : me.checkoutOpen === false ? { notOpen: true } : {})
   const billing = me.progress.billing
   const doneRef = useRef(onDone)
   useEffect(() => {
@@ -213,8 +232,7 @@ function PaymentStep({ me, onDone }) {
       )}
       {state.notOpen && (
         <p className="notice-soft" role="status">
-          Online sign-up isn’t open yet, so we can’t take payment here and you haven’t been charged. To get started now,{' '}
-          <a href="/#book">book a call with us</a>.
+          {NOT_OPEN} <a href="/#book">book a call with us</a>.
         </p>
       )}
       <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || state.notOpen} onClick={checkout}>

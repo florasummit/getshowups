@@ -37,7 +37,7 @@ export async function studioAccess(env, customer) {
     if (!studioEnabled(env) || !customer || typeof customer.id !== 'string' || !CUSTOMER_RE.test(customer.id)) return false
     if ((customer.status || 'active') !== 'active') return false
     const db = env.ONBOARDING_DB
-    if ((await hostingStatus(db, customer.id)).status !== 'active') return false
+    if ((await hostingStatus(db, customer.id, Date.now(), env)).status !== 'active') return false
     return await studioSchemaReady(db)
   } catch (err) {
     console.error('studio access check failed:', err?.name)
