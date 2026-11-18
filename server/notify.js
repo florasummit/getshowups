@@ -16,7 +16,7 @@ const MIN = 60 * 1000
 export const LEAD_GRACE_MS = 10 * MIN
 export const WINDOW_MS = 2 * 60 * MIN
 const LIMIT = 200
-export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce', 'owner_callback']
+export const OWNER_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce', 'owner_callback', 'owner_coverage']
 
 const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, n)
 // Still owed to at least one member (one held by the launch gate, or added since, is not skipped).
@@ -60,6 +60,14 @@ const CALLBACKS_SQL = `
   WHERE r.created_at > ?1 AND r.status = 'open' AND r.held = 0 AND c.status = 'active' AND r.phone IS NOT NULL
     AND ${notQueued('owner_callback', 'r.id', 'r.customer')}
   ORDER BY r.created_at LIMIT ${LIMIT}`
+// Service-area requests (migration 0029): a lead outside the listed ZIPs (or with a ZIP we couldn't verify) is kept and
+// waits for the owner's decision. Told right away (no grace period: they can't book until the owner answers).
+const COVERAGE_SQL = `
+  SELECT l.id AS item, l.customer, r.created_at, r.zip, r.zip_check, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
+  FROM coverage_requests r JOIN leads l ON l.id = r.lead_id AND l.customer = r.customer JOIN customers c ON c.id = r.customer
+  WHERE r.created_at > ?1 AND r.status = 'pending' AND c.status = 'active'
+    AND ${notQueued('owner_coverage', 'l.id', 'l.customer')}
+  ORDER BY r.created_at LIMIT ${LIMIT}`
 const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', reminder_2h: 'reminder', lead_followup_1: 'follow-up', lead_followup_2: 'follow-up', no_show_rebook: 'rebooking email' }
 
 export function ownerNotice(kind, r, origin) {
@@ -90,6 +98,13 @@ export function ownerNotice(kind, r, origin) {
       body: `${name || 'A customer'} ${what} through the ${clean(r.biz, 80)} AI receptionist.\n\n${clean(r.note, 400)}\n\nPhone: ${clean(r.phone, 40)}${r.email ? `\nEmail: ${clean(r.email, 120)}` : ''}\n\nMark it done when you've called: ${origin}/dashboard/receptionist\n\n— GetShowUps`,
     }
   }
+  if (kind === 'owner_coverage') {
+    const where = r.zip_check === 'outside' ? `ZIP ${clean(r.zip, 10)}, which isn't on your service list` : r.zip ? `ZIP ${clean(r.zip, 10)}, which we couldn't verify` : 'no valid ZIP'
+    return {
+      subject: clean(`Can you serve ${name}? (${r.zip ? `ZIP ${clean(r.zip, 10)}` : 'ZIP unknown'})`, 150),
+      body: `${name} asked ${clean(r.biz, 80)} about: ${clean(shortNeed(r.need), 80)}\n\nThey're in ${where}. We kept their request and told them you'll confirm availability. They can't book until you answer.\n\n${contact}\n\nAnswer "We serve this area" or "We can't serve this area": ${origin}/dashboard/appointments\n\n— GetShowUps`,
+    }
+  }
   if (kind === 'owner_cancel') {
     const when = longWhen(r.start_at, r.timezone)
     return {
@@ -106,7 +121,7 @@ export function ownerNotice(kind, r, origin) {
 export async function queueOwnerNotices(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const out = { queued: 0, held: 0 }
-  const [bookings, leads, cancels, bounces, callbacks] = await Promise.all([
+  const [bookings, leads, cancels, bounces, callbacks, coverage] = await Promise.all([
     db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
     db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
@@ -114,6 +129,8 @@ export async function queueOwnerNotices(env, now = Date.now()) {
     db.prepare(BOUNCES_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
     // Before migration 0027 there are no receptionist requests.
     db.prepare(CALLBACKS_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
+    // Before migration 0029 there are no coverage requests.
+    db.prepare(COVERAGE_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
   ])
   const items = [
     ...bookings.results.map((r) => ['owner_booking', r]),
@@ -121,6 +138,7 @@ export async function queueOwnerNotices(env, now = Date.now()) {
     ...cancels.results.map((r) => ['owner_cancel', r]),
     ...bounces.results.map((r) => ['owner_bounce', r]),
     ...callbacks.results.map((r) => ['owner_callback', r]),
+    ...coverage.results.map((r) => ['owner_coverage', r]),
   ]
   if (!items.length) return out
   const customers = [...new Set(items.map(([, r]) => r.customer))]

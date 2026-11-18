@@ -26,6 +26,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
     .prepare(
       `SELECT count(*) AS n,
               coalesce(sum(l.status <> 'unqualified'), 0) AS qualified,
+              coalesce(sum(l.status = 'unqualified'), 0) AS outside_area,
               coalesce(sum(a.source IN (${inList(AD_SOURCES)})), 0) AS from_ads
          FROM leads l LEFT JOIN lead_attribution a ON a.lead_id = l.id AND a.customer = l.customer
         WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')} ${scopeSql}`,
@@ -77,6 +78,9 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
   const stages = {
     leads: n(leads?.n),
     qualified: n(leads?.qualified),
+    // Kept leads not in a listed ZIP (waiting for, or declined by, the owner's coverage decision). Never "qualified";
+    // an approved request becomes qualified.
+    outsideArea: n(leads?.outside_area),
     booked: n(a?.booked),
     cancelled: n(a?.cancelled),
     past: n(a?.past),
@@ -116,7 +120,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
 // judged only with enough cases (MIN); otherwise the finding says there isn't enough data. Ordered along the funnel
 // (the first broken step matters most). Never recommends more spend; never acts by itself.
 export const MIN = { leads: 10, past: 5, recorded: 8, attended: 5, spendCents: 5000, clicks: 30 }
-export const THRESHOLDS = { bookRate: 0.3, recordedShare: 0.6, showRate: 0.7 }
+export const THRESHOLDS = { bookRate: 0.3, recordedShare: 0.6, showRate: 0.7, outsideShare: 0.3 }
 const pct = (a, b) => Math.round((a / b) * 100)
 const usd = (c) => `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
@@ -136,14 +140,28 @@ export function diagnose(f) {
   if (s.leads < MIN.leads) {
     if (s.leads > 0 || f.spend.cents)
       add('sample', 'info', 'Not enough leads yet to judge', `${s.leads} lead${s.leads === 1 ? '' : 's'} in ${f.range.days} days. Rates become meaningful from about ${MIN.leads}; until then, look at each lead.`, `${s.leads} leads`)
-  } else if (s.booked / s.leads < THRESHOLDS.bookRate)
-    add(
-      'lead_to_booking',
-      'act',
-      'Most leads aren’t booking',
-      `${s.leads} leads, but only ${s.booked} booked (${pct(s.booked, s.leads)}%). Review booking availability and how fast you follow up before increasing ad spend.`,
-      `${s.leads} leads`,
-    )
+  } else {
+    // Leads outside the listed ZIPs can't book until the owner answers: their own finding, and the booking rate is
+    // judged on in-area leads only (so one problem isn't reported twice).
+    const outside = s.outsideArea ?? 0
+    if (outside / s.leads >= THRESHOLDS.outsideShare)
+      add(
+        'outside_area',
+        'act',
+        'Many leads are outside your service area',
+        `${outside} of ${s.leads} leads (${pct(outside, s.leads)}%) were outside your listed ZIP codes. ${f.scope === 'ads' ? 'Check that the campaign’s locations match your service ZIP codes, and answer' : 'Answer'} their service-area requests in Appointments.`,
+        `${s.leads} leads`,
+      )
+    const inArea = s.leads - outside
+    if (inArea >= MIN.leads && s.booked / inArea < THRESHOLDS.bookRate)
+      add(
+        'lead_to_booking',
+        'act',
+        'Most leads aren’t booking',
+        `${outside ? `${inArea} leads in your area` : `${s.leads} leads`}, but only ${s.booked} booked (${pct(s.booked, inArea)}%). Review booking availability and how fast you follow up before increasing ad spend.`,
+        `${inArea} leads`,
+      )
+  }
   if (s.past >= MIN.past && s.outcomeRecorded / s.past < THRESHOLDS.recordedShare)
     add(
       'outcomes_missing',

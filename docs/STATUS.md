@@ -2,6 +2,26 @@
 
 _Update at the end of every task. Newest first._
 
+## Service-area requests (2026-11-17) — feat/service-area-requests; migration 0029 (NOT applied)
+
+- **Root cause of lost leads:**
+  - **Booking page:** an out-of-area visitor got a dead end ("We don’t serve your area online yet").
+  - **AI receptionist:** an out-of-area conversation never created a lead at all.
+  - **Owner:** got no notice; leads with status 'unqualified' were excluded from owner notices and follow-ups.
+  - **Booking:** the lead could never book, even if the owner would serve it.
+  - **ZIP check:** a typo or ZIP+4 counted as "outside".
+- **Fix:**
+  - **Lead vs booking eligibility separated:** the ZIP rule is server/zipcode.js (U.S. Census ZCTA list); coverage requests live in server/coverage.js (table coverage_requests).
+  - **Visitor journey:** "We may be able to help in your area…"; the ZIP check never clears the form.
+  - **Receptionist:** new request_coverage tool.
+  - **Website forms:** never lose the lead.
+  - **Owner:** notice (owner_coverage), then "We serve this area" / "We can’t serve this area" in Appointments. Approval lets the same lead book from its own link (coverage_ok message + copyable link). The ZIP list never changes.
+  - **Results:** outsideArea stage, plus an outside_area diagnostic.
+- **Not done (needs a decision):**
+  - City/radius/travel-time areas: the ZIP centroid data exists in the Census file, but distance is not service area.
+  - One-click "add this ZIP to my list".
+- Needs approval: migration 0029, merge/deploy. PoolThru's ZIP list was not touched.
+
 ## Acquisition engine, phase 3 (2026-11-17) — feat/acquisition-engine; migration 0028 (NOT applied)
 
 - Audit (already built before this phase, unchanged):

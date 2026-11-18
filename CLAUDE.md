@@ -286,6 +286,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   `redirects` content (409 studio_publish_off); drafts/previews unaffected. Never publish a draft automatically.
 - Appointment modes (service_settings.appointment_mode): 'at_business' (default; customer comes in) and 'at_customer'
   (business visits; service address required, stored in lead_addresses, put on the calendar event location).
+  Service area (server/zipcode.js + server/coverage.js, migration 0029): lead eligibility ≠ booking eligibility. A lead
+  is never discarded for its location. ZIPs: checkZip (malformed → ask again, form kept; well-formed but not a Census
+  ZCTA → ask to confirm, then kept as uncertain; plain website forms never error, the ZIP state goes to review).
+  areaFor: 'in' ONLY for an exact listed ZIP (or no list); numeric closeness, states, towns never count. Not 'in' →
+  lead kept ('unqualified', attribution kept) + a pending coverage_requests row + owner_coverage notice; the visitor
+  sees "We may be able to help in your area", never times. Owner approves (same lead becomes bookable; coverage_ok
+  message with their link; link also shown to the owner) or declines (kept, never bookable). A decision never changes
+  service_zips. Funnel counts these as stages.outsideArea, not qualified. scripts/build-zip-data.mjs regenerates
+  server/zip-data.js (do not confuse server/zip.js, the .zip archive writer).
   Money per visit (server/revenue.js, migration 0028): estimated = appointment_outcomes.value_cents; invoiced and paid =
   revenue_entries (append-only; latest row per kind is current; only for 'showed' visits; recorded_by is a ref, never an
   email). Never present an estimate or an invoice as money received.

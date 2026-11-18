@@ -9,7 +9,7 @@ const FIELD_ERRORS = {
   invalid_email: 'Please enter a valid email.',
   invalid_phone: 'Please enter a valid phone number.',
   invalid_need: 'Tell us briefly what you need.',
-  invalid_zip: 'Please enter a valid ZIP code.',
+  invalid_zip: 'Please check your ZIP code: it should be 5 digits.',
   invalid_street: 'Please enter the street address, including the number.',
   invalid_city: 'Please enter the city.',
   invalid_state: 'Please enter the two-letter state, like SC.',
@@ -84,10 +84,13 @@ export default function BookingPage({ id }) {
         )}
         {step === 'time' && <GoodToKnow policies={biz.policies} />}
         {step === 'outside' && (
-          <>
+          <div className="coverage-ask" role="status">
             <h1 className="title">Thanks, {lead.firstName}</h1>
-            <p className="lede">We don’t serve your area online yet. {biz.name} has your request and may reach out.</p>
-          </>
+            <p className="lede">We may be able to help in your area.</p>
+            <p>
+              {biz.name} has your details{lead.zip ? ` for ZIP ${lead.zip}` : ''} and will confirm availability with you. You won’t need to fill this in again.
+            </p>
+          </div>
         )}
         {step === 'done' && (
           <div className="done">
@@ -154,17 +157,20 @@ function Details({ id, askZip, visit, offerSms, bizName, onDone }) {
   const [state, setState] = useState({})
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  const submit = async (e) => {
-    e.preventDefault()
+  const typedZip = (visit ? address.zip : form.zip).trim()
+  const submit = async (e, zipConfirmed = false) => {
+    e?.preventDefault()
     setState({ saving: true })
     // Ad attribution: only the utm/gclid parameters from the link, never personal data.
     const q = new URLSearchParams(location.search)
     const attribution = Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'gclid'].filter((k) => q.get(k)).map((k) => [k, q.get(k)]))
-    const body = { ...(visit ? { ...form, address } : form), ...(Object.keys(attribution).length ? { attribution } : {}) }
+    const body = { ...(visit ? { ...form, address } : form), ...(zipConfirmed ? { zipConfirmed: true } : {}), ...(Object.keys(attribution).length ? { attribution } : {}) }
     const { status, data } = await api(`/api/book/${id}/lead`, { method: 'POST', body })
     if (status === 201) {
-      return onDone({ ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0], street: visit ? address.street.trim() : null })
+      return onDone({ ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0], street: visit ? address.street.trim() : null, zip: typedZip.slice(0, 5) })
     }
+    // A ZIP we can't find: ask them to check it, or keep it as typed. Nothing they typed is cleared.
+    if (data.error === 'unknown_zip') return setState({ unknownZip: typedZip })
     setState({ error: FIELD_ERRORS[data.error] || 'Something went wrong. Please try again.' })
   }
 
@@ -221,6 +227,14 @@ function Details({ id, askZip, visit, offerSms, bizName, onDone }) {
         <p className="form-error" role="alert">
           {state.error}
         </p>
+      )}
+      {state.unknownZip && state.unknownZip === typedZip && (
+        <div className="zip-check" role="alert">
+          <p>We couldn’t find ZIP {state.unknownZip}. Please check it, or continue with it as typed.</p>
+          <button type="button" className="btn btn-quiet" onClick={() => submit(null, true)}>
+            Continue with {state.unknownZip}
+          </button>
+        </div>
       )}
       <button className="btn btn-primary btn-lg btn-block" disabled={state.saving}>
         {state.saving ? 'One moment…' : 'Choose a time'}

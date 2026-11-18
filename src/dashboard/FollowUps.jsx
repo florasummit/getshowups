@@ -45,7 +45,7 @@ const SMS_REASON = {
   registration_suspended: 'Texting is suspended. Contact GetShowUps support.',
   paused_by_platform: 'Messaging is temporarily paused by GetShowUps.',
 }
-const KIND = { lead_ack: 'Thank-you reply', lead_followup_1: 'Reminder to pick a time', lead_followup_2: 'Second reminder to pick a time', interested_followup: 'Nudge to book', confirmation: 'Booking confirmation', reminder_24h: 'Day-before reminder', reminder_2h: 'Two-hour reminder', no_show_rebook: 'Invitation to rebook', after_visit: 'Thank-you after the visit' }
+const KIND = { lead_ack: 'Thank-you reply', lead_followup_1: 'Reminder to pick a time', lead_followup_2: 'Second reminder to pick a time', interested_followup: 'Nudge to book', coverage_ok: 'Your area is covered: pick a time', confirmation: 'Booking confirmation', reminder_24h: 'Day-before reminder', reminder_2h: 'Two-hour reminder', no_show_rebook: 'Invitation to rebook', after_visit: 'Thank-you after the visit' }
 
 const ago = (t) => {
   const s = Math.max(0, (Date.now() - t) / 1000)
