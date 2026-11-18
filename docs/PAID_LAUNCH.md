@@ -1,7 +1,31 @@
 # Paid launch runbook: first paying customer
 
 Smallest safe paid launch: live Stripe billing for the existing founding plan, real emails, monitoring. Texting and Ads
-stay off (not needed for launch). Every step marked (approval) needs the founder's explicit yes. Verified 2026-11-17.
+stay off (not needed for launch). Every step marked (approval) needs the founder's explicit yes. Verified 2026-11-17;
+preconditions and effects updated 2026-11-18 after PRs #64–#68 (production 64d9d47, deployment c77c658d).
+
+## 0. Preconditions (verified 2026-11-18)
+
+- [x] Code in production: sandbox checkout gate (#63), "sign-up opens soon" (#64), go-live access rule (#65:
+  `billingSubscription`, test-mode subscriptions are not paid once live), outbox closes held mail (#66).
+- [x] Migration 0013 (`subscription_modes`) applied; webhook records live/test per subscription.
+- [x] Production backup routine verified (latest: `prod-20261118T145816Z-pre-pr64-68.sql`).
+- [ ] Owner decisions on the two self-serve businesses holding SANDBOX subscriptions (see "What changes at go-live").
+- [ ] §1 done in the Stripe Dashboard (live account, live price, live webhook, live portal, live key).
+- [ ] A rollback window: the founder available for ~1 hour after activation.
+
+## What changes for existing businesses at go-live (code in production since 2026-11-18)
+
+| Business | Subscription today | After STRIPE_LIVE_ENABLED=true |
+| --- | --- | --- |
+| poolthru-llc | none (pilot; an old `incomplete` placeholder) | unchanged: never billed, never asked to pay |
+| gsu-stripe-test-pools, gsu-journey-test | sandbox, admin-marked TEST | unchanged: keep sandbox access; never reach live Stripe |
+| bob-electrical | sandbox `active` (test mode recorded) | shown as "test payment only, choose a plan"; site stays up (onboarded); Ads live launch and billing portal refused until a real subscription |
+| toys-for-us | sandbox `active` (mode never recorded → treated as test) | same as bob-electrical |
+
+Nobody is charged by the switch. An owner who chooses the plan gets a NEW live Stripe customer (audited
+`billing.sandbox_replaced`); their sandbox data stays in Stripe test mode. Alternatives per business (each an approval):
+mark as a test business (keeps sandbox access, out of metrics) or leave as above.
 
 ## Current configuration (verified read-only)
 
@@ -48,11 +72,23 @@ stay off (not needed for launch). Every step marked (approval) needs the founder
 Rollback: put the sandbox key + sandbox webhook secret back, `STRIPE_LIVE_ENABLED` unset, plan back to the sandbox price,
 redeploy. Live subscriptions created meanwhile stay in Stripe (refund/cancel there).
 
-**Decision needed — toys-for-us:** a self-serve business (one member, not the founder) whose "active" subscription is a
-SANDBOX subscription. Access does not depend on Stripe mode, so after live billing it keeps full access without paying,
-and its billing portal will fail (its Stripe customer exists only in the sandbox). Options: (a) leave it as a free
-founding pilot, (b) contact the owner to subscribe for real (the admin can then resync from Stripe), (c) if it was a
-test, mark it as a test business. No code change until decided.
+**Superseded (2026-11-18):** the toys-for-us note that sandbox subscriptions keep full access no longer applies: since
+#65 they count as not paid under live billing (table above). The decision left is per business: leave, or mark as test.
+
+### Smoke checks right after activation (read-only unless noted)
+
+1. `https://getshowups.com/build.json` shows the new deployment; `/`, `/dashboard`, `/p/poolthru-llc` → 200.
+2. A signed-in non-tester account: the first setup step shows the business-name form (no "Online sign-up opens soon");
+   `/api/dashboard/me` → `checkoutOpen: true`.
+3. /admin → Plans: `founding` points at the LIVE price id.
+4. /admin → Reconciliation → Run now: only the expected sandbox rows differ; no live mismatches.
+5. Stripe Dashboard (live) → Webhooks → endpoint shows no failed deliveries after §3's payment.
+6. Logs (`wrangler pages deployment tail`): no `livemode_not_enabled`, no 5xx on `/api/stripe/webhook`.
+
+### Stop and roll back if
+
+A live checkout fails for a reason other than the owner abandoning it; a webhook is refused or 5xx; an existing
+business loses its website; or any charge happens that nobody started.
 
 ## 3. Controlled real-payment test (approval: a real charge)
 
