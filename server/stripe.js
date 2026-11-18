@@ -8,6 +8,7 @@ import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
 import { testStatus } from './testbusiness.js'
+import { adminEmails } from './platform.js'
 
 // Live billing is a separate, explicit decision: unless STRIPE_LIVE_ENABLED is exactly 'true', only
 // test-mode keys (sk_test_/rk_test_) count as configured, and live-mode events are refused.
@@ -17,6 +18,21 @@ const testKey = (k) => /^(sk|rk)_test_/.test(String(k || ''))
 // Stripe: checkout and the billing portal are refused for them, so no live charge can be created.
 export const stripeLiveKey = (env) => Boolean(env.STRIPE_SECRET_KEY) && !testKey(env.STRIPE_SECRET_KEY)
 const liveBlocked = async (env, customerId) => stripeLiveKey(env) && (await testStatus(env, customerId)).test
+// A sandbox (test-key) subscription unlocks the real product, so until live billing is on, sandbox checkout is only
+// for authorized testers: a platform admin, an email listed in MESSAGE_TEST_RECIPIENTS, or a business a platform admin
+// marked as a test business (a readable mark; an unreadable table never authorizes). Everyone else is told online
+// sign-up isn't open yet. Live billing (STRIPE_LIVE_ENABLED) is open to every customer.
+export async function sandboxCheckoutAllowed(env, customerId, email) {
+  if (stripeLiveEnabled(env)) return true
+  const e = String(email || '').trim().toLowerCase()
+  const testers = String(env.MESSAGE_TEST_RECIPIENTS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.includes('@'))
+  if (e && (adminEmails(env).includes(e) || testers.includes(e))) return true
+  const t = await testStatus(env, customerId)
+  return t.test === true && !t.unreadable
+}
 export const stripeConfigured = (env) => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && (testKey(env.STRIPE_SECRET_KEY) || stripeLiveEnabled(env)))
 // STRIPE_API_MOCK_ORIGIN is a loopback-only test override (e2e); never set in production.
 const apiBase = (env) => {
@@ -77,6 +93,7 @@ export async function getSubscription(db, customerId) {
 const LIVE_SUB = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']
 export async function createCheckout(env, { customer, email, planId, origin }) {
   if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
+  if (!(await sandboxCheckoutAllowed(env, customer.id, email))) return { ok: false, httpStatus: 403, error: 'billing_not_live' }
   const db = env.ONBOARDING_DB
   const plan = await db.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()
   if (!plan) return { ok: false, httpStatus: 404, error: 'plan_not_found' }

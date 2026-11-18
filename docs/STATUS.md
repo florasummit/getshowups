@@ -2,6 +2,25 @@
 
 _Update at the end of every task. Newest first._
 
+## Launch readiness: sandbox billing gate + voice diagnostics (2026-11-18) — fix/sandbox-billing-access (no migration)
+
+- **Released before this:** PR #62 merged (f9aca6d) and deployed (5a57c9ff). PoolThru's DRAFT had the old-logo block
+  removed (guarded UPDATE, backup prod-20261118T023415Z-pre-pr62.sql); live v9 untouched. Live PoolThru pages changed
+  in CSS only (headline ceilings), verified by diff; toys-for-us byte-identical.
+- **P1 found (production, read-only):** with test keys and live billing off, ANY self-serve signup could unlock the
+  full product with Stripe's public test card. `bob-electrical` (2026-11-18 02:36 UTC) did: Stripe sandbox, $499 test
+  invoice paid, one subscription, DB matches Stripe, onboarding done at 6:25, booking at 7:59. Not marked test.
+- **Fix:** createCheckout → sandboxCheckoutAllowed (admin / MESSAGE_TEST_RECIPIENTS email / admin-marked test business);
+  others get 403 billing_not_live and an honest notice. Existing subscriptions untouched.
+- **Voice receptionist:** bob-electrical's call answered 1 of ~5 turns. Turns the caller talked over were logged as
+  `model:no_reply` and generated a fallback; now `turn:talked_over` (no fallback). Root cause of the slowness is NOT
+  confirmed (likely answer latency: Opus 5.5 + tool round trips); RECEPTIONIST_VOICE_MODEL exists for a faster model
+  (approval + a live test call).
+- **Not done:** a fresh human-timed production journey (no browser control this session); Ads is allowlist-only
+  (ADS_BUSINESSES), so new businesses can't prepare campaigns; onboarding "Create a new website" still uses the older
+  design system, not Website Studio; public sites are not edge-cached (TTFB 0.6–1.9 s).
+- **Next:** owner decisions (bob-electrical access; voice model; Ads allowlist), then a human-timed run.
+
 ## Product completion pass (2026-11-18) — feat/product-completion (no migration)
 
 - **PoolThru graphic, root cause** (traced in production data, read-only):

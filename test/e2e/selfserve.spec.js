@@ -225,3 +225,20 @@ test('new customer: get started → pay → onboard → publish → book → man
   const again = await page.request.post('/api/dashboard/billing', { data: { action: 'checkout', plan: 'founding' }, headers: { Origin: `http://127.0.0.1:${fixtures.E2E_PORT}` } })
   expect([again.status(), (await again.json()).error]).toEqual([409, 'use_portal'])
 })
+
+test('sandbox billing: an ordinary new customer can’t unlock the product with a test card', async ({ page }) => {
+  const email = 'stranger@e2e-sandbox.example' // not a platform admin, not a listed tester
+  await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
+  await page.goto('/')
+  await page.getByRole('main').getByRole('link', { name: /Get started/ }).first().click()
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
+  await page.getByLabel('Business name').fill('Sandbox Stranger Pools')
+  await page.getByRole('button', { name: 'Continue to plan' }).click()
+  await expect(page.getByRole('heading', { name: 'Start your founding plan' })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue to secure checkout' }).click()
+  await expect(page.getByText('Online sign-up isn’t open yet', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toBeDisabled()
+  await expect(page).toHaveURL(/\/dashboard/)
+  const billing = await (await page.request.get('/api/dashboard/billing')).json()
+  expect(billing.subscription ?? null).toBeNull()
+})
