@@ -5,7 +5,7 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { createCustomer, updateBusiness, validateBusiness } from '../../../server/customers.js'
 import { signupPlan } from '../../../server/onboarding.js'
-import { sandboxCheckoutAllowed } from '../../../server/stripe.js'
+import { billingMisconfigured, sandboxCheckoutAllowed } from '../../../server/stripe.js'
 
 export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { needCustomer: false, write: true })
@@ -18,6 +18,11 @@ export async function onRequestPost({ request, env }) {
     if (session.customer) {
       await updateBusiness(env.ONBOARDING_DB, session.customer.id, business)
       return json(200, { id: session.customer.id })
+    }
+    // Billing half-configured (e.g. mid go-live): refuse, never create a business that would skip payment for good.
+    if (billingMisconfigured(env)) {
+      console.error('self-serve signup refused: billing_misconfigured')
+      return json(403, { error: 'signup_not_open' })
     }
     const planId = await signupPlan(env, String(body?.plan || ''))
     // Billed signup while billing is sandbox-only: only authorized testers may create one (no orphan businesses
