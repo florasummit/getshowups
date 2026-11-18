@@ -17,6 +17,6 @@ export async function bookableCustomer(env, params, { write = false, request } =
   if (!customer || customer.status !== 'active' || !customer.hoursConfirmed || !(await env.GOOGLE_TOKENS.get(`google:${id}`))) {
     return { response: json(404, { error: 'not_found' }) }
   }
-  if (!isHosted(await hostingStatus(env.ONBOARDING_DB, id))) return { response: json(404, { error: 'not_found' }) }
+  if (!isHosted(await hostingStatus(env.ONBOARDING_DB, id, Date.now(), env))) return { response: json(404, { error: 'not_found' }) }
   return { customer }
 }

@@ -70,8 +70,10 @@ export async function sendEmail(env, { id, to, subject, text, fromName, replyTo,
 
 const deliver = (env, msg, testOnly) => sendEmail(env, { id: msg.id, to: msg.to_email, subject: msg.subject, text: msg.body, testOnly })
 
-// Sends pending messages (max 3 attempts each). No-op when no provider is configured. In test mode,
-// messages to non-test recipients stay pending (held, not attempted).
+// Sends pending messages (max 3 attempts each). No-op when no provider is configured. A message the launch gate
+// doesn't allow now (test mode, non-test recipient) is closed as failed/test_mode, never attempted: held mail would
+// otherwise go out days late in a burst when MESSAGES_LIVE is turned on, and 20+ held rows (e.g. from test businesses)
+// would fill every batch and stop all other email.
 export async function flushOutbox(env, now = Date.now(), limit = 20) {
   if (!emailConfigured(env)) return { configured: false, sent: 0, failed: 0 }
   const db = env.ONBOARDING_DB
@@ -82,7 +84,13 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
   for (const msg of results) {
     // Mail queued by (or while it was) a test business only ever goes to test recipients.
     const testOnly = msg.customer ? sandboxed(statusIn(tests, msg.customer), msg.created_at) : tests === null
-    if (!recipientAllowed(env, msg.to_email, { testOnly })) continue
+    if (!recipientAllowed(env, msg.to_email, { testOnly })) {
+      // Closed only on a definite refusal. If test-business status couldn't be read (a temporary storage error),
+      // nothing is sent (fails closed) but the message stays pending and is decided on a later run.
+      if (tests === null) continue
+      await db.prepare("UPDATE email_outbox SET status = 'failed', error = 'test_mode' WHERE id = ?1 AND status = 'pending'").bind(msg.id).run()
+      continue
+    }
     const r = await deliver(env, msg, testOnly)
     if (r.ok) {
       sent++
