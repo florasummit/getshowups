@@ -388,6 +388,23 @@ test('retries: a temporary failure is retried once later and sent once; an unkno
   assert.equal(sentSms().length, 2)
 })
 
+test('out-of-area lead waiting for the owner’s coverage decision: automatic text replies carry no booking link until approved', async () => {
+  await seed('alpha')
+  db.sql.prepare("UPDATE customers SET service_zips = '29401' WHERE id = 'alpha'").run() // 29403 is now outside
+  withTwilio()
+  withAi()
+  register('alpha', 'approved')
+  const l = await smsConsentLead()
+  assert.equal(db.sql.prepare('SELECT status FROM leads WHERE id = ?').get(l).status, 'unqualified')
+  ai = () => ({ response: { intent: 'wants_to_book', answerable: true, reply: 'Thanks! The team will check your area.' }, usage: {} })
+  await text(PHONE, 'Can I book this week?', 'SMc1')
+  assert.doesNotMatch(sentSms().at(-1).get('Body'), /\/book\/alpha/, 'no link to a booking the lead can’t make')
+  const { decideCoverage } = await import('../server/coverage.js')
+  assert.equal((await decideCoverage(env, customerFromRow(await getCustomer(db, 'alpha')), l, 'approve', 'owner@alpha.example')).coverage, 'approved')
+  await text(PHONE, 'Great, can I book now?', 'SMc2')
+  assert.match(sentSms().at(-1).get('Body'), /Pick a time: https:\/\/getshowups\.com\/book\/alpha\?lead=/)
+})
+
 test('assistant timeout or an invented price → fixed safe reply with the booking link, the owner is asked to look; no model text sent', async () => {
   await seed('alpha')
   withTwilio()

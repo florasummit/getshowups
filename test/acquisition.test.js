@@ -95,7 +95,7 @@ test('funnel: one cohort from spend to paid money; test leads, other periods and
   assert.equal(db.sql.prepare('SELECT count(*) AS n FROM revenue_entries').get().n, 3, 'append-only: the correction is a new row')
   assert.deepEqual((await recordRevenue(db, cs, `A${noShow}`, 'paid', 100, 'o', NOW)).error, 'not_found', 'no money on a visit that did not happen')
   const f = await funnel(db, 'pools', { days: 30, now: NOW })
-  assert.deepEqual(f.stages, { leads: 7, qualified: 6, booked: 5, cancelled: 1, past: 4, outcomeRecorded: 3, attended: 2, noShow: 1, completed: 1 })
+  assert.deepEqual(f.stages, { leads: 7, qualified: 6, outsideArea: 1, booked: 5, cancelled: 1, past: 4, outcomeRecorded: 3, attended: 2, noShow: 1, completed: 1 })
   assert.deepEqual(f.revenue, { estimatedCents: 50000, estimatedJobs: 1, invoicedCents: 52000, invoicedJobs: 1, paidCents: 45000, paidJobs: 1 })
   assert.deepEqual(f.cost, { perLead: Math.round(40000 / 7), perQualified: Math.round(40000 / 6), perBooking: 8000, perAttended: 20000, perCompleted: 40000 })
   assert.equal(f.roas, 1.13, 'paid ÷ spend')

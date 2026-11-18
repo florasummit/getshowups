@@ -26,6 +26,7 @@ import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
 import { syncLead, syncStage, syncNote } from '../ghl.js'
 import { keepableAttribution, recordAttribution } from '../ads/attribution.js'
+import { areaFor, checkZip } from '../zipcode.js'
 import { knowledgeFor, systemPrompt, factText } from './knowledge.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
@@ -239,6 +240,13 @@ export const TOOLS = [
     strict: true,
   },
   {
+    name: 'request_coverage',
+    description:
+      "Record a service-area request when the customer's ZIP is not on the service list (or couldn't be found and they confirmed it). Needs their ZIP, name, phone and what they need, saved first with save_customer_details. The team confirms availability; it does not book anything and guarantees nothing.",
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    strict: true,
+  },
+  {
     name: 'find_available_times',
     description: "Look up real open appointment times on the business's calendar (next 14 days). Returns up to 4 options with slot ids. Only these may be offered or booked. Call it again when the customer wants a different day or time of day.",
     input_schema: {
@@ -302,6 +310,39 @@ async function upsertRequest(ctx, kind, note, urgent) {
   return { ok: true, recorded: true, kind, tell_customer: kind === 'callback' ? `Say you've recorded their callback request for the ${customer.name} team with their number. Do not promise when they will call or that anyone has been told.` : `Say you've recorded their message for the ${customer.name} team. Do not promise when they will reply.` }
 }
 
+// The conversation's one lead (created on first need: a booking or a service-area request). Returns its id, or null
+// while another turn of the same conversation is creating it.
+async function leadFor(ctx, lead) {
+  const { env, customer, conv, now } = ctx
+  const s = conv.state
+  if (s.leadId) return s.leadId
+  // One lead per conversation even when two turns act at once (voice + chat, double send): claim the id on the
+  // conversation row first; only the winner creates the lead, the other turn reuses it.
+  const db = env.ONBOARDING_DB
+  const mine = randomToken(12)
+  let leadId
+  const claim = await db.prepare('UPDATE receptionist_conversations SET lead_id = ?3 WHERE id = ?1 AND customer = ?2 AND lead_id IS NULL').bind(conv.id, customer.id, mine).run()
+  if (claim?.meta?.changes > 0) {
+    try {
+      await createLead(env, customer, { ...lead, source: ctx.channel === 'voice' ? 'call' : 'chat' }, now, { id: mine })
+    } catch (err) {
+      await db.prepare('UPDATE receptionist_conversations SET lead_id = NULL WHERE id = ?1 AND customer = ?2 AND lead_id = ?3').bind(conv.id, customer.id, mine).run()
+      throw err
+    }
+    leadId = mine
+    // From an ad (the chat page was opened with its campaign parameters): tie the lead to that campaign.
+    if (s.attribution) await recordAttribution(env, customer.id, mine, s.attribution, now).catch((e) => console.error('receptionist attribution failed:', e?.name))
+    ctx.after.push(() => syncLead(env, customer.id, leadId, now))
+  } else {
+    const row = await db.prepare('SELECT l.id FROM receptionist_conversations c JOIN leads l ON l.id = c.lead_id AND l.customer = c.customer WHERE c.id = ?1 AND c.customer = ?2').bind(conv.id, customer.id).first()
+    if (!row) return null
+    leadId = row.id
+  }
+  s.leadId = leadId
+  conv.lead_id = leadId
+  return leadId
+}
+
 async function runTool(ctx, name, input) {
   const { env, customer, conv, now } = ctx
   const s = conv.state
@@ -310,7 +351,7 @@ async function runTool(ctx, name, input) {
     const { values, problems } = checkDetails(input, conv, ctx.channel)
     Object.assign(s.customer, values)
     if (values.zip) {
-      s.inArea = customer.serviceZips.length === 0 || customer.serviceZips.includes(values.zip)
+      s.inArea = areaFor(customer, values.zip) === 'in'
       if (!s.inArea) conv.outcome = conv.outcome || 'out_of_area'
     }
     const notes = Object.entries(problems).map(([k, p]) => `${k}: ${PROBLEM_NOTE[p] || PROBLEM_NOTE[`${k}_${p}`] || p}`)
@@ -318,12 +359,42 @@ async function runTool(ctx, name, input) {
   }
   if (name === 'check_service_area') {
     const zip = spokenToDigits(input.zip).replace(/\D/g, '').slice(0, 5)
-    if (!/^\d{5}$/.test(zip)) return { ok: false, error: 'invalid_zip' }
-    const served = customer.serviceZips.length === 0 || customer.serviceZips.includes(zip)
+    if (!/^\d{5}$/.test(zip)) return { ok: false, error: 'invalid_zip', note: 'A ZIP code has 5 digits. Ask for it again.' }
+    const { check } = checkZip(zip)
+    const area = areaFor(customer, zip, check)
+    const served = area === 'in'
     if (digitsSaid(conv).includes(zip)) s.customer.zip = zip
     s.inArea = served
     if (!served) conv.outcome = conv.outcome || 'out_of_area'
-    return { ok: true, zip, served }
+    if (served) return { ok: true, zip, served }
+    // Not on the business's list (or not a ZIP we know): never a dead end, never a booking.
+    return {
+      ok: true,
+      zip,
+      served: false,
+      ...(check === 'unknown' ? { zip_known: false } : {}),
+      note: `${check === 'unknown' ? "That ZIP isn't one we can find: ask them to double-check it once. If they confirm it, continue. " : ''}Say: "We may be able to help in your area. Leave your details and we'll confirm availability." Collect their name, phone and what they need (save_customer_details), then call request_coverage. Do not offer times or book.`,
+    }
+  }
+  if (name === 'request_coverage') {
+    const c = s.customer
+    if (!c.zip) return { ok: false, error: 'zip_missing', note: 'Ask for their ZIP code first (save_customer_details).' }
+    if (areaFor(customer, c.zip) === 'in') return { ok: false, error: 'in_area', note: 'They are in the service area: offer times instead.' }
+    const missing = ['name', 'phone', 'need'].filter((k) => !c[k])
+    if (missing.length) return { ok: false, error: 'details_missing', missing, note: `Ask only for: ${missing.join(', ')} (save them with save_customer_details).` }
+    const [error, lead] = validateLead({ name: c.name, email: c.email || '', phone: c.phone, need: c.need, zip: c.zip, zipConfirmed: true }, 'at_business', { requireEmail: false })
+    if (error) return { ok: false, error, note: 'Ask the customer to correct this detail.' }
+    const leadId = await leadFor(ctx, lead)
+    if (!leadId) return { ok: false, error: 'in_progress', note: 'Their request is being saved right now: do not repeat it.' }
+    s.coverageRequested = true
+    conv.outcome = 'coverage_request'
+    ctx.committed = true
+    ctx.after.push(() => syncNote(env, customer.id, leadId, `coverage:${conv.id}`, `Service-area request from the GetShowUps receptionist (${ctx.channel}): ZIP ${c.zip}. Need: ${c.need}`, now))
+    return {
+      ok: true,
+      recorded: true,
+      tell_customer: `Say ${customer.name} has their details and will confirm whether they can help at ZIP ${c.zip}. Do not promise service, a time or when they will hear back. Do not offer times.`,
+    }
   }
   if (name === 'find_available_times') {
     const r = await openSlots(env, customer, now)
@@ -359,37 +430,14 @@ async function runTool(ctx, name, input) {
     const c = s.customer
     const missing = missingForBooking(c, customer)
     if (missing.length) return { ok: false, error: 'details_missing', missing, note: `Ask only for: ${missing.join(', ')} (save them with save_customer_details).` }
-    if (customer.serviceZips.length && !customer.serviceZips.includes(c.zip)) return { ok: false, error: 'out_of_area', note: 'They are outside the service area: do not book.' }
+    if (areaFor(customer, c.zip) !== 'in')
+      return { ok: false, error: 'out_of_area', note: 'Not on the service list: do not book. Offer to record a service-area request (request_coverage) so the team can confirm availability.' }
     const body = { name: c.name, email: c.email || '', phone: c.phone, need: c.need, zip: c.zip || '' }
     if (customer.appointmentMode === 'at_customer') body.address = { street: c.street, unit: '', city: c.city, state: c.state, zip: c.zip }
     const [error, lead] = validateLead(body, customer.appointmentMode, { requireEmail: false })
     if (error) return { ok: false, error, note: 'Ask the customer to correct this detail.' }
-    let leadId = s.leadId
-    if (!leadId) {
-      // One lead per conversation even when two turns book at once (voice + chat, double send): claim the id on the
-      // conversation row first; only the winner creates the lead, the other turn reuses it.
-      const db = env.ONBOARDING_DB
-      const mine = randomToken(12)
-      const claim = await db.prepare('UPDATE receptionist_conversations SET lead_id = ?3 WHERE id = ?1 AND customer = ?2 AND lead_id IS NULL').bind(conv.id, customer.id, mine).run()
-      if (claim?.meta?.changes > 0) {
-        try {
-          await createLead(env, customer, { ...lead, source: ctx.channel === 'voice' ? 'call' : 'chat' }, now, { id: mine })
-        } catch (err) {
-          await db.prepare('UPDATE receptionist_conversations SET lead_id = NULL WHERE id = ?1 AND customer = ?2 AND lead_id = ?3').bind(conv.id, customer.id, mine).run()
-          throw err
-        }
-        leadId = mine
-        // From an ad (the chat page was opened with its campaign parameters): tie the lead to that campaign.
-        if (s.attribution) await recordAttribution(env, customer.id, mine, s.attribution, now).catch((e) => console.error('receptionist attribution failed:', e?.name))
-        ctx.after.push(() => syncLead(env, customer.id, leadId, now))
-      } else {
-        const row = await db.prepare('SELECT l.id FROM receptionist_conversations c JOIN leads l ON l.id = c.lead_id AND l.customer = c.customer WHERE c.id = ?1 AND c.customer = ?2').bind(conv.id, customer.id).first()
-        if (!row) return { ok: false, error: 'booking_in_progress', note: 'A booking for this customer is being made right now: say you are checking and do not book again.' }
-        leadId = row.id
-      }
-      s.leadId = leadId
-      conv.lead_id = leadId
-    }
+    const leadId = await leadFor(ctx, lead)
+    if (!leadId) return { ok: false, error: 'booking_in_progress', note: 'A booking for this customer is being made right now: say you are checking and do not book again.' }
     const r = await bookAppointment(env, customer, { leadId, leadToken: await linkToken(env, 'lead', leadId), start }, now)
     if (!r.ok) {
       if (r.error === 'slot_unavailable') delete s.offered[input.slot_id]

@@ -36,7 +36,7 @@ export async function submitSiteForm(env, customer, fields, now = Date.now()) {
   const quote = fields.kind === 'quote'
   const need = String(fields.need || '').trim()
   // Always validated as a message (no service address on a website form, even for businesses that visit customers).
-  const [error, lead] = validateLead({ name: fields.name, email: fields.email, phone: fields.phone, need: need && quote ? `Quote request: ${need}` : need, zip: fields.zip }, 'at_business')
+  const [error, lead] = validateLead({ name: fields.name, email: fields.email, phone: fields.phone, need: need && quote ? `Quote request: ${need}` : need, zip: fields.zip }, 'at_business', { lenientZip: true })
   if (error) return { state: error }
   if (customer.serviceZips.length && !lead.zip) return { state: 'invalid_zip' }
   try {

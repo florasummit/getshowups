@@ -284,6 +284,67 @@
   color: var(--orange-700);
   font-size: 0.92rem;
 }
+/* Booking page: a ZIP we couldn't find (check it or keep it), and the "we'll confirm availability" answer. */
+.zip-check {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--orange-50);
+  color: var(--orange-700);
+  font-size: 0.92rem;
+}
+.zip-check p {
+  margin: 0;
+}
+.coverage-ask {
+  display: grid;
+  gap: 10px;
+}
+.coverage-ask .title,
+.coverage-ask .lede {
+  margin: 0;
+}
+.coverage-ask p:not(.lede) {
+  margin: 0;
+  color: var(--ink-600);
+}
+/* Appointments: the owner's answer to a service-area request. */
+.coverage {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--ink-50);
+}
+.coverage-q {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.coverage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.coverage .fine {
+  margin: 0;
+}
+.coverage-link {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.coverage-link input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--ink-200);
+  border-radius: 8px;
+}
 
 .hp {
   position: absolute;

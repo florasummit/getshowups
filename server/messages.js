@@ -36,6 +36,7 @@ export const TIMING = {
   lead_ack: { after: 0, maxLate: 2 * HOUR }, //               website-form leads: an answer right away
   interested_followup: { after: 24 * HOUR, maxLate: 12 * HOUR }, // replied but didn't book: one nudge a day later
   after_visit: { after: 3 * HOUR, maxLate: 24 * HOUR }, //      optional thank-you after a completed visit
+  coverage_ok: { after: 0, maxLate: 24 * HOUR }, //             owner approved an out-of-area request: pick a time
 }
 const MAX_ATTEMPTS = 3
 const STUCK_SENDING_MS = 10 * MIN
@@ -101,6 +102,15 @@ export async function scheduleLeadMessages(env, customer, lead, now = Date.now()
   )
 }
 
+// The owner approved an out-of-area request (server/coverage.js): one message with their booking link. Same delivery
+// rules as every follow-up (automations on, launch gate, opt-outs, quiet hours, skipped once they book).
+export function scheduleCoverageMessage(env, customer, lead, now = Date.now()) {
+  if (!customer.automations) return 0
+  return safely('schedule coverage', () =>
+    insert(env, channelsFor(lead.smsConsent).map((channel) => ({ id: `coverage_ok:${channel}:${lead.id}`, customer: customer.id, leadId: lead.id, kind: 'coverage_ok', channel, sendAt: now + TIMING.coverage_ok.after })), now),
+  )
+}
+
 // Booked appointment: confirmation now, reminders 24 h and 2 h before (when there is time for them).
 export function scheduleAppointmentMessages(env, customer, appt, now = Date.now()) {
   if (!customer.automations) return 0
@@ -156,6 +166,7 @@ export function skipReason(m, now) {
     case 'lead_followup_1':
     case 'lead_followup_2':
     case 'interested_followup':
+    case 'coverage_ok':
       if (m.taken_over) return 'human_takeover'
       if (m.thread_stage === 'closed' || m.thread_stage === 'opted_out') return 'not_needed'
       return m.lead_status === 'new' ? null : 'not_needed'
@@ -202,6 +213,15 @@ export async function render(env, m) {
         subject: `${biz} got your message`,
         text: `${hi}\n\nThanks for contacting ${biz} about "${shortNeed(m.need)}". We'll be in touch soon. If you'd like to book now, pick a time that works for you:\n${url}${footer}`,
         sms: `${biz}: ${hi} thanks for your message about "${shortNeed(m.need)}". We'll be in touch soon, or pick a time: ${url} Reply STOP to opt out.`,
+      }
+    }
+    case 'coverage_ok': {
+      // The owner confirmed they can help at this ZIP. Same lead, same details: the link opens the time picker.
+      const url = await resumeUrl(env, m.customer, m.lead_id)
+      return {
+        subject: `${biz} can help in your area`,
+        text: `${hi}\n\nGood news: ${biz} can help with "${shortNeed(m.need)}" in your area. Your details are saved, so you only need to pick a time:\n${url}${footer}`,
+        sms: `${biz}: good news, we can help in your area. Pick a time: ${url} Reply STOP to opt out.`,
       }
     }
     case 'interested_followup': {
@@ -331,7 +351,7 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     return smsReady.get(customer)
   }
   const quiet = async (m) => {
-    if (!threads || !['lead_ack', 'lead_followup_1', 'lead_followup_2', 'interested_followup', 'no_show_rebook', 'after_visit', 'reminder_24h'].includes(m.kind)) return null
+    if (!threads || !['lead_ack', 'lead_followup_1', 'lead_followup_2', 'interested_followup', 'coverage_ok', 'no_show_rebook', 'after_visit', 'reminder_24h'].includes(m.kind)) return null
     const p = await getSettings(db, m.customer).catch(() => DEFAULTS)
     return inQuietHours(now, m.timezone, p) ? quietEndsAt(now, m.timezone, p) : null
   }

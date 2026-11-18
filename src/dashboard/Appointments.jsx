@@ -149,6 +149,84 @@ function TestToggle({ item, onDone }) {
   )
 }
 
+// A service-area request: the lead is outside the listed ZIPs (or the ZIP couldn't be verified). The owner answers;
+// approving lets the SAME lead book (they're sent their link; the owner can copy it too). Never changes the ZIP list.
+function CoverageAnswer({ l, onDone }) {
+  const [state, setState] = useState({})
+  const c = l.coverage
+  const decide = async (decision) => {
+    setState({ busy: decision })
+    const { status, data } = await api('/api/dashboard/coverage', { method: 'POST', body: { leadId: l.leadId, decision } })
+    if (status !== 200) return setState({ error: 'Couldn’t save that. Please try again.' })
+    setState({ link: data.bookingUrl })
+    if (!data.unchanged) onDone()
+  }
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(state.link)
+      setState((s) => ({ ...s, copied: true }))
+    } catch {
+      setState((s) => ({ ...s, copied: false }))
+    }
+  }
+  const where = c.check === 'outside' ? `ZIP ${c.zip} isn’t on your service list.` : c.zip ? `We couldn’t verify ZIP ${c.zip}.` : 'They didn’t give a valid ZIP.'
+  return (
+    <div className="coverage" role="group" aria-label="Service area request">
+      {c.status === 'pending' && (
+        <>
+          <p className="coverage-q">
+            {where} Can you serve them?
+          </p>
+          <div className="coverage-actions">
+            <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(state.busy)} onClick={() => decide('approve')}>
+              We serve this area
+            </button>
+            <button type="button" className="btn btn-quiet btn-sm" disabled={Boolean(state.busy)} onClick={() => decide('decline')}>
+              We can’t serve this area
+            </button>
+          </div>
+          <p className="fine">Your service ZIP list doesn’t change. Change it in Settings if you want to serve this ZIP for everyone.</p>
+        </>
+      )}
+      {c.status === 'approved' && (
+        <p className="coverage-q">
+          You said you serve this area. They can now pick a time with their own booking link, which is emailed to them when your automatic messages are on.
+        </p>
+      )}
+      {c.status === 'approved' && !state.link && (
+        <div className="coverage-actions">
+          <button type="button" className="btn btn-quiet btn-sm" disabled={Boolean(state.busy)} onClick={() => decide('approve')}>
+            Show their booking link
+          </button>
+        </div>
+      )}
+      {c.status === 'declined' && (
+        <>
+          <p className="coverage-q">You said you can’t serve this area. They can’t book; you can still contact them.</p>
+          <div className="coverage-actions">
+            <button type="button" className="btn btn-quiet btn-sm" disabled={Boolean(state.busy)} onClick={() => decide('approve')}>
+              Changed your mind? We serve this area
+            </button>
+          </div>
+        </>
+      )}
+      {state.link && (
+        <div className="coverage-link">
+          <input readOnly value={state.link} aria-label="Their booking link" onFocus={(e) => e.target.select()} />
+          <button type="button" className="btn btn-quiet btn-sm" onClick={copy}>
+            {state.copied ? 'Copied' : 'Copy link'}
+          </button>
+        </div>
+      )}
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // A past appointment's result, with "Change" to correct it.
 function PastResult({ a, tz, visit, onDone }) {
   const [changing, setChanging] = useState(false)
@@ -301,13 +379,17 @@ export default function Appointments({ me, data, reload }) {
                   <p className="row-title">
                     {l.name}
                     {l.test && <span className="tag">Test</span>}
-                    {l.status === 'unqualified' && <span className="tag">Outside service area</span>}
+                    {l.coverage?.status === 'pending' && <span className="tag tag--warn">Coverage review needed</span>}
+                    {l.coverage?.status === 'approved' && <span className="tag tag--ok">Area approved</span>}
+                    {l.coverage?.status === 'declined' && <span className="tag">Area declined</span>}
+                    {!l.coverage && l.status === 'unqualified' && <span className="tag">Outside service area</span>}
                   </p>
                   <p className="row-sub">
                     <a href={`tel:${l.phone}`}>{phoneText(l.phone)}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
                   </p>
                   {l.address && <p className="row-sub">{l.address}</p>}
                   <p className="row-note">{l.need}</p>
+                  {l.coverage && <CoverageAnswer l={l} onDone={reload} />}
                 </div>
                 <TestToggle item={l} onDone={reload} />
               </li>

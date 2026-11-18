@@ -12,6 +12,8 @@ import { ingestLead, markStage } from './followups/engine.js'
 import { offerSmsFor } from './followups/settings.js'
 import { isTestLead } from './testdata.js'
 import { CURRENT_REVENUE_SQL, revenueReady } from './revenue.js'
+import { areaFor, checkZip } from './zipcode.js'
+import { coverageFor, coverageInsert, coverageReady } from './coverage.js'
 
 export const BOOKING_DAYS = 14
 const DAY = 24 * 60 * 60 * 1000
@@ -51,7 +53,11 @@ export const formatAddress = (a) => (a ? `${a.street}${a.unit ? `, ${a.unit}` : 
 // address is required and its ZIP is the one checked against the service area.
 // requireEmail: false only for the AI receptionist (a caller may book with a phone number; email messages are then
 // skipped as no_email and the calendar event has no invitee). Every other entry point requires an email.
-export function validateLead(body, mode = 'at_business', { requireEmail = true } = {}) {
+// ZIP (server/zipcode.js): a malformed ZIP → 'invalid_zip' (ask again, keep the rest); a well-formed ZIP that isn't a
+// known US ZIP area → 'unknown_zip' unless the visitor confirmed it (body.zipConfirmed === true), then it is kept as
+// uncertain. lenientZip (plain website forms, which can't ask again without losing what was typed): never an error,
+// the lead is kept and the ZIP's state goes to the owner's coverage review. lead.zipCheck records the result.
+export function validateLead(body, mode = 'at_business', { requireEmail = true, lenientZip = false } = {}) {
   const lead = {
     name: clean(body?.name, 80),
     email: clean(body?.email, 254).toLowerCase(),
@@ -70,6 +76,14 @@ export function validateLead(body, mode = 'at_business', { requireEmail = true }
     lead.address = address
     lead.zip = address.zip.slice(0, 5)
   }
+  const typed = lead.zip
+  if (typed) {
+    const z = checkZip(typed)
+    if (z.check === 'invalid' && !lenientZip) return ['invalid_zip']
+    if (z.check === 'unknown' && !lenientZip && body?.zipConfirmed !== true) return ['unknown_zip']
+    lead.zip = z.zip || typed.replace(/[^0-9A-Z -]/g, '').slice(0, 10)
+    lead.zipCheck = z.check
+  }
   return [null, lead]
 }
 
@@ -78,7 +92,12 @@ export function validateLead(body, mode = 'at_business', { requireEmail = true }
 // opts.id: a caller-chosen id (the receptionist claims it on its conversation first, so overlapping turns make one lead).
 export async function createLead(env, customer, lead, now = Date.now(), opts = {}) {
   const db = env.ONBOARDING_DB
-  const qualified = customer.serviceZips.length === 0 || customer.serviceZips.includes(lead.zip)
+  // Lead eligibility ≠ booking eligibility: the lead is always kept; it can book only in a listed ZIP. Anything else
+  // (outside, or a ZIP we couldn't verify) waits for the owner's coverage decision (server/coverage.js).
+  const zipCheck = lead.zipCheck || (lead.zip ? checkZip(lead.zip).check : 'invalid')
+  const area = areaFor(customer, lead.zip, zipCheck)
+  const qualified = area === 'in'
+  const coverage = !qualified && (await coverageReady(db)) ? (area === 'outside' ? 'outside' : zipCheck === 'unknown' ? 'unknown' : 'invalid') : null
   const id = opts.id || randomToken(12)
   const token = randomToken(32)
   const insertLead = db
@@ -102,12 +121,13 @@ export async function createLead(env, customer, lead, now = Date.now(), opts = {
     ...(smsConsent
       ? [db.prepare('INSERT INTO sms_consents (lead_id, customer, wording, consented_at) VALUES (?1, ?2, ?3, ?4)').bind(id, customer.id, lead.smsWording || SMS_CONSENT_WORDING, now)]
       : []),
+    ...(coverage ? [coverageInsert(db, { leadId: id, customer: customer.id, zip: lead.zip, check: coverage, now })] : []),
   ])
-  await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified }, at: now })
+  await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified, ...(coverage ? { coverage } : {}) }, at: now })
   const source = lead.source || 'booking_page'
   await ingestLead(env, customer.id, id, source, now)
   await scheduleLeadMessages(env, customer, { id, qualified, smsConsent, source }, now)
-  return { id, token, qualified }
+  return { id, token, qualified, coverage: coverage ? 'pending' : null }
 }
 
 // Open slots for the public booking page: booking hours minus Google busy time minus our own
@@ -386,7 +406,7 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     internal,
   )
   const followUp = await list(
-    `SELECT l.id, l.name, l.phone, l.email, l.need, l.status, l.created_at, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ${testCol('?3')}
+    `SELECT l.id, l.name, l.phone, l.email, l.need, l.zip, l.status, l.created_at, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ${testCol('?3')}
        FROM leads l LEFT JOIN lead_addresses la ON la.lead_id = l.id AND la.customer = l.customer
       WHERE l.customer = ?1 AND l.status IN ('new','unqualified') AND l.created_at >= ?2 ORDER BY l.created_at DESC LIMIT 25`,
     since,
@@ -437,8 +457,18 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     needsOutcome: needsOutcome.map(appt),
     // Visits that happened carry their current invoiced/paid amounts (server/revenue.js), once migration 0028 exists.
     recent: await withRevenue(db, customerId, recent.map(appt)),
-    followUp: followUp.map((r) => ({ id: r.id, leadId: r.id, test: Boolean(r.is_test), name: r.name, phone: r.phone, email: r.email, need: r.need, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
+    // Leads outside the listed ZIPs carry their service-area request (server/coverage.js) for the owner to answer.
+    followUp: await withCoverage(
+      db,
+      customerId,
+      followUp.map((r) => ({ id: r.id, leadId: r.id, test: Boolean(r.is_test), name: r.name, phone: r.phone, email: r.email, need: r.need, zip: r.zip || null, status: r.status, address: addressOf(r), createdAt: new Date(r.created_at).toISOString() })),
+    ),
   }
+}
+
+async function withCoverage(db, customerId, list) {
+  const map = await coverageFor(db, customerId, list.map((l) => l.id))
+  return list.map((l) => (map.has(l.id) ? { ...l, coverage: map.get(l.id) } : l))
 }
 
 // Owner cancels an upcoming appointment. Order matters: the Google Calendar event (ours, by its id) is removed

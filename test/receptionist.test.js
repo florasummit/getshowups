@@ -201,7 +201,7 @@ test('chat booking end to end: details saved once, real times, read back, explic
   const t1 = await chat('alpha', 'Hi, do you do weekly pool cleaning in 29403? How much is it?')
   assert.equal(t1.status, 200)
   assert.match(t1.json().reply, /\$280\/month/)
-  assert.deepEqual(modelRequests[0].tools.map((t) => t.name), ['save_customer_details', 'check_service_area', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
+  assert.deepEqual(modelRequests[0].tools.map((t) => t.name), ['save_customer_details', 'check_service_area', 'request_coverage', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
   assert.equal(modelRequests[0].model, 'claude-opus-5-5')
   // Turn 2: name + phone; the model reads back. No email needed.
   script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142' })), (body) => {
@@ -712,4 +712,41 @@ test('before migrations 0026/0027: nothing is offered; before 0027 alone, callba
   assert.equal((await call(infoApi, 'GET', '/api/receptionist/alpha', { params: { customer: 'alpha' } })).json().enabled, false)
   assert.deepEqual((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: await owner('alpha') })).json(), { ready: false })
   void playbookFor
+})
+
+test('out of area in chat: never a dead end, never a booking — the lead is kept as a coverage request with the ad campaign that brought them', async () => {
+  await seed('alpha') // serves 29401, 29403
+  enable('alpha')
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, created_at, updated_at) VALUES ('camp-alpha', 'alpha', 'google', 'active', '{}', 2000, '1', 1, 1)").run()
+  // Turn 1 (from an ad): a real ZIP next to the served ones. The tool says it isn't served and how to answer.
+  script.push(calls(details({ zip: '29405', need: 'Green pool cleanup' }), tool('check_service_area', { zip: '29405' })), (body) => {
+    const [, area] = lastToolResults(body)
+    assert.equal(area.served, false)
+    assert.match(area.note, /We may be able to help in your area\. Leave your details and we'll confirm availability\./)
+    assert.match(area.note, /Do not offer times or book/)
+    return say("We may be able to help in your area. Leave your details and we'll confirm availability. What's your name and phone?")
+  })
+  const t1 = await call(chatApi, 'POST', '/api/receptionist/alpha/chat', { params: { customer: 'alpha' }, body: { text: 'Can you clean a green pool in 29405?', attribution: { utm_source: 'google', utm_campaign: 'camp-alpha', gclid: 'Cj0KCQiAoutofarea' } } })
+  assert.equal(t1.status, 200)
+  // Booking is refused even if the model tried; the request is recorded instead.
+  script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142' }), tool('book_appointment', { slot_id: 's1', confirmation_quote: 'yes' }), tool('request_coverage', {})), (body) => {
+    const [, booking, request] = lastToolResults(body)
+    assert.equal(booking.ok, false)
+    assert.equal(request.recorded, true)
+    assert.match(request.tell_customer, /will confirm whether they can help at ZIP 29405\. Do not promise service/)
+    return say("Thanks Jamie. The alpha Co team has your details and will confirm whether they can help at 29405.")
+  })
+  const t2 = await chat('alpha', 'Jamie Rivera, 843-555-0142', t1.json())
+  assert.equal(t2.status, 200)
+  const lead = db.sql.prepare('SELECT id, status, zip FROM leads').get()
+  assert.deepEqual([lead.status, lead.zip], ['unqualified', '29405'])
+  const cov = db.sql.prepare('SELECT zip, zip_check, status FROM coverage_requests WHERE lead_id = ?').get(lead.id)
+  assert.deepEqual({ ...cov }, { zip: '29405', zip_check: 'outside', status: 'pending' })
+  const attr = db.sql.prepare('SELECT source, campaign_id FROM lead_attribution WHERE lead_id = ?').get(lead.id)
+  assert.deepEqual({ ...attr }, { source: 'google_ads', campaign_id: 'camp-alpha' })
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM appointments').get().n, 0, 'nothing booked')
+  assert.ok(!fetches.some((f) => f.url.includes('/events')), 'no calendar event')
+  assert.equal(db.sql.prepare('SELECT outcome FROM receptionist_conversations').get().outcome, 'coverage_request')
+  // The prompt itself never tells the model to turn people away.
+  assert.match(modelRequests[0].system.map?.((b) => b.text).join('') ?? String(modelRequests[0].system), /never a dead end and never a booking/)
 })

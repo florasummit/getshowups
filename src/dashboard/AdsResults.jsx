@@ -25,6 +25,7 @@ export default function AdsResults({ testAccount }) {
     ['Ad spend', usd(f.spend.cents), f.spend.clicks != null ? `${f.spend.clicks} clicks` : 'not reported yet', null],
     ['Leads from your ads', s.leads, usd(f.cost.perLead), null],
     ['Qualified (in your area)', s.qualified, usd(f.cost.perQualified), rate(s.qualified, s.leads, 10)],
+    ...(s.outsideArea ? [['Outside your service area', s.outsideArea, '', 'answer in Appointments']] : []),
     ['Booked', s.booked, usd(f.cost.perBooking), rate(s.booked, s.leads, 10)],
     ['Showed up', s.attended, usd(f.cost.perAttended), s.outcomeRecorded ? `${s.attended} of ${s.outcomeRecorded} marked` : 'none marked yet'],
     ['Jobs completed', s.completed, usd(f.cost.perCompleted), null],
@@ -119,6 +120,7 @@ export default function AdsResults({ testAccount }) {
             <summary className="fine">How these are counted</summary>
             <ul className="fine">
               <li>Leads are people who came from your ads (an ad link or Google Ads lead) in the period; test records are left out.</li>
+              <li>Qualified means their ZIP is on your service list (or you approved their area). Leads outside it are kept and counted separately until you answer them.</li>
               <li>Booked, showed up and completed follow those same leads. Cancelled bookings aren’t counted as booked.</li>
               <li>Showed up and completed come from what you mark on each visit; a booking is never counted as a visit.</li>
               <li>Paid per $1 of ads uses only money you marked as paid, divided by ad spend.</li>
