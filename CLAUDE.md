@@ -270,7 +270,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Sandbox checkout ≠ open sign-up: while STRIPE_LIVE_ENABLED is off, a test-card subscription would unlock the real
   product, so createCheckout refuses (403 billing_not_live; the plan step says online sign-up isn't open yet) unless
   sandboxCheckoutAllowed(): platform admin email, an email in MESSAGE_TEST_RECIPIENTS, or an admin-marked test business
-  (readable mark only). Existing subscriptions are never touched by this check (2026-11-18: bob-electrical, a test
+  (readable mark only). /api/dashboard/me returns checkoutOpen, so a visitor who can't buy is told before naming a
+  business ("Online sign-up opens soon"), and POST /api/dashboard/business refuses that billed signup (403
+  signup_not_open: no orphan businesses). Existing subscriptions are never touched by this check (2026-11-18: bob-electrical, a test
   subscription from before the gate, is an open owner decision). Go-live note: test-mode rows in `subscriptions` still
   grant access after STRIPE_LIVE_ENABLED=true; review subscription_modes livemode=0 businesses at go-live.
 - STRIPE_API_MOCK_ORIGIN and STRIPE_LIVE_ENABLED: mock is loopback-only (e2e); live billing needs STRIPE_LIVE_ENABLED=true
