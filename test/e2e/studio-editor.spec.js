@@ -202,7 +202,13 @@ test('two tabs: a save from an older tab is refused with a clear choice, never s
   for (const p of [a, b]) await expect(p.locator('section[aria-label="Website Studio editor"] [data-save]').first()).toBeAttached()
   const edit = async (p, text) => {
     const studio = p.locator('section[aria-label="Website Studio editor"]')
-    await p.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 }).click()
+    const h1 = p.frameLocator('iframe[title="Editable website preview"]').getByRole('heading', { level: 1 })
+    // A click that lands before the preview is wired for editing is ignored (CI flake 2026-11-18: typing went nowhere,
+    // nothing saved, no conflict): click until the heading is actually editable, then type.
+    await expect(async () => {
+      await h1.click()
+      await expect(h1).toHaveAttribute('contenteditable', /.+/, { timeout: 1000 })
+    }).toPass({ timeout: 10_000 })
     await p.keyboard.press('ControlOrMeta+a')
     await p.keyboard.type(text)
     await p.keyboard.press('Enter')
