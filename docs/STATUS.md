@@ -2,6 +2,22 @@
 
 _Update at the end of every task. Newest first._
 
+## Sales-tax analysis for the $499 plan (2026-11-19) — docs/sales-tax-analysis (docs only)
+
+- docs/SALES_TAX_ANALYSIS.md: what the $499 buys today (SaaS, generated website, hosting, support; ad management,
+  messaging and voice NOT included; ad spend paid directly to Google/Meta), general state treatment per component,
+  the bundle decision (recommendation: one SaaS business-use product, tax-exclusive), nexus math (~17 customers per
+  state at $100k), California SaaS taxable from 2027-01-01, WA/MD 2025 changes, and 12 questions for the advisor.
+- No tax configuration changed; the live price stays blocked (docs/LAUNCH_CHECKLIST.md §B).
+- **Next:** the owner sends §6 to the accountant; Q1 (home state) first.
+
+## Release 2026-11-19: Phase 1 starter live (#76), docs #77/#78
+
+- #76 merged 126dcba, deployment c5258264 (rollback target 95f0a6ba / a9a334e). Added before merge (owner decisions):
+  "Online booking hours" label; HVAC starters text-led. Backup ~/getshowups-backups/prod-20261119T143234Z-pre-pr76.sql
+  (integrity ok, counts match). After deploy: PoolThru, bob-electrical and toys-for-us HTML byte-identical to the
+  pre-release captures; subscriptions, customers, websites, counts unchanged; booking, sign-in, admin, webhook smoke ok.
+
 ## Website Studio Phase 1: conversion-first starter (2026-11-18) — feat/studio-starter-phase1 (no migration)
 
 - **Approved scope (owner, 2026-11-18):** Book online + Call, service cards, 3-step booking explanation (production
