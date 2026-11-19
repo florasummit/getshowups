@@ -95,7 +95,7 @@ product already writes; it never changes a customer's account.
   - The tester is stored as a ref, never an email. Free text is capped and email/phone/token-redacted.
 - **Activation** appears as measured only when an observer has finished an `activation` run. Automated tests never
   fill it.
-- **CI hookup (needs the owner):**
+- **CI hookup (needs the owner; exact safe setup in docs/QA_CI_SETUP.md):**
   1. Add to the CI workflow: `PLAYWRIGHT_JSON_OUTPUT_NAME=qa-report.json npx playwright test --reporter=list,json`,
      then `node scripts/qa-report.mjs qa-report.json`, with the secrets `QA_INGEST_URL` and `QA_INGEST_TOKEN`.
   2. Set `QA_INGEST_TOKEN` on Pages.

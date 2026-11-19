@@ -137,6 +137,9 @@ test('Control Center: phone width has no sideways scroll; customers and signed-o
   await page.goto('/admin/control')
   await expect(page.getByRole('heading', { name: 'Control Center', level: 1 })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Recommended next actions' })).toBeVisible()
+  // No real-person activation run exists: the dashboard says so (never derived from automated tests).
+  await expect(page.locator('[data-overview-activation]')).toHaveAttribute('data-overview-activation', 'not-measured')
+  await expect(page.locator('[data-overview-activation]')).toContainText('not measured yet')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   await page.getByRole('button', { name: 'Open Control Demo Pools' }).click()
   await expect(page.getByRole('heading', { name: /Journey:/ })).toBeVisible()

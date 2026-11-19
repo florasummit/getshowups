@@ -9,6 +9,7 @@ import { sha256Hex } from '../server/google-oauth.js'
 import { addFinding, finishHumanRun, ingestAutomatedRun, purgeQa, qaOverview, recordStep, redact, runDetail, startHumanRun, testHistory } from '../server/ops/qa.js'
 import * as ingestRoute from '../functions/api/qa/runs.js'
 import * as qaRoute from '../functions/api/platform/qa.js'
+import * as controlRoute from '../functions/api/platform/control.js'
 
 const ORIGIN = 'https://getshowups.com'
 const MIN = 60000
@@ -148,6 +149,21 @@ test('ingest validation + replay protection: same run key or same body stored on
   const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(`{"x":"${'a'.repeat(2_100_000)}"}`)); c.close() } })
   const res = await ingestRoute.onRequestPost({ request: new Request(`${ORIGIN}/api/qa/runs`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: big, duplex: 'half' }), env })
   assert.equal(res.status, 413)
+})
+
+test('no CI data and no activation run yet: overview and QA views answer with honest empty states', async () => {
+  const admin = await cookie('founder@getshowups.example')
+  const ov = await controlRoute.onRequestGet({ request: req('/api/platform/control', { c: admin }), env })
+  assert.equal(ov.status, 200)
+  const o = await ov.json()
+  assert.deepEqual(o.qa, { automated: [], human: [], failedJourneys: [] })
+  assert.deepEqual(o.activation, { measured: false, runs: 0 })
+  assert.equal(o.incidents.open, 0)
+  const q = await (await qaRoute.onRequestGet({ request: req('/api/platform/qa', { c: admin }), env })).json()
+  assert.deepEqual([q.available, q.automated, q.human, q.activation.measured], [true, [], [], false])
+  // An unfinished activation run is not a measurement.
+  await startHumanRun(db, { journey: 'activation', testerEmail: 'founder@getshowups.example' }, NOW)
+  assert.equal((await qaOverview(db, NOW + MIN)).activation.measured, false)
 })
 
 test('redact: emails, phones, long tokens, ANSI and control characters; length cap', () => {
