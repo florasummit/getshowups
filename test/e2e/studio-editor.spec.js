@@ -121,8 +121,11 @@ test('owner edits the website on the website itself: text in place, button panel
   await studio.getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(saved).toBeVisible()
 
-  // Reload: everything came back from the server (not only shown).
+  // Reload: everything came back from the server (not only shown). The editor reopens on the page the owner was on
+  // (Contact; remembered for this browser tab since 2026-11-19), then the home page is checked.
   await page.reload()
+  await expect(pageSelect).toHaveValue('contact')
+  await pageSelect.selectOption('')
   await expect(h1).toHaveText('Pools, handled with care')
   await expect(frame.getByText('$300+')).toBeVisible()
   await expect(frame.getByRole('link', { name: 'Book a pool visit' })).toBeVisible()

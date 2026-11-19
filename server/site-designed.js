@@ -21,9 +21,11 @@ const para = (s) =>
 const ld = (o) => JSON.stringify(o).replace(/</g, '\\u003c')
 
 // Image reference → { src, srcset, alt, stock }.
-export function imageFor(ref) {
+// small: the id of an owner photo's phone-sized copy. Offered only for content that opted in (phoneCopy below), so
+// stored content without that opt-in renders exactly as before (no srcset on owner photos).
+export function imageFor(ref, small = null) {
   if (!ref) return null
-  if (ref.startsWith('asset:')) return { src: `/site-assets/${ref.slice(6)}`, alt: '' }
+  if (ref.startsWith('asset:')) return small ? { src: `/site-assets/${ref.slice(6)}`, srcset: `/site-assets/${small} 800w, /site-assets/${ref.slice(6)} 1600w`, alt: '' } : { src: `/site-assets/${ref.slice(6)}`, alt: '' }
   const s = stockById(ref.slice(6))
   return s ? { src: `/site-stock/${s.file}`, srcset: `/site-stock/${s.id}-sm.jpg 900w, /site-stock/${s.file} 1600w`, alt: s.alt, stock: true } : null
 }
@@ -200,9 +202,13 @@ export function renderDesigned(biz, c, { canonical, bookUrl, privacyUrl = '/priv
   const photo = (ref) => (ref && ref !== logoRef ? ref : null)
   const heroRef = photo(d.heroImage) ?? (d.heroImage && d.hero !== 'typographic' ? photo(d.aboutImage) : null)
   const aboutRef = photo(d.aboutImage) === heroRef && !photo(d.heroImage) ? null : photo(d.aboutImage)
-  const heroIm = imageFor(own && d.hero !== 'typographic' ? own : heroRef)
-  const aboutIm = imageFor(own && d.hero === 'typographic' ? own : aboutRef)
-  const ownPhotos = (c.photos || []).map((id) => imageFor(`asset:${id}`))
+  // Phone-sized copies (content.variants) only when the content opted in with responsiveImages: true (stored by the
+  // editor from 2026-11-19 on, when it makes the copies). Everything stored before has no flag → unchanged output.
+  const phoneCopy = (ref) => (c.responsiveImages === true && ref?.startsWith('asset:') ? c.variants?.[ref.slice(6)] || null : null)
+  const pick = (ref) => imageFor(ref, phoneCopy(ref))
+  const heroIm = pick(own && d.hero !== 'typographic' ? own : heroRef)
+  const aboutIm = pick(own && d.hero === 'typographic' ? own : aboutRef)
+  const ownPhotos = (c.photos || []).map((id) => pick(`asset:${id}`))
   const industryLine = [c.services[0]?.name, c.area].filter(Boolean).join(' · ')
   const buttons = (alt = 'btn-line') =>
     `<div class="cta"><a class="btn btn-main" ${link(bookUrl)}>${cta} ${ARROW}</a>${tel ? `<a class="btn ${alt}" ${link(tel)}>${PHONE} ${esc(biz.phone)}</a>` : ''}</div>`

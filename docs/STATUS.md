@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Studio UX hardening (Agent A, 2026-11-19)
+
+- Branch feat/studio-ux-hardening, draft PR; details, defects and renderer notes in docs/STUDIO_UX_HARDENING.md.
+- Photos: "Used on" per photo (draft page · section, live site, saved versions, History, logos); Replace everywhere
+  in the draft (undoable; live changes only on publish); Delete only when nothing recoverable uses it (phone copy goes
+  with it); Hide for history-only photos (bytes kept for restores). Fix: `content.design` photos were not counted as
+  used (deletable while live, and refused by /site-assets publicly).
+- Migration **0030** `website_asset_hidden` (additive, idempotent, in ERASED_TABLES) — NOT applied to production;
+  until applied, Hide answers not_available and everything else works.
+- Editor: full screen / photo-button panel / section menu are browser-history layers (Back closes the top one, Forward
+  never re-opens it); Escape from inside the preview; full screen fixed on phones; page, section, panel tab, mode,
+  preview size and scroll remembered per business (sessionStorage); unsaved edits auto-restored when the server copy
+  is unchanged, otherwise asked + 409 conflict; preview keeps its scroll after edits.
+- Phone-sized photos for older-format (`content.design`) sites: opt-in `responsiveImages: true` stored with new
+  uploads; render goldens unchanged (no fixture or golden edited).
+- Next: review + merge the draft PR (approval); apply 0030 to production (approval) before Hide is offered for real.
+
 ## Sales-tax analysis for the $499 plan (2026-11-19) — docs/sales-tax-analysis (docs only)
 
 - docs/SALES_TAX_ANALYSIS.md: what the $499 buys today (SaaS, generated website, hosting, support; ad management,

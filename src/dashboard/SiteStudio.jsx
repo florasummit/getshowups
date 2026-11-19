@@ -3,50 +3,184 @@
 // (POST /api/dashboard/website/preview: validated like a save, nothing stored) and autosaves (debounced) with optimistic
 // concurrency (baseUpdatedAt → 409 conflict, never a silent overwrite). Undo/redo for the session; unsaved changes are
 // kept in this browser until the server confirms them. The server validates every save (it is the trust boundary).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { makePhoneCopy, uploadPhotoWithCopy } from '../lib/images.js'
 import { ADDABLE, BACKGROUNDS, BUTTONS, FONT_PAIRS, LAYOUTS, PAGE_TYPES, SECTION_LABEL, colorsFor, newId, pageTemplate, sectionTemplate, takenIds, toneOf } from './site-templates.js'
+import { draftPlaces, replacePhoto, usageText } from './photo-refs.js'
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
-const BACKUP = 'gsu-studio-unsaved'
-const readBackup = () => {
-  try {
-    return JSON.parse(localStorage.getItem(BACKUP) || 'null')
-  } catch {
-    return null
-  }
+// Per-viewer conveniences, per business (storeKey). Every read and write is wrapped: private mode or blocked storage
+// just means nothing is remembered; the server copy stays the source of truth.
+const LEGACY_BACKUP = 'gsu-studio-unsaved' // before 2026-11-19: one key for every business
+const store = (kind) => ({
+  read(key) {
+    try {
+      return JSON.parse(kind().getItem(key) || 'null')
+    } catch {
+      return null
+    }
+  },
+  write(key, v) {
+    try {
+      if (v) kind().setItem(key, JSON.stringify(v))
+      else kind().removeItem(key)
+    } catch {
+      /* storage unavailable or full: nothing is remembered */
+    }
+  },
+})
+const local = store(() => window.localStorage)
+const session = store(() => window.sessionStorage)
+
+// Browser history for Studio's layers (full screen, the photo/button panel, a section menu): each open layer is one
+// history entry, so Back closes the top layer before leaving Studio; closing a layer from the page removes its entry,
+// and Forward into an entry whose layer was closed never re-opens it. Layers are numbered by depth (history.state).
+const Layers = createContext(null)
+function useHistoryLayers() {
+  const open = useRef([]) // [{ id, depth, close }]
+  const skip = useRef(0)
+  useEffect(() => {
+    const onPop = (e) => {
+      if (skip.current > 0) return void (skip.current -= 1)
+      const depth = e.state?.gsuStudio || 0
+      while (open.current.length && open.current.at(-1).depth > depth) open.current.pop().close()
+      if (depth > open.current.length) {
+        // Forward into an entry whose layer was closed: step straight back (nothing re-opens, and no duplicate entries
+        // pile up that would make Back need extra presses to leave Studio).
+        skip.current += 1
+        window.history.go(-(depth - open.current.length))
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  return useMemo(
+    () => ({
+      push(id, close, url) {
+        if (open.current.some((l) => l.id === id)) return
+        const depth = open.current.length + 1
+        const st = window.history.state || {}
+        open.current.push({ id, depth, close })
+        // A reload keeps history.state: the entry for this layer is already there, so it's adopted, not pushed again.
+        if (st.gsuStudio === depth && st.gsuLayer === id) return
+        try {
+          window.history.pushState({ ...st, gsuStudio: depth, gsuLayer: id }, '', url ?? window.location.href)
+        } catch {
+          // history unavailable: the layer still opens and closes from the page
+        }
+      },
+      pop(id) {
+        const i = open.current.findIndex((l) => l.id === id)
+        if (i < 0) return
+        const [first] = open.current.splice(i)
+        // Only step back over our own entries (after a dashboard tab change the current entry isn't ours).
+        const here = window.history.state?.gsuStudio || 0
+        const n = here - (first.depth - 1)
+        if (n > 0 && here >= first.depth) {
+          skip.current += 1
+          window.history.go(-n)
+        }
+      },
+    }),
+    [],
+  )
 }
-const writeBackup = (v) => {
+function useBackLayer(id, isOpen, close, url) {
+  const layers = useContext(Layers)
+  const closeRef = useRef(close)
+  useEffect(() => {
+    closeRef.current = close
+  })
+  useEffect(() => {
+    if (!isOpen || !layers) return undefined
+    layers.push(id, () => closeRef.current(), url)
+    return () => layers.pop(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one entry per opening
+  }, [isOpen, id, layers])
+}
+const urlWithFull = (on) => {
   try {
-    if (v) localStorage.setItem(BACKUP, JSON.stringify(v))
-    else localStorage.removeItem(BACKUP)
+    const u = new URL(window.location.href)
+    if (on) u.searchParams.set('full', '1')
+    else u.searchParams.delete('full')
+    return u.toString()
   } catch {
-    /* private mode: the server copy is still the source of truth */
+    return undefined
   }
 }
 const REMOVED = { claim: 'a claim we can’t verify (for example a rating or guarantee) was left out', too_long: 'a text was shortened to fit', link: 'a link outside your website was changed to “Book”', image: 'a photo that isn’t yours was removed', invented_number: 'a number that isn’t in your details was left out' }
 
-export default function SiteStudio({ website, assets: initialAssets, brand, visit, checkpoints = [], onSaved, onUnsaved }) {
-  const [content, setContent] = useState(() => clone(website.draft))
+export default function SiteStudio(props) {
+  const layers = useHistoryLayers()
+  return (
+    <Layers.Provider value={layers}>
+      <StudioEditor {...props} />
+    </Layers.Provider>
+  )
+}
+
+// What this browser remembers for this business: unsaved edits (localStorage, until the server confirms them) and where
+// the owner was (sessionStorage, this browser tab only): page, section, panel tab, mode, preview size, preview scroll.
+function startState(website, storeKey) {
+  const backupKey = `gsu-studio-unsaved:${storeKey || 'site'}`
+  const uiKey = `gsu-studio-ui:${storeKey || 'site'}`
+  const serverBase = website.updatedAt ?? null
+  let backup = local.read(backupKey)
+  if (!backup) {
+    // One-time move from the old shared key: only when it was made from this very server copy.
+    const old = local.read(LEGACY_BACKUP)
+    if (old && old.base === serverBase) backup = old
+    local.write(LEGACY_BACKUP, null)
+  }
+  const differs = backup?.content && JSON.stringify(backup.content) !== JSON.stringify(website.draft)
+  // Same server copy as when the edits were made: bring them back at once (they autosave as usual). The server copy
+  // changed since (another tab, the designer, a restore): ask, and keeping them goes through the conflict check.
+  const resumed = differs && backup.base === serverBase && backup.content?.site ? backup : null
+  const ask = differs && !resumed && backup.content?.site ? backup : null
+  if (!differs) local.write(backupKey, null)
+  const ui = session.read(uiKey) || {}
+  const draft = resumed ? resumed.content : website.draft
+  const pages = draft.site?.pages || []
+  const slug = pages.some((p) => p.slug === ui.slug) ? ui.slug : ''
+  const pg = pages.find((p) => p.slug === slug)
+  return {
+    backupKey,
+    uiKey,
+    content: clone(draft),
+    resumed: Boolean(resumed),
+    ask,
+    ui: {
+      slug,
+      selected: pg?.sections?.some((s) => s.id === ui.selected) ? ui.selected : null,
+      tab: ['section', 'page', 'site', 'photos', 'history'].includes(ui.tab) ? ui.tab : 'section',
+      mode: ui.mode === 'preview' ? 'preview' : 'edit',
+      device: ['desktop', 'tablet', 'phone'].includes(ui.device) ? ui.device : null,
+      scroll: ui.scroll && typeof ui.scroll === 'object' ? ui.scroll : {},
+    },
+  }
+}
+
+function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoints = [], storeKey, onSaved, onUnsaved }) {
+  const start = useMemo(() => startState(website, storeKey), []) // eslint-disable-line react-hooks/exhaustive-deps -- once per editor
+  const writeBackup = useCallback((v) => local.write(start.backupKey, v), [start])
+  const [content, setContent] = useState(start.content)
   const [base, setBase] = useState(website.updatedAt ?? null)
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
-  const [slug, setSlug] = useState('')
-  const [selected, setSelected] = useState(null) // section id | 'nav' | 'footer'
+  const [slug, setSlug] = useState(start.ui.slug)
+  const [selected, setSelected] = useState(start.ui.selected) // section id | 'nav' | 'footer'
   const [focus, setFocus] = useState(null)
-  const [tab, setTab] = useState('section')
-  const [device, setDevice] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 700 ? 'phone' : 'desktop'))
-  const [save, setSave] = useState({ state: 'saved' })
+  const [tab, setTab] = useState(start.ui.tab)
+  const [device, setDevice] = useState(() => start.ui.device || (typeof window !== 'undefined' && window.innerWidth < 700 ? 'phone' : 'desktop'))
+  const [save, setSave] = useState({ state: start.resumed ? 'pending' : 'saved' })
   const [html, setHtml] = useState('')
   const [removed, setRemoved] = useState([])
   const [assets, setAssets] = useState(initialAssets || [])
-  const [restore, setRestore] = useState(() => {
-    const b = readBackup()
-    return b && b.base === (website.updatedAt ?? null) && JSON.stringify(b.content) !== JSON.stringify(website.draft) ? b : null
-  })
+  const [restore, setRestore] = useState(start.ask)
+  const [resumed, setResumed] = useState(start.resumed)
   const frame = useRef(null)
-  const dirty = useRef(false)
+  const dirty = useRef(start.resumed)
 
   const site = content.site
   const pageIndex = Math.max(0, site.pages.findIndex((p) => p.slug === slug))
@@ -140,7 +274,7 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
         setSave({ state: 'failed', retrying: attempt.current <= 3 })
       }
     },
-    [content, base, onSaved],
+    [content, base, onSaved, writeBackup],
   )
   useEffect(() => {
     if (!dirty.current) return
@@ -148,12 +282,19 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     setSave({ state: 'pending' })
     const t = setTimeout(() => saveNow(), 800)
     return () => clearTimeout(t)
-  }, [content, base, saveNow])
+  }, [content, base, saveNow, writeBackup])
   useEffect(() => {
     if (save.state !== 'failed' || !save.retrying) return
     const t = setTimeout(() => saveNow(), [2000, 5000, 10000][attempt.current - 1] || 10000)
     return () => clearTimeout(t)
   }, [save, saveNow])
+  // The browser tab is hidden (another tab, the phone's home screen) with edits waiting: save them now, not after the
+  // debounce (a hidden tab's timers may be slowed or the page discarded). Unsaved edits are in local storage anyway.
+  useEffect(() => {
+    const onHide = () => document.visibilityState === 'hidden' && dirty.current && save.state === 'pending' && saveNow()
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [save.state, saveNow])
   // Tell the dashboard while edits aren't server-confirmed yet (it holds Publish until they are).
   useEffect(() => {
     onUnsaved?.(save.state !== 'saved')
@@ -179,23 +320,34 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   // The preview is a same-origin frame of the real website (which runs no script). This page makes its marked elements
   // editable from outside: text in place (data-edit), buttons and photos with a small panel (data-btn / data-img), and
   // sections with compact controls. "Preview" mode turns all of that off.
-  const [mode, setMode] = useState('edit')
+  const [mode, setMode] = useState(start.ui.mode)
   // Full screen: the same editor filling the browser window (also reachable as its own tab: /dashboard/website?full=1).
-  const [full, setFull] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('full') === '1')
+  // It is one browser-history entry: Back (or Escape, or the Exit button) leaves full screen before leaving Studio.
+  const [full, setFull] = useState(() => {
+    if (typeof window === 'undefined' || new URLSearchParams(window.location.search).get('full') !== '1') return false
+    // Opened as /dashboard/website?full=1 without its history entry (a link, a new tab): the entry underneath becomes
+    // the plain editor, so Back leaves full screen first instead of leaving the dashboard.
+    const st = window.history.state || {}
+    if (!(st.gsuStudio === 1 && st.gsuLayer === 'full')) {
+      try {
+        window.history.replaceState({ ...st, gsuStudio: 0, gsuLayer: null }, '', urlWithFull(false))
+      } catch {
+        // history unavailable: full screen still works from the page
+      }
+    }
+    return true
+  })
+  const fullButton = useRef(null)
   const toggleFull = (on) => {
     setFull(on)
-    try {
-      const u = new URL(window.location.href)
-      if (on) u.searchParams.set('full', '1')
-      else u.searchParams.delete('full')
-      window.history.replaceState(window.history.state, '', u)
-    } catch {
-      // URL update is a convenience only
-    }
+    // Leaving full screen puts focus back on the control that opened it (never lost behind the closed layer).
+    if (!on) setTimeout(() => fullButton.current?.focus(), 0)
   }
+  useBackLayer('full', full, () => toggleFull(false), urlWithFull(true))
   useEffect(() => {
     if (!full) return undefined
-    const onKey = (e) => e.key === 'Escape' && !e.target.closest?.('[contenteditable],input,textarea,select') && toggleFull(false)
+    // Escape leaves full screen unless a field is being edited or a panel/menu is open (Escape closes that first).
+    const onKey = (e) => e.key === 'Escape' && !e.target.closest?.('[contenteditable],input,textarea,select') && !document.querySelector('.studio-pop, .studio-menu') && toggleFull(false)
     document.addEventListener('keydown', onKey)
     document.body.classList.add('studio-full-open')
     return () => {
@@ -206,12 +358,40 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
   const [hover, setHover] = useState(null) // { id, rect }
   const [selRect, setSelRect] = useState(null)
   const [pop, setPop] = useState(null) // { kind: 'btn'|'img', sid, path, rect }
+  useBackLayer('pop', Boolean(pop), () => setPop(null))
+  // Escape pressed while focus is inside the preview frame (its key events don't reach this page): the same order as
+  // on the page — the open panel first, then full screen.
+  const escapeRef = useRef(null)
+  useEffect(() => {
+    escapeRef.current = () => (pop ? setPop(null) : full ? toggleFull(false) : null)
+  })
   const modeRef = useRef(mode)
   const selectedRef = useRef(selected)
   useEffect(() => {
     modeRef.current = mode
     selectedRef.current = selected
   }, [mode, selected])
+  // Where the owner is, remembered for this browser tab (a tab switch, Back/Forward or a reload comes back to it).
+  const scrollRef = useRef(start.ui.scroll)
+  const slugRef = useRef(page.slug)
+  const remember = useCallback(() => session.write(start.uiKey, { slug: slugRef.current, selected: selectedRef.current, tab: tabRef.current, mode: modeRef.current, device: deviceRef.current, scroll: scrollRef.current }), [start])
+  const tabRef = useRef(tab)
+  const deviceRef = useRef(device)
+  useEffect(() => {
+    slugRef.current = page.slug
+    tabRef.current = tab
+    deviceRef.current = device
+    remember()
+  }, [page.slug, selected, tab, mode, device, remember])
+  useEffect(() => {
+    const t = setInterval(remember, 1000) // scroll position (cheap; only this tab's sessionStorage)
+    window.addEventListener('pagehide', remember)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('pagehide', remember)
+      remember()
+    }
+  }, [remember])
   const stage = useRef(null)
   const rectOf = (el) => {
     const f = frame.current
@@ -309,7 +489,10 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
     })
     doc.addEventListener('keydown', (e) => {
       const el = e.target.closest?.('[data-edit]')
-      if (!el) return
+      if (!el) {
+        if (e.key === 'Escape') escapeRef.current?.()
+        return
+      }
       const multi = /(^|\.)(body|text|answer)$/.test(el.getAttribute('data-edit')) && !el.getAttribute('data-edit').startsWith('svc|')
       if (e.key === 'Escape' || (e.key === 'Enter' && !multi)) {
         e.preventDefault()
@@ -324,13 +507,24 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
       setTick((n) => n + 1)
     })
     doc.addEventListener('submit', (e) => e.preventDefault())
+    // The preview re-renders after every edit (a new document): it keeps the owner's place on the page instead of
+    // jumping back to the top, and the place is remembered per page for this browser tab.
+    const win = frame.current.contentWindow
+    const y = scrollRef.current[slugRef.current] || 0
+    // Our own restoring scroll (and the browser's scroll anchoring while photos settle) isn't the owner scrolling: an
+    // open panel stays open just after a re-render (they may be typing in it).
+    const settled = Date.now() + 600
+    if (y) win.scrollTo(0, y)
     const follow = () => {
-      setHover(null)
-      setPop(null)
+      if (Date.now() >= settled) {
+        setHover(null)
+        setPop(null)
+      }
+      scrollRef.current = { ...scrollRef.current, [slugRef.current]: Math.round(win.scrollY) }
       const sel = selectedRef.current && doc.getElementById(selectedRef.current)
       setSelRect(sel ? rectOf(sel) : null)
     }
-    frame.current.contentWindow.addEventListener('scroll', follow, { passive: true })
+    win.addEventListener('scroll', follow, { passive: true })
     const sel = selected && doc.getElementById(selected)
     setSelRect(sel ? rectOf(sel) : null)
   }
@@ -468,7 +662,7 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
             </button>
           ))}
         </div>
-        <button type="button" className="studio-icon-btn" aria-pressed={full} onClick={() => toggleFull(!full)} title={full ? 'Exit full screen (Esc)' : 'Edit in full screen'}>
+        <button ref={fullButton} type="button" className={`studio-icon-btn${full ? ' studio-exit-full' : ''}`} aria-pressed={full} onClick={() => toggleFull(!full)} title={full ? 'Exit full screen (Esc)' : 'Edit in full screen'}>
           {full ? 'Exit full screen' : 'Full screen'}
         </button>
         <div className="studio-history">
@@ -481,14 +675,44 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
         </div>
         <SaveState save={save} onRetry={() => saveNow()} />
       </div>
-      {restore && (
-        <div className="studio-notice" role="alert">
-          <span>You have unsaved changes from your last visit.</span>
+      {resumed && (
+        <div className="studio-notice" role="status">
+          <span>We brought back the changes you hadn’t saved yet.</span>
           <button
             type="button"
             className="link-btn"
             onClick={() => {
-              change((c) => Object.assign(c, clone(restore.content)))
+              setResumed(false)
+              dirty.current = false
+              writeBackup(null)
+              setPast([])
+              setFuture([])
+              setContent(clone(website.draft))
+              setBase(website.updatedAt ?? null)
+              setSave({ state: 'saved' })
+            }}
+          >
+            Discard them
+          </button>
+          <button type="button" className="link-btn" onClick={() => setResumed(false)}>
+            OK
+          </button>
+        </div>
+      )}
+      {restore && (
+        <div className="studio-notice" role="alert">
+          <span>You have unsaved changes from an earlier visit, but your website was saved somewhere else since.</span>
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              // Kept against the copy they were made from: the save then reports the conflict, and the owner chooses
+              // (load the latest, or keep these). Never a silent overwrite of the newer copy.
+              setPast((p) => [...p.slice(-49), content])
+              setFuture([])
+              dirty.current = true
+              setBase(restore.base ?? null)
+              setContent(clone(restore.content))
               setRestore(null)
             }}
           >
@@ -590,6 +814,14 @@ export default function SiteStudio({ website, assets: initialAssets, brand, visi
               <PhotosPanel
                 assets={assets}
                 variants={content.variants}
+                content={content}
+                saved={save.state === 'saved'}
+                onReplace={(from, to) => {
+                  const r = replacePhoto(content, from, to)
+                  if (r.count) change((c) => Object.assign(c, r.content))
+                  return r.count
+                }}
+                onHidden={(id) => setAssets((l) => l.filter((x) => x.id !== id))}
                 onAdded={(list) => {
                   setAssets((l) => [...list.filter((x) => !x.existing).map((x) => x.asset), ...l, ...list.filter((x) => x.small).map((x) => x.small)])
                   const pairs = list.filter((x) => x.small).map((x) => [x.asset.id, x.small.id])
@@ -649,10 +881,14 @@ function SectionMenu({ actions: a }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
   const wrap = useRef(null)
+  const toggle = useRef(null)
+  const menuId = `menu-${useId()}`
+  useBackLayer(menuId, open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
     const away = (e) => !wrap.current?.contains(e.target) && setOpen(false)
-    const esc = (e) => e.key === 'Escape' && setOpen(false)
+    // Escape closes the menu and returns focus to its button.
+    const esc = (e) => e.key === 'Escape' && (setOpen(false), toggle.current?.focus())
     document.addEventListener('mousedown', away)
     document.addEventListener('keydown', esc)
     return () => (document.removeEventListener('mousedown', away), document.removeEventListener('keydown', esc))
@@ -660,7 +896,7 @@ function SectionMenu({ actions: a }) {
   const pick = (fn) => () => (fn(), setOpen(false))
   return (
     <span className="studio-menu-wrap" ref={wrap}>
-      <button type="button" className="studio-sbar-btn" aria-haspopup="menu" aria-expanded={open} title="More" aria-label={`More for ${a.label}`} onClick={() => (setOpen(!open), setAdding(false))}>
+      <button ref={toggle} type="button" className="studio-sbar-btn" aria-haspopup="menu" aria-expanded={open} title="More" aria-label={`More for ${a.label}`} onClick={() => (setOpen(!open), setAdding(false))}>
         ⋯
       </button>
       {open && (
@@ -1191,12 +1427,40 @@ function LookEditor({ site, onSite, services, onServices }) {
 }
 
 // ---------- photos ----------
-function PhotosPanel({ assets, variants, onAdded, onRemoved, onReload }) {
+// Each photo says where it is used ("Used on: Home · Hero, your live website, 2 saved versions"): the draft places come
+// from the content being edited (unsaved edits included), the stored copies from the server (GET ?usage=1). Remove is
+// offered only for a photo nothing uses; Hide for one only history uses (kept for restores); Replace swaps it
+// everywhere in the draft (the live website changes only when the owner publishes).
+function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onReload, onReplace, onHidden }) {
   const [state, setState] = useState({})
+  const [usage, setUsage] = useState(null) // { [id]: usage } | null while loading | { failed }
+  const [hidden, setHidden] = useState([])
+  const [replacing, setReplacing] = useState(null) // photo id
+  const [usageTick, setUsageTick] = useState(0)
+  const loadUsage = () => setUsageTick((n) => n + 1)
+  useEffect(() => {
+    let live = true
+    api('/api/dashboard/website/assets?usage=1').then(({ status, data }) => {
+      if (!live) return
+      if (status !== 200) return setUsage({ failed: true })
+      setUsage(Object.fromEntries(data.assets.map((a) => [a.id, a.usage])))
+      setHidden(data.assets.filter((a) => a.hidden))
+    })
+    return () => {
+      live = false
+    }
+  }, [usageTick, assets.length, saved])
   const used = assets.reduce((n, a) => n + (a.size || 0), 0)
   const copies = new Set(Object.values(variants || {}))
   const photos = assets.filter((a) => !copies.has(a.id))
   const missing = photos.filter((a) => !variants?.[a.id])
+  const statusOf = (a) => {
+    const places = draftPlaces(content, a.id)
+    const u = usage && !usage.failed ? usage[a.id] : null
+    const known = usage && !usage.failed
+    const stored = Boolean(u?.live || u?.versions || u?.history)
+    return { places, u, known, parts: usageText(places, u ? { ...u, draft: saved && u.draft } : null), canDelete: known && saved && !places.length && !u?.draft && !stored && !a.logo, canHide: known && saved && !places.length && !u?.draft && !u?.live && stored }
+  }
   const pick = async (e) => {
     const files = [...(e.target.files || [])]
     e.target.value = ''
@@ -1217,9 +1481,30 @@ function PhotosPanel({ assets, variants, onAdded, onRemoved, onReload }) {
     setState(error ? { error } : {})
   }
   const remove = async (id) => {
+    if (!window.confirm('Delete this photo for good? It isn’t used anywhere on your website, in saved versions or in History.')) return
     const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'delete', id } })
-    if (status === 200) onRemoved(id)
-    else setState({ error: data?.error === 'in_use' ? 'That photo is used on your website (draft, live version, a saved version or an earlier draft). Replace it there first.' : 'Couldn’t remove that photo.' })
+    if (status === 200) {
+      for (const x of data.removed || [id]) onRemoved(x)
+      setState({ note: 'Photo deleted.' })
+    } else setState({ error: data?.error === 'in_use' ? `That photo is still used (${usageText([], data.usage).join(', ') || 'your draft'}), so it was kept.` : 'Couldn’t delete that photo. Please try again.' })
+    loadUsage()
+  }
+  const hide = async (id, on) => {
+    if (on && !window.confirm('Hide this photo? It leaves your photo list and the photo choices. It is kept, so restoring a saved version or an earlier draft that shows it still works. You can show it again below.')) return
+    const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: on ? 'hide' : 'show', id } })
+    if (status === 200) {
+      if (on) onHidden(id)
+      else await onReload()
+      setState({ note: on ? 'Photo hidden. It’s kept for your saved versions and History.' : 'Photo shown again.' })
+    } else setState({ error: data?.error === 'not_available' ? 'Hiding photos isn’t available yet.' : data?.error === 'live' || data?.error === 'in_draft' ? 'That photo is on your website, so it can’t be hidden. Replace it first.' : 'Couldn’t change that photo. Please try again.' })
+    loadUsage()
+  }
+  const replace = (from, to) => {
+    const n = draftPlaces(content, from).length
+    if (!window.confirm(`Use the new photo in ${n === 1 ? 'that place' : `all ${n} places`} in your draft? You can undo this. Your live website changes only when you publish.`)) return
+    const count = onReplace(from, to)
+    setReplacing(null)
+    setState({ note: count ? `Replaced in your draft (${count} place${count === 1 ? '' : 's'}). Publish to show it on your live website.` : 'Nothing to replace.' })
   }
   // Phone-sized copies for photos uploaded before copies existed (made in this browser from our own copy).
   const makeCopies = async () => {
@@ -1276,17 +1561,73 @@ function PhotosPanel({ assets, variants, onAdded, onRemoved, onReload }) {
           {state.error}
         </p>
       )}
-      <ul className="studio-thumbs studio-thumbs--list">
-        {photos.map((a) => (
-          <li key={a.id}>
-            <img src={a.url} alt="" />
-            <span className="fine">{variants?.[a.id] ? 'Phone version ready' : 'No phone version'}</span>
-            <button type="button" className="link-btn" onClick={() => remove(a.id)}>
-              Remove
-            </button>
-          </li>
-        ))}
+      {!saved && <p className="fine">Waiting for your latest changes to save before photos can be deleted or hidden…</p>}
+      <ul className="studio-photo-list" aria-label="Your photos">
+        {photos.map((a, i) => {
+          const s = statusOf(a)
+          const others = photos.filter((x) => x.id !== a.id && !x.logo)
+          return (
+            <li key={a.id} className="studio-photo-row">
+              <img src={a.url} alt={`Photo ${i + 1}`} />
+              <div className="studio-photo-info">
+                <span className="fine">
+                  {a.logo ? 'Logo · ' : ''}
+                  {variants?.[a.id] ? 'Phone version ready' : 'No phone version'}
+                </span>
+                <span className="fine studio-photo-used" data-testid="photo-usage">
+                  {!s.known ? (usage?.failed ? 'Couldn’t check where it’s used.' : 'Checking where it’s used…') : s.parts.length ? `Used on: ${s.parts.join(', ')}` : 'Not used anywhere'}
+                </span>
+                <span className="studio-photo-row-actions">
+                  {s.places.length > 0 && others.length > 0 && (
+                    <button type="button" className="link-btn" aria-expanded={replacing === a.id} onClick={() => setReplacing(replacing === a.id ? null : a.id)} aria-label={`Replace photo ${i + 1} in the draft`}>
+                      Replace…
+                    </button>
+                  )}
+                  {s.canDelete && (
+                    <button type="button" className="link-btn danger" onClick={() => remove(a.id)} aria-label={`Delete photo ${i + 1}`}>
+                      Delete
+                    </button>
+                  )}
+                  {s.canHide && (
+                    <button type="button" className="link-btn" onClick={() => hide(a.id, true)} aria-label={`Hide photo ${i + 1}`}>
+                      Hide
+                    </button>
+                  )}
+                </span>
+                {s.u?.live && !s.places.length && <span className="fine">Still on your live website until you publish your draft.</span>}
+              </div>
+              {replacing === a.id && (
+                <fieldset className="studio-replace">
+                  <legend className="fine">Choose the photo to use instead</legend>
+                  <div className="studio-thumbs">
+                    {others.map((o) => (
+                      <button key={o.id} type="button" className="studio-thumb" onClick={() => replace(a.id, o.id)} aria-label={`Use photo ${photos.indexOf(o) + 1} instead`}>
+                        <img src={o.url} alt="" />
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+            </li>
+          )
+        })}
       </ul>
+      {hidden.length > 0 && (
+        <details className="studio-hidden-photos">
+          <summary>Hidden photos ({hidden.length})</summary>
+          <p className="fine">Kept because a saved version or an earlier draft shows them.</p>
+          <ul className="studio-photo-list">
+            {hidden.map((a, i) => (
+              <li key={a.id} className="studio-photo-row">
+                <img src={a.url} alt={`Hidden photo ${i + 1}`} />
+                <button type="button" className="link-btn" onClick={() => hide(a.id, false)} aria-label={`Show hidden photo ${i + 1} again`}>
+                  Show again
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }
