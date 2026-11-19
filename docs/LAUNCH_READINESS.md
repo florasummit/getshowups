@@ -159,17 +159,62 @@ invited, unbilled businesses; Paid = first paying customer.
 | Monitoring | Pull-only (Business Review) | /admin/review | J-5 no push alerts; slot-lookup failures not recorded | High | Eng | Approve FOUNDER_ALERTS_PROPOSAL.md, then PR | 1 d | ✅ | ⚠️ | ⛔ J-5 |
 | Recovery / rollback | Proven runbooks | backups + rollbacks used 2026-11-17/18/19 | — | Low | Owner | Keep the backup-before-release rule | 0 | ✅ | ✅ | ✅ |
 
-## 4. Agent A: Website Studio (filled in after review)
+## 4. Agent A: Website Studio (PR #80, head b7a7fad, CI green)
 
-_Pending: PR, scope delivered, render verification._
+- **Built:**
+  - Photo usage tracking across the draft, the live site, saved versions, History and logos.
+  - Delete only when nothing recoverable uses the photo.
+  - Hide (bytes kept; migration 0030).
+  - Replace everywhere in the draft.
+  - Back/Forward-aware full screen and panels; Escape inside the preview frame.
+  - Editor state preservation with the 409 conflict path.
+  - Opt-in phone images (`responsiveImages: true`).
+  - EXIF orientation fix.
+  - Details: docs/STUDIO_UX_HARDENING.md.
+- **Real defect fixed:** photos used by older `content.design` sites weren't counted as in use. They could be deleted while live, and the public asset route refused them.
+- **Deferred:**
+  - No prompt when leaving Studio through a dashboard tab (the edits are kept).
+  - Escape inside the frame on touch devices.
+  - AI-composition phone order (needs renderer versioning).
 
-## 5. Agent B: AI communications (filled in after review)
+## 5. Agent B: AI communications (PR #81, head ec5e4f3, CI green)
 
-_Pending: PR, root causes, measurements (mocked), provider recommendation._
+- **Voice root causes fixed (in our code, checked against Retell's protocol):**
+  - an interrupted answer wasn't aborted;
+  - one failed turn silenced the rest of the call;
+  - Retell's auto-reconnect was refused;
+  - a bad `response_id` broke staleness checks;
+  - talked-over words were lost;
+  - the holding line was late;
+  - the 25 s ×2 timeout;
+  - the microphone was requested after the call was created.
 
-## 6. Integration and security review (filled in after review)
+  The 2026-11-18 bob-electrical call fits the first and the fifth (preliminary until a live call).
+- **Measured, mocked harness only (our overhead, not end-to-end):** first spoken chunk after the model's first token P50 8 ms / P95 10 ms (n=200). The next turn after an interruption went from ≈3.06 s to <0.1 s (n=1). End-of-speech → audio on a real call is **not measured**. Targets are in docs/COMMS_RELIABILITY.md, kept separate from these results.
+- **Voice gate:** `RECEPTIONIST_VOICE_BUSINESSES` (allowlist; empty = nobody). Enforced at call creation, on the socket and on reconnect; Beta label; honest wording; chat unchanged; no stored setting changed.
+- **Email/booking:**
+  - outbox backoff, expiry and permanent-failure handling;
+  - the confirmation and owner booking notice go out right after the booking (the cron stays as fallback; the deterministic id and the Resend idempotency key prevent duplicates);
+  - orphan Calendar events are cleaned up and retried;
+  - booking and availability failure/recovery events (codes for the founder-alert PR).
+- **Provider:** keep Retell, tune the configuration (`retell-setup.mjs --tuned`, never run). Retell stores everything by default with no retention limit; the proposal is `everything_except_pii` and 30 days (attorney/owner).
 
-_Pending._
+## 6. Integration and security review (coordinator)
+
+- **Integration worktree:** main + #80 + #81 + #82. Only conflict: docs/STATUS.md, resolved keep-both. No other file is touched by more than one PR, and there are no dependency changes. `npm run verify:all`: **634/634 unit** (604 + 10 + 14 + 6), **166 passed / 1 skipped** Playwright (A's opt-in screenshot test), lint clean.
+- **Customer websites:** PoolThru (5 pages), bob-electrical and toys-for-us rendered from the latest local backup through the full `serveSite` path (including B's `offerSmsFor`/`receptionistOn`), with the receptionist off and on. **Byte-identical to main** on #80, #81 and the integration branch. The 12 render goldens pass; `test/fixtures` is unchanged.
+- **Security review:**
+  - Asset actions are session-scoped and same-origin, ownership is checked by `customer` on every query, another business's id gets 404, and error codes are allowlisted.
+  - Delete is refused for anything recoverable.
+  - 0030 is additive and idempotent, is in ERASED_TABLES, and fails soft before it is applied. No 0031 was needed.
+  - The voice gate is fail-closed, with server enforcement in 3 places.
+  - The reconnect window is limited to 2 minutes and the conversation must not have ended.
+  - Immediate confirmations use the same launch gate (`recipientAllowed`) and the atomic claim.
+  - The edited outbox test assertions are stricter, not weaker.
+  - No secrets or personal data appear in events (codes and numbers only).
+- **Found nothing blocking.** Notes:
+  - (1) With B's change, account mail (e.g. an invite) queued more than 23 h ago is closed as `expired`, not sent (intended: no late bursts).
+  - (2) Concurrent cron and immediate flush of the same outbox row is deduplicated by Resend's idempotency key, not by our database.
 
 ## 7. Critical path to the first paying customer
 
