@@ -1,8 +1,11 @@
 import Icon from './Icon.jsx'
 import SectionHeading from './SectionHeading.jsx'
-import { getStarted, pricing } from '../content/site.js'
+import GetStarted from './GetStarted.jsx'
+import { useStartAction } from '../lib/enrollment.js'
+import { pricing } from '../content/site.js'
 
 export default function Pricing() {
+  const start = useStartAction()
   return (
     <section id="pricing" className="section" aria-labelledby="pricing-title">
       <div className="container">
@@ -31,12 +34,17 @@ export default function Pricing() {
               </li>
             ))}
           </ul>
-          <a href={getStarted.href} className="btn btn-primary btn-lg btn-block">
-            {getStarted.label}
-          </a>
-          <a href="#book-demo" className="price-alt">
-            Questions first? Book a call
-          </a>
+          {start.closed && (
+            <p className="price-note enrollment-note" role="status">
+              {start.note}
+            </p>
+          )}
+          <GetStarted className="btn btn-primary btn-lg btn-block" />
+          {!start.closed && (
+            <a href="#book-demo" className="price-alt">
+              Questions first? Book a call
+            </a>
+          )}
           <p className="price-fine">{pricing.excludes}</p>
         </div>
       </div>

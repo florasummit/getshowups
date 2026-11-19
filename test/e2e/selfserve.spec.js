@@ -18,7 +18,9 @@ test('new customer: get started → pay → onboard → publish → book → man
   await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
   await returnFromGoogle(page, '**/api/google/oauth/start', 'POST', '/api/google/oauth/callback', `connect:${email}`)
 
-  // Homepage → Get started (plan selected) → create account.
+  // Homepage → Get started (plan selected) → create account. Enrollment shown as open (go-live state); the server
+  // still applies the real sandbox rule, which lets this listed tester through.
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: true } }))
   await page.goto('/')
   await page.getByRole('main').getByRole('link', { name: /Get started/ }).first().click()
   await expect(page.getByRole('heading', { name: 'Create your GetShowUps account' })).toBeVisible()
@@ -229,13 +231,20 @@ test('new customer: get started → pay → onboard → publish → book → man
 test('sandbox billing: an ordinary new customer can’t unlock the product with a test card', async ({ page }) => {
   const email = 'stranger@e2e-sandbox.example' // not a platform admin, not a listed tester
   await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
-  await page.goto('/')
-  await page.getByRole('main').getByRole('link', { name: /Get started/ }).first().click()
+  // Homepage: no sign-up link at all while enrollment is closed (site.spec.js). An old or shared sign-up link still
+  // explains it BEFORE Google sign-in, offers a call first, and keeps sign-in for accounts/invitations/testers.
+  await page.goto('/dashboard?plan=founding')
+  await expect(page.getByRole('heading', { name: 'Online enrollment isn’t open yet' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Book a call' })).toHaveAttribute('href', '/#book-demo')
+  // "Book a call" lands on the call section, not the top of the homepage (React renders after the fragment scroll).
+  await page.getByRole('link', { name: 'Book a call' }).click()
+  await expect(page.locator('#book-demo')).toBeInViewport()
+  await page.goto('/dashboard?plan=founding')
   await page.getByRole('link', { name: 'Continue with Google' }).click()
-  // Told up front, before a business is created: no name form, no checkout button.
+  // Signed in anyway: told again before a business is created: no name form, no checkout button.
   await expect(page.getByRole('heading', { name: 'Online sign-up opens soon' })).toBeVisible()
   await expect(page.getByText('Online sign-up isn’t open yet', { exact: false })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'book a call with us' })).toHaveAttribute('href', '/#book')
+  await expect(page.getByRole('link', { name: 'book a call with us' })).toHaveAttribute('href', '/#book-demo')
   await expect(page.getByLabel('Business name')).toHaveCount(0)
   const me = await (await page.request.get('/api/dashboard/me')).json()
   expect([me.customer, me.checkoutOpen]).toEqual([null, false])

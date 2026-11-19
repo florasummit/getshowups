@@ -2,7 +2,7 @@
 // device resumes at the right place), the business profile collected during onboarding, and the
 // launch-readiness checklist shown at the end of onboarding and on the dashboard.
 import { unapprovedClaims } from './ads/spec.js'
-import { billingSubscription, listPlans, stripeConfigured } from './stripe.js'
+import { billingMisconfigured, billingSubscription, listPlans, stripeConfigured, stripeLiveEnabled } from './stripe.js'
 import { websiteSummary } from './website.js'
 import { domainFor } from './domains.js'
 import { internalEmails, isTestLead } from './testdata.js'
@@ -19,6 +19,17 @@ export async function signupPlan(env, requested) {
   if (!stripeConfigured(env)) return null
   const plans = await listPlans(env.ONBOARDING_DB)
   return (plans.find((p) => p.id === requested) || plans[0])?.id ?? null
+}
+
+// Whether a member of the public (no account, no invitation, not an authorized tester) could sign up and pay online
+// right now. Mirrors POST /api/dashboard/business: half-configured billing refuses; a billed plan needs live billing
+// (sandbox checkout is for admins/testers only). Shown to visitors BEFORE Google sign-in; it never decides access
+// (admin, tester and invited sign-in still works, and the server checks every request). Reveals one boolean only.
+export async function enrollmentOpen(env) {
+  if (billingMisconfigured(env)) return false
+  if (!stripeConfigured(env)) return true // billing off entirely: legacy unbilled setup (local/dev only)
+  if (stripeLiveEnabled(env)) return true
+  return (await listPlans(env.ONBOARDING_DB)).length === 0 // no plan on sale: unbilled setup, as signupPlan() decides
 }
 
 export async function recordSignup(db, customerId, planId, now = Date.now()) {

@@ -103,7 +103,7 @@ function SignupClosed() {
         Online sign-up opens soon
       </h1>
       <p className="notice-soft" role="status">
-        {NOT_OPEN} <a href="/#book">book a call with us</a>.
+        {NOT_OPEN} <a href="/#book-demo">book a call with us</a>.
       </p>
     </div>
   )
@@ -232,7 +232,7 @@ function PaymentStep({ me, onDone }) {
       )}
       {state.notOpen && (
         <p className="notice-soft" role="status">
-          {NOT_OPEN} <a href="/#book">book a call with us</a>.
+          {NOT_OPEN} <a href="/#book-demo">book a call with us</a>.
         </p>
       )}
       <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || state.notOpen} onClick={checkout}>

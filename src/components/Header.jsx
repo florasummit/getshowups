@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import Logo from './Logo.jsx'
-import { getStarted, navLinks } from '../content/site.js'
+import GetStarted from './GetStarted.jsx'
+import { navLinks } from '../content/site.js'
 
 export default function Header() {
   const [open, setOpen] = useState(false)
@@ -46,9 +47,7 @@ export default function Header() {
         <a href="/dashboard" className="header-login">
           Sign in
         </a>
-        <a href={getStarted.href} className="btn btn-primary btn-sm header-cta">
-          {getStarted.label}
-        </a>
+        <GetStarted className="btn btn-primary btn-sm header-cta" />
         <button
           type="button"
           className="menu-toggle"
@@ -73,9 +72,7 @@ export default function Header() {
         <a href="/dashboard" className="btn btn-ghost btn-block">
           Sign in
         </a>
-        <a href={getStarted.href} className="btn btn-primary btn-block" onClick={close}>
-          {getStarted.label}
-        </a>
+        <GetStarted className="btn btn-primary btn-block" onClick={close} />
       </nav>
     </header>
   )

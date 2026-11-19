@@ -1,5 +1,6 @@
 import Logo from './Logo.jsx'
-import { getStarted, navLinks } from '../content/site.js'
+import GetStarted from './GetStarted.jsx'
+import { navLinks } from '../content/site.js'
 
 const year = new Date().getFullYear()
 
@@ -8,9 +9,7 @@ export default function Footer() {
     <footer className="site-footer">
       <div className="container footer-cta">
         <h2>Ready to turn more leads into booked appointments?</h2>
-        <a href={getStarted.href} className="btn btn-primary btn-lg">
-          {getStarted.label}
-        </a>
+        <GetStarted className="btn btn-primary btn-lg" />
       </div>
       <div className="container footer-inner">
         <div className="footer-brand">
