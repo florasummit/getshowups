@@ -8,7 +8,7 @@ billing, email, SMS, voice, ads or signup. Run from the main checkout (`/Users/f
 | Check | Result |
 | --- | --- |
 | PR heads / CI | #80 b7a7fad ✅ verify + Pages · #81 ec5e4f3 ✅ · #82 head at approval time ✅ (includes the 320 px header fix 657caa5) |
-| Rehearsal of this exact order on main 425d311 | #80 clean; #81 conflicts only in docs/STATUS.md (keep both, #81's section first); #82 clean |
+| Rehearsal of this exact order on main 425d311 | #80 clean; #81 and #82 conflict only in docs/STATUS.md (keep both; the PR being merged goes first) |
 | Rehearsed tree `verify:all` | 634/634 unit (incl. 12 render goldens), Playwright 166 passed / 1 skipped (opt-in screenshot), lint clean |
 | Customer sites (render through site-serve from the 2026-11-19 14:32Z backup) | PoolThru ×5 pages, bob-electrical, toys-for-us **byte-identical to main**, receptionist link on and off |
 | Migration 0030 | `CREATE TABLE/INDEX IF NOT EXISTS` only; no existing table touched; code fails soft without it (Hide → `not_available`, lists unchanged); erased with the account |
