@@ -14,6 +14,25 @@ _Update at the end of every task. Newest first._
 - Not built (proposal optional): "resolved" emails. Next: owner approves scope → merge after #81 → set
   FOUNDER_ALERTS_ENABLED=true and add the founder address to MESSAGE_TEST_RECIPIENTS (approval).
 
+## Release 2026-11-19 evening: #80, #81, #82 (owner-approved plan, docs/RELEASE_PLAN.md)
+
+- Backup ~/getshowups-backups/prod-20261119T203844Z-pre-pr80.sql (integrity ok; 12 table counts = production; no
+  pending outbox). Rollback target: deployment b6ba40a5 (main 425d311). Migration 0030 applied (table + index).
+- #80 → merge 37951e8, deployment 4650e0aa. RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical set BEFORE #81
+  (authoritative: production served voice to exactly these two; all others unchanged). #81 → merge 54536db,
+  deployment 8e903802: voice still on for both, off for the rest. Live HTML of PoolThru ×5, bob-electrical,
+  toys-for-us (+ www.poolthru.com control) identical to the pre-release capture after each deploy.
+- #82: deployment id recorded in the release report. #83 (founder alerts) NOT merged, NOT activated.
+
+## Launch readiness + enrollment notice (2026-11-19) — docs/launch-readiness (#82, no migration)
+
+- Visitors are told enrollment isn't open BEFORE Google sign-in: GET /api/enrollment ({open}, mirrors the server's
+  signup gate; rate-limited), "Request early access" CTAs + note, /dashboard?plan=founding notice with Book a call.
+  Sign-in unchanged for existing owners, invitations, admins, testers. Help link on owner screens; /#book → /#book-demo.
+- Docs: LAUNCH_READINESS (journey QA, readiness matrix, 20-minute target vs measured), ACCOUNTANT_PACKAGE,
+  legal/ATTORNEY_REVIEW, FOUNDER_ALERTS_PROPOSAL (built in feat/founder-alerts, off), RELEASE_PLAN (#80 → #81 → #82,
+  backup/migration/smoke/rollback; not executed), ACTIVATION_TEST (real-person run script; not run).
+- Next: owner approves RELEASE_PLAN; voice allowlist `poolthru-llc,bob-electrical` before #81 deploys.
 ## Comms reliability (Agent B, 2026-11-19)
 
 - Branch feat/comms-reliability (draft PR), no migration. Detail: docs/COMMS_RELIABILITY.md.
@@ -26,6 +45,22 @@ _Update at the end of every task. Newest first._
   new-booking notice sent right after booking (waitUntil). Booking: orphan Google events tracked + cron retry;
   booking/availability failures are open `calendar.google` incidents until the next success.
 - Not live-verified: any real call. Next: approved live test call with and without `scripts/retell-setup.mjs --tuned`.
+## Studio UX hardening (Agent A, 2026-11-19)
+
+- Branch feat/studio-ux-hardening, draft PR; details, defects and renderer notes in docs/STUDIO_UX_HARDENING.md.
+- Photos: "Used on" per photo (draft page · section, live site, saved versions, History, logos); Replace everywhere
+  in the draft (undoable; live changes only on publish); Delete only when nothing recoverable uses it (phone copy goes
+  with it); Hide for history-only photos (bytes kept for restores). Fix: `content.design` photos were not counted as
+  used (deletable while live, and refused by /site-assets publicly).
+- Migration **0030** `website_asset_hidden` (additive, idempotent, in ERASED_TABLES) — NOT applied to production;
+  until applied, Hide answers not_available and everything else works.
+- Editor: full screen / photo-button panel / section menu are browser-history layers (Back closes the top one, Forward
+  never re-opens it); Escape from inside the preview; full screen fixed on phones; page, section, panel tab, mode,
+  preview size and scroll remembered per business (sessionStorage); unsaved edits auto-restored when the server copy
+  is unchanged, otherwise asked + 409 conflict; preview keeps its scroll after edits.
+- Phone-sized photos for older-format (`content.design`) sites: opt-in `responsiveImages: true` stored with new
+  uploads; render goldens unchanged (no fixture or golden edited).
+- Next: review + merge the draft PR (approval); apply 0030 to production (approval) before Hide is offered for real.
 
 ## Sales-tax analysis for the $499 plan (2026-11-19) — docs/sales-tax-analysis (docs only)
 

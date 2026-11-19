@@ -22,13 +22,32 @@ test('homepage renders headline, metadata, and all sections', async ({ page }) =
   }
 })
 
-test('one Get started action: every start link carries the founding plan to sign-up', async ({ page }) => {
+test('one Get started action: every start link carries the founding plan to sign-up (enrollment open)', async ({ page }) => {
+  // Go-live state (live billing on). The e2e server itself is sandbox-only, like production today.
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: true } }))
+  await page.reload()
   const starts = page.locator('a[href="/dashboard?plan=founding"]')
   // header, mobile nav, hero, pricing, footer CTA
   await expect(starts).toHaveCount(5)
   await expect(page.getByRole('main').getByRole('link', { name: /Get started/ }).first()).toBeVisible()
   await expect(page.locator('a[href="/dashboard"]').first()).toHaveText('Sign in')
   // The sign-up screen itself is exercised in selfserve.spec.js (signed out, /api/dashboard/me is a 401 there).
+})
+
+test('enrollment closed (sandbox billing, as in production today): visitors are told before Google sign-in @mobile', async ({ page }) => {
+  // Real endpoint: the e2e server has test-mode Stripe and no live billing.
+  expect((await (await page.request.get('/api/enrollment')).json()).open).toBe(false)
+  const early = page.locator('a[href="/#book-demo"]', { hasText: 'Request early access' })
+  await expect(early).toHaveCount(5) // header, mobile nav, hero, pricing, footer CTA
+  await expect(page.locator('a[href="/dashboard?plan=founding"]')).toHaveCount(0)
+  await expect(page.locator('.hero').getByText('Online enrollment isn’t open yet', { exact: false })).toBeVisible()
+  await expect(page.locator('#pricing').getByText('Online enrollment isn’t open yet', { exact: false })).toBeVisible()
+  // Existing accounts, invitations and testers still sign in.
+  await expect(page.locator('a[href="/dashboard"]').first()).toHaveText('Sign in')
+  await page.getByRole('main').getByRole('link', { name: 'Request early access' }).first().click()
+  await expect(page).toHaveURL(/#book-demo$/)
+  await expect(page.locator('#book-demo')).toBeInViewport()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
 
 test('no unsupported claims: no AI texting or missed-call promises outside the labelled simulation', async ({ page }) => {

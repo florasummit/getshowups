@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { problemText } from './website-data.js'
 import { api } from '../lib/api.js'
-import { uploadImage } from '../lib/images.js'
+import { uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
+
+// Phone-sized copies made on upload ({ photoId: smallId }) plus the opt-in that lets the design renderer offer them
+// (content.responsiveImages; content saved before it renders unchanged). Nothing when no copy was made.
+const withCopies = (c, copies) => (Object.keys(copies).length ? { variants: { ...(c.variants || {}), ...copies }, responsiveImages: true } : {})
 
 const STYLE_LABELS = { clean: 'Clean', bold: 'Bold', warm: 'Warm' }
 // Saves `content` a moment after the last change. Returns the save status for a quiet indicator.
@@ -103,9 +107,10 @@ function ImagePicker({ label, hint, value, kind, onPick, onRemove }) {
     e.target.value = ''
     if (!file) return
     setState({ busy: true })
-    const r = await uploadImage(file, kind)
+    // Photos get a phone-sized copy next to them (logos don't: they are small already).
+    const r = kind === 'photo' ? await uploadPhotoWithCopy(file) : await uploadImage(file, kind)
     setState(r.error ? { error: r.error } : {})
-    if (r.asset) onPick(r.asset.id)
+    if (r.asset) onPick(r.asset.id, r.small?.id || null)
   }
   return (
     <div className="image-pick">
@@ -141,15 +146,17 @@ function Photos({ c, set }) {
     e.target.value = ''
     setState({ busy: true })
     const ids = []
+    const copies = {}
     for (const f of files) {
-      const r = await uploadImage(f, 'photo')
+      const r = await uploadPhotoWithCopy(f)
       if (r.error) {
         setState({ error: r.error })
         break
       }
       ids.push(r.asset.id)
+      if (r.small) copies[r.asset.id] = r.small.id
     }
-    if (ids.length) set({ photos: [...c.photos, ...ids] })
+    if (ids.length) set({ photos: [...c.photos, ...ids], ...withCopies(c, copies) })
     setState((s) => ({ ...s, busy: false }))
   }
   return (
@@ -275,7 +282,7 @@ export default function WebsiteEditor({ initial, colors, designOptions, onSaved,
         <summary>{designed ? 'Photos' : 'Logo and photos'}</summary>
         {designed && <p className="fine">Add photos here, then ask the designer to use them.</p>}
         {!designed && <ImagePicker label="Logo" hint="Shown at the top of your site." kind="logo" value={c.logo} onPick={(id) => set({ logo: id })} onRemove={() => set({ logo: null })} />}
-        <ImagePicker label="Main photo" hint="A clear photo of your work or team." kind="photo" value={c.hero} onPick={(id) => set({ hero: id })} onRemove={() => set({ hero: null })} />
+        <ImagePicker label="Main photo" hint="A clear photo of your work or team." kind="photo" value={c.hero} onPick={(id, small) => set({ hero: id, ...withCopies(c, small ? { [id]: small } : {}) })} onRemove={() => set({ hero: null })} />
         <Photos c={c} set={set} />
       </details>
 

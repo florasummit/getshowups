@@ -181,6 +181,24 @@ for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_C
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
 
+# studio-hardening seeds (Agent A): one business per browser project with the editor's AI-designed draft (no AI call)
+# and a calendar record, for studio-hardening.spec.js (full screen + Back/Forward, editor state, photo usage).
+for E in "$E2E_STUDIO_H_CUSTOMER:$E2E_STUDIO_H_SESSION_TOKEN" "$E2E_STUDIO_H_M_CUSTOMER:$E2E_STUDIO_H_M_SESSION_TOKEN"; do
+  HC=${E%%:*}
+  HT=${E#*:}
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$HC', 'Harden Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$HC.example', '$HC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$HT")', 'owner@$HC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$HC', '(843) 555-0112', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280+\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES ('$HC', '$EDITOR_DRAFT', NULL, NULL, $NOW);
+  "
+  npx wrangler kv key put "google:$HC" "$(record "$HC")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+    -c test/e2e/wrangler.e2e.toml >/dev/null
+done
+
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --compatibility-date 2026-11-08 --persist-to "$STATE" --show-interactive-dev-session=false \
   --d1 ONBOARDING_DB=e2e-onboarding --kv GOOGLE_TOKENS=GOOGLE_TOKENS \

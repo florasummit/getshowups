@@ -237,6 +237,9 @@ export function validateContent(body, approvedClaims = [], assetIds = null, { pr
     .filter(([k, v]) => ASSET_RE.test(k) && ASSET_RE.test(String(v)) && k !== v && (!assetIds || (assetIds.has(k) && assetIds.has(v))))
     .slice(0, 120)
   if (variants.length) c.variants = Object.fromEntries(variants)
+  // Opt-in for the older design renderer (site-designed.js) to offer those copies via srcset. Stored only when true, so
+  // content saved without it stays byte-identical when rendered (Studio sites always use content.variants).
+  if (b.responsiveImages === true) c.responsiveImages = true
   // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
   // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
   if (designed) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, legacyServices: prior?.length ? prior : services, claims: approvedClaims }).spec

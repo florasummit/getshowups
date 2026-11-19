@@ -1,7 +1,10 @@
 import Icon from './Icon.jsx'
-import { getStarted, steps } from '../content/site.js'
+import GetStarted from './GetStarted.jsx'
+import { useStartAction } from '../lib/enrollment.js'
+import { steps } from '../content/site.js'
 
 export default function Hero() {
+  const start = useStartAction()
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="hero-glow" aria-hidden="true" />
@@ -15,13 +18,19 @@ export default function Hero() {
           tracks who actually shows up. $499/month.
         </p>
         <div className="hero-actions">
-          <a href={getStarted.href} className="btn btn-primary btn-lg">
-            {getStarted.label} <Icon name="arrow" size={18} />
-          </a>
+          <GetStarted className="btn btn-primary btn-lg">
+            {' '}
+            <Icon name="arrow" size={18} />
+          </GetStarted>
           <a href="#how-it-works" className="btn btn-ghost btn-lg">
             See how it works
           </a>
         </div>
+        {start.closed && (
+          <p className="hero-sub enrollment-note" role="status">
+            {start.note}
+          </p>
+        )}
         <ol className="hero-flow" aria-label="The GetShowUps workflow">
           {steps.map((s, i) => (
             <li key={s.id}>

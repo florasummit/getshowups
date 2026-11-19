@@ -11,6 +11,13 @@ export const navLinks = [
 
 // Primary call to action: start the founding plan (sign in with Google → business → Stripe Checkout).
 export const getStarted = { href: '/dashboard?plan=founding', label: 'Get started' }
+// While online enrollment isn't open (GET /api/enrollment), every "Get started" becomes this, so visitors know before
+// they sign in with Google. Existing accounts, invitations and testers still use "Sign in".
+export const enrollmentClosed = {
+  href: '/#book-demo',
+  label: 'Request early access',
+  note: 'Online enrollment isn’t open yet. Book a short call and we’ll set you up as soon as it opens.',
+}
 
 // Steps and features describe only what works today; anything not yet live says so.
 export const steps = [

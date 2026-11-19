@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, noIndex } from '../lib/api.js'
+import { useEnrollmentOpen } from '../lib/enrollment.js'
 import Setup from './Setup.jsx'
 import Home, { SignOut } from './Home.jsx'
 import '../app.css'
@@ -54,24 +55,34 @@ const clearInvite = () => {
 function SignIn({ invite, plan }) {
   const message = LOGIN_ERRORS[new URLSearchParams(window.location.search).get('login_error')]
   const signup = plan && !invite
+  // Sign-up link while enrollment is closed: say so BEFORE Google sign-in. Sign-in stays available for existing
+  // accounts, invitations, admins and testers (the server decides what they may do after).
+  const closed = useEnrollmentOpen() === false && signup
   return (
     <main className="center-page">
       <div className="panel panel--narrow enter">
         <Logo href="/" />
-        <h1 className="title">{invite ? `Join ${invite.businessName}` : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
+        <h1 className="title">{invite ? `Join ${invite.businessName}` : closed ? 'Online enrollment isn’t open yet' : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
         <p className="lede">
           {invite
             ? `Sign in with the Google account for ${invite.email}.`
-            : signup
-              ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month founding plan.'
-              : 'Sign in to manage your booking page.'}
+            : closed
+              ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
+              : signup
+                ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month founding plan.'
+                : 'Sign in to manage your booking page.'}
         </p>
+        {closed && (
+          <a className="btn btn-primary btn-lg btn-block" href="/#book-demo">
+            Book a call
+          </a>
+        )}
         {message && (
           <p className="form-error" role="alert">
             {message}
           </p>
         )}
-        <a className="btn btn-primary btn-lg btn-block" href={`/api/auth/google/start${returnTo()}`}>
+        <a className={`btn ${closed ? 'btn-quiet' : 'btn-primary'} btn-lg btn-block`} href={`/api/auth/google/start${returnTo()}`}>
           Continue with Google
         </a>
         <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage.</p>
