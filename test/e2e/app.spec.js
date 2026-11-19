@@ -115,6 +115,8 @@ test('partly set-up business resumes at the calendar step and sees only its own 
   await page.goto('/dashboard')
   await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
   await expect(page.locator('[aria-current="step"]')).toContainText('Calendar')
+  // Help is reachable during onboarding too (where owners get stuck).
+  await expect(page.getByRole('link', { name: 'Help', exact: true })).toBeVisible()
   const overview = await (await page.request.get(`/api/dashboard/overview?customer=${fixtures.E2E_CUSTOMER}`)).json()
   expect(overview.stats.leads).toBe(0)
   expect(JSON.stringify(overview)).not.toContain('Jordan Lead')
@@ -176,6 +178,8 @@ test.describe('read-only pages @mobile', () => {
     await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Follow-ups', 'Receptionist', 'Website', 'Ads', 'Settings'])
     await expect(page.getByRole('region', { name: 'Your website' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat')).toHaveCount(3)
+    // The plan promises direct help: reachable from every owner screen, not only when an account has a problem.
+    await expect(page.getByRole('link', { name: 'Help', exact: true })).toHaveAttribute('href', /^mailto:hello@getshowups\.com/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   })
 })
