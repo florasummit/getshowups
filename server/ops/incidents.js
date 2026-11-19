@@ -143,6 +143,7 @@ export async function registerReady(db) {
   }
 }
 
+const MAX_NEW_PER_RUN = 50
 export async function syncIncidents(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   if (!(await registerReady(db))) return { ready: false }
@@ -158,7 +159,7 @@ export async function syncIncidents(env, now = Date.now()) {
     const generic = await openFailureGroups(db, now)
     const kvRan = kvCheckDue(now)
 
-    const { results: open } = await db.prepare("SELECT * FROM ops_incidents WHERE status = 'open' LIMIT 500").all()
+    const { results: open } = await db.prepare("SELECT * FROM ops_incidents WHERE status = 'open' ORDER BY last_seen LIMIT 150").all()
     for (const inc of open) {
       let still = null
       let resolution = 'success_seen'
@@ -199,7 +200,8 @@ export async function syncIncidents(env, now = Date.now()) {
     for (const g of generic.values()) {
       fresh.push({ ...g, severity: HIGH_FEATURES.has(g.feature) ? 'high' : 'medium', evidence: { code: g.code, action: g.step, capability: g.feature, events: g.events, count: g.count } })
     }
-    for (const d of fresh) {
+    // Bounded per run (D1 ~1,000 queries per request): the rest open on the next run (INSERT OR IGNORE, same fingerprint).
+    for (const d of fresh.slice(0, MAX_NEW_PER_RUN)) {
       const rule = RULES[d.kind]
       const feature = d.feature || rule.feature
       const [cause] = causeFor(d.code)

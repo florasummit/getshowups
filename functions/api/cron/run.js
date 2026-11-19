@@ -61,8 +61,6 @@ export async function onRequestPost({ request, env }) {
     const ownerNotices = await adsStep('owner notices', () => queueOwnerNotices(env))
     // Founder alerts (FOUNDER_ALERTS_ENABLED, off by default): queued before the flush so they go out this run.
     const alerts = await adsStep('founder alerts', () => founderAlerts(env))
-    // Incident register (migration 0031; no-op before it): open / update / resolve from the same records.
-    const incidents = await adsStep('incidents', () => syncIncidents(env))
     const outbox = await flushOutbox(env)
     const ads = {
       // First: the safety stop. Businesses on hold (failed payment, ended subscription, suspension) get any
@@ -92,6 +90,9 @@ export async function onRequestPost({ request, env }) {
       const r = await auditCheckpoint(env.ONBOARDING_DB)
       return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
     })
+    // Incident register (migration 0031; no-op before it): open / update / resolve from the same records. Last, so
+    // it can never use up this request's query budget before the delivery, ads safety-stop or billing steps.
+    const incidents = await adsStep('incidents', () => syncIncidents(env))
     return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)

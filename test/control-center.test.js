@@ -159,6 +159,17 @@ test('other failure events become incidents per feature + business + action; fol
   assert.equal(aged.resolution, 'no_new_failures')
 })
 
+test('bounded per run: at most 50 new incidents open per cron run; the rest open next run without duplicates; the step runs after every existing cron job', async () => {
+  for (let k = 0; k < 60; k++) await recordEvent(db, { type: `x.failed_${k}`, actor: 'system:test', capability: 'platform.test', resource: { type: 'thing', id: `t${k}` }, outcome: 'failure', details: { error: 'e' }, at: NOW - MIN })
+  assert.equal((await syncIncidents(env, NOW)).opened, 50)
+  assert.deepEqual(await syncIncidents(env, NOW + MIN), { ready: true, opened: 10, updated: 50, resolved: 0 })
+  assert.equal(rows().length, 60)
+  // Cron order: the incident register is the last step (it cannot use up the budget of delivery / ads / billing jobs).
+  const src = readFileSync(new URL('../functions/api/cron/run.js', import.meta.url), 'utf8')
+  assert.ok(src.indexOf("adsStep('incidents'") > src.indexOf("adsStep('audit'"), 'incidents after the audit checkpoint')
+  assert.ok(src.indexOf("adsStep('incidents'") > src.indexOf('flushOutbox(env)'), 'incidents after the outbox flush')
+})
+
 test('test businesses: incidents recorded and tagged, never counted as customer impact; unreadable test list = treated as test', async () => {
   db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('beta', 1, 'founder@getshowups.example', 1)").run()
   await failSeq('alpha', 'reconnect_required', [NOW - MIN])
