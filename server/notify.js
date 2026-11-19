@@ -26,7 +26,7 @@ const notQueued = (kind, col, customerCol) =>
 const BOOKINGS_SQL = `
   SELECT a.id AS item, a.customer, a.created_at, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
   FROM appointments a JOIN leads l ON l.id = a.lead_id JOIN customers c ON c.id = a.customer
-  WHERE a.created_at > ?1 AND a.status = 'booked' AND c.status = 'active' AND ${notQueued('owner_booking', 'a.id', 'a.customer')}
+  WHERE a.created_at > ?1 AND (?2 IS NULL OR a.id = ?2) AND a.status = 'booked' AND c.status = 'active' AND ${notQueued('owner_booking', 'a.id', 'a.customer')}
   ORDER BY a.created_at LIMIT ${LIMIT}`
 const LEADS_SQL = `
   SELECT l.id AS item, l.customer, l.created_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
@@ -118,11 +118,17 @@ export function ownerNotice(kind, r, origin) {
   }
 }
 
-export async function queueOwnerNotices(env, now = Date.now()) {
+// bookingId (optional): only the new-booking notice for that appointment, queued right after the booking request (the
+// cron scan still catches anything this misses; the outbox id makes it exactly once either way).
+export async function queueOwnerNotices(env, now = Date.now(), { bookingId = null } = {}) {
   const db = env.ONBOARDING_DB
   const out = { queued: 0, held: 0 }
-  const [bookings, leads, cancels, bounces, callbacks, coverage] = await Promise.all([
-    db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS).all(),
+  const only = typeof bookingId === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(bookingId) ? bookingId : null
+  const none = Promise.resolve({ results: [] })
+  const [bookings, leads, cancels, bounces, callbacks, coverage] = only
+    ? await Promise.all([db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS, only).all(), none, none, none, none, none])
+    : await Promise.all([
+    db.prepare(BOOKINGS_SQL).bind(now - WINDOW_MS, null).all(),
     db.prepare(LEADS_SQL).bind(now - WINDOW_MS, now - LEAD_GRACE_MS).all(),
     db.prepare(CANCELS_SQL).bind(now - WINDOW_MS).all(),
     // Before migration 0020 there are no suppressions: the other notices must still go out.
@@ -131,7 +137,7 @@ export async function queueOwnerNotices(env, now = Date.now()) {
     db.prepare(CALLBACKS_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
     // Before migration 0029 there are no coverage requests.
     db.prepare(COVERAGE_SQL).bind(now - WINDOW_MS).all().catch(() => ({ results: [] })),
-  ])
+      ])
   const items = [
     ...bookings.results.map((r) => ['owner_booking', r]),
     ...leads.results.map((r) => ['owner_lead', r]),

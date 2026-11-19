@@ -55,7 +55,8 @@ const channelName = (c) => (c === 'voice' ? 'Browser voice' : 'Chat')
 function Channels({ cap, on }) {
   const tiles = [
     ['Website chat', !on ? ['neutral', 'Off'] : cap.chat ? ['ok', 'Active'] : ['bad', 'Unavailable']],
-    ['Browser voice', !cap.voice ? ['neutral', 'Not set up'] : on ? ['ok', 'Active'] : ['neutral', 'Off']],
+    // Voice is released per business (owner decision 2026-11-19): 'testing' = exists, not available to this business yet.
+    ['Browser voice', cap.voiceStatus === 'testing' ? ['neutral', 'In testing, not available yet'] : !cap.voice ? ['neutral', 'Not set up'] : on ? ['ok', 'Active'] : ['neutral', 'Off']],
     ['Phone calls', ['neutral', 'Not connected']],
     ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on'] : ['warn', 'Test mode']],
   ]
@@ -286,7 +287,14 @@ export default function Receptionist() {
     <div className="ui-page">
       <PageHeader
         title="AI receptionist"
-        status={<Pill tone={overall[0]}>{overall[1]}</Pill>}
+        status={
+          <>
+            <Pill tone="neutral" dot={false}>
+              Beta
+            </Pill>
+            <Pill tone={overall[0]}>{overall[1]}</Pill>
+          </>
+        }
         actions={
           <a className="btn btn-quiet btn-sm" href={data.chatUrl} target="_blank" rel="noreferrer">
             Try it as a customer

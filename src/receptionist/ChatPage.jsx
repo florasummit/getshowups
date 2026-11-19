@@ -31,6 +31,8 @@ const VOICE_ERRORS = {
   voice_not_configured: 'Voice isn’t available right now. You can keep typing.',
   conversation_ended: 'This conversation has ended. Start a new one to talk.',
   mic: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
+  noMic: 'No microphone was found. Connect one, or keep typing.',
+  voice_not_available: 'Voice is in testing and not available yet. You can keep typing.',
   dropped: 'The call dropped. You can talk again or keep typing.',
   start: 'Couldn’t start talking. Try again or keep typing.',
 }
@@ -128,12 +130,23 @@ export default function ChatPage({ id }) {
   const startVoice = async () => {
     if (voice.state === 'connecting' || voice.state === 'live' || outcome.ended) return
     setVoice({ state: 'connecting', live: [] })
+    // Microphone first, inside the click (browsers tie the permission prompt and audio playback to the gesture): a
+    // blocked or missing microphone is reported before a call is created, and the voice SDK loads meanwhile.
+    const sdk = import('retell-client-js-sdk')
+    sdk.catch(() => {}) // a failed load is reported where it is awaited below
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('microphone unavailable'), { name: 'NotAllowedError' })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+      for (const t of stream.getTracks()) t.stop() // permission granted; the SDK opens its own capture
+    } catch (err) {
+      return setVoice({ state: 'error', live: [], message: err?.name === 'NotFoundError' ? VOICE_ERRORS.noMic : VOICE_ERRORS.mic })
+    }
     const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() } })
     if (status !== 200) return setVoice({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start })
     const c = { id: data.conversationId, token: data.token }
     setConv(c)
     try {
-      const { RetellWebClient } = await import('retell-client-js-sdk')
+      const { RetellWebClient } = await sdk
       const call = new RetellWebClient()
       callRef.current = call
       call.on('call_started', () => setVoice((v) => ({ ...v, state: 'live' })))
@@ -148,6 +161,10 @@ export default function ChatPage({ id }) {
         refresh(c)
       })
       call.on('error', () => {
+        // Release the microphone and the connection (the SDK doesn't always end the call on an error).
+        try {
+          call.stopCall()
+        } catch {}
         callRef.current = null
         setVoice({ state: 'error', live: [], message: VOICE_ERRORS.dropped })
         refresh(c)
@@ -387,6 +404,7 @@ export default function ChatPage({ id }) {
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
                 <a href={`/book/${id}`}>Book online</a>
               </p>
+              {info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice is in testing and not available yet.</p>}
             </>
           )}
           <p className="chat-legal">

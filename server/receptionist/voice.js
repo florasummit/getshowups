@@ -12,6 +12,7 @@
 // response_type config | ping_pong | response { response_id, content, content_complete, end_call }. A newer
 // response_id means the caller spoke again: Retell discards older responses.
 import { customerFromRow } from '../auth.js'
+import { CUSTOMER_RE } from '../invites.js'
 import { getCustomer } from '../customers.js'
 import { startConversation, loadConversation, respond, getSettings } from './engine.js'
 import { knowledgeFor } from './knowledge.js'
@@ -20,12 +21,26 @@ const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.RETELL_API_MOCK_ORIGIN) ? env.RETELL_API_MOCK_ORIGIN : 'https://api.retellai.com')
 // Voice needs the Retell key, our agent, and the socket secret the agent's URL carries.
 export const voiceConfigured = (env) => Boolean(env.RETELL_API_KEY && /^agent_[A-Za-z0-9]{6,80}$/.test(env.RETELL_AGENT_ID || '') && String(env.RETELL_WS_SECRET || '').length >= 32)
+
+// Voice release gate (owner decision 2026-11-19: voice reliability is a launch blocker). Voice is offered ONLY to the
+// businesses listed in RECEPTIONIST_VOICE_BUSINESSES (comma-separated ids, no wildcard; empty/unset = nobody), parsed
+// like ADS_BUSINESSES. Chat is not affected. Fails closed. Nothing stored changes: there is no per-business voice
+// setting; this gate only decides whether voice is offered.
+export const voiceBusinesses = (env) =>
+  String(env?.RECEPTIONIST_VOICE_BUSINESSES || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => CUSTOMER_RE.test(s))
+export const voiceAllowedFor = (env, customerId) => typeof customerId === 'string' && CUSTOMER_RE.test(customerId) && voiceBusinesses(env).includes(customerId)
+// 'available' | 'testing' (voice exists but not released for this business) | 'not_configured'
+export const voiceStatus = (env, customerId) => (!voiceConfigured(env) ? 'not_configured' : voiceAllowedFor(env, customerId) ? 'available' : 'testing')
 const CALL_TTL_MS = 60 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
 export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
+  if (!voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available' }
   const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now, { attribution })
   let res
   try {
@@ -64,8 +79,24 @@ export function latestUserText(transcript) {
   return parts.join(' ').trim()
 }
 
+// The caller's words for this turn. `pending` = words of an earlier turn that was talked over and dropped (never
+// saved): when an agent line (e.g. the holding line) was heard in between, latestUserText alone would lose them.
+export function turnText(transcript, pending = '') {
+  const latest = latestUserText(transcript)
+  const p = String(pending || '').trim()
+  if (!p || latest.startsWith(p)) return latest
+  return `${p} ${latest}`.trim()
+}
+
+// A closed socket is not an ended call: with auto_reconnect Retell closes and reconnects (up to twice) when pings stop
+// for 5 s. The same call may reconnect within this window; after it (or once the conversation ended) it may not.
+export const RECONNECT_MS = 2 * 60 * 1000
+const REMINDER = 'Take your time, I’m still here. You can also type in the chat if that’s easier.'
+const RETRY_LINE = 'Sorry, give me a moment and try that again.'
+
 // Handles one Retell LLM WebSocket for callId. `ws` is the server side of a WebSocketPair (already accepted).
-export async function attachRetellSocket(env, ws, callId, now = Date.now()) {
+// clock: test hook for the per-turn timings (numbers only, recorded as receptionist_events 'voice_turn').
+export async function attachRetellSocket(env, ws, callId, now = Date.now(), { clock = Date.now } = {}) {
   const send = (o) => {
     try {
       ws.send(JSON.stringify(o))
@@ -73,26 +104,80 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now()) {
   }
   const db = env.ONBOARDING_DB
   const call = /^[A-Za-z0-9_-]{8,80}$/.test(callId || '') ? await db.prepare('SELECT * FROM receptionist_calls WHERE call_id = ?1').bind(callId).first() : null
-  if (!call || call.ended_at || now - call.created_at > CALL_TTL_MS) {
+  if (!call || now - call.created_at > CALL_TTL_MS || (call.ended_at && now - call.ended_at > RECONNECT_MS)) {
     ws.close(1008, 'unknown call')
     return false
   }
   const customer = customerFromRow(await getCustomer(db, call.customer))
-  if (!customer || customer.status !== 'active') {
+  if (!customer || customer.status !== 'active' || !voiceAllowedFor(env, customer.id)) {
     ws.close(1008, 'unavailable')
     return false
   }
   const settings = await getSettings(db, customer.id)
   const k = await knowledgeFor(env, customer, settings)
   const start = await loadConversation(env, customer, call.conversation_id)
+  const reconnect = Boolean(call.ended_at)
+  const ev = (kind, ok, detail) => (start ? db.prepare('INSERT INTO receptionist_events (customer, conversation_id, kind, ok, detail, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(customer.id, start.id, kind, ok ? 1 : 0, detail, clock()).run().catch(() => {}) : Promise.resolve())
+  if (reconnect) {
+    if (!start || start.state?.endedAt) {
+      ws.close(1008, 'unknown call')
+      return false
+    }
+    await db.prepare('UPDATE receptionist_calls SET ended_at = NULL WHERE call_id = ?1').bind(callId).run()
+    await ev('voice_socket', true, 'reconnected')
+  }
   send({ response_type: 'config', config: { auto_reconnect: true, call_details: false } })
-  // Begin message (response_id 0): continuing a chat → no second greeting; otherwise the owner's greeting.
-  const continuing = (start?.state?.log || []).length > 0
-  send({ response_type: 'response', response_id: 0, content: continuing ? 'Hi, I’m here. Go ahead whenever you’re ready.' : k.greeting || `Thanks for calling ${customer.name}. How can I help you today?`, content_complete: true, end_call: false })
+  // Begin message (response_id 0) on the first connection only: a reconnect mid-call must not greet again.
+  // Continuing a chat → no second greeting; otherwise the owner's greeting.
+  if (!reconnect) {
+    const continuing = (start?.state?.log || []).length > 0
+    send({ response_type: 'response', response_id: 0, content: continuing ? 'Hi, I’m here. Go ahead whenever you’re ready.' : k.greeting || `Thanks for calling ${customer.name}. How can I help you today?`, content_complete: true, end_call: false })
+  }
 
-  let latest = 0
-  let busy = Promise.resolve()
+  let latest = 0 // newest response_id seen
+  let inflight = null // the turn generating right now: { id, controller }
+  let pending = '' // words of a talked-over turn that was dropped (not saved yet)
+  let queue = Promise.resolve()
   const say = (id, content, last = true) => send({ response_type: 'response', response_id: id, content, content_complete: last, end_call: false })
+
+  async function runTurn(msg, turn) {
+    const { id } = turn
+    if (id < latest) return // talked over before it started
+    inflight = turn
+    const t = { started: clock(), firstChunk: null }
+    const sayT = (content, last) => {
+      if (t.firstChunk === null && content) t.firstChunk = clock()
+      say(id, content, last)
+    }
+    try {
+      if (msg.interaction_type === 'reminder_required') return sayT(REMINDER, true)
+      const text = turnText(msg.transcript, pending)
+      if (!text) return sayT('Sorry, I didn’t catch that. Could you say it again?', true)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const conv = await loadConversation(env, customer, call.conversation_id)
+        if (!conv) return send({ response_type: 'response', response_id: id, content: 'Sorry, something went wrong on our side.', content_complete: true, end_call: true })
+        if (conv.state.endedAt) return send({ response_type: 'response', response_id: id, content: 'This conversation has ended. Thanks for calling!', content_complete: true, end_call: true })
+        let spoke = false
+        const timing = {}
+        const r = await respond(env, customer, conv, text, { channel: 'voice', onText: (s) => ((spoke = true), sayT(s, false)), isStale: () => latest > id, signal: turn.controller.signal, timing, defer: (p) => void p }).catch(() => ({ ok: false, error: 'failed' }))
+        const result = r.ok ? 'ok' : r.error === 'stale' ? 'stale' : r.error === 'busy' ? 'busy' : 'failed'
+        // Numbers and codes only: queue wait, first chunk, whole turn, model and tool time.
+        const end = clock()
+        await ev('voice_turn', r.ok, `r=${result};q=${t.started - turn.received};first=${t.firstChunk === null ? -1 : t.firstChunk - turn.received};total=${end - turn.received};model=${timing.modelMs ?? 0};tools=${timing.toolMs ?? 0};calls=${timing.modelCalls ?? 0}`.slice(0, 80))
+        if (r.error === 'stale') {
+          pending = text // not saved: the next turn carries these words
+          return
+        }
+        if (r.error === 'busy' && attempt === 0 && !spoke) continue // a typed message landed at the same moment: retry once on the fresh record
+        if (r.ok || r.error !== 'busy') pending = ''
+        if (!r.ok && !spoke) return sayT(RETRY_LINE, true)
+        return sayT('', true)
+      }
+    } finally {
+      if (inflight === turn) inflight = null
+    }
+  }
+
   ws.addEventListener('message', (evt) => {
     let msg
     try {
@@ -100,32 +185,29 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now()) {
     } catch {
       return
     }
+    // Keepalive is answered at once, never queued behind a turn (Retell reconnects after 5 s without one).
     if (msg.interaction_type === 'ping_pong') return send({ response_type: 'ping_pong', timestamp: msg.timestamp })
     if (msg.interaction_type !== 'response_required' && msg.interaction_type !== 'reminder_required') return
     const id = Number(msg.response_id)
-    latest = Math.max(latest, id)
-    // One turn at a time. A turn the caller has already talked over (newer response_id) is skipped before it starts,
-    // and dropped mid-way unless it acted — Retell discards that answer, so it must not enter the history either.
-    busy = busy.then(async () => {
-      if (id < latest) return
-      if (msg.interaction_type === 'reminder_required') return say(id, 'Take your time, I’m still here. You can also type in the chat if that’s easier.')
-      const text = latestUserText(msg.transcript)
-      if (!text) return say(id, 'Sorry, I didn’t catch that. Could you say it again?')
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const conv = await loadConversation(env, customer, call.conversation_id)
-        if (!conv) return send({ response_type: 'response', response_id: id, content: 'Sorry, something went wrong on our side.', content_complete: true, end_call: true })
-        if (conv.state.endedAt) return send({ response_type: 'response', response_id: id, content: 'This conversation has ended. Thanks for calling!', content_complete: true, end_call: true })
-        let spoke = false
-        const r = await respond(env, customer, conv, text, { channel: 'voice', onText: (s) => ((spoke = true), say(id, s, false)), isStale: () => latest > id }).catch(() => ({ ok: false, error: 'failed' }))
-        if (r.error === 'stale') return
-        if (r.error === 'busy' && attempt === 0 && !spoke) continue // a typed message landed at the same moment: retry once on the fresh record
-        if (!r.ok && !spoke) return say(id, 'Sorry, give me a moment and try that again.')
-        return say(id, '', true)
-      }
-    })
+    // A frame without a usable response_id can't be answered (and must not poison the staleness check).
+    if (!Number.isSafeInteger(id) || id < 0) return void ev('voice_frame', false, 'bad_response_id')
+    if (id < latest) return // older than a request already seen: Retell has discarded it
+    latest = id
+    // Barge-in: the caller spoke again. Stop generating the old answer now (unless it already acted, see respond),
+    // so this turn doesn't wait for words nobody will hear.
+    if (inflight && inflight.id < id) inflight.controller.abort()
+    const turn = { id, controller: new AbortController(), received: clock() }
+    // One turn at a time. A failure in one turn never stops the ones after it.
+    queue = queue
+      .then(() => runTurn(msg, turn))
+      .catch((err) => {
+        console.error('receptionist voice turn failed:', err?.name)
+        if (turn.id === latest) say(turn.id, RETRY_LINE, true)
+      })
   })
   ws.addEventListener('close', () => {
-    db.prepare('UPDATE receptionist_calls SET ended_at = ?2 WHERE call_id = ?1 AND ended_at IS NULL').bind(callId, Date.now()).run().catch(() => {})
+    // Only the socket closed: Retell may reconnect within RECONNECT_MS (see above).
+    db.prepare('UPDATE receptionist_calls SET ended_at = ?2 WHERE call_id = ?1 AND ended_at IS NULL').bind(callId, clock()).run().catch(() => {})
   })
   return true
 }

@@ -306,9 +306,17 @@ test('email: nothing is marked sent without a provider; provider success and ret
 
   resend = () => [500, {}]
   await call(pInvites, 'POST', '/api/platform/invites', { cookie, body: { email: 'c@alpha.example', customer: 'alpha' } })
+  // Retries back off (5 min, then 30 min after it was queued): flushing again right away doesn't burn an attempt.
   for (let i = 0; i < 3; i++) await call(pOverview, 'GET', '/api/platform/overview', { cookie })
-  const failed = db.sql.prepare("SELECT status, attempts FROM email_outbox WHERE to_email = 'c@alpha.example'").get()
-  assert.deepEqual({ ...failed }, { status: 'failed', attempts: 3 })
+  const row = () => ({ ...db.sql.prepare("SELECT status, attempts FROM email_outbox WHERE to_email = 'c@alpha.example'").get() })
+  assert.deepEqual(row(), { status: 'pending', attempts: 1 })
+  const { flushOutbox } = await import('../server/email.js')
+  await flushOutbox(env, Date.now() + 6 * 60_000)
+  assert.deepEqual(row(), { status: 'pending', attempts: 2 })
+  await flushOutbox(env, Date.now() + 10 * 60_000)
+  assert.deepEqual(row(), { status: 'pending', attempts: 2 }, 'third attempt waits for the 30-minute step')
+  await flushOutbox(env, Date.now() + 31 * 60_000)
+  assert.deepEqual(row(), { status: 'failed', attempts: 3 })
 })
 
 // ---------- account status ----------

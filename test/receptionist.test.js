@@ -14,7 +14,7 @@ import { getCustomer } from '../server/customers.js'
 import { checkDetails, inventedPrices, loadConversation, respond, sentenceProblem, spokenToDigits, startConversation, visibleTranscript } from '../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, factText, playbookFor, systemPrompt } from '../server/receptionist/knowledge.js'
 import { routeCall, withinHours } from '../server/receptionist/routing.js'
-import { attachRetellSocket, latestUserText } from '../server/receptionist/voice.js'
+import { attachRetellSocket, latestUserText, turnText, RECONNECT_MS } from '../server/receptionist/voice.js'
 import { queueOwnerNotices } from '../server/notify.js'
 import { syncNote } from '../server/ghl.js'
 import * as infoApi from '../functions/api/receptionist/[customer]/index.js'
@@ -58,6 +58,7 @@ function d1({ skip = [] } = {}) {
 }
 
 let env, db, kv, fetches, script, modelRequests, origFetch, origError, logs, responses, busy
+let deferred = [] // waitUntil promises of the last calls (event-driven work after a response)
 
 // Scripted model: each entry returns { content, stop_reason } for one /v1/messages call (or { status } for an error).
 const tool = (name, input, id = `toolu_${Math.random().toString(36).slice(2, 10)}`) => ({ type: 'tool_use', id, name, input })
@@ -167,7 +168,7 @@ async function call(mod, method, path, { cookie, origin = ORIGIN, body, params }
     request: new Request(ORIGIN + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }),
     env,
     params,
-    waitUntil: () => {},
+    waitUntil: (p) => deferred.push(p),
   })
   const text = await res.clone().text()
   responses.push(text)
@@ -217,7 +218,12 @@ test('chat booking end to end: details saved once, real times, read back, explic
     return say(`You're booked for ${offered.time}.`)
   })
   assert.equal(t2.json().booked, null, 'no booking card before the booking is persisted')
+  // Email configured: the confirmation is handled right after the booking (waitUntil), not at the next cron run.
+  Object.assign(env, { RESEND_API_KEY: 're_x', EMAIL_FROM: 'GetShowUps <b@getshowups.com>', MESSAGES_LIVE: 'true' })
+  deferred = []
   const t3 = await chat('alpha', 'Yes please, book it', t2.json())
+  assert.equal(deferred.length, 1, 'one post-booking dispatch handed to waitUntil')
+  assert.equal((await deferred[0]).ok, true)
   assert.deepEqual([t3.status, t3.json().status, Boolean(t3.json().booked)], [200, 'booked', true])
   assert.deepEqual(t3.json().booked, { time: offered.time, service: 'Weekly pool care', address: null }, 'confirmation card: service + time (no address for visits at the business)')
   assert.match(modelRequests.at(-1).messages.filter((m) => m.role === 'system').at(-1).content, /phone: \+18435550142/)
@@ -237,9 +243,10 @@ test('chat booking end to end: details saved once, real times, read back, explic
   assert.equal(detail.bookedAt, o.conversations[0].bookedAt)
   assert.equal(detail.request, null)
   assert.ok(detail.transcript.every((l) => Number.isInteger(l.at)), 'transcript lines carry their time')
-  // The confirmation email for a booking with no email is skipped as no_email (never sent to an empty address).
+  // The confirmation email for a booking with no email is skipped as no_email (never sent to an empty address),
+  // already by the post-booking dispatch; a later cron run changes nothing.
+  assert.equal(db.sql.prepare("SELECT error FROM messages WHERE kind = 'confirmation'").get().error, 'no_email')
   const { processDueMessages } = await import('../server/messages.js')
-  Object.assign(env, { RESEND_API_KEY: 're_x', EMAIL_FROM: 'GetShowUps <b@getshowups.com>', MESSAGES_LIVE: 'true' })
   await processDueMessages(env, Date.now() + 1000)
   assert.equal(db.sql.prepare("SELECT error FROM messages WHERE kind = 'confirmation'").get().error, 'no_email')
 })
@@ -599,6 +606,7 @@ test('voice continues the chat conversation (context kept); streams sentence by 
   Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912' })
   assert.equal((await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })).json().error, 'voice_not_configured', 'no socket secret → no voice')
   env.RETELL_WS_SECRET = WS_SECRET
+  env.RECEPTIONIST_VOICE_BUSINESSES = 'alpha' // released for this business (voice gate)
   // Chat first: the customer types their details.
   script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142' })), say('Thanks Jamie.'))
   const t1 = await chat('alpha', 'Jamie Rivera 843-555-0142')
@@ -632,13 +640,24 @@ test('voice continues the chat conversation (context kept); streams sentence by 
   assert.match(s.sent.at(-1).content, /You can also type in the chat/)
   s.handlers.close()
   await tick(10)
-  assert.equal(await attachRetellSocket(env, ws(), row.call_id), false, 'an ended call cannot reconnect')
+  // A closed socket is not an ended call: Retell's auto_reconnect comes back with the same call id within seconds.
+  const again = ws()
+  assert.equal(await attachRetellSocket(env, again, row.call_id), true, 'the same call reconnects within the window')
+  assert.ok(!again.sent.some((m) => m.response_type === 'response'), 'a reconnect never greets again')
+  assert.equal(db.sql.prepare('SELECT ended_at FROM receptionist_calls WHERE call_id = ?').get(row.call_id).ended_at, null)
+  again.handlers.close()
+  await tick(10)
+  const closedAt = db.sql.prepare('SELECT ended_at FROM receptionist_calls WHERE call_id = ?').get(row.call_id).ended_at
+  assert.equal(await attachRetellSocket(env, ws(), row.call_id, closedAt + RECONNECT_MS + 1), false, 'after the reconnect window the call cannot reconnect')
+  // Once the conversation ended, the call can't come back even inside the window.
+  db.sql.prepare('UPDATE receptionist_conversations SET state = json_set(state, \'$.endedAt\', 1) WHERE id = ?').run(row.conversation_id)
+  assert.equal(await attachRetellSocket(env, ws(), row.call_id), false, 'an ended conversation cannot reconnect')
 })
 
 test('voice: a turn the caller talked over is dropped (not saved), so the next turn hears everything once; an ended conversation ends the call', async () => {
   await seed('alpha')
   enable('alpha')
-  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET })
+  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET, RECEPTIONIST_VOICE_BUSINESSES: 'alpha' })
   const v = await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })
   const row = db.sql.prepare('SELECT * FROM receptionist_calls').get()
   const s = ws()
@@ -667,13 +686,69 @@ test('voice: a turn the caller talked over is dropped (not saved), so the next t
   const evs = db.sql.prepare('SELECT kind, detail FROM receptionist_events WHERE conversation_id = ?').all(row.conversation_id).map((e) => `${e.kind}:${e.detail}`)
   assert.ok(evs.includes('turn:talked_over'), evs.join(','))
   assert.ok(!evs.includes('model:no_reply'), evs.join(','))
-  assert.ok(!s.sent.some((m) => m.response_id === 1 && /can’t answer right now|can't answer right now/.test(m.content || '')), 'no fallback spoken into the discarded answer')
+  assert.ok(!s.sent.some((m) => m.response_id === 1 && /can’t answer right now|can't answer right now|having trouble on my side/.test(m.content || '')), 'no fallback spoken into the discarded answer')
   assert.equal(latestUserText([{ role: 'agent', content: 'a' }, { role: 'user', content: 'b' }, { role: 'user', content: 'c' }]), 'b c')
+  // Words of a dropped turn: kept when an agent line came in between, never duplicated when they are still there.
+  assert.equal(turnText([{ role: 'user', content: 'b' }, { role: 'agent', content: 'One moment.' }, { role: 'user', content: 'c' }], 'b'), 'b c')
+  assert.equal(turnText([{ role: 'user', content: 'b' }, { role: 'user', content: 'c' }], 'b'), 'b c')
+  assert.equal(turnText([{ role: 'user', content: 'c' }], ''), 'c')
   // Ending the conversation (from the page) ends the call on the next turn.
   await call(convApi, 'POST', '/api/receptionist/alpha/conversation', { params: { customer: 'alpha' }, body: { action: 'end', conversationId: v.json().conversationId, token: v.json().token } })
   s.handlers.message({ data: JSON.stringify({ interaction_type: 'response_required', response_id: 5, transcript: [{ role: 'user', content: 'still there?' }] }) })
   await tick()
   assert.equal(s.sent.at(-1).end_call, true)
+})
+
+test('voice gate (RECEPTIONIST_VOICE_BUSINESSES): voice only for listed businesses, no wildcard, fails closed; chat unaffected; the server refuses too', async () => {
+  const { voiceAllowedFor, voiceStatus } = await import('../server/receptionist/voice.js')
+  await seed('alpha')
+  await seed('bravo')
+  enable('alpha')
+  enable('bravo')
+  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET })
+  const info = async (id) => (await call(infoApi, 'GET', `/api/receptionist/${id}`, { params: { customer: id } })).json()
+  const startVoice = (id) => call(voiceApi, 'POST', `/api/receptionist/${id}/voice`, { params: { customer: id }, body: {} })
+  // Unset and empty: nobody (fails closed), and the page is told it is in testing.
+  for (const list of [undefined, '', ' , ', '*', 'ALPHA', 'alpha*']) {
+    env.RECEPTIONIST_VOICE_BUSINESSES = list
+    assert.equal(voiceAllowedFor(env, 'alpha'), false, `list ${JSON.stringify(list)}`)
+    assert.deepEqual([(await info('alpha')).voice, (await info('alpha')).voiceStatus], [false, 'testing'])
+    if (list === undefined || list === '*') {
+      // (two route calls only: the per-IP voice rate limit is 6 per 10 minutes)
+      const r = await startVoice('alpha')
+      assert.deepEqual([r.status, r.json().error], [403, 'voice_not_available'])
+    }
+  }
+  assert.equal(fetches.filter((f) => f.url.includes('/v3/create-web-call')).length, 0, 'no Retell call is ever created when not allowed')
+  // Listed: allowed for that business only.
+  env.RECEPTIONIST_VOICE_BUSINESSES = ' bravo , alpha '
+  assert.deepEqual([(await info('alpha')).voice, (await info('alpha')).voiceStatus], [true, 'available'])
+  assert.equal((await startVoice('alpha')).status, 200)
+  env.RECEPTIONIST_VOICE_BUSINESSES = 'bravo'
+  assert.equal(voiceAllowedFor(env, 'alpha'), false)
+  assert.equal(voiceAllowedFor(env, 'unknown-biz'), false)
+  assert.equal(voiceAllowedFor(env, '../bravo'), false)
+  // A call created while allowed can't connect once the business is no longer listed.
+  const row = db.sql.prepare("SELECT call_id FROM receptionist_calls WHERE customer = 'alpha'").get()
+  const s = ws()
+  assert.equal(await attachRetellSocket(env, s, row.call_id), false)
+  assert.deepEqual(s.sent, [{ closed: 1008 }])
+  // Not configured at all: 'not_configured' (never claimed as testing or available).
+  delete env.RETELL_API_KEY
+  assert.equal(voiceStatus(env, 'bravo'), 'not_configured')
+  assert.equal((await info('bravo')).voiceStatus, 'not_configured')
+  // Chat is unaffected by the voice gate.
+  env.RECEPTIONIST_VOICE_BUSINESSES = ''
+  script.push(say('Hi! How can I help?'))
+  const c = await chat('alpha', 'hello')
+  assert.deepEqual([c.status, c.json().reply], [200, 'Hi! How can I help?'])
+  assert.equal((await info('alpha')).enabled, true)
+  // Owner dashboard: voice reported as in testing, not as set up or active; stored settings untouched.
+  const before = db.sql.prepare("SELECT * FROM receptionist_settings WHERE customer = 'alpha'").get()
+  env.RETELL_API_KEY = 'retell_SECRET'
+  const o = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: await owner('alpha') })).json()
+  assert.deepEqual([o.capabilities.voice, o.capabilities.voiceStatus], [false, 'testing'])
+  assert.deepEqual({ ...db.sql.prepare("SELECT * FROM receptionist_settings WHERE customer = 'alpha'").get() }, { ...before })
 })
 
 test('voice socket route: refuses without the secret path segment, wrong secret, non-WebSocket and IP outside the allowlist', async () => {
@@ -688,7 +763,7 @@ test('voice socket route: refuses without the secret path segment, wrong secret,
 })
 
 test('Retell setup script: dry run writes nothing; creates the Custom LLM agent once; re-runs update the draft; duplicates stop it; never publishes; secrets never printed', async () => {
-  const { setupAgent, AGENT_NAME } = await import('../scripts/retell-setup.mjs')
+  const { setupAgent, AGENT_NAME, TUNED_SETTINGS } = await import('../scripts/retell-setup.mjs')
   const R = 'http://127.0.0.1:9913'
   let agents = []
   const writes = []
@@ -717,7 +792,14 @@ test('Retell setup script: dry run writes nothing; creates the Custom LLM agent 
     assert.equal(writes.length, 0)
     assert.equal((await setupAgent({ ...opts, apply: true })).action, 'created')
     assert.equal(writes[0][1].response_engine.llm_websocket_url, `wss://getshowups.com/api/receptionist/llm/${WS_SECRET}`)
+    assert.ok(!('interruption_sensitivity' in writes[0][1]) && !('data_storage_setting' in writes[0][1]), 'without --tuned: Retell defaults (nothing sent)')
     assert.equal((await setupAgent({ ...opts, apply: true })).action, 'updated')
+    // --tuned: the proposed settings, dry run first (still writes nothing), then sent on the draft update.
+    assert.equal((await setupAgent({ ...opts, apply: false, tuned: true })).tuned, true)
+    assert.equal(writes.length, 2)
+    await setupAgent({ ...opts, apply: true, tuned: true })
+    assert.deepEqual(Object.fromEntries(Object.keys(TUNED_SETTINGS).map((k) => [k, writes[2][1][k]])), { ...TUNED_SETTINGS })
+    assert.ok(TUNED_SETTINGS.interruption_sensitivity >= 0 && TUNED_SETTINGS.interruption_sensitivity <= 1 && TUNED_SETTINGS.end_call_after_silence_ms >= 10000)
     agents.push({ agent_id: 'agent_dupe999999', agent_name: AGENT_NAME })
     assert.equal((await setupAgent({ ...opts, apply: true })).error, 'duplicate_agents')
     assert.ok(!lines.join('\n').includes(WS_SECRET))

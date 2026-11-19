@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Comms reliability (Agent B, 2026-11-19)
+
+- Branch feat/comms-reliability (draft PR), no migration. Detail: docs/COMMS_RELIABILITY.md.
+- Voice: 8 defects in our Retell socket/engine fixed (barge-in now aborts the stale Claude answer; a failed turn no
+  longer silences the call; Retell reconnects are accepted without a second greeting; talked-over words kept; holding
+  line at tool start; 10 s voice model timeout). Mocked harness + per-turn `voice_turn` timings (numbers only).
+- Voice release gate `RECEPTIONIST_VOICE_BUSINESSES` (no wildcard, empty = nobody), server-enforced; Beta label.
+  **At deploy, unlisted businesses lose the voice button (chat unchanged): owner decides which ids to list.**
+- Email: outbox backoff, stale/past-idempotency mail closed (`expired`), 400/422 permanent; confirmation + owner
+  new-booking notice sent right after booking (waitUntil). Booking: orphan Google events tracked + cron retry;
+  booking/availability failures are open `calendar.google` incidents until the next success.
+- Not live-verified: any real call. Next: approved live test call with and without `scripts/retell-setup.mjs --tuned`.
 ## Studio UX hardening (Agent A, 2026-11-19)
 
 - Branch feat/studio-ux-hardening, draft PR; details, defects and renderer notes in docs/STUDIO_UX_HARDENING.md.
