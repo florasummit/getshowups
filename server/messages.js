@@ -326,14 +326,14 @@ const DUE_SQL = (threads) => `
     JOIN customers c ON c.id = m.customer
     JOIN leads l ON l.id = m.lead_id AND l.customer = m.customer
     LEFT JOIN appointments a ON a.id = m.appointment_id AND a.customer = m.customer
-   WHERE m.status = 'scheduled' AND m.send_at <= ?1
+   WHERE m.status = 'scheduled' AND m.send_at <= ?1 AND (?3 IS NULL OR m.appointment_id = ?3)
    ORDER BY m.send_at LIMIT ?2`
 
 // Sends due messages. Safe to run concurrently (each row is claimed atomically before sending).
 // Fails closed: a follow-up whose opt-out status cannot be read is skipped, never sent unchecked.
 const optOutReason = (state) => (state === false ? null : state === null ? 'optout_unknown' : 'opted_out')
 
-export async function processDueMessages(env, now = Date.now(), limit = 20) {
+export async function processDueMessages(env, now = Date.now(), limit = 20, { appointmentId = null } = {}) {
   const db = env.ONBOARDING_DB
   const out = { sent: 0, failed: 0, skipped: 0, retry: 0 }
   // A run that died mid-send: the outcome is unknown, so never resend (avoids duplicate texts).
@@ -342,7 +342,7 @@ export async function processDueMessages(env, now = Date.now(), limit = 20) {
     .bind(now, now - STUCK_SENDING_MS)
     .run()
   const threads = await followupsReady(db)
-  const { results } = await db.prepare(DUE_SQL(threads)).bind(now, limit).all()
+  const { results } = await db.prepare(DUE_SQL(threads)).bind(now, limit, typeof appointmentId === 'string' ? appointmentId : null).all()
   const configured = { email: emailConfigured(env), sms: smsConfigured(env) }
   // Texts only from a business whose own sender is set up and whose US texting registration was approved.
   const smsReady = new Map()

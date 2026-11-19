@@ -62,11 +62,25 @@ export async function sendEmail(env, { id, to, subject, text, fromName, replyTo,
       signal: AbortSignal.timeout(8000),
     })
     const body = await res.json().catch(() => ({}))
-    return res.ok ? { ok: true, providerId: typeof body.id === 'string' ? body.id.slice(0, 64) : null } : { ok: false, error: `http_${res.status}` }
+    // 400/422: Resend refused this message as invalid (bad address, bad payload): retrying the same request can't help.
+    return res.ok ? { ok: true, providerId: typeof body.id === 'string' ? body.id.slice(0, 64) : null } : { ok: false, error: `http_${res.status}`, ...(res.status === 400 || res.status === 422 ? { permanent: true } : {}) }
   } catch {
-    return { ok: false, error: 'network_error' }
+    // Unknown outcome (timeout after Resend accepted it?): a retry is safe only with the same Idempotency-Key and
+    // within Resend's 24 h idempotency window (callers enforce that window, see OUTBOX_RETRY_WINDOW_MS).
+    return { ok: false, error: 'network_error', unknown: true }
   }
 }
+
+// Outbox retries: attempt n+1 waits OUTBOX_BACKOFF_MS[n] after the message was queued (5 min, then 30 min), so a short
+// provider outage doesn't burn all three attempts in ten minutes.
+export const OUTBOX_BACKOFF_MS = [0, 5 * 60 * 1000, 30 * 60 * 1000]
+// Resend keeps an Idempotency-Key for 24 h. A message already attempted is never retried after this window (a retry
+// could then deliver it twice), and nothing waits longer than this to go out late in a burst.
+export const OUTBOX_RETRY_WINDOW_MS = 23 * 60 * 60 * 1000
+// Owner notices are about something that happened now (new booking, cancellation, callback): one that couldn't go out
+// within the notice window is closed (expired) instead of arriving hours later, e.g. when a provider is configured.
+const OWNER_NOTICE_TEMPLATES = ['owner_booking', 'owner_lead', 'owner_cancel', 'owner_bounce', 'owner_callback', 'owner_coverage']
+export const OWNER_NOTICE_MAX_AGE_MS = 2 * 60 * 60 * 1000
 
 const deliver = (env, msg, testOnly) => sendEmail(env, { id: msg.id, to: msg.to_email, subject: msg.subject, text: msg.body, testOnly })
 
@@ -74,10 +88,32 @@ const deliver = (env, msg, testOnly) => sendEmail(env, { id: msg.id, to: msg.to_
 // doesn't allow now (test mode, non-test recipient) is closed as failed/test_mode, never attempted: held mail would
 // otherwise go out days late in a burst when MESSAGES_LIVE is turned on, and 20+ held rows (e.g. from test businesses)
 // would fill every batch and stop all other email.
-export async function flushOutbox(env, now = Date.now(), limit = 20) {
+// idPrefix (optional): only messages whose id starts with it (an event-driven flush right after the triggering
+// request, e.g. the owner's new-booking notice); the cron flush takes everything due.
+export async function flushOutbox(env, now = Date.now(), limit = 20, { idPrefix = null } = {}) {
   if (!emailConfigured(env)) return { configured: false, sent: 0, failed: 0 }
   const db = env.ONBOARDING_DB
-  const { results } = await db.prepare("SELECT * FROM email_outbox WHERE status = 'pending' ORDER BY created_at LIMIT ?1").bind(limit).all()
+  const prefix = typeof idPrefix === 'string' && /^[a-z_]+:[A-Za-z0-9_-]+:$/.test(idPrefix) ? idPrefix : null
+  // Stale mail is closed, never sent late: owner notices past their window, anything already attempted past the
+  // provider's idempotency window (a retry could duplicate it), and anything queued longer than that window.
+  if (!prefix) {
+    await db
+      .prepare(
+        `UPDATE email_outbox SET status = 'failed', error = 'expired' WHERE status = 'pending'
+           AND ((template IN (${OWNER_NOTICE_TEMPLATES.map((t) => `'${t}'`).join(', ')}) AND created_at < ?1) OR created_at < ?2)`,
+      )
+      .bind(now - OWNER_NOTICE_MAX_AGE_MS, now - OUTBOX_RETRY_WINDOW_MS)
+      .run()
+  }
+  const { results } = await db
+    .prepare(
+      `SELECT * FROM email_outbox WHERE status = 'pending'
+         AND (attempts = 0 OR (attempts = 1 AND created_at <= ?2) OR (attempts >= 2 AND created_at <= ?3))
+         AND (?4 IS NULL OR (id >= ?4 AND id < ?4 || '~'))
+       ORDER BY created_at LIMIT ?1`,
+    )
+    .bind(limit, now - OUTBOX_BACKOFF_MS[1], now - OUTBOX_BACKOFF_MS[2], prefix)
+    .all()
   let sent = 0
   let failed = 0
   const tests = results.length ? await testStatuses(env) : new Map()
@@ -100,8 +136,8 @@ export async function flushOutbox(env, now = Date.now(), limit = 20) {
     } else {
       failed++
       await db
-        .prepare("UPDATE email_outbox SET attempts = attempts + 1, error = ?2, status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END WHERE id = ?1")
-        .bind(msg.id, r.error)
+        .prepare("UPDATE email_outbox SET attempts = attempts + 1, error = ?2, status = CASE WHEN attempts + 1 >= 3 OR ?3 = 1 THEN 'failed' ELSE 'pending' END WHERE id = ?1 AND status = 'pending'")
+        .bind(msg.id, r.error, r.permanent ? 1 : 0)
         .run()
     }
   }

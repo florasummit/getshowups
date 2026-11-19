@@ -6,7 +6,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { hit, hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { conversationToken, loadConversation, receptionistOn } from '../../../../server/receptionist/engine.js'
-import { startVoiceCall, voiceConfigured } from '../../../../server/receptionist/voice.js'
+import { startVoiceCall, voiceAllowedFor, voiceConfigured } from '../../../../server/receptionist/voice.js'
 
 export async function onRequestPost({ request, env, params }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
@@ -16,6 +16,8 @@ export async function onRequestPost({ request, env, params }) {
   }
   if (!(await receptionistOn(env, customer))) return json(404, { error: 'receptionist_off' })
   if (!voiceConfigured(env)) return json(503, { error: 'voice_not_configured' })
+  // Release gate (RECEPTIONIST_VOICE_BUSINESSES): voice is in testing for every business not listed.
+  if (!voiceAllowedFor(env, customer.id)) return json(403, { error: 'voice_not_available' })
   const body = await request.json().catch(() => ({}))
   try {
     let existing = null

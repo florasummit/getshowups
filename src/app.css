@@ -3028,3 +3028,26 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 @keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .ui-skeleton-page, .ui-skeleton-block, .ui-detail { animation: none; } }
+
+/* ---- Studio UX hardening (Agent A, 2026-11-19): photo usage list, hidden photos, full-screen exit ---- */
+.studio-photo-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.studio-photo-row { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 6px; border-radius: 8px; border: 1px solid var(--ink-100); }
+.studio-photo-row > img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; display: block; }
+.studio-photo-info { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.studio-photo-used { color: var(--ink-700); overflow-wrap: anywhere; }
+.studio-photo-row-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.studio-photo-row-actions .link-btn, .studio-hidden-photos .link-btn { min-height: 32px; }
+.studio-photo-row-actions .danger { color: #b42318; }
+.studio-replace { grid-column: 1 / -1; border: 0; padding: 4px 0 0; margin: 0; }
+.studio-replace .studio-thumb:focus-visible, .studio-thumb:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 1px; }
+.studio-hidden-photos { margin-top: 12px; font-size: 14px; }
+.studio-hidden-photos .studio-photo-row { grid-template-columns: 56px auto; align-items: center; }
+/* Full screen: the Exit control stays visible and stands out (it is the way back besides Escape and Back). */
+.studio-exit-full { background: var(--ink-900); color: var(--white); }
+.studio-exit-full:hover:not(:disabled) { background: var(--ink-700); }
+.studio--full .studio-bar { position: sticky; top: 0; z-index: 6; }
+/* Full screen on phones/tablets: one column (the two-column full-screen grid left the preview a few pixels wide). */
+@media (max-width: 980px) {
+  .studio--full .studio-grid { grid-template-columns: minmax(0, 1fr); }
+  .studio--full .studio-stage iframe { height: 70vh; min-height: 420px; }
+}

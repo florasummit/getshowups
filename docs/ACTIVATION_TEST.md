@@ -14,6 +14,14 @@ unassisted, on their own device. Status: **prepared, not run.** Run it after the
 | P4 | Stripe stays in test mode; give the tester test card 4242 4242 4242 4242, any future date, any CVC | Observer |
 | P5 | Observer prepares: stopwatch, the sheet below, `/admin/review` open in a separate window (not visible to the tester) | Observer |
 
+**This run is permitted test onboarding, not public signup.** Genuine public signup stays closed throughout: the
+tester gets through only because their email is on the approved test list (sandbox checkout allowed by
+`sandboxCheckoutAllowed`, test card, Stripe test mode). Nothing is changed for anyone else, and the result must never
+be reported as "signup works for the public". Observer control check, before and after the session, from a
+browser that is NOT signed in as the tester: `/api/enrollment` returns `{"open":false}`, and the home page buttons
+read "Request early access". A second, non-listed Google account at `/dashboard?plan=founding` must still be told
+"Online sign-up opens soon" at the plan step (no business created: `signup_not_open`).
+
 **Known skew while enrollment is closed:** the public site shows "Request early access" to everyone (it can't know the
 tester is allowed), and `/dashboard?plan=founding` says enrollment isn't open, with "Continue with Google" below.
 Give the tester the link `https://getshowups.com/dashboard?plan=founding` and the one sentence "sign in with Google

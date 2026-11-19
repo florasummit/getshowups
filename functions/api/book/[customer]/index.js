@@ -2,17 +2,21 @@
 // Exposes no contact details, settings beyond what a visitor needs, or calendar contents.
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
-import { openSlots } from '../../../../server/booking.js'
+import { openSlots, recordAvailability } from '../../../../server/booking.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { offerSmsFor } from '../../../../server/followups/settings.js'
 import { policiesOrEmpty } from '../../../../server/policies.js'
 
-export async function onRequestGet({ request, env, params }) {
+export async function onRequestGet({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params)
   if (response) return response
   const rl = await hitByIp(env, 'bookView', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const [result, policies] = await Promise.all([openSlots(env, customer), policiesOrEmpty(env.ONBOARDING_DB, customer.id)])
+  // A lookup that failed for an integration reason (never "no free time") → Business Review (throttled; never throws).
+  const recorded = recordAvailability(env, customer.id, result)
+  if (typeof waitUntil === 'function') waitUntil(recorded)
+  else await recorded
   return json(200, {
     name: customer.name,
     timezone: customer.timezone,
