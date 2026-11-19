@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## Launch readiness + enrollment notice (2026-11-19) — docs/launch-readiness (#82, no migration)
+
+- Visitors are told enrollment isn't open BEFORE Google sign-in: GET /api/enrollment ({open}, mirrors the server's
+  signup gate; rate-limited), "Request early access" CTAs + note, /dashboard?plan=founding notice with Book a call.
+  Sign-in unchanged for existing owners, invitations, admins, testers. Help link on owner screens; /#book → /#book-demo.
+- Docs: LAUNCH_READINESS (journey QA, readiness matrix, 20-minute target vs measured), ACCOUNTANT_PACKAGE,
+  legal/ATTORNEY_REVIEW, FOUNDER_ALERTS_PROPOSAL (built in feat/founder-alerts, off), RELEASE_PLAN (#80 → #81 → #82,
+  backup/migration/smoke/rollback; not executed), ACTIVATION_TEST (real-person run script; not run).
+- Next: owner approves RELEASE_PLAN; voice allowlist `poolthru-llc,bob-electrical` before #81 deploys.
+
 ## Sales-tax analysis for the $499 plan (2026-11-19) — docs/sales-tax-analysis (docs only)
 
 - docs/SALES_TAX_ANALYSIS.md: what the $499 buys today (SaaS, generated website, hosting, support; ad management,

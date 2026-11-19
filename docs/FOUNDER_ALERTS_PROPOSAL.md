@@ -1,6 +1,6 @@
 # Proposal: founder alerts for critical operational failures
 
-Status: **proposal only (2026-11-19). Nothing built, nothing switched on.** Owner decision requested: approve the
+Status: **built in feat/founder-alerts (2026-11-19), OFF by default, nothing switched on.** Owner decision requested: approve the
 scope below, then one small PR implements it behind an off-by-default switch. Activating it needs separate approval.
 
 ## Problem
