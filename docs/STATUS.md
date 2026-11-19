@@ -12,6 +12,9 @@ _Update at the end of every task. Newest first._
   buttons, area `showHours`); site-render-v2.js (Call shows + dials the CURRENT phone on record, dropped without one;
   hours line; CSS only where used); Studio editor (Call target, "Show your booking hours"); Website tab notice listing
   what's missing.
+- **2026-11-19 (owner):** hours labelled "Online booking hours" (heading "Online booking hours" / "Service area and
+  online booking hours"); HVAC starters text-led (textLedStarter: hvac / heating / air conditioning / furnace / heat
+  pump in industry, services, description or name; owner photo still wins).
 - **Compatibility:** all 10 existing render goldens byte-identical (no golden regenerated); new fixtures
   v2-starter-full / v2-starter-minimal; layout spec checks Book + Call together on the first screen (desktop + phone).
   Applies only to NEW starter sites ("I'm starting fresh" / import without a site). Nothing published automatically.

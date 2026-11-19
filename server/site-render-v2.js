@@ -333,8 +333,8 @@ export function renderV2(biz, spec, opts = {}) {
       case 'area':
         // A section that shows hours (new starter) with neither towns nor confirmed hours on record isn't rendered.
         // (In the owner's editor it stays visible with a note, so it can still be found and edited.)
-        if (s.showHours && !biz.cities?.length && !biz.hours) return editing ? `${open()}<div class="wrap">${head(s)}<p class="muted">Your towns and booking hours appear here once they’re in Business details.</p></div></section>` : ''
-        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Where we work' })}${biz.cities?.length ? `<ul class="towns">${biz.cities.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}${s.showHours && biz.hours ? (extraCss.add(EXTRA_CSS.hours), `<p class="hours"><strong>Booking hours</strong> ${esc(hoursText(biz.hours))}</p>`) : ''}</div></section>`
+        if (s.showHours && !biz.cities?.length && !biz.hours) return editing ? `${open()}<div class="wrap">${head(s)}<p class="muted">Your towns and online booking hours appear here once they’re in Business details.</p></div></section>` : ''
+        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Where we work' })}${biz.cities?.length ? `<ul class="towns">${biz.cities.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}${s.showHours && biz.hours ? (extraCss.add(EXTRA_CSS.hours), `<p class="hours"><strong>Online booking hours</strong> ${esc(hoursText(biz.hours))}</p>`) : ''}</div></section>`
       case 'contact':
         return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Get in touch' })}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book online', target: 'book' })}${s.showPhone && biz.phone ? `<a class="btn ghost" href="tel:${esc(biz.phone.replace(/[^\d+]/g, ''))}">${esc(biz.phone)}</a>` : ''}</div>${s.form !== 'none' && form ? leadForm(s) : ''}</div></section>`
     }

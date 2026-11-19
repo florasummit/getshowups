@@ -65,14 +65,14 @@ test('missing records: sections left out, never invented; reported so the owner 
   const spec = validated(site, c)
   const html = render(NONE, spec)
   assert.ok(!html.includes('tel:') && !html.includes('btn-call'), 'no phone on record → no Call button (never a dead link)')
-  assert.ok(!html.includes('id="area"') && !html.includes('Booking hours'), 'no towns or hours → no empty section')
+  assert.ok(!html.includes('id="area"') && !html.includes('booking hours'), 'no towns or hours → no empty section')
   assert.ok(!html.includes('<details'), 'no FAQ without the owner’s own notes')
   // The owner's editor still shows the empty section (with a note) so it can be found.
   assert.match(renderV2(renderBiz(NONE), spec, { bookUrl: '/book/x', year: 2026, editing: true }), /id="area"[^]*appear here once they’re in Business details/)
   // Later the owner adds a phone and confirms hours: both appear without a new draft.
   const later = renderV2(renderBiz(NONE, { phone: '(512) 555-0100', hours: { dayStart: '10:00', dayEnd: '16:00', workdays: [2, 3, 4] } }), spec, { bookUrl: '/book/x', year: 2026 })
   assert.ok(later.includes('href="tel:5125550100"'))
-  assert.match(later, /<h2 id="h-area">Hours and service area<\/h2><\/div><p class="hours"><strong>Booking hours<\/strong> Tue–Thu · 10:00 AM – 4:00 PM/)
+  assert.match(later, /<h2 id="h-area">Service area and online booking hours<\/h2><\/div><p class="hours"><strong>Online booking hours<\/strong> Tue–Thu · 10:00 AM – 4:00 PM/)
 })
 
 test('a long town list is never cut into the first-screen line (left out; the area section lists every town)', () => {
@@ -115,7 +115,7 @@ test('renderer: Call dials the CURRENT phone on record; CSS only on pages that u
   const spec = validated(starterSite(c, FULL).site, c)
   const html = render(FULL, spec)
   assert.match(html, /<a class="btn ghost btn-call" href="tel:8435550100">Call <span class="tel">\(843\) 555-0100<\/span><\/a>/)
-  assert.match(html, /<strong>Booking hours<\/strong> Mon–Fri · 9:00 AM – 5:00 PM/)
+  assert.match(html, /<strong>Online booking hours<\/strong> Mon–Fri · 9:00 AM – 5:00 PM/)
   assert.ok(html.includes('.btn-call .tel{') && html.includes('.hours{'))
   // The owner changes the phone in Business details → the site follows without a new draft.
   const changed = renderV2(renderBiz(FULL, { phone: '843-555-0199' }), spec, { bookUrl: '/book/x', year: 2026 })
@@ -124,11 +124,36 @@ test('renderer: Call dials the CURRENT phone on record; CSS only on pages that u
   const gone = renderV2(renderBiz(FULL, { phone: '' }), spec, { bookUrl: '/book/x', year: 2026 })
   assert.ok(!gone.includes('tel:') && !gone.includes('.btn-call'))
   // Hours no longer confirmed → no hours line.
-  assert.ok(!renderV2(renderBiz(FULL, { hours: null }), spec, { bookUrl: '/book/x', year: 2026 }).includes('Booking hours'))
+  assert.ok(!renderV2(renderBiz(FULL, { hours: null }), spec, { bookUrl: '/book/x', year: 2026 }).includes('<p class="hours">'))
 })
 
 test('hoursText: consecutive days joined, HH:MM or minutes', () => {
   assert.equal(hoursText({ workdays: [1, 2, 3, 4, 5], dayStart: '09:00', dayEnd: '17:30' }), 'Mon–Fri · 9:00 AM – 5:30 PM')
   assert.equal(hoursText({ workdays: [6, 1, 3, 2], dayStart: 480, dayEnd: 720 }), 'Mon–Wed, Sat · 8:00 AM – 12:00 PM')
   assert.equal(hoursText({ workdays: [0, 6], dayStart: '00:00', dayEnd: '23:59' }), 'Sun, Sat · 12:00 AM – 11:59 PM')
+})
+
+test('HVAC starters are text-led (no approved licensed photo); other trades keep theirs; an owner photo always wins', () => {
+  const hvac = { ...FULL, name: 'Cool Air Co', industry: 'HVAC' }
+  for (const b of [hvac, { ...FULL, industry: '', description: 'Heating and air conditioning repair' }, { ...FULL, industry: 'Contractor', name: 'Furnace Pros' }]) {
+    const hero = home(starterSite(content(), b).site)[0]
+    assert.equal(hero.image, null, `${b.name}: no stock photo`)
+    assert.equal(hero.layout, 'minimal')
+  }
+  assert.match(String(home(starterSite(content(), FULL).site)[0].image), /^stock:tools-/, 'an electrician keeps the trades photo')
+  const own = 'a'.repeat(32)
+  assert.equal(home(starterSite(content({ hero: own }), hvac).site)[0].image, `asset:${own}`)
+})
+
+test('rendered starter shows the records exactly: phone, service prices, online booking hours, booking link', () => {
+  const c = content()
+  const site = validated(starterSite(c, FULL).site, c)
+  const html = render(FULL, site)
+  assert.match(html, /href="tel:8435550100"/)
+  assert.ok(html.includes('(843) 555-0100'))
+  assert.ok(html.includes('$129'), 'recorded price shown')
+  assert.ok(!/\$\d/.test(html.replace(/\$129/g, '')), 'no price that is not on record')
+  assert.match(html, /<strong>Online booking hours<\/strong> Mon–Fri · 9:00 AM – 5:00 PM/)
+  assert.ok(!/business hours|opening hours|open hours/i.test(html), 'never presented as opening hours')
+  assert.ok(html.includes('href="https://getshowups.com/book/x"'))
 })

@@ -1013,9 +1013,9 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
       {s.type === 'area' && (
         <>
           <label className="check">
-            <input type="checkbox" checked={Boolean(s.showHours)} onChange={(e) => onChange((x) => (x.showHours = e.target.checked))} /> Show your booking hours
+            <input type="checkbox" checked={Boolean(s.showHours)} onChange={(e) => onChange((x) => (x.showHours = e.target.checked))} /> Show your online booking hours
           </label>
-          <p className="fine">The towns and booking hours come from Business details.</p>
+          <p className="fine">The towns and online booking hours come from Business details.</p>
         </>
       )}
       {LAYOUTS[s.type] && <Choice label="Layout" value={s.layout} options={LAYOUTS[s.type]} onChange={set('layout')} />}

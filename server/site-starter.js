@@ -151,13 +151,22 @@ export function ensureServices(site, content) {
   return { site: { ...site, pages }, added: true }
 }
 
+// Industries without approved licensed photos whose starter stays text-led even though their wider industry group
+// (site-design.js INDUSTRIES) has stock photos. Same sources as industryKey: industry, service names, description, name.
+const TEXT_LED = /\bhvac\b|heating|air[- ]?condition|furnace|heat pump/i
+export function textLedStarter(content, biz) {
+  const services = (content.services || []).map((s) => (typeof s === 'string' ? s : s?.name)).join(' ')
+  return [biz.industry, services, biz.description, biz.name].some((t) => TEXT_LED.test(String(t || '')))
+}
+
 // biz: { name, industry, description, phone, chat, visit, cities[], hoursConfirmed, policies } (server/website-import.js
 // starterFacts). kinds: extra pages to create (see PAGE_KINDS). Returns { site, added[], missing[] }.
 export function starterSite(content, biz, { kinds = [], privacy = null, now = Date.now() } = {}) {
   const key = industryKey({ industry: biz.industry, services: content.services || [], description: biz.description, name: biz.name })
   const look = starterTheme(key)
-  // The logo is never the first-screen photo (it stays in the header).
-  const image = content.hero && content.hero !== content.logo ? `asset:${content.hero}` : look.heroImage
+  // The logo is never the first-screen photo (it stays in the header). HVAC has no approved licensed photo yet, so an
+  // HVAC starter is text-led unless the owner uploaded their own (owner decision 2026-11-19).
+  const image = content.hero && content.hero !== content.logo ? `asset:${content.hero}` : textLedStarter(content, biz) ? null : look.heroImage
   const aboutPage = kinds.includes('about') && content.about
   const visit = Boolean(biz.visit)
   const cities = Array.isArray(biz.cities) ? biz.cities.filter(Boolean) : []
@@ -185,7 +194,8 @@ export function starterSite(content, biz, { kinds = [], privacy = null, now = Da
     bookingSteps(visit),
     ...(content.about && !aboutPage ? [{ type: 'text', id: 'about', heading: `About ${biz.name}`.slice(0, 120), body: content.about }] : []),
     // Towns and confirmed hours are read from the records at render time; with neither, the section isn't shown.
-    { type: 'area', id: 'area', heading: cities.length && !hours ? 'Where we work' : hours && !cities.length ? 'Booking hours' : 'Hours and service area', showHours: true },
+    // "Online booking hours": the record is when online booking offers times, not necessarily when the business is open.
+    { type: 'area', id: 'area', heading: cities.length && !hours ? 'Where we work' : hours && !cities.length ? 'Online booking hours' : 'Service area and online booking hours', showHours: true },
     ...(faq.length ? [{ type: 'faq', id: 'faq', heading: 'Good to know', items: faq }] : []),
     cta('book-cta'),
   ]

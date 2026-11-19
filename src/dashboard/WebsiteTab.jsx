@@ -81,7 +81,7 @@ function HostingNotice({ hosting }) {
 // Phone, hours and towns are shown from the records at render time once they exist; services and notes need a section.
 const MISSING_TEXT = {
   phone: { text: 'Your phone number: the Call button next to Book online appears once it’s in Settings.' },
-  hours: { text: 'Your booking hours: they appear on the page once you confirm them in Settings.' },
+  hours: { text: 'Your online booking hours: they appear on the page once you confirm them in Settings.' },
   area: { text: 'The towns you serve: they appear on the page once they’re in Settings.' },
   services: { text: 'Your services: add them, then add a Services section in the editor.' },
   policies: { text: 'What customers should know: write it in Settings, then add a Good to know section in the editor.' },

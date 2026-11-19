@@ -66,3 +66,6 @@ renderer versioning (old versions keep old CSS) or with your explicit approval o
 3. Photos: **approved for a future phase**. Curate ≈12 commercially usable, freely licensed photos with source, license,
    attribution and permitted uses recorded (docs/PHOTO_LIBRARY_CANDIDATES.md); separate from Phase 1; no existing
    customer website changes automatically.
+4. (2026-11-19) Label the hours "Online booking hours": the record is when online booking offers times, not opening
+   hours. HVAC starters stay text-led (no stock photo; an owner photo still wins) until licensed HVAC imagery is
+   approved (site-starter.js textLedStarter).
