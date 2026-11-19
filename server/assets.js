@@ -35,46 +35,104 @@ export async function saveAsset(db, customerId, bytes, now = Date.now()) {
   return { ok: true, asset: { id, url: `/site-assets/${id}`, size: bytes.length } }
 }
 
-// Every photo something recoverable shows: the draft, the live version, any saved (published) version, an AI designer
-// turn Undo can bring back, or a draft checkpoint. Each is read as content (usedBy), so a photo merely named in a copy
-// map (content.variants) without being shown doesn't count.
-export async function photosInUse(db, customerId) {
-  const used = new Set()
-  const add = (content) => {
-    for (const id of usedBy(content)) used.add(id)
+const parseJson = (v) => {
+  try {
+    return typeof v === 'string' ? JSON.parse(v) : v
+  } catch {
+    return null
   }
-  const parse = (v) => {
-    try {
-      return typeof v === 'string' ? JSON.parse(v) : v
-    } catch {
-      return null
-    }
-  }
-  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
-  if (w) add(parse(w.draft))
-  add((await liveContent(db, customerId))?.content)
+}
+
+// Where each photo is used, per business: { [id]: { draft, live, versions, history, logo } }.
+//   draft     the private draft shows it
+//   live      the version visitors see shows it
+//   versions  how many saved (published) versions show it (each can be restored)
+//   history   an AI-designer turn Undo can bring back, or a draft checkpoint, shows it
+//   logo      it is or was the business's logo (current draft or any saved version)
+// Each is read as content (usedBy), so a photo merely named in a copy map (content.variants) without being shown
+// doesn't count; a phone-sized copy counts wherever its photo does.
+export async function photoUsage(db, customerId) {
+  const usage = new Map()
+  const at = (id) => usage.get(id) || (usage.set(id, { draft: false, live: false, versions: 0, history: false, logo: false }), usage.get(id))
+  const w = await db.prepare('SELECT draft, live_version FROM websites WHERE customer = ?1').bind(customerId).first()
+  const draft = w ? parseJson(w.draft) : null
+  for (const id of usedBy(draft)) at(id).draft = true
+  if (typeof draft?.logo === 'string') at(draft.logo).logo = true
+  for (const id of usedBy((await liveContent(db, customerId))?.content)) at(id).live = true
   const versions = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1').bind(customerId).all()
-  for (const v of versions.results) add(parse(v.content))
+  for (const v of versions.results) {
+    const c = parseJson(v.content)
+    for (const id of usedBy(c)) at(id).versions++
+    if (typeof c?.logo === 'string') at(c.logo).logo = true
+  }
   const kept = await db
     .prepare("SELECT json_extract(content, '$.site') AS site, json_extract(content, '$.previous') AS previous, json_extract(content, '$.draft') AS draft FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') IN ('designer', 'checkpoint')")
     .bind(customerId)
     .all()
-  for (const r of kept.results) {
-    add({ site: parse(r.site) })
-    add({ site: parse(r.previous) })
-    add(parse(r.draft))
-  }
-  return used
+  for (const r of kept.results) for (const c of [{ site: parseJson(r.site) }, { site: parseJson(r.previous) }, parseJson(r.draft)]) for (const id of usedBy(c)) at(id).history = true
+  return usage
 }
 
-// Removes one of the business's photos, only if nothing recoverable still shows it. Returns { ok } or { error: 'in_use' }.
-export async function deleteAsset(db, customerId, id, inUse = null) {
-  if (!/^[a-f0-9]{32}$/.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
-  const row = await db.prepare('SELECT id FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
-  if (!row) return { ok: false, httpStatus: 404, error: 'not_found' }
-  if ((inUse || (await photosInUse(db, customerId))).has(id)) return { ok: false, httpStatus: 409, error: 'in_use' }
+// Every photo something recoverable shows: the draft, the live version, any saved (published) version, an AI designer
+// turn Undo can bring back, or a draft checkpoint.
+export async function photosInUse(db, customerId) {
+  return new Set((await photoUsage(db, customerId)).keys())
+}
+
+// Hidden photos (migration 0030): kept (something recoverable may still show them) but out of the photo list and every
+// picker. Fails soft: before 0030 is applied nothing is hidden.
+async function hiddenIds(db, customerId) {
+  try {
+    const { results } = await db.prepare('SELECT asset FROM website_asset_hidden WHERE customer = ?1').bind(customerId).all()
+    return new Set(results.map((r) => r.asset))
+  } catch {
+    return new Set()
+  }
+}
+const ownRow = (db, customerId, id) => db.prepare('SELECT id FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
+const forget = async (db, customerId, id) => {
   await db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).run()
-  return { ok: true }
+  await db.prepare('DELETE FROM website_asset_hidden WHERE asset = ?1 AND customer = ?2').bind(id, customerId).run().catch(() => {})
+}
+
+// Removes one of the business's photos, only if nothing recoverable still shows it. Its phone-sized copy (named in the
+// draft's content.variants) goes with it when nothing else shows that copy. Returns { ok, removed } or
+// { error: 'in_use', usage } (where it is used, so the owner can be told).
+export async function deleteAsset(db, customerId, id) {
+  if (!/^[a-f0-9]{32}$/.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
+  if (!(await ownRow(db, customerId, id))) return { ok: false, httpStatus: 404, error: 'not_found' }
+  const usage = await photoUsage(db, customerId)
+  if (usage.has(id)) return { ok: false, httpStatus: 409, error: 'in_use', usage: usage.get(id) }
+  const removed = [id]
+  await forget(db, customerId, id)
+  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
+  const copy = parseJson(w?.draft)?.variants?.[id]
+  if (typeof copy === 'string' && /^[a-f0-9]{32}$/.test(copy) && !usage.has(copy) && (await ownRow(db, customerId, copy))) {
+    await forget(db, customerId, copy)
+    removed.push(copy)
+  }
+  return { ok: true, removed }
+}
+
+// Hide / show again. Hiding is for a photo the draft and the live website don't show (only saved versions, AI undo or
+// draft checkpoints do): its bytes stay, so a restore still shows it. { error: 'in_draft' | 'live' } otherwise.
+export async function hideAsset(db, customerId, id, hidden = true, now = Date.now()) {
+  if (!/^[a-f0-9]{32}$/.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
+  if (!(await ownRow(db, customerId, id))) return { ok: false, httpStatus: 404, error: 'not_found' }
+  try {
+    if (!hidden) {
+      await db.prepare('DELETE FROM website_asset_hidden WHERE asset = ?1 AND customer = ?2').bind(id, customerId).run()
+      return { ok: true }
+    }
+    const u = (await photoUsage(db, customerId)).get(id)
+    if (u?.live) return { ok: false, httpStatus: 409, error: 'live', usage: u }
+    if (u?.draft) return { ok: false, httpStatus: 409, error: 'in_draft', usage: u }
+    await db.prepare('INSERT INTO website_asset_hidden (asset, customer, hidden_at) VALUES (?1, ?2, ?3) ON CONFLICT (asset) DO NOTHING').bind(id, customerId, now).run()
+    return { ok: true }
+  } catch (err) {
+    if (/no such table/i.test(String(err?.message))) return { ok: false, httpStatus: 503, error: 'not_available' }
+    throw err
+  }
 }
 
 // Removes every photo of this business that nothing recoverable uses. Returns { removed, kept, bytesFreed }.
@@ -85,7 +143,7 @@ export async function cleanupAssets(db, customerId) {
   let bytesFreed = 0
   for (const a of results) {
     if (inUse.has(a.id)) continue
-    await db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(a.id, customerId).run()
+    await forget(db, customerId, a.id)
     removed++
     bytesFreed += a.size || 0
   }
@@ -93,20 +151,36 @@ export async function cleanupAssets(db, customerId) {
 }
 
 // logo: true for an image that is or was the business's logo (photo pickers leave it out; server/website.js).
-export async function listAssets(db, customerId) {
-  const [{ results }, logos] = await Promise.all([
+// Hidden photos are left out unless { hidden: true } (then marked hidden: true). { usage: true } adds where each is used.
+export async function listAssets(db, customerId, { hidden: withHidden = false, usage: withUsage = false } = {}) {
+  const [{ results }, logos, hidden, usage] = await Promise.all([
     db.prepare('SELECT id, size, created_at FROM website_assets WHERE customer = ?1 ORDER BY created_at DESC').bind(customerId).all(),
     logoAssetIdsFor(db, customerId),
+    hiddenIds(db, customerId),
+    withUsage ? photoUsage(db, customerId) : null,
   ])
-  return results.map((r) => ({ id: r.id, url: `/site-assets/${r.id}`, size: r.size, createdAt: r.created_at, ...(logos.has(r.id) ? { logo: true } : {}) }))
+  return results
+    .filter((r) => withHidden || !hidden.has(r.id))
+    .map((r) => ({
+      id: r.id,
+      url: `/site-assets/${r.id}`,
+      size: r.size,
+      createdAt: r.created_at,
+      ...(logos.has(r.id) ? { logo: true } : {}),
+      ...(hidden.has(r.id) ? { hidden: true } : {}),
+      ...(usage ? { usage: usage.get(r.id) || null } : {}),
+    }))
 }
 
 // D1 may return a BLOB as an ArrayBuffer, a typed array or a plain number array.
 export const blobBytes = (v) => (v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v) : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : Uint8Array.from(v || []))
 
 // Photos a piece of content shows, including the phone-sized copies of the ones it uses (content.variants).
+// content.design (older AI design format) may place an owner photo as its hero/About image (asset:<id>): it counts too
+// (it used to be missed, so such a photo could be removed while a version still showed it).
+const designImages = (d) => [d?.heroImage, d?.aboutImage].filter((r) => typeof r === 'string' && r.startsWith('asset:')).map((r) => r.slice(6))
 export const usedBy = (content) => {
-  const used = new Set([content?.logo, content?.hero, ...(content?.photos || []), ...specImages(content?.site)].filter(Boolean))
+  const used = new Set([content?.logo, content?.hero, ...(content?.photos || []), ...designImages(content?.design), ...specImages(content?.site)].filter((v) => typeof v === 'string' && v))
   for (const [id, small] of Object.entries(content?.variants || {})) if (used.has(id)) used.add(small)
   return used
 }

@@ -1,15 +1,25 @@
 // /api/dashboard/website/assets — website images for the signed-in business.
-//   GET  → { assets: [{ id, url, size }] }
+//   GET                → { assets: [{ id, url, size }] }  (hidden photos left out)
+//   GET ?usage=1       → { assets: [{ id, url, size, hidden?, usage: { draft, live, versions, history, logo } | null }] }
 //   POST (raw JPEG/PNG/WebP body, ≤ 1 MB; the dashboard resizes before upload) → { asset }
+//   POST JSON { action: 'delete', id }   remove a photo nothing recoverable uses (409 in_use + usage otherwise)
+//             { action: 'hide' | 'show', id }  hide a photo only history uses (bytes kept) / show it again
+//             { action: 'cleanup' }      remove every photo nothing recoverable uses
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
-import { cleanupAssets, deleteAsset, listAssets, MAX_BYTES, saveAsset } from '../../../../server/assets.js'
+import { cleanupAssets, deleteAsset, hideAsset, listAssets, MAX_BYTES, saveAsset } from '../../../../server/assets.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  return json(200, { assets: await listAssets(env.ONBOARDING_DB, session.customer.id) })
+  const usage = new URL(request.url).searchParams.get('usage') === '1'
+  try {
+    return json(200, { assets: await listAssets(env.ONBOARDING_DB, session.customer.id, usage ? { hidden: true, usage: true } : {}) })
+  } catch (err) {
+    console.error('asset list failed:', err?.name)
+    return json(503, { error: 'storage_error' })
+  }
 }
 
 export async function onRequestPost({ request, env }) {
@@ -17,25 +27,21 @@ export async function onRequestPost({ request, env }) {
   if (response) return response
   const rl = await hit(env, 'assetUpload', session.customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
-  // JSON { action: 'delete', id }: remove a photo nothing recoverable uses (server/assets.js deleteAsset). Uploads are
-  // raw image bytes, checked by their content, never by the declared type.
+  // JSON actions (delete / hide / show / cleanup). Uploads are raw image bytes, checked by their content, never by the
+  // declared type.
   if ((request.headers.get('Content-Type') || '').startsWith('application/json')) {
     const body = await request.json().catch(() => null)
-    if (body?.action === 'cleanup') {
-      // { action: 'cleanup' }: remove every photo nothing recoverable uses → { removed, kept, bytesFreed }.
-      try {
-        return json(200, await cleanupAssets(env.ONBOARDING_DB, session.customer.id))
-      } catch (err) {
-        console.error('asset cleanup failed:', err?.name)
-        return json(503, { error: 'storage_error' })
-      }
-    }
-    if (body?.action !== 'delete') return json(400, { error: 'invalid_request' })
+    const db = env.ONBOARDING_DB
+    const id = session.customer.id
     try {
-      const r = await deleteAsset(env.ONBOARDING_DB, session.customer.id, body.id)
-      return r.ok ? json(200, { ok: true }) : json(r.httpStatus, { error: r.error })
+      if (body?.action === 'cleanup') return json(200, await cleanupAssets(db, id))
+      let r
+      if (body?.action === 'delete') r = await deleteAsset(db, id, body.id)
+      else if (body?.action === 'hide' || body?.action === 'show') r = await hideAsset(db, id, body.id, body.action === 'hide')
+      else return json(400, { error: 'invalid_request' })
+      return r.ok ? json(200, { ok: true, ...(r.removed ? { removed: r.removed } : {}) }) : json(r.httpStatus, { error: r.error, ...(r.usage ? { usage: r.usage } : {}) })
     } catch (err) {
-      console.error('asset delete failed:', err?.name)
+      console.error('asset action failed:', err?.name)
       return json(503, { error: 'storage_error' })
     }
   }
