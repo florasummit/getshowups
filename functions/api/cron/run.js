@@ -14,6 +14,7 @@ import { purgeDesignerRaw } from '../../../server/ai-designer.js'
 import { queueOwnerNotices } from '../../../server/notify.js'
 import { founderAlerts } from '../../../server/alerts.js'
 import { syncIncidents } from '../../../server/ops/incidents.js'
+import { purgeQa } from '../../../server/ops/qa.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { enforceAdsHolds } from '../../../server/ads/holds.js'
@@ -63,6 +64,8 @@ export async function onRequestPost({ request, env }) {
     const alerts = await adsStep('founder alerts', () => founderAlerts(env))
     // Incident register (migration 0031; no-op before it): open / update / resolve from the same records.
     const incidents = await adsStep('incidents', () => syncIncidents(env))
+    // QA history retention (migration 0032; no-op before it): automated 90 days, human 365 days.
+    await adsStep('qa retention', () => purgeQa(env.ONBOARDING_DB))
     const outbox = await flushOutbox(env)
     const ads = {
       // First: the safety stop. Businesses on hold (failed payment, ended subscription, suspension) get any

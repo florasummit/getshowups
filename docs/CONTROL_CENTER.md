@@ -8,7 +8,7 @@ product already writes; it never changes a customer's account.
 | --- | --- | --- |
 | #83 | Founder alerts (detectors: calendar, availability, comms); OFF by default | — |
 | B1 (this) | Incident register, Account + Journey Inspector, overview, feature/journey registry, demo e2e | 0031 |
-| B2 | Automated QA run history (Playwright results), guided human QA, activation timer | 0032 |
+| B2 | Automated QA run history (Playwright results), guided human QA, activation timer, demo steps 6, 9, 11 | 0032 |
 
 ## Incident register (server/ops/incidents.js, cron step `incidents`)
 
@@ -78,3 +78,28 @@ product already writes; it never changes a customer's account.
 - **Activation:** apply 0031 (additive), then merge. Before 0031 is applied, the cron step returns
   `{ ready: false }` and every view shows an empty register.
 - **Rollback:** redeploy the previous version. The table stays and is unused; nothing else changes.
+
+## B2: QA history and guided human QA (server/ops/qa.js, migration 0032)
+
+- **Automated runs:** `scripts/qa-report.mjs` reads Playwright's own JSON report and posts it to `POST /api/qa/runs`.
+  - Auth is Bearer `QA_INGEST_TOKEN`. If it is unset the endpoint returns 503 and is off.
+  - Stored: registry-linked tests plus failures, with the code revision, source (ci/local), provider
+    (**mocked** vs **real**, never mixed), duration, a redacted error, and the CI run URL. Screenshots and traces stay
+    as CI artifacts.
+  - The run view shows failed results first, their related open incidents (matched by feature), and per-test retest
+    history.
+- **Guided human QA** runs on the same journey definitions. Each step shows the action and the expected result; the
+  observer records what happened, a status (Pass / Fail / Blocked / Not tested) and answers to the context
+  questions. Defects and improvements are captured separately.
+  - The timed journey `activation` stores server-clock step splits and the total.
+  - The tester is stored as a ref, never an email. Free text is capped and email/phone/token-redacted.
+- **Activation** appears as measured only when an observer has finished an `activation` run. Automated tests never
+  fill it.
+- **CI hookup (needs the owner):**
+  1. Add to the CI workflow: `PLAYWRIGHT_JSON_OUTPUT_NAME=qa-report.json npx playwright test --reporter=list,json`,
+     then `node scripts/qa-report.mjs qa-report.json`, with the secrets `QA_INGEST_URL` and `QA_INGEST_TOKEN`.
+  2. Set `QA_INGEST_TOKEN` on Pages.
+
+  Our GitHub token has no Workflows permission, so I did not change `.github/workflows`. Both steps need approval.
+- **Retention:** automated runs 90 days, human runs 365 days; purged by the cron. Size estimate: about 15 stored rows
+  per CI run (~3 KB), so 20 runs/day is about 5 MB over 90 days. Human runs are negligible.
