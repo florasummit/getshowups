@@ -12,6 +12,7 @@ import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { purgeDesignerRaw } from '../../../server/ai-designer.js'
 import { queueOwnerNotices } from '../../../server/notify.js'
+import { founderAlerts } from '../../../server/alerts.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { enforceAdsHolds } from '../../../server/ads/holds.js'
@@ -57,6 +58,8 @@ export async function onRequestPost({ request, env }) {
     const onboardingQueued = await queueFollowUps(env)
     // New bookings / unbooked leads → the business's members (queued before the flush so they go out this run).
     const ownerNotices = await adsStep('owner notices', () => queueOwnerNotices(env))
+    // Founder alerts (FOUNDER_ALERTS_ENABLED, off by default): queued before the flush so they go out this run.
+    const alerts = await adsStep('founder alerts', () => founderAlerts(env))
     const outbox = await flushOutbox(env)
     const ads = {
       // First: the safety stop. Businesses on hold (failed payment, ended subscription, suspension) get any
@@ -86,7 +89,7 @@ export async function onRequestPost({ request, env }) {
       const r = await auditCheckpoint(env.ONBOARDING_DB)
       return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
     })
-    return json(200, { messages, followups, onboardingQueued, ownerNotices, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
+    return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

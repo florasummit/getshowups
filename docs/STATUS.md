@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Founder alerts (2026-11-19) — feat/founder-alerts (stacked on #81, no migration, OFF by default)
+
+- server/alerts.js `founderAlerts` (cron step before the outbox flush), scope as approved-for-review in
+  docs/FOUNDER_ALERTS_PROPOSAL.md: calendar broken (connection error on a lookup: invalid grant at once, others open
+  ≥ 10 min; or hours confirmed with no calendar, checked hourly, once/day), booking page without times (≥ 3 failed
+  lookups in 30 min, no success since), messages failing (1 failed confirmation or ≥ 3 failures/hour per business).
+- Recipients: PLATFORM_ADMIN_EMAILS that recipientAllowed() delivers to now (MESSAGE_TEST_RECIPIENTS while
+  MESSAGES_LIVE is off); nothing held to burst later. One email per incident (outbox id), ≤ 1 per business + kind per 6 h, ≤ 10/run + digest. "No free time" never alerts. Test and
+  deleted businesses never alert; unreadable test list = nothing alerts. Codes/counts only. Capability platform.alerts.
+- Not built (proposal optional): "resolved" emails. Next: owner approves scope → merge after #81 → set
+  FOUNDER_ALERTS_ENABLED=true and add the founder address to MESSAGE_TEST_RECIPIENTS (approval).
+
 ## Release 2026-11-19 evening: #80, #81, #82 (owner-approved plan, docs/RELEASE_PLAN.md)
 
 - Backup ~/getshowups-backups/prod-20261119T203844Z-pre-pr80.sql (integrity ok; 12 table counts = production; no

@@ -442,6 +442,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   forward-only. An unknown send outcome is never resent. Conversation text: owner inbox only, never logged or in admin
   views; purged after 365 days; erased with the account. Live SMS / registration submission / number purchase need
   approval (docs/TEXTING_ACTIVATION.md).
+- Founder alerts (server/alerts.js): OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Platform admins only,
+  through the outbox and launch gate (queued only for admins recipientAllowed() delivers to now); one email per incident
+  (deterministic outbox id), ≤ 1 per business + kind per 6 h (flapping), ≤ 10 per run + digest; test/deleted businesses never alert; codes and counts only.
 - Owner notices (server/notify.js): only items from the last 2 h; queued only when recipientAllowed() would deliver now
   (nothing waits in the outbox to go out late); one per item + member (outbox id); body cleared once sent.
 - Owner cancellation (POST /api/dashboard/appointment-cancel, server/booking.js cancelAppointment): upcoming bookings only;
