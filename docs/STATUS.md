@@ -6,8 +6,8 @@ _Update at the end of every task. Newest first._
 
 - docs/SALES_TAX_ANALYSIS.md: what the $499 buys today (SaaS, generated website, hosting, support; ad management,
   messaging and voice NOT included; ad spend paid directly to Google/Meta), general state treatment per component,
-  the bundle decision (recommendation: one SaaS business-use product, tax-exclusive), nexus math (~17 customers per
-  state at $100k), California SaaS taxable from 2027-01-01, WA/MD 2025 changes, and 12 questions for the advisor.
+  the bundle consequences (recommendation: one SaaS business-use product, tax-exclusive), state-specific nexus thresholds (17–84 customers per
+  state), California SB 122 from CDTFA L-1036, WA/MD 2025 changes, the information package and 13 questions; each statement labelled verified / preliminary / open.
 - No tax configuration changed; the live price stays blocked (docs/LAUNCH_CHECKLIST.md §B).
 - **Next:** the owner sends §6 to the accountant; Q1 (home state) first.
 

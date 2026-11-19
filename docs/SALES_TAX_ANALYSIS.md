@@ -1,199 +1,338 @@
 # Sales tax on the $499/month founding plan: decision-ready analysis
 
-Prepared 2026-11-19 for the owner and the accountant / tax attorney. **This is not tax or legal advice.** It describes
-what GetShowUps actually sells today, how US states generally treat each part, and the exact questions a
-professional must answer before the live price exists. State rules change often (several changed in 2025–2026), so
-every state-level statement below must be confirmed against current law by the advisor.
+Prepared 2026-11-19 for the owner and the accountant / tax attorney. **This is not tax or legal advice.** It records
+what GetShowUps sells today, what the law says where we checked it, and what a professional must decide before the
+live price exists.
 
-**Status:** no tax configuration exists or has been changed. Stripe automatic tax is off, no Stripe Tax head office or
-registrations are set, the sandbox price's tax behavior is `unspecified`, and no live price exists
-(docs/PAID_LAUNCH.md, docs/LAUNCH_CHECKLIST.md §B). The live $499 price stays blocked until §6 is answered.
+**Status:** no tax configuration exists or has been changed.
+- Stripe automatic tax is off, and no Stripe Tax head office or registrations are set.
+- The sandbox price's tax behavior is `unspecified`, and no live price exists.
+- The live $499 price stays blocked until §8 is answered (docs/PAID_LAUNCH.md, docs/LAUNCH_CHECKLIST.md §B).
+- Intended configuration: **tax-exclusive** ($499 plus tax where legally due).
 
-## 1. What the $499 actually buys today (facts from the product)
+## How to read this document
 
-From the public pricing (src/content/site.js) and what production does:
+Every statement carries one of three labels:
 
-| Component | What it is in practice | In the $499 today? |
-| --- | --- | --- |
-| A. Booking and lead software | Online booking into the owner's Google Calendar, service-area screening, calendar invitations, show-up / no-show tracking, dashboard. Hosted, accessed over the internet, nothing downloaded, not customised per buyer | Yes |
-| B. Website build | Starter site generated from the owner's records (deterministic, no human design work); owner edits it themselves in the editor; optional AI designer on the owner's OWN AI key | Yes |
-| C. Website hosting | Site served on a GetShowUps address or the owner's own domain; images stored | Yes |
-| D. Support | "Direct help from the founding team" (human help, not a separately priced service) | Yes |
-| E. Advertising management | Google/Meta campaign drafting and management | **No** — marked "coming soon"; not live |
-| F. Advertising spend | Paid by the business **directly** to Google/Meta | **No** — never passes through GetShowUps |
-| G. Texting / email reminders, AI receptionist | Messaging and voice | **No** — not live; not in the plan's list |
+| Label | Meaning |
+| --- | --- |
+| **[VERIFIED]** | Read in an official government source (cited, with the date read). Still confirm it applies to us. |
+| **[PRELIMINARY]** | Our reading or a secondary source (law-firm or vendor summary). Plausible, not relied on until the advisor confirms. |
+| **[OPEN]** | Unanswered. Needs the advisor or a facts decision from the owner. |
 
-Price facts: one flat, non-itemised monthly charge; no setup fee; no trial; buyers are businesses (sole proprietors and
-LLCs running service businesses), buying for business use. Customers can be in any US state.
+## 1. Four different "locations" (do not conflate them)
 
-## 2. Each component, in general terms
+| Concept | What it means | Why it matters | What we know |
+| --- | --- | --- | --- |
+| **LLC formation state** | Where Flora Summit LLC was organised | Governs the entity (filings, annual reports). Doesn't by itself create sales-tax nexus in that state if nothing happens there [PRELIMINARY] | **[OPEN]** Not recorded in this repo |
+| **Principal operating location** | Where the business is actually run from: owner, staff, contractors, office | Usually the main source of physical nexus. Also the Stripe Tax "head office" | **[OPEN]** Not recorded; Terms draft leaves governing law open |
+| **Physical nexus** | Presence in a state (people, property, inventory, contractors working there, possibly servers) | Creates a duty to collect from the first taxable sale in that state, with no threshold [PRELIMINARY: general post-Wayfair rule] | **[OPEN]** Depends on the two rows above and where anyone working for GetShowUps sits. Hosting runs on Cloudflare's network; whether that creates presence anywhere is an advisor question |
+| **Economic nexus** | Sales into a state above its threshold (§5) | Creates a collection duty in states where we have no physical presence | No live sales yet, so no state's threshold is reached today [VERIFIED from our own records: all subscriptions are sandbox] |
+| **Customer location (sourcing)** | Where the sale is taxed: generally where the buyer receives or uses the service | Decides which state's and locality's rules and rate apply to each sale | We don't yet collect a billing address at checkout. **[OPEN]** which address to use |
 
-These are the common patterns across states. The advisor must map them to the states that matter (§4).
+## 2. What the $499 actually buys today (facts from the product)
 
-**A. Booking software = SaaS.** The core of the offer. Roughly 20 states plus DC tax SaaS in some form; the rest do
-not. Important variations:
-- Taxed as software / digital product in states such as NY, PA, WA, UT, TN, MA, RI, SD, WV, MS, KY, DC (verify each).
-- Business-use distinctions: OH taxes it only when used in business (so for our buyers it is taxed); CT taxes business
-  use at a reduced 1%; IA exempts qualifying business use.
-- Texas treats it as a data processing service and taxes 80% of the charge.
-- Gross-receipts states (HI GET, NM GRT) reach almost everything, services included.
-- Local taxes can apply on top (e.g. Chicago's lease tax on cloud software).
-- **California: SaaS becomes taxable on 2027-01-01** (SB 122; Stripe's California 2027 guide lists the SaaS business-use
-  code as "becomes taxable"). This matters because the change takes effect about six weeks from now, so it applies to
-  any California customer from the start.
-- Maryland: SaaS taxed as a digital product, and a separate 3% tax on data/IT services since 2025-07-01 (Technical
-  Bulletin 56) — the advisor must say which applies to us.
+From the public pricing (src/content/site.js) and what production does [VERIFIED from our own code]:
 
-**B. Website build.** Website design is usually a non-taxable professional service when sold separately. Exceptions:
-- Washington taxes website development since 2025-10-01 (ESSB 5814). A 2026 law (ESSB 6346) is reported to repeal
-  that from 2029, but advertising stays taxed. Penalty relief is available for 2025 non-collection.
-- Maryland's 3% IT-services tax may reach it (NAICS 5415 coverage is disputed in summaries).
-- Texas may treat it as a data processing service.
-- Gross-receipts states (HI, NM) and states taxing most services (SD) tax it.
+| # | Component | What it is in practice | In the $499 today? |
+| --- | --- | --- | --- |
+| A | Booking and lead software | Online booking into the owner's Google Calendar, service-area screening, calendar invitations, show-up / no-show tracking, dashboard. Hosted and accessed online, nothing downloaded, the same software for every customer | Yes |
+| B | Website build | Starter site generated by software from the owner's records (no human design work). The owner edits it in the editor. Optional AI designer runs on the owner's OWN AI key | Yes |
+| C | Website hosting | Site served on a GetShowUps address or the owner's own domain | Yes |
+| D | Support | "Direct help from the founding team": human help, not separately priced | Yes |
+| E | Advertising management | Google/Meta campaigns | **No**, "coming soon" |
+| F | Advertising spend | Paid by the business **directly** to Google/Meta | **No**, never billed by us |
+| G | Texting / email reminders, AI receptionist | Messaging and voice | **No**, not live and not in the plan |
 
-Ours is generated by software rather than designed by a person, which may push it toward "part of the SaaS" rather
-than a design service — a classification question for the advisor.
+**Price facts:**
+- one flat, non-itemised monthly charge, with no setup fee and no trial;
+- buyers are businesses buying for business use;
+- customers can be anywhere in the US.
 
-**C. Website hosting.** Usually not taxed as a standalone service. Exceptions include TX (data processing), MD (3% on
-NAICS 518 hosting), and the gross-receipts/broad-base states. A few states treat hosting bundled with software as part
-of the SaaS.
+## 3. Tax treatment of each component
 
-**D. Support.** Included human help with no separate price normally follows the main product (taxed where the SaaS is
-taxed). A mandatory support component bundled with taxable software is generally taxable with it.
+States differ widely. The advisor must map this to the states in §8 Q1/Q7.
 
-**E. Advertising management (future).** Usually a non-taxable professional/marketing service. Exceptions:
-- Washington taxes advertising services since 2025-10-01, and the reported 2029 repeal leaves advertising taxable.
-- HI, NM and SD tax most services.
+**A. Booking software (SaaS).** This is the core of the offer.
+- **[PRELIMINARY]** Roughly 20 states plus DC tax SaaS in some form; the rest do not.
+  - Business-use rules vary: OH taxes it only when used in business (so it applies to our buyers); CT taxes business use
+    at 1%; IA exempts qualifying business use; TX taxes 80% as a data processing service.
+  - Gross-receipts states (HI, NM) reach almost everything.
+  - Local taxes can apply on top (e.g. Chicago).
+  - MD taxes SaaS as a digital product and has a separate 3% data/IT-services tax since 2025-07-01 (Comptroller
+    Technical Bulletin 56; we didn't read the bulletin itself).
+- **[VERIFIED]** California taxes SaaS from 2027-01-01 (§6).
 
-If ad management is later added **inside** the $499, the bundle question below changes, so **re-run this analysis
-before ad management is included in the price.**
+**B. Website build (generated by software).**
+- **[PRELIMINARY]** When sold separately, website design is usually a non-taxable professional service. Exceptions:
+  - WA taxes website development since 2025-10-01 (ESSB 5814). A 2026 law (ESSB 6346) is reported to repeal that from
+    2029.
+  - MD's 3% IT tax may reach it.
+  - HI and NM tax it.
+- **[OPEN]** Ours is produced by prewritten software, not designed by a person to order. It may be part of the SaaS
+  rather than a design service. In CA the "custom software" and "representing a service" exemptions are unlikely to
+  fit (§6).
 
-**F. Ad spend.** Not our sale: the business pays Google/Meta directly. Keep it that way. If GetShowUps ever bills or
-resells ad spend, it could become part of our gross receipts in some states.
+**C. Website hosting.**
+- **[PRELIMINARY]** Usually not taxed when sold alone. Exceptions include TX (data processing), MD (3%) and the
+  gross-receipts states.
+- **[OPEN]** For CA, hosting is not on CDTFA's list of exclusions. The "digital infrastructure" exclusion covers
+  platforms that run the *customer's own* software, which isn't what we sell.
 
-**G. Messaging / voice (future).** Telecom-like services carry their own taxes and fees in some states. Re-analyse
-before they're sold.
+**D. Support (included, not priced separately).**
+- **[PRELIMINARY]** It normally follows the main product: taxed where the SaaS is taxed.
 
-## 3. The bundle problem (the most important decision)
+**E. Advertising management (future, not in the price).**
+- **[PRELIMINARY]** Usually a non-taxable service.
+- WA taxes advertising services since 2025-10-01, and the reported 2029 repeal keeps advertising taxable. HI and NM tax
+  it too.
+- **Re-run this analysis before ad management joins the $499.**
 
-The $499 is one non-itemised price for a mix of possibly-taxable parts (SaaS, hosting) and possibly-non-taxable parts
-(website build, support). States handle such bundles differently:
+**F. Ad spend.** Not our sale. **[PRELIMINARY]** It stays outside our receipts only while businesses pay Google/Meta
+directly. Keep it that way.
 
-- **Streamlined (SSUTA) member states** use "bundled transaction" rules. A single non-itemised price for taxable and
-  non-taxable parts is often taxable in full. There are exceptions, for example where the seller can identify each
-  part's price from its books and records, or where the taxable part is de minimis.
-- **Other states** use "true object" / "primary purpose" tests: what is the buyer really paying for? For us that is
-  most likely the booking software, so the whole charge would be treated as SaaS.
-- In either case, the outcome depends on whether the customer could buy the parts separately and on how we document
-  the price.
+**G. Messaging / voice (future).** **[OPEN]** Telecom-type taxes and fees may apply. Re-analyse before selling.
+
+## 4. Bundling: what can happen when one price covers taxable and non-taxable parts
+
+**[PRELIMINARY]** General rules (confirm per state):
+- **Streamlined (SSUTA) member states:** a "bundled transaction" (one non-itemised price for distinct taxable and
+  non-taxable items) can be taxable in full. Exceptions apply where the seller can identify each part's price from its
+  books and records, or where the taxable part is de minimis.
+- **Other states:** a "true object" / "primary purpose" test asks what the buyer is really paying for. For us that is
+  probably the booking software, which would make the whole charge SaaS.
+- **California:** **[OPEN]** CDTFA's SB 122 materials we read don't address bundles. The emergency regulations are
+  still being drafted (§6).
+
+**Possible consequences:**
+
+| Outcome | Effect on us |
+| --- | --- |
+| Whole $499 taxable where SaaS is taxable | Tax is added on the full amount in those states. Simple. If we over-collect, the tax must still be remitted (a customer cost, not a compliance risk) |
+| Whole $499 non-taxable where SaaS isn't taxed but hosting or design is (e.g. TX, MD, WA nuances) | Possible under-collection if a state taxes a component we treated as part of a non-taxable whole |
+| We allocate the price and a state rejects the allocation | Tax, interest and penalties on the difference. Under tax-exclusive pricing we can't recover uncollected tax from past customers |
+| Ad management or messaging added inside the $499 later | Changes the bundle analysis. Possibly taxable in WA, HI, NM and elsewhere |
 
 **Options:**
 
-| Option | Effect | Cost |
+| Option | Pros | Cons |
 | --- | --- | --- |
-| 1. Treat the whole $499 as SaaS (one product, one tax code) | Simplest. Taxed in full where SaaS is taxed, not taxed where it isn't | May over-collect in states where part would be non-taxable. Over-collected tax still has to be remitted, so it is a customer-relations cost, not a legal risk |
-| 2. Allocate the $499 across components in our books (documented method) and/or on the invoice | Can reduce tax where website/hosting are non-taxable | Needs a defensible allocation, multiple Stripe products/tax codes or line items, more complexity, audit exposure if the allocation isn't supportable |
-| 3. Sell components separately | Clean separation | A different product; contradicts the simple single-price offer |
+| 1. One product: the plan is SaaS for business use, with website, hosting and support integral | Simplest, one tax code | May over-tax in some states |
+| 2. Documented allocation across components (books, or line items) | Can reduce tax where parts are non-taxable | Needs a defensible method, several Stripe products/codes, audit exposure |
+| 3. Sell components separately | Clean | A different, more complex offer |
 
-**My recommendation for the advisor to confirm:** Option 1 at launch. Classify the plan as SaaS for business use, with
-website and hosting as integral parts of the SaaS, priced tax-exclusive. Revisit allocation only if a material share of
-customers is in states where the difference matters.
+**[PRELIMINARY] Recommendation:** Option 1, tax-exclusive, for the advisor to confirm.
 
-## 4. Where tax could be owed (nexus)
+## 5. Economic nexus thresholds by state (no single number)
 
-- **Home state (physical nexus).** Wherever Flora Summit LLC is based and has people or property, it has nexus from
-  the first sale. If that state taxes this service, tax is due on in-state customers from day one.
-  **This is the first question to answer, and it isn't recorded anywhere in this repository yet**: the governing-law
-  state is also an open decision in docs/legal/TERMS_DRAFT.md.
-- **Other states (economic nexus, post-Wayfair).**
-  - Most states use $100,000 of sales in the state per year. Some also count transactions; several have dropped the
-    200-transaction test. A few states set higher thresholds (e.g. CA and TX at $500,000).
-  - At $499/month = $5,988 per customer per year, about **17 customers in one state** reach a $100,000 threshold. Fewer
-    are needed if any state still counts 200 transactions: 12 monthly charges per customer reaches 200 at about
-    17 customers too.
-  - So early on, nexus is mostly the home state plus wherever customers cluster. The threshold count includes all
-    sales into the state in many states, taxable or not.
-- **Where the sale is sourced.** Generally the customer's location (where the software is used / the service is
-  received). For businesses using it at several locations, some states allow apportionment, e.g. MD's
-  multiple-points-of-use certificate. Practically this means collecting a reliable business address at checkout.
-- **Marketplace / remote seller registrations, filing frequency and local (city/county) taxes** follow from the
-  registrations chosen.
+**[PRELIMINARY]** Source: secondary compilations, not state statutes:
+- Sales Tax Institute, "as of 8/1/2026": <https://www.salestaxinstitute.com/resources/economic-nexus-state-guide>
+- TaxCloud, "updated Sep 22, 2026": <https://taxcloud.com/blog/sales-tax-nexus-by-state/>
+- Avalara, 2026-08-03: <https://www.avalara.com/blog/en/north-america/2025/06/states-eliminating-economic-nexus-transaction-thresholds.html>
 
-## 5. Recommended configuration (once the advisor confirms; NOT done now)
+California's row is **[VERIFIED]** (CDTFA, below). Each state's revenue department must be checked before a
+registration decision.
 
-Nothing below has been or will be configured without approval.
+**What reaching a threshold takes at $499/month.** Each customer is $5,988 a year and 12 transactions:
+
+| Threshold | Customers in one state to reach it |
+| --- | --- |
+| $100,000 | 17 |
+| 200 transactions | 17 |
+| $250,000 | 42 |
+| $500,000 | 84 |
+| NY: $500,000 **and** 100 sales | 84 |
+
+**Thresholds that differ from "$100,000, no transaction test":**
+
+| State(s) | Threshold | Notes |
+| --- | --- | --- |
+| **California** | $500,000, preceding or current calendar year | **[VERIFIED]** CDTFA Wayfair guide (cdtfa.ca.gov/industry/wayfair.htm, read 2026-11-19) states it for "sales of tangible personal property". **[PRELIMINARY]** From 2027 SB 122 makes digital products tangible personal property, so SaaS sales should count; the CDTFA pages we read don't say so explicitly |
+| Texas | $500,000, preceding 12 months | Gross revenue including non-taxable sales |
+| New York | $500,000 **and** more than 100 sales | Preceding four sales-tax quarters; sources differ on whether only property sales count |
+| Alabama | $250,000 | Previous calendar year, retail sales |
+| Mississippi | more than $250,000 | Prior 12 months |
+| Connecticut | $100,000 **and** 200 transactions | 12 months ending Sep 30 |
+| AR, GA, HI, MD, MI, MN, NE, NV, NJ, OH, RI, VT, VA, WV, DC | $100,000 **or** 200 transactions | Measurement periods vary |
+| Kentucky | $100,000; 200-transaction test reported removed 2026-08-01 | Sources disagree; one still lists it |
+| Tennessee | $100,000 | One source shows a stale $500,000 |
+| Most others (AZ, CO, FL, ID, IL, IN, IA, KS, LA, ME, MA, MO, NM, NC, ND, OK, PA, SC, SD, UT, WA, WI, WY) | $100,000, no transaction test | Measures differ: gross vs retail vs taxable sales. PA has additional notice-and-reporting rules |
+| DE, MT, NH, OR | No statewide sales tax | Alaska: no state tax; local remote-seller rules at $100,000 |
+
+**Where the sources disagree:**
+- **Which sales count** (gross, retail or taxable only, property only): CT, GA, LA, MO, NY, PA.
+- **Measurement period:** MN, PA, VT.
+- **Kentucky's** transaction test, as noted in the table.
+
+Several states count non-taxable sales toward the threshold, so a state where our plan isn't taxable can still require
+registration if the state taxes something else we sell. **[OPEN]**
+
+## 6. California SB 122 (effective 2027-01-01)
+
+**[VERIFIED]** CDTFA Special Notice **L-1036** (September 2026), <https://www.cdtfa.ca.gov/formspubs/L1036.pdf>, read
+2026-11-19:
+
+**Scope and timing**
+- From 2027-01-01, "the definition of tangible personal property in the Sales and Use Tax Law will be expanded to
+  include digital products".
+- A digital product is "prewritten computer software transferred on tangible storage media, transferred
+  electronically, or accessed remotely".
+- Affected sellers include "Prewritten Software-as-a-Service (SaaS) providers".
+- SB 122 is Stats. 2026, ch. 23, signed 2026-06-29.
+
+**Not digital products:** digital assets, audio works, audiovisual works, books, **digital infrastructure** ("cloud
+platforms that allow customers to create, deploy, or run their own software applications"), video game products and
+visual works.
+
+**Exempt digital products:**
+- "representing a service, not including SaaS";
+- custom computer software;
+- products transferred with reproduction and distribution rights;
+- products purchased solely for use outside California.
+
+**Who pays**
+- If a retailer's sales of digital products to one purchaser exceed $5 million in a calendar year or the preceding year,
+  liability may shift to that purchaser (Use Tax Direct Payment Permit). This doesn't affect us at $5,988 per customer
+  per year.
+
+**Where the sale happens:** for local and district tax, the place of sale of remotely accessed products "is generally
+the customer's address". The CDTFA retailers guide orders the addresses as billing, then shipping, then payment
+instrument, then mailing. With no California address, the sale is treated as occurring outside California.
+
+**Registration**
+- Out-of-state sellers "engaged in business in this state as defined in Revenue and Taxation Code section 6203 must
+  register" for a Certificate of Registration—Use Tax and collect use tax.
+- California sellers need a seller's permit.
+
+**Status**
+- **[VERIFIED]** CDTFA's retailers guide (<https://www.cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/retailers.htm>)
+  says "Emergency regulations are being drafted to interpret and clarify SB 122". The detailed rules are not final.
+
+**What it means for GetShowUps**
+- **[PRELIMINARY]** Our plan is prewritten SaaS, so it is taxable for California customers from 2027-01-01.
+  - The service and custom-software exemptions don't fit: "representing a service" expressly excludes SaaS, and our
+    software is the same for everyone.
+  - The digital-infrastructure exclusion doesn't fit either.
+  - CDTFA's materials draw no business-use distinction.
+- **[OPEN]**
+  - Whether the generated website, hosting and human support inside the same price are taxable as part of the SaaS.
+  - The bundling rule (awaiting the regulations).
+  - Whether we are "engaged in business" in California before reaching $500,000 (e.g. through any California-based
+    people).
+
+## 7. What the accountant needs from us (information package)
+
+**Entity and people**
+- LLC formation state and date.
+- Principal operating address.
+- Every state where the owner, employees or contractors work, and where any property or equipment sits.
+
+**What we sell**
+- §2 of this document.
+- The public pricing text and a description of the product.
+- That ad spend is paid directly to Google/Meta.
+- The roadmap items that would change the price contents: ad management, messaging, voice.
+
+**Customers**
+- Expected launch states and first customers' states. Today there are no live customers; all subscriptions are
+  sandbox.
+- That buyers are businesses using it at one location or several.
+
+**Billing mechanics**
+- Monthly, non-itemised, Stripe Billing and Checkout.
+- We can collect billing address, service address and tax ID at checkout.
+- Refunds and cancellation are handled through Stripe.
+
+**Records we can keep:** customer business address, use location (service area), billing address, exemption
+certificates (via a Stripe app).
+
+**Proposed configuration** (§9) for their sign-off.
+
+## 8. Questions for the accountant / tax attorney (written answers needed)
+
+1. **Locations:** Given the formation state, operating location and people (§7), where do we have physical nexus today?
+2. **Classification:** Is the plan one SaaS product, with the generated website, hosting and support integral to it,
+   or a bundle? Is the generated website "design services" anywhere?
+3. **Bundling:** Is Option 1 (tax the whole $499 where SaaS is taxable) acceptable? If not, what allocation method and
+   documentation would hold up?
+4. **Component treatment** in OH, CT, IA, TX, MD, WA, NY, PA and the gross-receipts states, plus any state you expect
+   our first customers in.
+5. **California:**
+   - Do you agree the plan is taxable from 2027-01-01 under SB 122 / L-1036?
+   - Do our sales count toward the $500,000 threshold?
+   - Should we register before the first California sale?
+   - How should bundles be treated pending the emergency regulations?
+6. **Washington:** Is any part taxable today as website development or a digital automated service? What changes with
+   the reported 2029 repeal?
+7. **Registrations at launch:** Which states (likely only the physical-nexus state(s))? Which to monitor? Is Stripe Tax
+   threshold monitoring adequate given the differing measures in §5?
+8. **Sourcing:**
+   - Which address do we tax on (billing vs service location)?
+   - How do we handle customers using it at several locations?
+   - What evidence do we keep?
+9. **Tax-exclusive pricing:** Confirm $499 + tax. Is any specific disclosure wording required on the pricing page,
+   in the Terms and in Checkout?
+10. **Future components:** If ad management, messaging or voice join the plan, what changes? Should they be separate
+    line items?
+11. **Ad spend:** Confirm it stays outside our receipts while businesses pay Google/Meta directly.
+12. **Filing and exemptions:**
+    - Who files, and how often?
+    - How do we handle exemption certificates?
+    - Is any voluntary disclosure needed? No live sales exist yet.
+13. **Income side** (same advisor, outside sales tax): state income/franchise and gross-receipts taxes (WA B&O, OH CAT,
+    TX franchise) triggered by sales into those states.
+
+## 9. Proposed configuration (only after written answers; NOT done now)
+
+Nothing below has been or will be configured without approval:
 
 1. **Stripe Tax:**
-   - head office = the LLC's address;
-   - registrations only where the advisor says tax is due (home state if applicable);
-   - threshold monitoring on, which is free and shows when another state's threshold is near.
-2. **Product tax code:** a single SaaS code. Stripe's list confirms `txcd_10103001` "Software as a Service (SaaS) -
-   Business Use" exists. If the advisor prefers a hosting or website classification for part of the price, Stripe's
-   list includes `txcd_10701400` "Website Information Services - Business Use". The final codes must come from Stripe's
-   tax code list and the advisor; don't pick one only to get a preferred result.
-3. **Price:** $499.00 USD monthly, `tax_behavior: exclusive`, so tax is added on top where due. This can't be changed
-   after the price is created, which is why the price waits for this decision.
-4. **Checkout:**
-   - `automatic_tax[enabled]=true`;
-   - billing address collection;
-   - optionally tax ID collection;
-   - exemption certificates for the rare exempt buyer (Stripe suggests the EXEMPTAX app).
-5. **Customer-facing text** (needs the legal track): "$499/month plus applicable sales tax" on the pricing page, in the
-   Terms and in Checkout.
-6. **Filing:** decide who files (accountant, Stripe Tax filing partners, or the owner) and the cadence per
-   registration.
-7. **Existing test subscriptions** are sandbox, have nothing to do with live tax and are left untouched.
+   - head office = the operating address;
+   - registrations only where the advisor says tax is due;
+   - threshold monitoring on.
+2. **Tax code:** one SaaS code. Stripe's list confirms `txcd_10103001` "Software as a Service (SaaS) - Business Use"
+   exists. `txcd_10701400` "Website Information Services - Business Use" exists if the advisor wants hosting classified
+   separately. The final codes come from the advisor, never chosen to get a preferred result.
+3. **Price:** $499.00 USD monthly, `tax_behavior: exclusive`. This can't be changed after the price is created.
+4. **Checkout:** `automatic_tax[enabled]=true` and billing-address collection; optionally tax ID collection. This is a
+   small engineering PR with tests, and nothing is deployed without approval.
+5. **Wording:** "$499/month plus applicable sales tax" on the pricing page, in the Terms and in Checkout. This needs
+   the legal track; the Terms stay unpublished.
+6. **Existing sandbox subscriptions** are untouched.
 
-## 6. Questions that need the accountant or tax attorney
-
-Answers are needed in writing; B1–B3 in docs/LAUNCH_CHECKLIST.md refer to these.
-
-1. **Home state:** In which state(s) does Flora Summit LLC have physical presence (office, employees, contractors,
-   property)? Does that state tax this offering (SaaS / website / hosting), and at what state and local rates?
-2. **Classification:** Should the single $499 plan be treated as one SaaS product, with the generated website, hosting
-   and support integral to it, or as a bundle of separate services? Is the deterministic, software-generated website
-   "design services" in any state?
-3. **Bundle and allocation:** If it is a bundle, is Option 1 (taxed in full where SaaS is taxable) acceptable, or should
-   we allocate? If we allocate, what method and documentation would hold up?
-4. **Business-use rules:** How do OH (business use), CT (1% business rate), IA (business-use exemption), TX (80% data
-   processing) and MD (6% digital product vs 3% IT services) apply to us?
-5. **California 2027:** Confirm that SB 122 makes our plan taxable for California customers from 2027-01-01, the
-   registration and threshold rules, and whether to register before the first California sale.
-6. **Washington:** Is any part taxable as website development or digital automated services today? What does the
-   2029 repeal change, and when?
-7. **Registrations now:** Which states should we register in at launch (likely home state only), and which should we
-   monitor? Is Stripe Tax threshold monitoring sufficient?
-8. **Tax-exclusive pricing:** Confirm $499 + tax. Are there states where advertising a price excluding tax requires
-   specific wording?
-9. **Future components:** If ad management (and later messaging/voice) is added to the plan, what changes (WA
-   advertising tax, telecom-type fees)? Should those be priced as separate line items?
-10. **Ad spend:** Confirm that ad spend paid directly by the business to Google/Meta is outside our receipts.
-11. **Records and exemptions:** What evidence of customer location and business use to keep. How to handle exemption
-    or resale certificates. Who files, how often, and whether a voluntary disclosure is needed for anything sold
-    before registration (no live sales exist today).
-12. **Income-side items** (out of scope here, but the same advisor): state income/franchise tax nexus and any gross
-    receipts taxes (WA B&O, OH CAT, TX franchise) triggered by sales into those states.
-
-## 7. What is decided vs open
+## 10. Decided vs open
 
 | Item | Status |
 | --- | --- |
-| Tax-exclusive pricing ($499 + tax where due) | Intended by the owner (2026-11-18); confirm in Q8 |
 | No live price until treatment, jurisdictions and exclusive configuration are confirmed | **Decided** (owner, 2026-11-18) |
-| Classification / bundle approach | Open (Q2–Q3); recommendation: one SaaS product |
-| Home state and launch registrations | Open (Q1, Q7) |
-| Code change (automatic tax, address collection) | Not started; a small PR after the answers, with tests, no deploy without approval |
+| Tax-exclusive where legally applicable | **Decided** (owner, 2026-11-19); wording per Q9 |
+| Formation state, operating location, people's locations | **Open**: owner to supply (§7) |
+| Classification and bundle approach | **Open** (Q2–Q4); recommendation: Option 1 |
+| Launch registrations; California pre-2027 plan | **Open** (Q5, Q7) |
+| Sourcing address and records | **Open** (Q8) |
+| Code change (automatic tax, address collection) | Not started; after the answers |
 
-## Sources consulted (2026-11-19; secondary sources must be confirmed against primary law)
+## Sources (read 2026-11-19)
 
-- Stripe: [Product tax codes](https://docs.stripe.com/tax/tax-codes),
-  [Tax for digital products](https://docs.stripe.com/tax/digital-products),
-  [California 2027 software tax changes](https://docs.stripe.com/tax/supported-countries/united-states/california-software-tax),
-  [Tax codes and tax behavior](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior)
-- Washington:
-  [DOR interim guidance on advertising services (ESSB 5814)](https://dor.wa.gov/laws-rules/interim_guidance_statements/interim-guidance-statement-regarding-changes-made-essb-5814-advertising-services),
-  [Ballard Spahr, April 2026: 2026 session roll-backs](https://www.ballardspahr.com/insights/alerts-and-articles/2026/04/washington-state-2026-session-legislature-repeals-and-rolls-back-certain-recently-enacted-taxes)
-- Maryland: [Comptroller Technical Bulletin 56](https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/legal-publications/technical-bulletins/tb-56.pdf),
-  [Sales Tax Institute summary](https://www.salestaxinstitute.com/resources/marylands-new-tech-tax-targets-digital-services)
-- SaaS state overviews (secondary): [Quaderno](https://quaderno.io/blog/us-sales-tax/sales-taxes-for-saas-in-us/),
-  [TaxCloud on WA penalty relief](https://taxcloud.com/sales-tax-radar/washington-temporary-penalty-relief-program-essb-5814-by-sept-2027/)
+**Official**
+- CDTFA, Special Notice L-1036 (Sept 2026): <https://www.cdtfa.ca.gov/formspubs/L1036.pdf>
+- CDTFA, Tax Guide for Retailers and Purchasers of Digital Products:
+  <https://www.cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/>, including
+  [retailers](https://www.cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/retailers.htm),
+  [purchasers](https://www.cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/purchasers.htm) and
+  [definitions](https://www.cdtfa.ca.gov/industry/retailers-and-purchasers-of-digital-products/definitions.htm)
+- CDTFA, Wayfair / remote sellers: <https://www.cdtfa.ca.gov/industry/wayfair.htm>
+- WA DOR, interim guidance on advertising services (ESSB 5814): <https://dor.wa.gov/laws-rules/interim_guidance_statements/interim-guidance-statement-regarding-changes-made-essb-5814-advertising-services>
+
+**Stripe**
+- [Product tax codes](https://docs.stripe.com/tax/tax-codes)
+- [California 2027 guide](https://docs.stripe.com/tax/supported-countries/united-states/california-software-tax)
+- [Tax behavior](https://docs.stripe.com/tax/products-prices-tax-codes-tax-behavior)
+
+**Secondary (confirm before relying on them)**
+- Sales Tax Institute [economic nexus guide](https://www.salestaxinstitute.com/resources/economic-nexus-state-guide)
+- TaxCloud [nexus chart](https://taxcloud.com/blog/sales-tax-nexus-by-state/)
+- Avalara [transaction thresholds](https://www.avalara.com/blog/en/north-america/2025/06/states-eliminating-economic-nexus-transaction-thresholds.html)
+- Ballard Spahr [WA 2026 session](https://www.ballardspahr.com/insights/alerts-and-articles/2026/04/washington-state-2026-session-legislature-repeals-and-rolls-back-certain-recently-enacted-taxes)
+- Sales Tax Institute [Maryland tech tax](https://www.salestaxinstitute.com/resources/marylands-new-tech-tax-targets-digital-services)
+- Maryland Comptroller [Technical Bulletin 56](https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/legal-publications/technical-bulletins/tb-56.pdf) (official, not read directly)
