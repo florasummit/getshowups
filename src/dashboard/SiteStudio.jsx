@@ -46,14 +46,10 @@ function useHistoryLayers() {
       const depth = e.state?.gsuStudio || 0
       while (open.current.length && open.current.at(-1).depth > depth) open.current.pop().close()
       if (depth > open.current.length) {
-        // Forward into an entry whose layer is closed: make it a plain entry (nothing re-opens).
-        try {
-          const u = new URL(window.location.href)
-          u.searchParams.delete('full')
-          window.history.replaceState({ ...(e.state || {}), gsuStudio: open.current.length, gsuLayer: null }, '', u)
-        } catch {
-          // history unavailable: nothing to tidy
-        }
+        // Forward into an entry whose layer was closed: step straight back (nothing re-opens, and no duplicate entries
+        // pile up that would make Back need extra presses to leave Studio).
+        skip.current += 1
+        window.history.go(-(depth - open.current.length))
       }
     }
     window.addEventListener('popstate', onPop)
@@ -515,16 +511,12 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
     // jumping back to the top, and the place is remembered per page for this browser tab.
     const win = frame.current.contentWindow
     const y = scrollRef.current[slugRef.current] || 0
-    // Our own restoring scroll isn't the owner scrolling: an open panel stays open (they may be typing in it).
-    let restoring = false
-    if (y) {
-      restoring = true
-      win.scrollTo(0, y)
-      if (Math.round(win.scrollY) !== y && win.scrollY === 0) restoring = false // page shorter now: no event comes
-    }
+    // Our own restoring scroll (and the browser's scroll anchoring while photos settle) isn't the owner scrolling: an
+    // open panel stays open just after a re-render (they may be typing in it).
+    const settled = Date.now() + 600
+    if (y) win.scrollTo(0, y)
     const follow = () => {
-      if (restoring) restoring = false
-      else {
+      if (Date.now() >= settled) {
         setHover(null)
         setPop(null)
       }
@@ -1467,7 +1459,7 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
     const u = usage && !usage.failed ? usage[a.id] : null
     const known = usage && !usage.failed
     const stored = Boolean(u?.live || u?.versions || u?.history)
-    return { places, u, known, parts: usageText(places, u ? { ...u, draft: u.draft && !saved } : null), canDelete: known && saved && !places.length && !u?.draft && !stored && !a.logo, canHide: known && saved && !places.length && !u?.draft && !u?.live && stored }
+    return { places, u, known, parts: usageText(places, u ? { ...u, draft: saved && u.draft } : null), canDelete: known && saved && !places.length && !u?.draft && !stored && !a.logo, canHide: known && saved && !places.length && !u?.draft && !u?.live && stored }
   }
   const pick = async (e) => {
     const files = [...(e.target.files || [])]
@@ -1585,7 +1577,7 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
                 <span className="fine studio-photo-used" data-testid="photo-usage">
                   {!s.known ? (usage?.failed ? 'Couldn’t check where it’s used.' : 'Checking where it’s used…') : s.parts.length ? `Used on: ${s.parts.join(', ')}` : 'Not used anywhere'}
                 </span>
-                <span className="studio-photo-actions">
+                <span className="studio-photo-row-actions">
                   {s.places.length > 0 && others.length > 0 && (
                     <button type="button" className="link-btn" aria-expanded={replacing === a.id} onClick={() => setReplacing(replacing === a.id ? null : a.id)} aria-label={`Replace photo ${i + 1} in the draft`}>
                       Replace…
