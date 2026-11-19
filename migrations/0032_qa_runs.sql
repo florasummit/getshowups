@@ -18,9 +18,12 @@ CREATE TABLE IF NOT EXISTS qa_runs (
   summary       TEXT NOT NULL DEFAULT '{}',    -- counts (+ timing for timed journeys)
   artifacts_url TEXT,                          -- CI run page (screenshots, traces)
   started_at    INTEGER NOT NULL,
-  finished_at   INTEGER
+  finished_at   INTEGER,
+  run_key       TEXT                           -- automated: replay key (CI run id + attempt, or SHA-256 of the body)
 );
 CREATE INDEX IF NOT EXISTS qa_runs_recent ON qa_runs (kind, started_at);
+-- Replay protection: the same automated report (same key) is stored once.
+CREATE UNIQUE INDEX IF NOT EXISTS qa_runs_key ON qa_runs (run_key) WHERE run_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS qa_results (
   run_id    TEXT NOT NULL,
   test_id   TEXT NOT NULL,                     -- registry test id, or <journey>.<step> for human runs

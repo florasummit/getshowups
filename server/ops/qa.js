@@ -39,9 +39,20 @@ const STATUS_MAP = { passed: 'pass', expected: 'pass', failed: 'fail', unexpecte
 
 // body: { revision, source: 'ci'|'local', provider: 'mocked'|'real', artifactsUrl?, startedAt?, results: [{ file, title,
 // project?, status, durationMs?, error? }] } → stored run id. Validated, bounded, redacted.
-export async function ingestAutomatedRun(db, body, now = Date.now()) {
+export const MAX_REPORT_AGE_MS = 7 * DAY
+// runKey: the caller's replay key (CI: gh:<run id>:<attempt>); without one, `bodyHash` (SHA-256 of the raw body) is used.
+export async function ingestAutomatedRun(db, body, now = Date.now(), { bodyHash = null } = {}) {
   const results = Array.isArray(body?.results) ? body.results.slice(0, 5000) : null
   if (!results) return { error: 'invalid_request' }
+  if (!results.every((r) => r && typeof r === 'object' && typeof r.file === 'string' && typeof r.title === 'string' && r.file.length <= 300 && r.title.length <= 500)) return { error: 'invalid_request' }
+  if (body.runKey != null && !/^[A-Za-z0-9._:-]{4,80}$/.test(String(body.runKey))) return { error: 'invalid_request' }
+  // Stale reports are refused (a replayed old body never becomes "the latest run").
+  if (Number.isInteger(body.startedAt) && body.startedAt < now - MAX_REPORT_AGE_MS) return { error: 'stale_report' }
+  const runKey = body.runKey != null ? `key:${body.runKey}` : bodyHash ? `sha:${bodyHash}` : null
+  if (runKey) {
+    const seen = await db.prepare('SELECT id, status, summary FROM qa_runs WHERE run_key = ?1').bind(runKey).first()
+    if (seen) return { id: seen.id, status: seen.status, counts: parse(seen.summary), duplicate: true }
+  }
   const source = ['ci', 'local'].includes(body.source) ? body.source : null
   const provider = ['mocked', 'real'].includes(body.provider) ? body.provider : null
   if (!source || !provider) return { error: 'invalid_request' }
@@ -66,10 +77,15 @@ export async function ingestAutomatedRun(db, body, now = Date.now()) {
   }
   const status = counts.fail ? 'failed' : counts.blocked ? 'blocked' : 'passed'
   const started = Number.isInteger(body.startedAt) && body.startedAt <= now ? body.startedAt : now
-  await db
-    .prepare("INSERT INTO qa_runs (id, kind, source, revision, provider, status, summary, artifacts_url, started_at, finished_at) VALUES (?1, 'automated', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")
-    .bind(id, source, revision, provider, status, JSON.stringify(counts), artifactsUrl, started, now)
+  const ins = await db
+    .prepare("INSERT OR IGNORE INTO qa_runs (id, kind, source, revision, provider, status, summary, artifacts_url, started_at, finished_at, run_key) VALUES (?1, 'automated', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")
+    .bind(id, source, revision, provider, status, JSON.stringify(counts), artifactsUrl, started, now, runKey)
     .run()
+  // Concurrent replay of the same key: the other request stored it; this one stores nothing.
+  if ((ins?.meta?.changes ?? 0) === 0) {
+    const seen = await db.prepare('SELECT id, status, summary FROM qa_runs WHERE run_key = ?1').bind(runKey).first()
+    return { id: seen?.id ?? null, status: seen?.status ?? status, counts: parse(seen?.summary), duplicate: true }
+  }
   for (const r of [...rows.values()].slice(0, MAX_RESULTS)) {
     await db.prepare('INSERT OR IGNORE INTO qa_results (run_id, test_id, journey, status, observed, ms, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)').bind(id, r.test_id, r.journey, r.status, r.observed, r.ms, now).run()
   }

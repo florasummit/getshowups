@@ -40,7 +40,9 @@ if (!revision) {
   } catch {}
 }
 const artifactsUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : null
-const body = { revision, source: flag('source', process.env.CI ? 'ci' : 'local'), provider: flag('provider', 'mocked'), artifactsUrl, startedAt: Date.parse(report.stats?.startTime) || undefined, results }
+// Replay key: one stored run per CI run attempt (the server also dedupes identical bodies by hash).
+const runKey = process.env.GITHUB_RUN_ID ? `gh:${process.env.GITHUB_RUN_ID}:${process.env.GITHUB_RUN_ATTEMPT || '1'}` : undefined
+const body = { runKey, revision, source: flag('source', process.env.CI ? 'ci' : 'local'), provider: flag('provider', 'mocked'), artifactsUrl, startedAt: Date.parse(report.stats?.startTime) || undefined, results }
 const counts = results.reduce((m, r) => ((m[r.status] = (m[r.status] || 0) + 1), m), {})
 console.log(`qa-report: ${results.length} results`, counts, `revision ${String(revision).slice(0, 7)}`, body.provider)
 if (args.includes('--dry-run')) process.exit(0)

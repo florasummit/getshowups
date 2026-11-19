@@ -121,6 +121,35 @@ test('guided human QA: same journey ids, server-side step times for timed journe
   assert.deepEqual(o.activation, { measured: true, runs: 1, latest: { id, status: 'failed', totalMinutes: 25, targetMinutes: 20, provider: 'mocked', finishedAt: NOW + 25 * MIN } })
 })
 
+test('ingest validation + replay protection: same run key or same body stored once; stale and malformed reports refused; size checked on received bytes', async () => {
+  const a = await ingestAutomatedRun(db, { ...REPORT, runKey: 'gh:42:1' }, NOW)
+  const again = await ingestAutomatedRun(db, { ...REPORT, runKey: 'gh:42:1', results: [] }, NOW + MIN)
+  assert.deepEqual([again.duplicate, again.id], [true, a.id])
+  const retry = await ingestAutomatedRun(db, { ...REPORT, runKey: 'gh:42:2' }, NOW)
+  assert.notEqual(retry.id, a.id) // a re-run attempt is a new run
+  const h1 = await ingestAutomatedRun(db, REPORT, NOW, { bodyHash: 'f'.repeat(64) })
+  const h2 = await ingestAutomatedRun(db, REPORT, NOW, { bodyHash: 'f'.repeat(64) })
+  assert.deepEqual([h2.duplicate, h2.id], [true, h1.id])
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM qa_runs WHERE kind = 'automated'").get().n, 3)
+  assert.deepEqual(await ingestAutomatedRun(db, { ...REPORT, startedAt: NOW - 8 * DAY }, NOW), { error: 'stale_report' })
+  assert.deepEqual(await ingestAutomatedRun(db, { ...REPORT, runKey: 'bad key!' }, NOW), { error: 'invalid_request' })
+  assert.deepEqual(await ingestAutomatedRun(db, { ...REPORT, results: [{ file: 1, title: 'x' }] }, NOW), { error: 'invalid_request' })
+  assert.deepEqual(await ingestAutomatedRun(db, { ...REPORT, results: [{ file: 'a', title: 'x'.repeat(501) }] }, NOW), { error: 'invalid_request' })
+  // Route: replay → 200 duplicate; invalid JSON → 400; a large body without Content-Length → 413.
+  const send = async (raw, headers = {}) => {
+    const res = await ingestRoute.onRequestPost({ request: new Request(`${ORIGIN}/api/qa/runs`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, ...headers }, body: raw }), env })
+    return { status: res.status, json: await res.json() }
+  }
+  const raw = JSON.stringify(REPORT)
+  assert.equal((await send(raw)).status, 201)
+  const dup = await send(raw)
+  assert.deepEqual([dup.status, dup.json.duplicate], [200, true])
+  assert.equal((await send('{not json')).status, 400)
+  const big = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(`{"x":"${'a'.repeat(2_100_000)}"}`)); c.close() } })
+  const res = await ingestRoute.onRequestPost({ request: new Request(`${ORIGIN}/api/qa/runs`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: big, duplex: 'half' }), env })
+  assert.equal(res.status, 413)
+})
+
 test('redact: emails, phones, long tokens, ANSI and control characters; length cap', () => {
   assert.equal(redact('a\u0007b \u001b[1mX\u001b[0m x@y.co +1 (843) 555-0101 Bearer abcdefghijklmnopqrstuvwxyz0123456789'), 'ab X [email] [phone] [token]')
   assert.equal(redact('word '.repeat(200)).length, 500)
