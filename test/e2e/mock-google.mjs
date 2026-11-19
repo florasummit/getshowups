@@ -143,6 +143,7 @@ const ADS_ACCOUNTS = {
   7770000000: { name: 'MOCK non-test account', manager: false, test: false },
 }
 let flakyListings = 0
+const faults = { invalidGrant: new Set(), freeBusy: new Set() } // /__faults (Control Center demo)
 const adsCampaigns = new Map() // account id → [{ id, name, status, budget, amountMicros }]
 let adsNextId = 900000001
 // Our Cloud project has Google Ads TEST access only: Google lists a real account but refuses every
@@ -385,8 +386,23 @@ createServer(async (req, res) => {
   // Google OAuth token revocation (MOCK): always succeeds.
   if (url.pathname === '/revoke' && req.method === 'POST') return send(res, 200, {})
 
+  // Reversible, deterministic fault injection (Control Center demo, test-only): POST /__faults
+  // { customer, fault: 'invalid_grant' | 'freebusy_error' | 'clear' } for a seeded business (refresh token
+  // mock-refresh-seeded-<customer>). invalid_grant: Google rejects the stored grant; freebusy_error: lookups fail (500).
+  if (url.pathname === '/__faults' && req.method === 'POST') {
+    const { customer, fault } = JSON.parse(raw || '{}')
+    const refresh = `mock-refresh-seeded-${customer}`
+    const access = `Bearer mock-access-${createHmac('sha256', 'cal').update(refresh).digest('hex').slice(0, 16)}`
+    faults.invalidGrant.delete(refresh)
+    faults.freeBusy.delete(access)
+    if (fault === 'invalid_grant') faults.invalidGrant.add(refresh)
+    if (fault === 'freebusy_error') faults.freeBusy.add(access)
+    return send(res, 200, { ok: true })
+  }
+
   if (url.pathname === '/token' && req.method === 'POST') {
     const p = new URLSearchParams(raw)
+    if (p.get('grant_type') === 'refresh_token' && faults.invalidGrant.has(String(p.get('refresh_token')))) return send(res, 400, { error: 'invalid_grant' })
     // One calendar per connected Google account: the access token is derived from the refresh token.
     // A Google sign-in that reaches only REAL (production) Google Ads accounts keeps a recognisable token.
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
@@ -413,6 +429,7 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/calendar/v3/freeBusy' && req.method === 'POST') {
     const owner = req.headers.authorization
+    if (faults.freeBusy.has(owner)) return send(res, 500, { error: { code: 500, status: 'INTERNAL', message: 'mock fault' } })
     return send(res, 200, { calendars: { primary: { busy: events.filter((e) => e.owner === owner).map((e) => ({ start: e.start.dateTime, end: e.end.dateTime })) } } })
   }
 

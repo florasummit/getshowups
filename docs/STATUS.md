@@ -2,6 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
+## Control Center B1: incidents + Account/Journey Inspector (2026-11-19) — feat/control-center-incidents (stacked on #83, migration 0031)
+
+- Incident register from existing records (alert detectors + open failure events), deduplicated, evidence-based
+  recovery, fixed causes; Account Inspector (readiness, voice gate, comms, billing, journey steps, incidents,
+  history, customer view, read-only calendar diagnosis); overview at /admin/control. Details: docs/CONTROL_CENTER.md.
+- Demo e2e (control-center.spec.js): injected invalid grant → incident → dedupe → diagnosis → fix → recovered.
+- Next: B2 (QA run history + guided human QA + activation timer, migration 0032). Apply 0031 before merging (approval).
+
 ## Founder alerts (2026-11-19) — feat/founder-alerts (stacked on #81, no migration, OFF by default)
 
 - server/alerts.js `founderAlerts` (cron step before the outbox flush), scope as approved-for-review in

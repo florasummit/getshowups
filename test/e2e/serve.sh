@@ -199,6 +199,17 @@ for E in "$E2E_STUDIO_H_CUSTOMER:$E2E_STUDIO_H_SESSION_TOKEN" "$E2E_STUDIO_H_M_C
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
 
+# Control Center demo (control-center.spec.js): a bookable TEST business with a calendar record; faults are injected
+# through the Google mock (/__faults), never in the app.
+d1 "
+INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+  ('$E2E_CC_CUSTOMER', 'Control Demo Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$E2E_CC_CUSTOMER.example', '$E2E_CC_CUSTOMER', $NOW);
+INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_CC_CUSTOMER', 1, '$E2E_PLATFORM_ADMIN', $NOW);
+"
+npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
+
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --compatibility-date 2026-11-08 --persist-to "$STATE" --show-interactive-dev-session=false \
   --d1 ONBOARDING_DB=e2e-onboarding --kv GOOGLE_TOKENS=GOOGLE_TOKENS \
@@ -224,4 +235,5 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TWILIO_AUTH_TOKEN="$E2E_TWILIO_AUTH_TOKEN" \
   --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example" \
-  --binding FOLLOWUP_AI=true
+  --binding FOLLOWUP_AI=true \
+  --binding CRON_SECRET="$E2E_CRON_SECRET"

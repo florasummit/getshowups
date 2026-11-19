@@ -21,6 +21,7 @@ import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
 import { customerRows } from '../metrics.js'
 import { alertsEnabled } from '../alerts.js'
+import { registerReady } from './incidents.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
 import './../followups/ops.js' // follow-up engine, texts, assistant, texting registration
 
@@ -67,6 +68,14 @@ registerCapability({
       : !emailConfigured(env)
         ? { mode: 'disabled', note: 'Email provider not configured' }
         : { mode: 'live', note: messagesLive(env) ? 'Platform admins' : 'Platform admins listed in MESSAGE_TEST_RECIPIENTS' },
+})
+registerCapability({
+  id: 'platform.incidents',
+  name: 'Incident register (Control Center)',
+  journey: 'platform',
+  description: 'Customer-impacting failures from existing records, deduplicated, resolved on evidence (server/ops/incidents.js).',
+  dependsOn: ['platform.database', 'platform.cron'],
+  state: async (env) => ((await registerReady(env.ONBOARDING_DB)) ? { mode: 'live', note: 'Built from records every cron run' } : { mode: 'disabled', note: 'Migration 0031 not applied', approval: 'Apply migration 0031' }),
 })
 registerCapability({
   id: 'platform.tokens',

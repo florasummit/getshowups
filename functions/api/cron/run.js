@@ -13,6 +13,7 @@ import { flushOutbox } from '../../../server/email.js'
 import { purgeDesignerRaw } from '../../../server/ai-designer.js'
 import { queueOwnerNotices } from '../../../server/notify.js'
 import { founderAlerts } from '../../../server/alerts.js'
+import { syncIncidents } from '../../../server/ops/incidents.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { enforceAdsHolds } from '../../../server/ads/holds.js'
@@ -89,7 +90,10 @@ export async function onRequestPost({ request, env }) {
       const r = await auditCheckpoint(env.ONBOARDING_DB)
       return r.skipped ? { skipped: true } : { ok: r.ok === true, checked: r.checked ?? 0 }
     })
-    return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
+    // Incident register (migration 0031; no-op before it): open / update / resolve from the same records. Last, so
+    // it can never use up this request's query budget before the delivery, ads safety-stop or billing steps.
+    const incidents = await adsStep('incidents', () => syncIncidents(env))
+    return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })
