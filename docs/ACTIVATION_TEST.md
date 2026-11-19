@@ -29,7 +29,35 @@ there"; record T1 as not representative. Once live billing opens, rerun T1 from 
 
 The observer does not help unless the tester is stuck > 2 minutes, then gives the smallest hint and logs it.
 
-## Timer sheet (start the clock when the tester first sees getshowups.com)
+## Instrumentation: record it in the Control Center (preferred over the paper sheet)
+
+Open `/admin/control?view=qa&journey=activation` on the observer's screen, not the tester's. Enter the test
+business id, then press **Start guided QA: New owner activation**. The server clock starts at that moment. Press it
+when the tester first sees getshowups.com.
+
+For each step, as the tester finishes it, the observer records:
+- what happened;
+- Pass, Fail, Blocked or Not tested;
+- the context questions (clarity, trust, effort, accessibility, visuals).
+
+The server stores the time since the previous step. "Report a defect or an improvement" keeps the two lists
+separate. When the confirmation step is checked, press **Finish run**: the total and the per-step splits are stored.
+The Overview then shows "Activation: N min in the latest observer-recorded run". Until such a run exists it says
+"not measured yet". The Control Center never fills it from automated tests.
+
+| Directive measure | Guided-QA step (journey `activation`) |
+| --- | --- |
+| Time to understand the offer | `offer` |
+| Time to begin onboarding | `start` (+ `business` for plan/test checkout, `details`) |
+| Time to connect Google Calendar | `calendar` |
+| Time to configure availability | `hours` |
+| Time to establish a working website and booking page | `website` |
+| Time to complete a test booking | `booking` |
+| Time to verify confirmation behavior | `confirmation` (needs the tester on MESSAGE_TEST_RECIPIENTS ⚠) |
+| Total activation time | run total (start → Finish run) |
+| Confusing steps and recovery attempts | step observations + answers + defects/improvements; recovery table below |
+
+## Paper fallback timer sheet (start the clock when the tester first sees getshowups.com)
 
 | Step | What the tester does | Done when | Split (mm:ss) | Help? | Hesitations / words used |
 | --- | --- | --- | --- | --- | --- |

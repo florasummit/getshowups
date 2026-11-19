@@ -486,6 +486,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (server/ops/inspector.js) reads records only; support never impersonates; "Diagnose calendar" is read-only, not
   recorded as an availability event, rate-limited (supportDiagnose), audited. Journey/feature ids (server/ops/journeys.js)
   are stable: rename = new title, replace = RETIRED entry; every step's feature must be a registered capability.
+  QA history (server/ops/qa.js, migration 0032): automated runs only via POST /api/qa/runs (Bearer QA_INGEST_TOKEN,
+  off when unset), registry-linked tests + failures only, provider mocked|real never mixed, errors redacted; guided
+  human QA records observations only (never changes a business). Activation is "measured" ONLY from a finished
+  observer-recorded `activation` run — never from automated tests, never claimed otherwise.
 - Every feature registers a capability (server/ops/registry.js `registerCapability`, imported from server/ops/catalog.js):
   id, name, journey step, dependsOn, external service, `state(env)` (live|sandbox|disabled|missing|unknown + note +
   approval), optional read-only `verify(env, now)` (database evidence of real activity, no outside calls) and

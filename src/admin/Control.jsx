@@ -1,8 +1,10 @@
 // /admin/control — QA & Account Operations Control Center (platform admins; every request is authorized server-side).
 // Exceptions first: incidents, affected businesses, accounts needing help, integration health, next actions; then the
 // Account Inspector (readiness, journey, incidents, history, customer view) for one business. Counts and codes only.
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { api, fmt } from '../lib/api.js'
+
+const Qa = lazy(() => import('./Qa.jsx'))
 
 const when = (ms) => (ms ? fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
 const SEV_TAG = { critical: 'tag--bad', high: 'tag--bad', medium: 'tag--warn', low: 'tag--info' }
@@ -72,7 +74,7 @@ function Stat({ label, value, bad }) {
   )
 }
 
-function Overview({ o, onOpen }) {
+function Overview({ o, onOpen, onQa }) {
   const problems = o.integrations.filter((c) => ['failing', 'degraded', 'unknown'].includes(c.health))
   return (
     <div className="stack-lg">
@@ -156,7 +158,24 @@ function Overview({ o, onOpen }) {
       </section>
       <section className="card" aria-labelledby="cc-qa">
         <h2 id="cc-qa" className="card-title">Test runs and activation</h2>
-        {o.qa ? null : <p className="empty">Automated and human QA results are not recorded yet.</p>}
+        {!o.qa ? (
+          <p className="empty">QA history isn’t available yet.</p>
+        ) : (
+          <>
+            {o.qa.failedJourneys.length > 0 && <p className="bad">Failing journeys (latest automated result): {o.qa.failedJourneys.join(', ')}</p>}
+            <p className="fine" data-overview-qa>
+              Latest automated run: {o.qa.automated[0] ? `${o.qa.automated[0].status} · ${when(o.qa.automated[0].startedAt)} · ${o.qa.automated[0].provider === 'real' ? 'real provider' : 'mocked providers'}` : 'none recorded'}
+            </p>
+            <p className="fine" data-overview-activation={o.activation?.measured ? 'measured' : 'not-measured'}>
+              Activation: {o.activation?.measured ? `${o.activation.latest.totalMinutes} min in the latest observer-recorded run (target 20)` : 'not measured yet (no real-person run recorded)'}
+            </p>
+          </>
+        )}
+        {onQa && (
+          <button type="button" className="link-btn" onClick={onQa}>
+            Open QA
+          </button>
+        )}
       </section>
       {o.incidents.recentlyResolved.length > 0 && (
         <section className="card" aria-labelledby="cc-res">
@@ -313,21 +332,36 @@ function Account({ id, onBack }) {
 export default function Control() {
   const [o, setO] = useState(null)
   const [business, setBusiness] = useQueryParam('business')
+  const [view, setView] = useQueryParam('view')
   useEffect(() => {
-    if (business) return
+    if (business || view === 'qa') return
     let live = true
     api('/api/platform/control').then(({ status, data }) => live && setO(status === 200 ? data : { error: true }))
     return () => {
       live = false
     }
-  }, [business])
+  }, [business, view])
   return (
     <div className="stack-lg">
       <div className="page-head">
         <h1 className="title title--page">Control Center</h1>
         <p className="fine">Customer-impacting failures, accounts that need help, and where each customer is in their journey. Built from records; nothing here changes a customer’s account.</p>
       </div>
-      {business ? (
+      {!business && (
+        <div className="seg cc-views" role="group" aria-label="Control Center view">
+          <button type="button" className={view !== 'qa' ? 'seg-on' : ''} aria-pressed={view !== 'qa'} onClick={() => setView(null)}>
+            Overview
+          </button>
+          <button type="button" className={view === 'qa' ? 'seg-on' : ''} aria-pressed={view === 'qa'} onClick={() => setView('qa')}>
+            QA
+          </button>
+        </div>
+      )}
+      {!business && view === 'qa' ? (
+        <Suspense fallback={<p aria-busy="true">Loading QA…</p>}>
+          <Qa initialJourney={new URLSearchParams(window.location.search).get('journey')} />
+        </Suspense>
+      ) : business ? (
         <Account key={business} id={business} onBack={() => setBusiness(null)} />
       ) : !o ? (
         <p aria-busy="true">Loading…</p>
@@ -335,7 +369,7 @@ export default function Control() {
         <p className="form-error" role="alert">Couldn’t load the Control Center.</p>
       ) : (
         <>
-          <Overview o={o} onOpen={setBusiness} />
+          <Overview o={o} onOpen={setBusiness} onQa={() => setView('qa')} />
           <section className="card" aria-labelledby="cc-acc">
             <h2 id="cc-acc" className="card-title">All accounts</h2>
             <ul className="rows">

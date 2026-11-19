@@ -41,6 +41,8 @@ export const RULES = {
   receptionistVoice: { limit: 6, windowSec: 600 }, //  POST /api/receptionist/:id/voice (per IP; each starts a paid call)
   receptionistVoicePerBusiness: { limit: 60, windowSec: 3600 }, // voice calls started per business
   receptionistSocket: { limit: 120, windowSec: 600 }, // GET /api/receptionist/llm/:call (per IP, before the call lookup)
+  qaIngest: { limit: 30, windowSec: 600 }, //        POST /api/qa/runs (per IP; bearer QA_INGEST_TOKEN)
+  qaWrite: { limit: 600, windowSec: 600 }, //        POST /api/platform/qa (per admin; guided human QA)
   supportDiagnose: { limit: 6, windowSec: 600 }, //  POST /api/platform/inspector calendar diagnosis (per business)
   websiteExport: { limit: 10, windowSec: 600 }, //   GET static website download (per business; renders every page)
   websiteAi: { limit: 30, windowSec: 600 }, //      POST website generate/revise attempts (per business; burst guard,

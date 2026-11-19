@@ -2,6 +2,15 @@
 
 _Update at the end of every task. Newest first._
 
+## Control Center B2: QA history + guided human QA (2026-11-19) — feat/control-center-qa (stacked on B1, migration 0032)
+
+- Automated run ingest (POST /api/qa/runs, QA_INGEST_TOKEN, off when unset; scripts/qa-report.mjs from Playwright
+  JSON), run detail (failed first, redacted errors, related incidents by feature, retest history), guided human QA on
+  the same journeys (observed result, status, context questions, defects vs improvements), activation timer
+  (server-clock splits). Activation is "measured" ONLY from a finished observer run — none exists yet.
+- Demo now covers all 11 directive steps (control-center.spec.js). CI hookup needs a workflow change (owner; token
+  has no Workflows permission) + QA_INGEST_TOKEN secret (approval).
+
 ## Control Center B1: incidents + Account/Journey Inspector (2026-11-19) — feat/control-center-incidents (stacked on #83, migration 0031)
 
 - Incident register from existing records (alert detectors + open failure events), deduplicated, evidence-based

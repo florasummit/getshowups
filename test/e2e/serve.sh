@@ -236,4 +236,5 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example" \
   --binding FOLLOWUP_AI=true \
-  --binding CRON_SECRET="$E2E_CRON_SECRET"
+  --binding CRON_SECRET="$E2E_CRON_SECRET" \
+  --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN"

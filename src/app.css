@@ -3057,3 +3057,6 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .cc-steps li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cc-evidence { margin: 8px 0 0; padding: 8px 10px; max-width: 100%; overflow-x: auto; font-size: 0.75rem; background: var(--ink-100); border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
 .cc-incident .row-sub code { font-size: 0.8em; }
+.qa-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.qa-list { list-style: none; padding: 0; margin: 0; }
+.cc-views { margin-bottom: 0; }
