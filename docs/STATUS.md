@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Founder alerts (2026-11-19) — feat/founder-alerts (stacked on #81, no migration, OFF by default)
+
+- server/alerts.js `founderAlerts` (cron step before the outbox flush), scope as approved-for-review in
+  docs/FOUNDER_ALERTS_PROPOSAL.md: calendar broken (connection error on a lookup: invalid grant at once, others open
+  ≥ 10 min; or hours confirmed with no calendar, checked hourly, once/day), booking page without times (≥ 3 failed
+  lookups in 30 min, no success since), messages failing (1 failed confirmation or ≥ 3 failures/hour per business).
+- Recipients: PLATFORM_ADMIN_EMAILS that recipientAllowed() delivers to now (MESSAGE_TEST_RECIPIENTS while
+  MESSAGES_LIVE is off); nothing held to burst later. One email per incident (outbox id), ≤ 10/run + digest. Test and
+  deleted businesses never alert; unreadable test list = nothing alerts. Codes/counts only. Capability platform.alerts.
+- Not built (proposal optional): "resolved" emails. Next: owner approves scope → merge after #81 → set
+  FOUNDER_ALERTS_ENABLED=true and add the founder address to MESSAGE_TEST_RECIPIENTS (approval).
+
 ## Comms reliability (Agent B, 2026-11-19)
 
 - Branch feat/comms-reliability (draft PR), no migration. Detail: docs/COMMS_RELIABILITY.md.

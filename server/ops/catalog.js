@@ -20,6 +20,7 @@ import { deletionEnabled, deletionStatus } from '../deletion.js'
 import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
 import { customerRows } from '../metrics.js'
+import { alertsEnabled } from '../alerts.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
 import './../followups/ops.js' // follow-up engine, texts, assistant, texting registration
 
@@ -53,6 +54,19 @@ registerCapability({
     const r = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'").first()
     return { ok: r.n > 0, at: Date.now(), evidence: `Reachable, ${r.n} tables` }
   },
+})
+registerCapability({
+  id: 'platform.alerts',
+  name: 'Founder alerts (email to platform admins)',
+  journey: 'platform',
+  description: 'Calendar broken, booking page without times, messages failing: one email per incident (server/alerts.js).',
+  external: 'Resend',
+  state: (env) =>
+    !alertsEnabled(env)
+      ? { mode: 'disabled', note: 'FOUNDER_ALERTS_ENABLED off', approval: 'FOUNDER_ALERTS_ENABLED + founder address in MESSAGE_TEST_RECIPIENTS' }
+      : !emailConfigured(env)
+        ? { mode: 'disabled', note: 'Email provider not configured' }
+        : { mode: 'live', note: messagesLive(env) ? 'Platform admins' : 'Platform admins listed in MESSAGE_TEST_RECIPIENTS' },
 })
 registerCapability({
   id: 'platform.tokens',
