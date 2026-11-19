@@ -17,9 +17,13 @@ preconditions and effects updated 2026-11-18 after PRs #64–#68 (production 64d
 - [ ] **Terms of service page** (founder/legal, BLOCKER): `https://getshowups.com/terms` does not exist (it falls through
   to the marketing home page). Needed for the live portal and for a paid subscription offer: subscription terms,
   monthly renewal, cancellation at period end, refund policy. Claude does not write legal text; provide it and it can
-  be published as a page.
+  be published as a page. Draft for review: docs/legal/TERMS_DRAFT.md (#73); unpublished until the owner approves the wording.
 - [ ] §1 done in the Stripe Dashboard (live account verified, live price, live webhook, live portal, retries, emails,
   live key). The connector here reaches the SANDBOX only, so none of the live settings are verified by Claude.
+- [ ] **Sales-tax decision** (owner + accountant, BLOCKER, 2026-11-18): treatment, jurisdictions, tax-exclusive
+  configuration confirmed before the live price exists (Tax section; docs/LAUNCH_CHECKLIST.md §B).
+- [x] #72 merged and deployed (2026-11-18, dcdcb56, deployment 96cd945a): reconciliation applies a missed final
+  cancellation (stamped with Stripe's end time; skipped while another subscription is running).
 - [ ] A rollback window: the founder available for ~1 hour after activation.
 
 ## Review findings behind this checklist (read-only, 2026-11-18)
@@ -79,8 +83,8 @@ mark as a test business (keeps sandbox access, out of metrics) or leave as above
 1. **Account:** activate live payments (business details, identity, bank account for payouts). Confirm the Dashboard
    shows payments AND payouts enabled, and set the statement descriptor (e.g. `GETSHOWUPS`) and support email/phone.
 2. **Price:** Product catalog → product "GetShowUps Founding" → price **$499.00 USD, recurring, monthly**, lookup key
-   `getshowups_monthly_499`. Decide tax behavior (see Tax) before creating it: a price's tax behavior can't be changed
-   later. Copy the live price id (`price_…`).
+   `getshowups_monthly_499`. **Blocked until the tax decision (see Tax):** a price's tax behavior can't be changed
+   later; intended behavior: exclusive. Copy the live price id (`price_…`).
 3. **Webhook:** Developers → Webhooks → add endpoint `https://getshowups.com/api/stripe/webhook`, exactly these 6 events:
    `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`. Copy its signing secret (`whsec_…`).
@@ -178,7 +182,11 @@ Run right after activation, inside the rollback window.
 - **Rollback / abort:** if any step fails, stop, refund and cancel in the Dashboard, then decide whether to roll back
   activation (§2). Risk: forgetting to cancel → $499 again next month (step 7 cancels immediately).
 
-## Tax (decision before broad paid launch; not a blocker for the controlled test)
+## Tax (BLOCKER for the live price, and so for the controlled test — owner decision 2026-11-18)
+
+- **Do not create or activate the live $499 price** until sales-tax treatment, the jurisdictions and the
+  tax-exclusive configuration are confirmed (docs/LAUNCH_CHECKLIST.md §B). The intended configuration is
+  tax-exclusive ($499 plus tax where due).
 
 - Today: checkout does NOT enable Stripe automatic tax; the sandbox price's tax behavior is `unspecified`; Stripe Tax
   isn't set up (head office missing in the sandbox). So $499 is charged with no sales tax added.
