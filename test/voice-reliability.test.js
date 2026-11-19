@@ -107,6 +107,7 @@ beforeEach(() => {
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), delete: async (k) => kv.delete(k), list: async () => ({ keys: [], list_complete: true }) },
     RECEPTIONIST_ANTHROPIC_API_KEY: 'sk-ant-test-SECRET',
     AI_API_MOCK_ORIGIN: MOCK,
+    RECEPTIONIST_VOICE_BUSINESSES: 'alpha', // voice released for the test business (voice gate)
   }
   origFetch = globalThis.fetch
   globalThis.fetch = async (url, init = {}) => {
@@ -191,18 +192,24 @@ const pct = (xs, p) => {
 
 test('latency harness: first chunk follows the model\'s first token closely; timings are recorded as numbers only', async () => {
   await seed('alpha')
-  const { s, convId } = await callFor('alpha')
   const N = Number(process.env.VOICE_BENCH_N) || 20
   const FIRST = 40
-  const transcript = [{ role: 'agent', content: 'Hi' }]
-  for (let i = 1; i <= N; i++) {
-    script.push(said('Sure, I can help with that. What is your ZIP code?', { firstMs: FIRST, gapMs: 2 }))
-    transcript.push({ role: 'user', content: `question number ${i}` })
-    ask(s, i, transcript)
-    assert.ok(await until(() => done(s, i)), `turn ${i} answered`)
-    transcript.push({ role: 'agent', content: 'Sure, I can help with that. What is your ZIP code?' })
+  const t = []
+  // 40 turns per call (conversations stop at 60 turns by design), as many calls as needed for N turns.
+  for (let done0 = 0; done0 < N; ) {
+    const { s, convId } = await callFor('alpha')
+    const transcript = [{ role: 'agent', content: 'Hi' }]
+    for (let i = 1; i <= Math.min(40, N - done0); i++) {
+      script.push(said('Sure, I can help with that. What is your ZIP code?', { firstMs: FIRST, gapMs: 2 }))
+      transcript.push({ role: 'user', content: `question number ${i}` })
+      ask(s, i, transcript)
+      assert.ok(await until(() => done(s, i)), `turn ${i} answered`)
+      transcript.push({ role: 'agent', content: 'Sure, I can help with that. What is your ZIP code?' })
+    }
+    const got = turnEvents(convId)
+    t.push(...got)
+    done0 += got.length
   }
-  const t = turnEvents(convId)
   assert.equal(t.length, N)
   assert.ok(t.every((e) => e.r === 'ok' && e.first >= FIRST && e.total >= e.first && e.calls === 1))
   // Our overhead before the first spoken words (D1 reads, prompt build, SDK), on top of the model's first token.

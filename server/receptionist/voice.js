@@ -12,6 +12,7 @@
 // response_type config | ping_pong | response { response_id, content, content_complete, end_call }. A newer
 // response_id means the caller spoke again: Retell discards older responses.
 import { customerFromRow } from '../auth.js'
+import { CUSTOMER_RE } from '../invites.js'
 import { getCustomer } from '../customers.js'
 import { startConversation, loadConversation, respond, getSettings } from './engine.js'
 import { knowledgeFor } from './knowledge.js'
@@ -20,12 +21,26 @@ const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.RETELL_API_MOCK_ORIGIN) ? env.RETELL_API_MOCK_ORIGIN : 'https://api.retellai.com')
 // Voice needs the Retell key, our agent, and the socket secret the agent's URL carries.
 export const voiceConfigured = (env) => Boolean(env.RETELL_API_KEY && /^agent_[A-Za-z0-9]{6,80}$/.test(env.RETELL_AGENT_ID || '') && String(env.RETELL_WS_SECRET || '').length >= 32)
+
+// Voice release gate (owner decision 2026-11-19: voice reliability is a launch blocker). Voice is offered ONLY to the
+// businesses listed in RECEPTIONIST_VOICE_BUSINESSES (comma-separated ids, no wildcard; empty/unset = nobody), parsed
+// like ADS_BUSINESSES. Chat is not affected. Fails closed. Nothing stored changes: there is no per-business voice
+// setting; this gate only decides whether voice is offered.
+export const voiceBusinesses = (env) =>
+  String(env?.RECEPTIONIST_VOICE_BUSINESSES || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => CUSTOMER_RE.test(s))
+export const voiceAllowedFor = (env, customerId) => typeof customerId === 'string' && CUSTOMER_RE.test(customerId) && voiceBusinesses(env).includes(customerId)
+// 'available' | 'testing' (voice exists but not released for this business) | 'not_configured'
+export const voiceStatus = (env, customerId) => (!voiceConfigured(env) ? 'not_configured' : voiceAllowedFor(env, customerId) ? 'available' : 'testing')
 const CALL_TTL_MS = 60 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
 export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
+  if (!voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available' }
   const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now, { attribution })
   let res
   try {
@@ -94,7 +109,7 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now(), { cl
     return false
   }
   const customer = customerFromRow(await getCustomer(db, call.customer))
-  if (!customer || customer.status !== 'active') {
+  if (!customer || customer.status !== 'active' || !voiceAllowedFor(env, customer.id)) {
     ws.close(1008, 'unavailable')
     return false
   }

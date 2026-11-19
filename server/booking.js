@@ -149,6 +149,32 @@ export async function openSlots(env, customer, now = Date.now()) {
   return { ok: true, slots: computeSlots({ busy, rules: customer, now, days: BOOKING_DAYS }).slots }
 }
 
+// Availability for the public booking page (and the receptionist): a lookup that failed because of the calendar
+// connection (not "no free time") is an open failure of calendar.google, resource 'availability' for that business, so
+// a booking page showing no times for an integration reason is visible in Business Review. At most one failure row per
+// business per AVAILABILITY_EVENT_MS; one success row closes it. Codes only. Never throws.
+export const AVAILABILITY_EVENT_MS = 5 * 60 * 1000
+export async function recordAvailability(env, customerId, result, now = Date.now()) {
+  try {
+    const db = env.ONBOARDING_DB
+    const last = await db
+      .prepare("SELECT outcome, at FROM audit_log WHERE customer = ?1 AND capability = 'calendar.google' AND resource_type = 'availability' ORDER BY seq DESC LIMIT 1")
+      .bind(customerId)
+      .first()
+    const resource = { type: 'availability', id: customerId }
+    if (!result.ok) {
+      if (last?.outcome === 'failure' && now - last.at < AVAILABILITY_EVENT_MS) return 'throttled'
+      await recordEvent(db, { type: 'availability.failed', actor: 'system:booking', customer: customerId, capability: 'calendar.google', resource, outcome: 'failure', details: { error: String(result.status || 'calendar_error').slice(0, 40) }, at: now })
+      return 'failure'
+    }
+    if (last?.outcome !== 'failure') return null
+    await recordEvent(db, { type: 'availability.recovered', actor: 'system:booking', customer: customerId, capability: 'calendar.google', resource, outcome: 'success', details: {}, at: now })
+    return 'success'
+  } catch {
+    return null
+  }
+}
+
 const fail = (httpStatus, error) => ({ ok: false, httpStatus, error })
 // Operational failures (not customer mistakes) are recorded for the platform dashboard.
 const OPERATIONAL = new Set(['calendar_unavailable', 'calendar_error', 'booking_failed', 'storage_error'])

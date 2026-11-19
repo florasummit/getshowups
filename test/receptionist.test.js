@@ -606,6 +606,7 @@ test('voice continues the chat conversation (context kept); streams sentence by 
   Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912' })
   assert.equal((await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })).json().error, 'voice_not_configured', 'no socket secret → no voice')
   env.RETELL_WS_SECRET = WS_SECRET
+  env.RECEPTIONIST_VOICE_BUSINESSES = 'alpha' // released for this business (voice gate)
   // Chat first: the customer types their details.
   script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142' })), say('Thanks Jamie.'))
   const t1 = await chat('alpha', 'Jamie Rivera 843-555-0142')
@@ -656,7 +657,7 @@ test('voice continues the chat conversation (context kept); streams sentence by 
 test('voice: a turn the caller talked over is dropped (not saved), so the next turn hears everything once; an ended conversation ends the call', async () => {
   await seed('alpha')
   enable('alpha')
-  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET })
+  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET, RECEPTIONIST_VOICE_BUSINESSES: 'alpha' })
   const v = await call(voiceApi, 'POST', '/api/receptionist/alpha/voice', { params: { customer: 'alpha' }, body: {} })
   const row = db.sql.prepare('SELECT * FROM receptionist_calls').get()
   const s = ws()
@@ -687,11 +688,67 @@ test('voice: a turn the caller talked over is dropped (not saved), so the next t
   assert.ok(!evs.includes('model:no_reply'), evs.join(','))
   assert.ok(!s.sent.some((m) => m.response_id === 1 && /can’t answer right now|can't answer right now|having trouble on my side/.test(m.content || '')), 'no fallback spoken into the discarded answer')
   assert.equal(latestUserText([{ role: 'agent', content: 'a' }, { role: 'user', content: 'b' }, { role: 'user', content: 'c' }]), 'b c')
+  // Words of a dropped turn: kept when an agent line came in between, never duplicated when they are still there.
+  assert.equal(turnText([{ role: 'user', content: 'b' }, { role: 'agent', content: 'One moment.' }, { role: 'user', content: 'c' }], 'b'), 'b c')
+  assert.equal(turnText([{ role: 'user', content: 'b' }, { role: 'user', content: 'c' }], 'b'), 'b c')
+  assert.equal(turnText([{ role: 'user', content: 'c' }], ''), 'c')
   // Ending the conversation (from the page) ends the call on the next turn.
   await call(convApi, 'POST', '/api/receptionist/alpha/conversation', { params: { customer: 'alpha' }, body: { action: 'end', conversationId: v.json().conversationId, token: v.json().token } })
   s.handlers.message({ data: JSON.stringify({ interaction_type: 'response_required', response_id: 5, transcript: [{ role: 'user', content: 'still there?' }] }) })
   await tick()
   assert.equal(s.sent.at(-1).end_call, true)
+})
+
+test('voice gate (RECEPTIONIST_VOICE_BUSINESSES): voice only for listed businesses, no wildcard, fails closed; chat unaffected; the server refuses too', async () => {
+  const { voiceAllowedFor, voiceStatus } = await import('../server/receptionist/voice.js')
+  await seed('alpha')
+  await seed('bravo')
+  enable('alpha')
+  enable('bravo')
+  Object.assign(env, { RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_API_MOCK_ORIGIN: 'http://127.0.0.1:9912', RETELL_WS_SECRET: WS_SECRET })
+  const info = async (id) => (await call(infoApi, 'GET', `/api/receptionist/${id}`, { params: { customer: id } })).json()
+  const startVoice = (id) => call(voiceApi, 'POST', `/api/receptionist/${id}/voice`, { params: { customer: id }, body: {} })
+  // Unset and empty: nobody (fails closed), and the page is told it is in testing.
+  for (const list of [undefined, '', ' , ', '*', 'ALPHA', 'alpha*']) {
+    env.RECEPTIONIST_VOICE_BUSINESSES = list
+    assert.equal(voiceAllowedFor(env, 'alpha'), false, `list ${JSON.stringify(list)}`)
+    assert.deepEqual([(await info('alpha')).voice, (await info('alpha')).voiceStatus], [false, 'testing'])
+    if (list === undefined || list === '*') {
+      // (two route calls only: the per-IP voice rate limit is 6 per 10 minutes)
+      const r = await startVoice('alpha')
+      assert.deepEqual([r.status, r.json().error], [403, 'voice_not_available'])
+    }
+  }
+  assert.equal(fetches.filter((f) => f.url.includes('/v3/create-web-call')).length, 0, 'no Retell call is ever created when not allowed')
+  // Listed: allowed for that business only.
+  env.RECEPTIONIST_VOICE_BUSINESSES = ' bravo , alpha '
+  assert.deepEqual([(await info('alpha')).voice, (await info('alpha')).voiceStatus], [true, 'available'])
+  assert.equal((await startVoice('alpha')).status, 200)
+  env.RECEPTIONIST_VOICE_BUSINESSES = 'bravo'
+  assert.equal(voiceAllowedFor(env, 'alpha'), false)
+  assert.equal(voiceAllowedFor(env, 'unknown-biz'), false)
+  assert.equal(voiceAllowedFor(env, '../bravo'), false)
+  // A call created while allowed can't connect once the business is no longer listed.
+  const row = db.sql.prepare("SELECT call_id FROM receptionist_calls WHERE customer = 'alpha'").get()
+  const s = ws()
+  assert.equal(await attachRetellSocket(env, s, row.call_id), false)
+  assert.deepEqual(s.sent, [{ closed: 1008 }])
+  // Not configured at all: 'not_configured' (never claimed as testing or available).
+  delete env.RETELL_API_KEY
+  assert.equal(voiceStatus(env, 'bravo'), 'not_configured')
+  assert.equal((await info('bravo')).voiceStatus, 'not_configured')
+  // Chat is unaffected by the voice gate.
+  env.RECEPTIONIST_VOICE_BUSINESSES = ''
+  script.push(say('Hi! How can I help?'))
+  const c = await chat('alpha', 'hello')
+  assert.deepEqual([c.status, c.json().reply], [200, 'Hi! How can I help?'])
+  assert.equal((await info('alpha')).enabled, true)
+  // Owner dashboard: voice reported as in testing, not as set up or active; stored settings untouched.
+  const before = db.sql.prepare("SELECT * FROM receptionist_settings WHERE customer = 'alpha'").get()
+  env.RETELL_API_KEY = 'retell_SECRET'
+  const o = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: await owner('alpha') })).json()
+  assert.deepEqual([o.capabilities.voice, o.capabilities.voiceStatus], [false, 'testing'])
+  assert.deepEqual({ ...db.sql.prepare("SELECT * FROM receptionist_settings WHERE customer = 'alpha'").get() }, { ...before })
 })
 
 test('voice socket route: refuses without the secret path segment, wrong secret, non-WebSocket and IP outside the allowlist', async () => {

@@ -114,6 +114,10 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
 
 Kill switch: `RECEPTIONIST_ENABLED=false` hides chat and voice everywhere. Owners can also switch their own off.
 
+Voice release gate (2026-11-19): voice is offered only to businesses listed in `RECEPTIONIST_VOICE_BUSINESSES`
+(comma-separated ids, no wildcard; empty = nobody). Others see "voice is in testing"; chat is unaffected. Details and
+the proposed Retell settings (`scripts/retell-setup.mjs --tuned`): docs/COMMS_RELIABILITY.md.
+
 ## Personal end-to-end test (after activation)
 
 You, as a new business owner (Stripe stays in sandbox):

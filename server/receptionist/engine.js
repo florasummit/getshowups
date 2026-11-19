@@ -21,7 +21,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { randomToken } from '../google-oauth.js'
 import { linkToken, verifyLinkToken } from '../links.js'
-import { createLead, bookAppointment, dispatchBooked, openSlots, validateLead } from '../booking.js'
+import { createLead, bookAppointment, dispatchBooked, openSlots, recordAvailability, validateLead } from '../booking.js'
 import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
 import { syncLead, syncStage, syncNote } from '../ghl.js'
@@ -399,6 +399,7 @@ async function runTool(ctx, name, input) {
   }
   if (name === 'find_available_times') {
     const r = await openSlots(env, customer, now)
+    await recordAvailability(env, customer.id, r, now)
     if (!r.ok) return { ok: false, error: 'calendar_unavailable', note: "The calendar can't be reached right now. Offer a callback request or the booking page instead; do not guess times." }
     const date = /^\d{4}-\d{2}-\d{2}$/.test(input.date || '') ? input.date : ''
     const part = input.part_of_day || 'any'

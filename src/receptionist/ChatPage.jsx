@@ -32,6 +32,7 @@ const VOICE_ERRORS = {
   conversation_ended: 'This conversation has ended. Start a new one to talk.',
   mic: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
   noMic: 'No microphone was found. Connect one, or keep typing.',
+  voice_not_available: 'Voice is in testing and not available yet. You can keep typing.',
   dropped: 'The call dropped. You can talk again or keep typing.',
   start: 'Couldn’t start talking. Try again or keep typing.',
 }
@@ -403,6 +404,7 @@ export default function ChatPage({ id }) {
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
                 <a href={`/book/${id}`}>Book online</a>
               </p>
+              {info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice is in testing and not available yet.</p>}
             </>
           )}
           <p className="chat-legal">

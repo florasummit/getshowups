@@ -6,13 +6,13 @@ import { test, expect } from './test.js'
 
 const ID = 'e2e-comms-mic'
 
-async function setup(page, micError) {
+async function setup(page, micError, voiceStatus = 'available') {
   const voiceCalls = []
   await page.addInitScript((name) => {
     navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('stubbed', name))
   }, micError)
   await page.route(`**/api/receptionist/${ID}`, (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: true, name: 'Mic Test Co', greeting: 'Hi! Ask me anything.', phone: '', voice: true, callbacks: true, website: null }) }),
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: true, name: 'Mic Test Co', greeting: 'Hi! Ask me anything.', phone: '', voice: voiceStatus === 'available', voiceStatus, callbacks: true, website: null }) }),
   )
   await page.route(`**/api/receptionist/${ID}/voice`, (route) => {
     voiceCalls.push(route.request().method())
@@ -29,6 +29,14 @@ test('voice: microphone blocked → told how to allow it, no call is created, ty
   await expect(page.getByText('We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.')).toBeVisible()
   expect(voiceCalls).toEqual([])
   await expect(page.getByLabel('Your message')).toBeEnabled()
+})
+
+test('voice gate: voice not released for this business → no talk button, the page says voice is in testing; chat works @mobile', async ({ page }) => {
+  const voiceCalls = await setup(page, 'NotAllowedError', 'testing')
+  await expect(page.getByText('Talking by voice is in testing and not available yet.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Talk instead/ })).toHaveCount(0)
+  await expect(page.getByLabel('Your message')).toBeEnabled()
+  expect(voiceCalls).toEqual([])
 })
 
 test('voice: no microphone → says so, no call is created', async ({ page }) => {

@@ -1100,3 +1100,38 @@ test('booking: a Google event that may exist after a failed booking is removed; 
   await book('alpha', l2.leadId, l2.leadToken, await slotAfter('alpha', 4 * DAY))
   assert.equal(audit().length, 4)
 })
+
+test('availability: a booking page with no times because the calendar lookup failed is an open calendar.google failure (throttled); the next good lookup closes it; "no free time" records nothing', async () => {
+  await seed('alpha', { zips: '29403' })
+  const { recordAvailability, AVAILABILITY_EVENT_MS } = await import('../server/booking.js')
+  const rows = () => db.sql.prepare("SELECT action, outcome, resource_type, resource_id, details FROM audit_log WHERE capability = 'calendar.google' AND resource_type = 'availability' ORDER BY seq").all().map((r) => `${r.action}:${r.outcome}:${r.resource_id}:${r.details}`)
+  // Fully booked (no free time) is not a failure.
+  const prev = globalThis.fetch
+  let freeBusy = () => [200, { calendars: { primary: { busy: [{ start: new Date(Date.now() - DAY).toISOString(), end: new Date(Date.now() + 30 * DAY).toISOString() }] } } }]
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).endsWith('/freeBusy')) {
+      const [st, body] = freeBusy()
+      return new Response(JSON.stringify(body), { status: st })
+    }
+    return prev(url, init)
+  }
+  const page = async () => (await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).json()
+  assert.deepEqual([(await page()).status, (await page()).slots.length], ['ok', 0])
+  assert.deepEqual(rows(), [])
+  // Google fails: one failure row, not one per page view.
+  freeBusy = () => [500, {}]
+  assert.equal((await page()).status, 'unavailable')
+  await page()
+  await page()
+  assert.deepEqual(rows(), ['availability.failed:failure:alpha:{"error":"calendar_error"}'])
+  // Still failing after the throttle window: one more row.
+  assert.equal(await recordAvailability(env, 'alpha', { ok: false, status: 'calendar_error' }, Date.now() + AVAILABILITY_EVENT_MS + 1000), 'failure')
+  assert.equal(rows().length, 2)
+  // Works again: one success closes it; later good lookups record nothing.
+  freeBusy = () => [200, { calendars: { primary: { busy: [] } } }]
+  assert.equal((await page()).status, 'ok')
+  await page()
+  assert.deepEqual(rows().slice(-1), ['availability.recovered:success:alpha:{}'])
+  assert.equal(rows().length, 3)
+  globalThis.fetch = prev
+})

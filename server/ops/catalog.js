@@ -7,6 +7,8 @@ import { registerCapability } from './registry.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
 import { emailConfigured, messagesLive } from '../email.js'
 import { smsConfigured } from '../sms.js'
+import { modelConfigured } from '../receptionist/engine.js'
+import { voiceBusinesses, voiceConfigured, voiceStatus } from '../receptionist/voice.js'
 import { aiConfigured } from '../website-ai.js'
 import { studioEnabled, studioPublishAllowed, studioSchemaReady } from '../website-studio.js'
 import { providerConfigured } from '../domains.js'
@@ -397,6 +399,36 @@ registerCapability({
   journey: 'account',
   dependsOn: ['account.deletion', 'billing.lifecycle'],
   state: (env) => (retentionScheduleEnabled(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Day 90 only records the expiry', approval: 'Approved, disclosed retention schedule + RETENTION_SCHEDULE_ENABLED' }),
+})
+// ---------- AI receptionist (server/receptionist/) ----------
+registerCapability({
+  id: 'receptionist.chat',
+  name: 'AI receptionist: website chat',
+  journey: 'lead',
+  description: 'Answers customers from the business records and books through the same booking engine.',
+  external: 'Anthropic',
+  dependsOn: ['calendar.google', 'platform.database'],
+  state: (env) => (modelConfigured(env) ? { mode: 'live', note: 'Off per business until the owner turns it on' } : { mode: 'disabled', note: env.RECEPTIONIST_ENABLED === 'false' ? 'Kill switch on' : 'Model key not set' }),
+  verify: seen('real receptionist conversation', 30, `SELECT max(c.updated_at) AS at FROM receptionist_conversations c WHERE c.turns > 0 AND ${NOT_TEST_BIZ('c.customer', 'c.created_at')}`),
+})
+registerCapability({
+  id: 'receptionist.voice',
+  name: 'AI receptionist: browser voice (Retell)',
+  journey: 'lead',
+  description: 'Browser voice calls; released per business (RECEPTIONIST_VOICE_BUSINESSES). Failures: voice_turn / voice_frame events.',
+  external: 'Retell',
+  dependsOn: ['receptionist.chat'],
+  state: (env) =>
+    !modelConfigured(env) || !voiceConfigured(env)
+      ? { mode: 'disabled', note: 'Retell not configured' }
+      : voiceBusinesses(env).length
+        ? { mode: 'sandbox', note: `In testing for ${voiceBusinesses(env).length} business(es)`, approval: 'Voice reliability sign-off (owner) before wider release' }
+        : { mode: 'disabled', note: 'In testing: no business released', approval: 'RECEPTIONIST_VOICE_BUSINESSES' },
+  verify: seen('voice turn answered for a real business', 30, `SELECT max(e.at) AS at FROM receptionist_events e WHERE e.kind = 'voice_turn' AND e.ok = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
+  business: async (env, id) => {
+    const s = voiceStatus(env, id)
+    return s === 'available' ? { status: 'ok', summary: 'Voice released' } : { status: 'off', summary: s === 'testing' ? 'Voice in testing (not released)' : 'Voice not configured' }
+  },
 })
 registerCapability({
   id: 'crm.ghl',
