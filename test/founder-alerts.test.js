@@ -5,7 +5,7 @@ import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { founderAlerts, MAX_ALERTS } from '../server/alerts.js'
+import { founderAlerts, MAX_ALERTS, COOLDOWN_MS } from '../server/alerts.js'
 import { recordAvailability } from '../server/booking.js'
 import { flushOutbox } from '../server/email.js'
 import { recordEvent } from '../server/auditlog.js'
@@ -86,12 +86,27 @@ test('availability: 3 failed lookups in 30 min → one alert per incident (not p
   // Later runs while it stays open: nothing new.
   await failLookups('alpha', 'google_unavailable', [OFF_HOUR - MIN])
   assert.equal((await founderAlerts(env, OFF_HOUR)).queued, 0)
-  // Recovered, then broken again: a new incident, a new alert.
+  // Recovered, then broken again soon after (flapping): a new incident, but no second email within the cooldown.
   await recordAvailability(env, 'alpha', { ok: true }, OFF_HOUR)
   const later = OFF_HOUR + 40 * MIN
   await failLookups('alpha', 'google_unavailable', [later - 15 * MIN, later - 9 * MIN, later - 3 * MIN])
-  assert.equal((await founderAlerts(env, later)).queued, 1)
+  const r2 = await founderAlerts(env, later)
+  assert.equal(r2.queued, 0)
+  assert.equal(r2.cooldown, 1)
+  assert.equal(outbox().length, 1)
+  // Broken again after the cooldown: a new alert.
+  await recordAvailability(env, 'alpha', { ok: true }, later)
+  const much = NOW + COOLDOWN_MS + 30 * MIN
+  await failLookups('alpha', 'google_unavailable', [much - 15 * MIN, much - 9 * MIN, much - 3 * MIN])
+  assert.equal((await founderAlerts(env, much)).queued, 1)
   assert.equal(outbox().length, 2)
+  assert.match(outbox()[1].body, /Still open at: .*\n\nBusiness Review \(current state, incl\. recovery\)/)
+})
+
+test('"no free time" is not an integration failure: successful lookups without times record nothing and never alert', async () => {
+  for (let i = 0; i < 6; i++) assert.equal(await recordAvailability(env, 'alpha', { ok: true, slots: [] }, NOW - i * MIN), null)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM audit_log WHERE capability = 'calendar.google'").get().n, 0)
+  assert.equal((await founderAlerts(env, NOW)).queued, 0)
 })
 
 test('calendar: invalid grant alerts at once; a possibly temporary refresh failure only after 10 min open; hours confirmed with no calendar alerts hourly, once a day', async () => {

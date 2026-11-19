@@ -122,7 +122,14 @@ async function commsIncidents(db, now) {
   return out
 }
 
-function render(env, a, name) {
+// Every open incident of the three kinds, from records only (test businesses NOT filtered here). Shared with the
+// incident register (server/ops/incidents.js) so alerts and incidents use the same rules.
+export async function detectIncidents(env, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  return [...(await availabilityIncidents(db, now)), ...(await disconnectedCalendars(env, now).catch(() => [])), ...(await commsIncidents(db, now))]
+}
+
+function render(env, a, name, now) {
   const f = a.facts
   const lines = [
     `${LABEL[a.kind]}`,
@@ -133,15 +140,20 @@ function render(env, a, name) {
     f.failedLastHour != null ? `Failed deliveries in the last hour: ${f.failedLastHour} (booking confirmations: ${f.failedConfirmations})` : null,
     f.firstSeen ? `First seen: ${iso(f.firstSeen)}` : null,
     f.lastSeen ? `Last seen: ${iso(f.lastSeen)}` : null,
+    `Still open at: ${iso(now)}`,
     '',
-    `Business Review: ${siteOrigin(env)}/admin/review`,
+    `Business Review (current state, incl. recovery): ${siteOrigin(env)}/admin/review`,
     '',
-    'Sent by GetShowUps founder alerts (FOUNDER_ALERTS_ENABLED). One email per incident.',
+    'Sent by GetShowUps founder alerts (FOUNDER_ALERTS_ENABLED). One email per incident, at most one per business and',
+    'kind every 6 hours; this email is not repeated and no "resolved" email is sent.',
   ]
   return { subject: `GetShowUps alert: ${LABEL[a.kind]} — ${name}`.slice(0, 180), body: lines.filter((l) => l !== null).join('\n') }
 }
 
 const recipientRef = async (email) => (await sha256Hex(`alert:${email}`)).slice(0, 12)
+export const COOLDOWN_MS = 6 * HOUR
+const recentlyAlerted = async (db, prefix, now) =>
+  Boolean(await db.prepare("SELECT 1 FROM email_outbox WHERE id >= ?1 AND id < ?1 || '~' AND created_at >= ?2 LIMIT 1").bind(prefix, now - COOLDOWN_MS).first())
 const queued = async (db, prefix) => Boolean(await db.prepare('SELECT 1 FROM email_outbox WHERE id >= ?1 AND id < ?1 || \'~\' LIMIT 1').bind(prefix).first())
 
 // Cron step. Returns counts only. Never throws.
@@ -152,7 +164,7 @@ export async function founderAlerts(env, now = Date.now()) {
     const admins = adminEmails(env)
     const to = admins.filter((e) => recipientAllowed(env, e))
     const tests = await testStatuses(env)
-    const found = [...(await availabilityIncidents(db, now)), ...(await disconnectedCalendars(env, now).catch(() => [])), ...(await commsIncidents(db, now))]
+    const found = await detectIncidents(env, now)
     // Test businesses never alert; if the test list is unreadable nothing alerts (fails closed, decided next run).
     const candidates = tests === null ? [] : found.filter((a) => !statusIn(tests, a.customer).test)
     const ids = [...new Set(candidates.map((a) => a.customer))]
@@ -163,7 +175,7 @@ export async function founderAlerts(env, now = Date.now()) {
         .catch(() => db.prepare('SELECT name, status, 0 AS deleted FROM customers WHERE id = ?1').bind(id).first())
       if (r && !r.deleted) names.set(id, r)
     }
-    const out = { enabled: true, recipients: to.length, held: admins.length - to.length, candidates: 0, queued: 0, digest: 0 }
+    const out = { enabled: true, recipients: to.length, held: admins.length - to.length, candidates: 0, queued: 0, digest: 0, cooldown: 0 }
     if (!to.length) return { ...out, candidates: candidates.length }
     const fresh = []
     for (const a of candidates) {
@@ -171,12 +183,17 @@ export async function founderAlerts(env, now = Date.now()) {
       if (!biz) continue
       a.id = `alert:${a.kind}:${a.customer}:${a.key}`
       if (await queued(db, `${a.id}:`)) continue
+      // Flapping (fails, recovers, fails again) opens new incidents: at most one alert per business + kind per COOLDOWN.
+      if (await recentlyAlerted(db, `alert:${a.kind}:${a.customer}:`, now)) {
+        out.cooldown++
+        continue
+      }
       a.name = biz.name
       fresh.push(a)
     }
     out.candidates = fresh.length
     for (const a of fresh.slice(0, MAX_ALERTS)) {
-      const { subject, body } = render(env, a, a.name)
+      const { subject, body } = render(env, a, a.name, now)
       for (const email of to) await enqueue(env, { id: `${a.id}:${await recipientRef(email)}`, to: email, template: 'founder_alert', subject, body }, now)
       out.queued++
       await recordEvent(db, { type: 'alert.queued', actor: 'system:alerts', customer: a.customer, capability: 'platform.alerts', resource: { type: 'alert', id: a.kind }, outcome: 'success', details: { kind: a.kind }, at: now })

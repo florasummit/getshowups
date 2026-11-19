@@ -9,7 +9,7 @@ _Update at the end of every task. Newest first._
   ≥ 10 min; or hours confirmed with no calendar, checked hourly, once/day), booking page without times (≥ 3 failed
   lookups in 30 min, no success since), messages failing (1 failed confirmation or ≥ 3 failures/hour per business).
 - Recipients: PLATFORM_ADMIN_EMAILS that recipientAllowed() delivers to now (MESSAGE_TEST_RECIPIENTS while
-  MESSAGES_LIVE is off); nothing held to burst later. One email per incident (outbox id), ≤ 10/run + digest. Test and
+  MESSAGES_LIVE is off); nothing held to burst later. One email per incident (outbox id), ≤ 1 per business + kind per 6 h, ≤ 10/run + digest. "No free time" never alerts. Test and
   deleted businesses never alert; unreadable test list = nothing alerts. Codes/counts only. Capability platform.alerts.
 - Not built (proposal optional): "resolved" emails. Next: owner approves scope → merge after #81 → set
   FOUNDER_ALERTS_ENABLED=true and add the founder address to MESSAGE_TEST_RECIPIENTS (approval).
