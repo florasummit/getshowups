@@ -78,12 +78,39 @@ function HostingNotice({ hosting }) {
   return null
 }
 
+// Phone, hours and towns are shown from the records at render time once they exist; services and notes need a section.
+const MISSING_TEXT = {
+  phone: { text: 'Your phone number: the Call button next to Book online appears once it’s in Settings.' },
+  hours: { text: 'Your online booking hours: they appear on the page once you confirm them in Settings.' },
+  area: { text: 'The towns you serve: they appear on the page once they’re in Settings.' },
+  services: { text: 'Your services: add them, then add a Services section in the editor.' },
+  policies: { text: 'What customers should know: write it in Settings, then add a Good to know section in the editor.' },
+}
+function StarterMissing({ missing }) {
+  const items = missing.filter((k) => MISSING_TEXT[k])
+  if (!items.length) return null
+  return (
+    <section className="card" aria-label="Details to add">
+      <p>
+        <strong>Your draft is ready.</strong> We left out what we don’t know yet rather than make it up. To complete it, add these in <a href="/dashboard/settings">Settings</a>:
+      </p>
+      <ul>
+        {items.map((k) => (
+          <li key={k}>{MISSING_TEXT[k].text}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export default function WebsiteTab() {
   const [data, setData] = useWebsite()
   const [stamp, setStamp] = useState(0)
   const [rewrite, setRewrite] = useState(false)
   const [pending, setPending] = useState(null)
   const [editorKey, setEditorKey] = useState(0)
+  // What "I'm starting fresh" needed but didn't find (those parts were left out, never made up).
+  const [starterMissing, setStarterMissing] = useState([])
   // The Studio editor has edits the server hasn't confirmed yet: publishing waits (Publish sends the saved draft).
   const [unsaved, setUnsaved] = useState(false)
   const [moreOpen, setMoreOpen] = useState(null) // null = default: open until the site is AI-designed
@@ -135,9 +162,11 @@ export default function WebsiteTab() {
           onCreated={(d) => {
             refresh(d)
             setEditorKey((k) => k + 1)
+            setStarterMissing(Array.isArray(d?.starterMissing) ? d.starterMissing : [])
           }}
         />
       )}
+      {starterMissing.length > 0 && <StarterMissing missing={starterMissing} />}
       <WebsiteJourney data={data} onPublish={openPublish} canPublish={!w.generated && !pending && !publishing && !unsaved && !(studioOutput(w.draft) && !data.studioPublish)} />
       <section id="site-publish" className={`card site-status${studioMode ? ' site-status--bar' : ''}`} aria-label="Website status">
         <p className="site-status-line">

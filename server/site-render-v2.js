@@ -8,6 +8,32 @@ import { FONTS } from './site-spec.js'
 import { stockById } from './site-design.js'
 import { compositionRoles } from './design-blocks.js'
 
+// CSS for features added after sites were published; emitted only on pages that use them (see extraCss in renderV2).
+const EXTRA_CSS = {
+  call: '.btn-call .tel{white-space:nowrap;font-variant-numeric:tabular-nums}',
+  hours: '.hours{margin:20px 0 0}.hours strong{margin-right:10px}',
+}
+// Confirmed booking hours → "Mon–Fri · 9:00 AM – 5:00 PM" (consecutive days joined; from records only).
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Records store 'HH:MM' (customers.day_start); minutes since midnight are accepted too.
+const clock = (hm) => {
+  const [h, m] = typeof hm === 'number' ? [Math.floor(hm / 60), hm % 60] : String(hm).split(':').map(Number)
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return ''
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+export function hoursText(hours) {
+  const days = [...new Set(hours.workdays)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b)
+  const runs = []
+  for (const d of days) {
+    const last = runs.at(-1)
+    if (last && d === last[1] + 1) last[1] = d
+    else runs.push([d, d])
+  }
+  const dayText = runs.map(([a, b]) => (a === b ? DAY_SHORT[a] : b === a + 1 ? `${DAY_SHORT[a]}, ${DAY_SHORT[b]}` : `${DAY_SHORT[a]}–${DAY_SHORT[b]}`)).join(', ')
+  const from = clock(hours.dayStart)
+  const to = clock(hours.dayEnd)
+  return [dayText, from && to ? `${from} – ${to}` : ''].filter(Boolean).join(' · ')
+}
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const paras = (s) =>
   String(s || '')
@@ -169,7 +195,16 @@ export function renderV2(biz, spec, opts = {}) {
   const E = (sid, path) => (editing ? ` data-edit="${esc(sid)}|${esc(path)}"` : '')
   const B = (sid, path) => (editing ? ` data-btn="${esc(sid)}|${esc(path)}"` : '')
   const I = (sid, path) => (editing ? ` data-img="${esc(sid)}|${esc(path)}"` : '')
-  const button = (c, ghost = false, sid = null, path = null) => (c ? `<a class="btn${ghost ? ' ghost' : ''}" href="${link(c.target)}"${sid ? B(sid, path) : ''}>${esc(c.label)}</a>` : '')
+  // A 'call' button dials the phone on record and shows that number (always current, never from the spec); with no
+  // phone on record it isn't rendered. Every other target renders exactly as before.
+  // Their CSS is added only to pages that render them (extraCss), so pages without them are byte-identical.
+  const extraCss = new Set()
+  const tel = (biz.phone || '').replace(/[^\d+]/g, '')
+  const button = (c, ghost = false, sid = null, path = null) => {
+    if (!c) return ''
+    if (c.target === 'call') return tel ? (extraCss.add(EXTRA_CSS.call), `<a class="btn${ghost ? ' ghost' : ''} btn-call" href="tel:${esc(tel)}"${sid ? B(sid, path) : ''}>${esc(c.label)} <span class="tel">${esc(biz.phone)}</span></a>`) : ''
+    return `<a class="btn${ghost ? ' ghost' : ''}" href="${link(c.target)}"${sid ? B(sid, path) : ''}>${esc(c.label)}</a>`
+  }
   const visit = biz.appointmentMode === 'at_customer'
   const head = (s, tag = 'h2') => (s.heading || s.eyebrow || s.text ? `<div class="head">${s.eyebrow ? `<p class="eyebrow"${E(s.id, 'eyebrow')}>${esc(s.eyebrow)}</p>` : ''}${s.heading ? `<${tag} id="h-${esc(s.id)}"${E(s.id, 'heading')}>${esc(s.heading)}</${tag}>` : ''}${s.text ? `<div class="muted"${E(s.id, 'text')}>${paras(s.text)}</div>` : ''}</div>` : '')
   // A service by its stable id (server/website.js); a position only in content that never had ids (read-time upgraded).
@@ -296,7 +331,10 @@ export function renderV2(biz, spec, opts = {}) {
         return `${open(` cta-${s.layout}`)}<div class="wrap">${inner}${s.layout === 'split' && s.image ? pic(s.image, { focus: s.imageFocus, aspect: s.imageAspect, sizes: '(max-width:760px) 100vw, 40vw' }) : ''}</div></section>`
       }
       case 'area':
-        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Where we work' })}${biz.cities?.length ? `<ul class="towns">${biz.cities.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}</div></section>`
+        // A section that shows hours (new starter) with neither towns nor confirmed hours on record isn't rendered.
+        // (In the owner's editor it stays visible with a note, so it can still be found and edited.)
+        if (s.showHours && !biz.cities?.length && !biz.hours) return editing ? `${open()}<div class="wrap">${head(s)}<p class="muted">Your towns and online booking hours appear here once they’re in Business details.</p></div></section>` : ''
+        return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Where we work' })}${biz.cities?.length ? `<ul class="towns">${biz.cities.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}${s.showHours && biz.hours ? (extraCss.add(EXTRA_CSS.hours), `<p class="hours"><strong>Online booking hours</strong> ${esc(hoursText(biz.hours))}</p>`) : ''}</div></section>`
       case 'contact':
         return `${open()}<div class="wrap">${head({ ...s, heading: s.heading || 'Get in touch' })}<div class="actions">${button({ label: visit ? 'Book a visit' : 'Book online', target: 'book' })}${s.showPhone && biz.phone ? `<a class="btn ghost" href="tel:${esc(biz.phone.replace(/[^\d+]/g, ''))}">${esc(biz.phone)}</a>` : ''}</div>${s.form !== 'none' && form ? leadForm(s) : ''}</div></section>`
     }
@@ -376,7 +414,7 @@ export function renderV2(biz, spec, opts = {}) {
   const social = pageUrl
     ? `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(biz.name)}"><meta property="og:title" content="${esc(title)}">${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}<meta property="og:url" content="${esc(pageUrl)}">${shareImage ? `<meta property="og:image" content="${esc(shareImage)}"><meta name="twitter:card" content="summary_large_image">` : '<meta name="twitter:card" content="summary">'}`
     : ''
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : ''}${!preview ? social : ''}${faviconHref ? `<link rel="icon" href="${esc(faviconHref)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme, { composition: blockCss.length > 0 })}${blockCss.join("")}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${preview || noindex ? '<meta name="robots" content="noindex">' : ''}${!preview && pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : ''}${!preview ? social : ''}${faviconHref ? `<link rel="icon" href="${esc(faviconHref)}">` : ''}<meta name="theme-color" content="${spec.theme.colors.bg}"><style>${css(spec.theme, { composition: blockCss.length > 0 })}${blockCss.join("")}${[...extraCss].join('')}</style><script type="application/ld+json">${ld(schema)}</script></head><body><a class="skip" href="#main">Skip to content</a>${preview ? '<div class="preview-bar">Preview. Only you can see this.</div>' : ''}${nav}<main id="main">${body}</main>${foot}</body></html>`
 }
 
 export { FONTS }

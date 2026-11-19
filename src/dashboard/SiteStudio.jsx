@@ -802,11 +802,12 @@ function Choice({ id, label, value, options, onChange }) {
   )
 }
 // Where a button goes: booking, a page, or a section on this page.
-function Target({ label, value, site, page, onChange }) {
-  const options = [['book', 'Booking page'], ...site.pages.map((p) => [`page:${p.slug}`, `Page: ${p.navLabel}`]), ...page.sections.map((s) => [`section:${s.id}`, `Section: ${s.heading || SECTION_LABEL[s.type]}`])]
+// call: regular buttons only (not composition blocks): dials the phone number in Business details.
+function Target({ label, value, site, page, onChange, call = false }) {
+  const options = [['book', 'Booking page'], ...(call || value === 'call' ? [['call', 'Call (your phone number from Business details)']] : []), ...site.pages.map((p) => [`page:${p.slug}`, `Page: ${p.navLabel}`]), ...page.sections.map((s) => [`section:${s.id}`, `Section: ${s.heading || SECTION_LABEL[s.type]}`])]
   return <Choice label={label} value={value || 'book'} options={options} onChange={onChange} />
 }
-function ButtonFields({ title, cta, site, page, onChange, autoFocus, removable = false }) {
+function ButtonFields({ title, cta, site, page, onChange, autoFocus, removable = false, call = true }) {
   if (!cta)
     return (
       <button type="button" className="link-btn" onClick={() => onChange({ label: 'Book now', target: 'book' })}>
@@ -817,7 +818,8 @@ function ButtonFields({ title, cta, site, page, onChange, autoFocus, removable =
     <fieldset className="field studio-group">
       <legend>{title}</legend>
       <Text label="Text" value={cta.label} max={32} autoFocus={autoFocus} onChange={(v) => onChange({ ...cta, label: v })} />
-      <Target label="Goes to" value={cta.target} site={site} page={page} onChange={(v) => onChange({ ...cta, target: v })} />
+      <Target label="Goes to" value={cta.target} site={site} page={page} call={call} onChange={(v) => onChange({ ...cta, target: v })} />
+      {cta.target === 'call' && <p className="fine">Shows and dials the phone number in Business details. Without one, the button isn’t shown.</p>}
       {removable && (
         <button type="button" className="link-btn" onClick={() => onChange(null)}>
           Remove this button
@@ -937,7 +939,7 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
           b.kind === 'heading' || b.kind === 'text' ? (
             <Text key={i} label={b.kind === 'heading' ? 'Heading' : 'Text'} value={b.text} max={b.kind === 'heading' ? 120 : 400} area={b.kind === 'text'} autoFocus={focus === (b.kind === 'heading' ? 'heading' : 'text') && i === s.blocks.findIndex((x) => x.kind === b.kind)} onChange={(v) => onChange((x) => (x.blocks[i].text = v))} />
           ) : b.kind === 'button' ? (
-            <ButtonFields key={i} title="Button" cta={{ label: b.label, target: b.target }} site={site} page={page} autoFocus={focus === 'button'} onChange={(c) => onChange((x) => Object.assign(x.blocks[i], c))} />
+            <ButtonFields key={i} title="Button" cta={{ label: b.label, target: b.target }} site={site} page={page} call={false} autoFocus={focus === 'button'} onChange={(c) => onChange((x) => Object.assign(x.blocks[i], c))} />
           ) : b.kind === 'media' ? (
             <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => onChange((x) => (v ? (x.blocks[i].image = v) : x.blocks.splice(i, 1)))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
           ) : null,
@@ -1008,7 +1010,14 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
           <p className="fine">Messages arrive with your other leads. Your phone number and service area come from Business details.</p>
         </>
       )}
-      {s.type === 'area' && <p className="fine">The towns listed come from Business details.</p>}
+      {s.type === 'area' && (
+        <>
+          <label className="check">
+            <input type="checkbox" checked={Boolean(s.showHours)} onChange={(e) => onChange((x) => (x.showHours = e.target.checked))} /> Show your online booking hours
+          </label>
+          <p className="fine">The towns and online booking hours come from Business details.</p>
+        </>
+      )}
       {LAYOUTS[s.type] && <Choice label="Layout" value={s.layout} options={LAYOUTS[s.type]} onChange={set('layout')} />}
       {s.type !== 'composition' && <Choice label="Background" value={s.background === 'image' ? 'ink' : s.background} options={BACKGROUNDS} onChange={set('background')} />}
     </div>

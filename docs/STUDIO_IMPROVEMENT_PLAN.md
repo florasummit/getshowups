@@ -58,9 +58,14 @@ One-section AI rewrite (other sections byte-identical, asserted), owner's key; a
 compositions (PoolThru split buttons). The phone fix changes how existing compositions render → it ships only behind
 renderer versioning (old versions keep old CSS) or with your explicit approval of the golden diff.
 
-## Decisions needed
+## Decisions (owner, 2026-11-18)
 
-1. Approve Phase 1 as the next PR (recommended).
-2. "How booking works" wording while confirmation emails are not live: omit the email step (recommended) or show it
-   as "coming soon".
-3. Phase 3 photo sourcing: OK to add ≈12 CC0 photos (Openverse/StockSnap, same rules as today)?
+1. Phase 1: **approved**; built in feat/studio-starter-phase1.
+2. "How booking works": describe only what production does; no confirmation emails, texts or other messaging while
+   those are off; never "coming soon".
+3. Photos: **approved for a future phase**. Curate ≈12 commercially usable, freely licensed photos with source, license,
+   attribution and permitted uses recorded (docs/PHOTO_LIBRARY_CANDIDATES.md); separate from Phase 1; no existing
+   customer website changes automatically.
+4. (2026-11-19) Label the hours "Online booking hours": the record is when online booking offers times, not opening
+   hours. HVAC starters stay text-led (no stock photo; an owner photo still wins) until licensed HVAC imagery is
+   approved (site-starter.js textLedStarter).

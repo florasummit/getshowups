@@ -26,8 +26,7 @@ import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../..
 import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } from '../../../../server/website-history.js'
 import { renderSite } from '../../../../server/site-render.js'
 import { starterSite } from '../../../../server/site-starter.js'
-import { getProfile } from '../../../../server/onboarding.js'
-import { receptionistOn } from '../../../../server/receptionist/engine.js'
+import { starterFacts } from '../../../../server/website-import.js'
 import { siteBusinessInfo } from '../../../../server/site-serve.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
@@ -179,14 +178,14 @@ export async function onRequestPost({ request, env }) {
       if (!(await studioAccess(env, customer))) return json(404, { error: 'not_found' })
       const loaded = await loadWebsite(db, customer)
       if (loaded.draft.site) return json(409, { error: 'designed_site' })
-      const profile = await getProfile(db, customer.id).catch(() => null)
-      const biz = { name: customer.name, industry: profile?.industry || '', description: profile?.description || '', phone: profile?.phone || '', chat: await receptionistOn(env, customer).catch(() => false), visit: customer.appointmentMode === 'at_customer' }
-      const { site } = starterSite(loaded.draft, biz, { kinds: ['contact', 'privacy'], now: Date.now() })
+      const biz = await starterFacts(env, customer)
+      const { site, missing } = starterSite(loaded.draft, biz, { kinds: ['contact', 'privacy'], now: Date.now() })
       const [errors, content] = validateContent({ ...loaded.draft, site }, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior: loaded.draft.services })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
       await saveDraft(db, customer.id, content)
       await track(env, 'website_starter', { customer: customer.id })
-      return json(200, await state(env, customer, session.email))
+      // missing: records the starter needed but didn't have (sections left out, never invented), so the owner is asked.
+      return json(200, { ...(await state(env, customer, session.email)), starterMissing: missing })
     }
     if (action === 'save' || action === 'publish') {
       // `prior`: the saved services, so an AI-designed site keeps each service's id (and its description) whatever the

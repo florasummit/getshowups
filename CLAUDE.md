@@ -341,6 +341,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   site (no AI, no key) on import or "I'm starting fresh"; a business with one gets only missing pages added (never
   replaced) and a services section if approved services had nowhere to show. Precedence: owner edits > records >
   approved imported content > starter text. Nothing invents services, prices, claims or legal text.
+  Conversion-first starter home (owner decision 2026-11-18, Phase 1): hero (area line only when the whole town list fits,
+  Book online + Call), services, "How booking works" (bookingSteps: ONLY what the booking page does in production —
+  details → open times → booked on screen; never emails/texts/reminders, never "coming soon"), about, hours + area,
+  "Good to know" FAQ (faqFromPolicies: the owner's policies word for word), final CTA. Facts come from ONE builder,
+  website-import.js starterFacts(); missing records → left out and returned as `starterMissing` (owner is told).
+  Call = button target 'call' (hero/cta/imageText only, never composition blocks): the renderer dials and SHOWS the
+  phone on record at request time and drops the button without one. area.showHours shows confirmed booking hours from
+  the record; a showHours area with no towns and no hours renders nothing publicly. Their CSS (EXTRA_CSS) is emitted
+  only on pages that use them, and showHours is stored only when true, so existing sites stay byte-identical.
 - Legal pages (page.legal: privacy policy, terms): text sections only, escaped and length-limited but NOT run through
   the marketing-claims / invented-number filters (owner decision 2026-11-17: legal wording must be kept exactly).
   Only set by import (word for word, provenance source {imported, url}) or the starter (source starter); AI output can

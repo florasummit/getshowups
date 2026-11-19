@@ -259,10 +259,20 @@ test('an existing designed site without a services section gets one (once) when 
 
 test('starting fresh: pages from the business records only (no AI, no retyping); starter privacy matches what the site does and needs review', async () => {
   const c = await cookieFor('salon')
+  // The owner's own notes (Settings → What customers should know) become the FAQ word for word; towns: none on record.
+  db.sql.prepare("INSERT INTO business_policies (customer, before_visit, cancellation, updated_at) VALUES ('salon', 'Arrive with clean, dry hair.', '', 1)").run()
   const r = await call(website, 'POST', { cookie: c, body: { action: 'starter' } })
   assert.equal(r.status, 200, r.text)
   const site = r.json.website.draft.site
   assert.deepEqual(site.pages.map((p) => p.slug), ['', 'contact', 'privacy'])
+  // Conversion-first home from records: Book + Call (phone on record, number rendered from the record), the three
+  // booking steps, hours (confirmed), the owner's FAQ, a final booking button. Missing records are reported, not invented.
+  const home = site.pages[0].sections
+  assert.deepEqual(home.map((s) => s.type), ['hero', 'steps', 'area', 'faq', 'cta'])
+  assert.deepEqual(home[0].secondaryCta, { label: 'Call', target: 'call' })
+  assert.deepEqual([home[2].heading, home[2].showHours], ['Online booking hours', true])
+  assert.deepEqual(home[3].items, [{ question: 'What should I know before my appointment?', answer: 'Arrive with clean, dry hair.' }])
+  assert.deepEqual(r.json.starterMissing, ['services', 'area'])
   assert.equal(site.pages[2].source.kind, 'starter')
   assert.equal(site.pages[1].sections[0].type, 'contact')
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'starter' } })).json.error, 'designed_site', 'never replaces a designed site')
