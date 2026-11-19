@@ -90,6 +90,8 @@ Goal: one person who has never seen GetShowUps goes from sign-up to a published 
 
 ## H. Engineering items that need approval to release
 
-- ☐ PR #76 Website Studio Phase 1 (new starter sites only; existing sites byte-identical) — approve merge + deploy.
-- ☐ PR #77 photo candidates (docs) — approve merge; the import itself is a later phase.
-- ☐ PR for this checklist (docs) — approve merge.
+- ☑ PR #76 Website Studio Phase 1 — merged and deployed 2026-11-19 (126dcba, deployment c5258264); existing sites
+  byte-identical. Includes "Online booking hours" and text-led HVAC starters.
+- ☑ PR #77 photo candidates (docs) — approved 2026-11-19; the import itself is a later phase (needs approval).
+- ☑ This checklist (docs, #78) — approved 2026-11-19.
+- ☐ Sales-tax decision (section B) — decision-ready analysis in a separate docs PR (docs/SALES_TAX_ANALYSIS.md); needs the accountant's answers.
