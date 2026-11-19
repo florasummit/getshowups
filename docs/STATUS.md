@@ -2,6 +2,25 @@
 
 _Update at the end of every task. Newest first._
 
+## Release 2026-11-19 evening: #80, #81, #82 (owner-approved plan, docs/RELEASE_PLAN.md)
+
+- Backup ~/getshowups-backups/prod-20261119T203844Z-pre-pr80.sql (integrity ok; 12 table counts = production; no
+  pending outbox). Rollback target: deployment b6ba40a5 (main 425d311). Migration 0030 applied (table + index).
+- #80 → merge 37951e8, deployment 4650e0aa. RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical set BEFORE #81
+  (authoritative: production served voice to exactly these two; all others unchanged). #81 → merge 54536db,
+  deployment 8e903802: voice still on for both, off for the rest. Live HTML of PoolThru ×5, bob-electrical,
+  toys-for-us (+ www.poolthru.com control) identical to the pre-release capture after each deploy.
+- #82: deployment id recorded in the release report. #83 (founder alerts) NOT merged, NOT activated.
+
+## Launch readiness + enrollment notice (2026-11-19) — docs/launch-readiness (#82, no migration)
+
+- Visitors are told enrollment isn't open BEFORE Google sign-in: GET /api/enrollment ({open}, mirrors the server's
+  signup gate; rate-limited), "Request early access" CTAs + note, /dashboard?plan=founding notice with Book a call.
+  Sign-in unchanged for existing owners, invitations, admins, testers. Help link on owner screens; /#book → /#book-demo.
+- Docs: LAUNCH_READINESS (journey QA, readiness matrix, 20-minute target vs measured), ACCOUNTANT_PACKAGE,
+  legal/ATTORNEY_REVIEW, FOUNDER_ALERTS_PROPOSAL (built in feat/founder-alerts, off), RELEASE_PLAN (#80 → #81 → #82,
+  backup/migration/smoke/rollback; not executed), ACTIVATION_TEST (real-person run script; not run).
+- Next: owner approves RELEASE_PLAN; voice allowlist `poolthru-llc,bob-electrical` before #81 deploys.
 ## Comms reliability (Agent B, 2026-11-19)
 
 - Branch feat/comms-reliability (draft PR), no migration. Detail: docs/COMMS_RELIABILITY.md.

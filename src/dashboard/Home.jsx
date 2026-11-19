@@ -22,6 +22,13 @@ export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
   }
   return (
     <div className="header-user">
+      {/* Owner pages only (not /admin): the plan promises direct help from the founding team, so it is reachable from
+          every owner screen, including onboarding, not just when an account has a problem. */}
+      {to === '/dashboard' && (
+        <a className="link-btn" href="mailto:hello@getshowups.com?subject=GetShowUps%20help">
+          Help
+        </a>
+      )}
       <span className="header-email">{email}</span>
       <button type="button" className="link-btn" onClick={signOut}>
         {label}

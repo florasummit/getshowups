@@ -51,6 +51,17 @@
   font-size: 0.88rem;
 }
 
+/* Smallest phones: Logo · Help · Sign out must fit in 320px (Help link, 2026-11-19). */
+@media (max-width: 400px) {
+  .app-header {
+    gap: 10px;
+  }
+
+  .header-user {
+    gap: 12px;
+  }
+}
+
 .app-main {
   max-width: 880px;
   margin: 0 auto;
