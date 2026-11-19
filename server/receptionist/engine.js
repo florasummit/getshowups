@@ -21,7 +21,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { randomToken } from '../google-oauth.js'
 import { linkToken, verifyLinkToken } from '../links.js'
-import { createLead, bookAppointment, openSlots, validateLead } from '../booking.js'
+import { createLead, bookAppointment, dispatchBooked, openSlots, validateLead } from '../booking.js'
 import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
 import { syncLead, syncStage, syncNote } from '../ghl.js'
@@ -43,6 +43,7 @@ export const LIMITS = {
   log: 200,
 }
 const MODEL_TIMEOUT_MS = 25_000
+export const VOICE_MODEL_TIMEOUT_MS = 10_000
 
 const ready = new WeakSet()
 export async function receptionistReady(db) {
@@ -449,6 +450,7 @@ async function runTool(ctx, name, input) {
     conv.status = 'booked'
     conv.outcome = 'booked'
     ctx.committed = true
+    ctx.bookedNow = r.appointment.id
     ctx.after.push(() => syncStage(env, customer.id, leadId, 'booked', null, now))
     ctx.after.push(() => syncNote(env, customer.id, leadId, `booked:${conv.id}`, `Booked by the GetShowUps receptionist (${ctx.channel}) for ${slotLabel(start, customer.timezone)}. Need: ${lead.need}`, now))
     return { ok: true, booked: true, time: slotLabel(start, customer.timezone), confirmation: lead.email ? `A confirmation email goes to ${lead.email}.` : 'It is on the calendar; no confirmation email (no email given).' }
@@ -477,7 +479,9 @@ export function sentenceProblem(sentence, facts) {
 }
 
 const textOf = (content) => (content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
-function fallbackText(k) {
+function fallbackText(k, channel = 'chat') {
+  // Spoken: a web address read aloud is useless, so the caller hears where to book and the phone number instead.
+  if (channel === 'voice') return `Sorry, I'm having trouble on my side right now. You can book on the ${k.name} website${k.phone ? ` or call ${k.phone}` : ''}.`
   return `Sorry, I can't answer right now. You can pick a time at https://getshowups.com/book/${k.id}${k.phone ? ` or call ${k.phone}` : ''}.`
 }
 const safePrice = (k) => `I don't want to quote the wrong price, so the ${k.name} team will confirm it. Would you like me to find a time for a visit?`
@@ -487,15 +491,20 @@ function costMicros(u) {
   return Math.round((u.input_tokens || 0) * PRICE.input + (u.output_tokens || 0) * PRICE.output + (u.cache_read_input_tokens || 0) * PRICE.cacheRead + (u.cache_creation_input_tokens || 0) * PRICE.cacheWrite)
 }
 
-function client(env) {
+// Voice waits at most VOICE_MODEL_TIMEOUT_MS for the model to start answering (one retry): a caller hears silence
+// meanwhile, and Retell's own reminder would talk over a slow answer. Chat keeps the longer budget.
+function client(env, channel = 'chat') {
   const mock = providerMock(env)
-  return new Anthropic({ apiKey: env.RECEPTIONIST_ANTHROPIC_API_KEY, maxRetries: 1, timeout: MODEL_TIMEOUT_MS, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
+  return new Anthropic({ apiKey: env.RECEPTIONIST_ANTHROPIC_API_KEY, maxRetries: 1, timeout: channel === 'voice' ? VOICE_MODEL_TIMEOUT_MS : MODEL_TIMEOUT_MS, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
 }
 
 // Streams one model call's text sentence by sentence through `emit`, checking each sentence first. Returns the
 // final message, the text actually emitted, and the first problem found (after which nothing more is emitted).
-async function streamCall(anthropic, params, { emit, facts, isStale }) {
-  const stream = anthropic.messages.stream(params)
+// onToolStart(name): the model began a tool call (voice says its holding line now, not after the whole call).
+// signal: aborts the request when the caller talked over this turn (Retell discards it), so the next turn starts
+// at once instead of waiting for an answer nobody will hear.
+async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart, signal }) {
+  const stream = anthropic.messages.stream(params, signal ? { signal } : undefined)
   let buf = ''
   let emitted = ''
   let problem = null
@@ -529,6 +538,11 @@ async function streamCall(anthropic, params, { emit, facts, isStale }) {
     buf += delta
     flush(false)
   })
+  if (onToolStart) {
+    stream.on('streamEvent', (ev) => {
+      if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use' && !isStale?.()) onToolStart(ev.content_block.name)
+    })
+  }
   const message = await stream.finalMessage()
   flush(true)
   return { message, emitted, problem }
@@ -551,7 +565,7 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   }
   if (conv.turns >= LIMITS.turnsPerConversation || conv.cost_micros >= LIMITS.conversationMicros || (await spentToday(db, customer.id, now)) >= dailyCap(env)) {
     await event(env, conv, 'limit', false, conv.turns >= LIMITS.turnsPerConversation ? 'turns' : 'cost', now)
-    const reply = fallbackText(k)
+    const reply = fallbackText(k, channel)
     opts.onText?.(reply)
     return { ok: true, reply, status: conv.status, limited: true }
   }
@@ -570,22 +584,62 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   let failed = null
   let blocked = null
   let held = null // voice holding line spoken while a slow tool ran (not an answer: no_reply still applies without one)
-  const anthropic = client(env)
+  const anthropic = client(env, channel)
   const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools: TOOLS, messages: transcript })
+  // Per-turn timings (numbers only; voice records them as a voice_turn event). opts.timing is filled in place so the
+  // caller has them on every return path, including a dropped (talked-over) turn.
+  const timing = opts.timing || {}
+  Object.assign(timing, { modelMs: 0, toolMs: 0, modelCalls: 0, firstTextMs: null })
+  const t0 = Date.now()
+  const holdLine = (names) => (names.includes('find_available_times') ? 'One moment while I check the calendar.' : names.includes('book_appointment') ? 'One moment, please.' : null)
+  let saidAny = false
+  const speak = opts.onText
+    ? (s) => {
+        if (timing.firstTextMs === null) timing.firstTextMs = Date.now() - t0
+        saidAny = true
+        opts.onText(s)
+      }
+    : null
+  // Voice: the holding line goes out the moment the model starts a slow tool call (calendar lookup / booking), not
+  // after the whole model call finished, as long as nothing else has been said this turn.
+  const onToolStart = (name) => {
+    if (held || saidAny || opts.isStale?.()) return
+    const line = holdLine([name])
+    if (line) {
+      speak(line)
+      held = line
+    }
+  }
   for (let i = 0; i < LIMITS.modelCallsPerTurn; i++) {
     let res
     let emitted = ''
+    // The caller talked over this turn and it hasn't acted: stop before another model call.
+    if (opts.isStale?.() && !ctx.committed) {
+      await event(env, conv, 'turn', false, 'talked_over', now)
+      return { ok: false, error: 'stale' }
+    }
+    // Aborting is only allowed while the turn has done nothing; after a booking/request the answer is still produced.
+    const signal = opts.signal && !ctx.committed ? opts.signal : undefined
+    const tm = Date.now()
     try {
-      if (opts.onText) {
-        const s = await streamCall(anthropic, params(), { emit: opts.onText, facts, isStale: opts.isStale })
+      if (speak) {
+        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, signal })
         res = s.message
         emitted = s.emitted
         if (s.problem) blocked = blocked || s.problem
       } else res = await anthropic.messages.create(params())
     } catch (err) {
-      failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
+      timing.modelMs += Date.now() - tm
+      timing.modelCalls++
+      if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) {
+        await event(env, conv, 'turn', false, 'talked_over', now)
+        return { ok: false, error: 'stale' }
+      }
+      failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
       break
     }
+    timing.modelMs += Date.now() - tm
+    timing.modelCalls++
     spent += costMicros(res.usage)
     transcript.push({ role: 'assistant', content: res.content })
     if (opts.onText && emitted) reply = reply ? `${reply} ${emitted}` : emitted
@@ -605,22 +659,25 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     }
     // Voice: a calendar lookup or booking is two model calls plus Google, several seconds of silence. A caller who
     // hears nothing talks again and the turn is lost (talked_over), so say a fixed holding line first (never a claim).
-    if (opts.onText && !reply && !held) {
-      const line = uses.some((u) => u.name === 'find_available_times') ? 'One moment while I check the calendar.' : uses.some((u) => u.name === 'book_appointment') ? 'One moment, please.' : null
+    // (Normally already said at the tool call's start, see onToolStart; this covers a non-streamed start.)
+    if (speak && !reply && !held && !saidAny) {
+      const line = holdLine(uses.map((u) => u.name))
       if (line) {
-        opts.onText(line)
+        speak(line)
         held = line
       }
     }
     const results = []
     for (const u of uses) {
       let out
+      const tt = Date.now()
       try {
         out = await runTool(ctx, u.name, u.input || {})
       } catch (err) {
         console.error('receptionist: tool failed:', u.name, err?.name)
         out = { ok: false, error: 'tool_failed', note: "Something went wrong on our side: say so honestly and offer a callback request or the booking page." }
       }
+      timing.toolMs += Date.now() - tt
       const detail = out.ok ? (out.booked ? 'booked' : out.already_booked ? 'already_booked' : out.recorded ? out.kind : out.recheck ? 'recheck' : null) : out.error
       await event(env, conv, u.name, out.ok, detail, now)
       results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out), ...(out.ok ? {} : { is_error: true }) })
@@ -636,8 +693,8 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   if (!reply && !failed) failed = 'no_reply'
   if (failed) {
     await event(env, conv, 'model', false, failed, now)
-    reply = fallbackText(k)
-    opts.onText?.(reply)
+    reply = fallbackText(k, channel)
+    speak?.(reply)
     if (!conv.outcome) conv.outcome = 'error'
   }
   // Chat: check the whole reply before showing it. Voice was checked sentence by sentence while it streamed.
@@ -650,7 +707,7 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     }
   } else if (blocked && blocked !== 'narration') {
     const fix = safePrice(k)
-    opts.onText(fix)
+    speak(fix)
     reply = `${reply} ${fix}`.trim()
   }
   if (blocked) {
@@ -684,6 +741,8 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   conv.turns = next
   conv.cost_micros += spent
   for (const fn of ctx.after) await fn().catch(() => {})
+  // A booking: confirmation + owner notice now (opts.defer = the request's waitUntil; the cron is the fallback).
+  if (ctx.bookedNow && typeof opts.defer === 'function') opts.defer(dispatchBooked(env, ctx.bookedNow, now))
   return { ok: true, reply, ...publicState(conv, customer), costMicros: spent }
 }
 

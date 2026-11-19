@@ -3,11 +3,13 @@
 // slot atomically, (2) a fresh freeBusy check after reserving, and (3) rollback if Google fails.
 import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
 import { EMAIL_RE } from './auth.js'
-import { computeSlots, connect, createEvent, deleteEvent, freeBusy, isOfferedSlot, removeEvent } from './calendar.js'
+import { computeSlots, connect, createEvent, freeBusy, isOfferedSlot, removeEvent } from './calendar.js'
 import { recordEvent } from './auditlog.js'
 import { track } from './events.js'
 import { verifyLinkToken } from './links.js'
-import { scheduleAfterVisitMessage, scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
+import { processDueMessages, scheduleAfterVisitMessage, scheduleAppointmentMessages, scheduleLeadMessages, scheduleNoShowMessage } from './messages.js'
+import { queueOwnerNotices } from './notify.js'
+import { flushOutbox } from './email.js'
 import { ingestLead, markStage } from './followups/engine.js'
 import { offerSmsFor } from './followups/settings.js'
 import { isTestLead } from './testdata.js'
@@ -151,8 +153,21 @@ const fail = (httpStatus, error) => ({ ok: false, httpStatus, error })
 // Operational failures (not customer mistakes) are recorded for the platform dashboard.
 const OPERATIONAL = new Set(['calendar_unavailable', 'calendar_error', 'booking_failed', 'storage_error'])
 
+// Operational events (Business Review, server/ops): a booking that failed for an operational reason is an open failure
+// of calendar.google for that business until its next successful booking (booking.recovered). Codes only.
+const BOOKING_CAPABILITY = 'calendar.google'
+async function lastBookingOutcome(db, customerId) {
+  const r = await db
+    .prepare("SELECT outcome FROM audit_log WHERE customer = ?1 AND capability = ?2 AND resource_type = 'business' AND action IN ('booking.failed', 'booking.recovered') ORDER BY seq DESC LIMIT 1")
+    .bind(customerId, BOOKING_CAPABILITY)
+    .first()
+    .catch(() => null)
+  return r?.outcome ?? null
+}
+
 export async function bookAppointment(env, customer, input, now = Date.now()) {
   const result = await book(env, customer, input, now)
+  const db = env.ONBOARDING_DB
   if (result.ok) {
     const { id, leadId, smsConsent, start } = result.appointment
     await track(env, 'appointment_booked', { id: `booked:${id}`, customer: customer.id, at: now })
@@ -160,10 +175,68 @@ export async function bookAppointment(env, customer, input, now = Date.now()) {
     // Booked: the conversation moves on and every pending sales follow-up retires itself (lead status 'booked').
     await markStage(env, customer.id, leadId, 'booked', now)
     result.appointment = { id, start, end: result.appointment.end }
+    if ((await lastBookingOutcome(db, customer.id)) === 'failure') {
+      await recordEvent(db, { type: 'booking.recovered', actor: 'system:booking', customer: customer.id, capability: BOOKING_CAPABILITY, resource: { type: 'business', id: customer.id }, outcome: 'success', details: {}, at: now })
+    }
   } else if (OPERATIONAL.has(result.error)) {
     await track(env, 'booking_failed', { customer: customer.id, props: { error: result.error }, at: now })
+    await recordEvent(db, { type: 'booking.failed', actor: 'system:booking', customer: customer.id, capability: BOOKING_CAPABILITY, resource: { type: 'business', id: customer.id }, outcome: 'failure', details: { error: result.error }, at: now })
   }
   return result
+}
+
+// Right after a booking request (waitUntil): the confirmation and the owner's new-booking notice go out now instead
+// of at the next 5-minute cron run. Same functions, same checks and launch gate as the cron; each message row / outbox
+// id is claimed atomically, so the cron can never send one twice. Never throws.
+export async function dispatchBooked(env, appointmentId, now = Date.now()) {
+  if (typeof appointmentId !== 'string' || !/^[a-f0-9]{32}$/.test(appointmentId)) return { ok: false }
+  try {
+    const messages = await processDueMessages(env, now, 4, { appointmentId })
+    const notices = await queueOwnerNotices(env, now, { bookingId: appointmentId })
+    const outbox = notices.queued ? await flushOutbox(env, now, 10, { idPrefix: `owner_booking:${appointmentId}:` }) : { sent: 0, failed: 0 }
+    return { ok: true, messages, notices, outbox: { sent: outbox.sent, failed: outbox.failed } }
+  } catch (err) {
+    console.error('booking: dispatch failed:', err?.name)
+    return { ok: false }
+  }
+}
+
+// After Google may have created our event (timeout) or the booking couldn't be recorded, the event is removed. If the
+// removal fails too, the customer may hold an invitation for a booking we reported as failed: an open failure of
+// calendar.google for that event, retried by the cron (retryEventCleanups) until Google confirms it is gone.
+async function cleanupEvent(env, customer, accessToken, eventId, reason, now) {
+  const r = await removeEvent(env, accessToken, eventId)
+  if (!r.ok) {
+    await recordEvent(env.ONBOARDING_DB, { type: 'booking.event_cleanup', actor: 'system:booking', customer: customer.id, capability: BOOKING_CAPABILITY, resource: { type: 'calendar_event', id: eventId }, outcome: 'failure', details: { reason, error: r.error }, at: now })
+  }
+  return r.ok
+}
+
+export async function retryEventCleanups(env, now = Date.now(), limit = 10) {
+  const db = env.ONBOARDING_DB
+  const out = { retried: 0, removed: 0 }
+  const { results } = await db
+    .prepare(
+      `SELECT f.customer, f.resource_id FROM audit_log f
+        WHERE f.action = 'booking.event_cleanup' AND f.outcome = 'failure' AND f.capability = ?1 AND f.at >= ?2
+          AND NOT EXISTS (SELECT 1 FROM audit_log s WHERE s.capability = f.capability AND s.outcome = 'success' AND s.seq > f.seq AND s.resource_type = 'calendar_event' AND s.resource_id = f.resource_id)
+        GROUP BY f.customer, f.resource_id LIMIT ?3`,
+    )
+    .bind(BOOKING_CAPABILITY, now - 7 * DAY, limit)
+    .all()
+    .catch(() => ({ results: [] }))
+  for (const r of results) {
+    if (!/^gsu[a-f0-9]{32}$/.test(r.resource_id || '')) continue
+    out.retried++
+    const conn = await connect(env, r.customer).catch(() => ({ ok: false }))
+    if (!conn.ok) continue
+    const gone = await removeEvent(env, conn.accessToken, r.resource_id)
+    if (gone.ok) {
+      out.removed++
+      await recordEvent(db, { type: 'booking.event_cleanup', actor: 'system:booking', customer: r.customer, capability: BOOKING_CAPABILITY, resource: { type: 'calendar_event', id: r.resource_id }, outcome: 'success', details: { retried: true }, at: now })
+    }
+  }
+  return out
 }
 
 async function book(env, customer, { leadId, leadToken, start }, now) {
@@ -248,7 +321,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
   if (!event.ok) {
     console.error('booking: event create failed:', customer.id, event.httpStatus, event.error)
     // The outcome is unknown after a timeout: remove the event in case it was created, then free the slot.
-    if (event.retryable) await deleteEvent(env, conn.accessToken, eventId)
+    if (event.retryable) await cleanupEvent(env, customer, conn.accessToken, eventId, 'unknown_outcome', now)
     await release()
     return fail(502, 'booking_failed')
   }
@@ -260,7 +333,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
       .bind(lead.id, customer.id, now)
       .first()
     if (!booked) {
-      await deleteEvent(env, conn.accessToken, event.eventId)
+      await cleanupEvent(env, customer, conn.accessToken, event.eventId, 'already_booked', now)
       await release()
       return fail(409, 'already_booked')
     }
@@ -270,7 +343,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
       .run()
   } catch (err) {
     console.error('booking: record failed:', customer.id, err?.message)
-    await deleteEvent(env, conn.accessToken, event.eventId)
+    await cleanupEvent(env, customer, conn.accessToken, event.eventId, 'record_failed', now).catch(() => false)
     await release().catch(() => {})
     return fail(503, 'storage_error')
   }

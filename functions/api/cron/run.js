@@ -4,6 +4,7 @@
 import { purgeClickIds, uploadConversions } from '../../../server/ads/conversions.js'
 import { json, missingConfig, sha256Hex, timingSafeEqual } from '../../../server/google-oauth.js'
 import { processDueMessages } from '../../../server/messages.js'
+import { retryEventCleanups } from '../../../server/booking.js'
 import { processReplies, sendQueued, purgeOldMessages } from '../../../server/followups/engine.js'
 import { syncPendingRegistrations } from '../../../server/followups/provisioning.js'
 import { purgeOldConversations } from '../../../server/receptionist/engine.js'
@@ -50,6 +51,8 @@ export async function onRequestPost({ request, env }) {
       // Texting registrations with Twilio: read what Twilio reports (hourly per business, read-only).
       registrations: await adsStep('texting registrations', () => syncPendingRegistrations(env)),
       receptionistPurged: await adsStep('receptionist retention', () => purgeOldConversations(env)),
+      // Calendar events left behind by a failed booking whose cleanup failed (open calendar.google failures).
+      eventCleanups: await adsStep('event cleanups', () => retryEventCleanups(env)),
     }
     const onboardingQueued = await queueFollowUps(env)
     // New bookings / unbooked leads → the business's members (queued before the flush so they go out this run).

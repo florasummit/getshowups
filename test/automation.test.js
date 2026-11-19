@@ -599,8 +599,8 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
   assert.equal(sentEmails().length, before)
   delete env.MESSAGES_LIVE
   // 25 messages the gate refuses never starve a deliverable one queued after them.
-  for (let i = 0; i < 25; i++) await enqueue(env, { id: `held-${i}`, to: `someone${i}@example.net`, template: 't', subject: 's', body: 'b' }, 1000 + i)
-  await enqueue(env, { id: 'deliverable', to: 'tester@example.org', template: 't', subject: 's', body: 'b' }, 5000)
+  for (let i = 0; i < 25; i++) await enqueue(env, { id: `held-${i}`, to: `someone${i}@example.net`, template: 't', subject: 's', body: 'b' }, t0 + 1000 + i)
+  await enqueue(env, { id: 'deliverable', to: 'tester@example.org', template: 't', subject: 's', body: 'b' }, t0 + 5000)
   await flushOutbox(env)
   await flushOutbox(env)
   assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'deliverable'").get().status, 'sent')
@@ -608,7 +608,7 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
   // Live messaging, but the test-business table can't be read right now: nothing is sent (fails closed) and nothing is
   // closed: the legitimate message stays pending and goes out once the read works again.
   env.MESSAGES_LIVE = 'true'
-  await enqueue(env, { id: 'legit', to: 'customer@example.net', customer: 'alpha', template: 't', subject: 's', body: 'b' }, 6000)
+  await enqueue(env, { id: 'legit', to: 'customer@example.net', customer: 'alpha', template: 't', subject: 's', body: 'b' }, t0 + 6000)
   db.sql.exec('ALTER TABLE test_businesses RENAME TO test_businesses_away')
   const sentBefore = sentEmails().length
   await flushOutbox(env)
@@ -619,11 +619,13 @@ test('launch gate (fails closed): before MESSAGES_LIVE, only test recipients get
   assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'legit'").get().status, 'sent')
   // A provider failure is a retry (attempts counted, failed only after 3), never a test_mode close.
   resend = () => [503, {}]
-  await enqueue(env, { id: 'flaky', to: 'customer@example.net', customer: 'alpha', template: 't', subject: 's', body: 'b' }, 7000)
+  await enqueue(env, { id: 'flaky', to: 'customer@example.net', customer: 'alpha', template: 't', subject: 's', body: 'b' }, t0 + 7000)
   await flushOutbox(env)
   assert.deepEqual({ ...db.sql.prepare("SELECT status, attempts FROM email_outbox WHERE id = 'flaky'").get() }, { status: 'pending', attempts: 1 })
   resend = () => [200, { id: 'email_2' }]
   await flushOutbox(env)
+  assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'flaky'").get().status, 'pending', 'the retry waits for its backoff step')
+  await flushOutbox(env, t0 + 7000 + 6 * MIN)
   assert.equal(db.sql.prepare("SELECT status FROM email_outbox WHERE id = 'flaky'").get().status, 'sent')
   delete env.MESSAGES_LIVE
 
@@ -973,4 +975,128 @@ test('safeguard: while a cancellation is incomplete (Google event removed, save 
   // A retry completes the cancellation.
   assert.equal((await cancelAppointment(env, { id: 'alpha' }, appt.id, { by: 'customer' })).ok, true)
   assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(appt.id).status, 'cancelled')
+})
+
+// ---------- comms reliability (Agent B, 2026-11-19) ----------
+
+// The booking route with waitUntil (as in production): the post-booking dispatch is collected so the test can await it.
+async function bookNow(customer, leadId, leadToken, start) {
+  const pending = []
+  const res = await bookAppt.onRequestPost({
+    request: new Request(`${ORIGIN}/api/book/${customer}/appointment`, { method: 'POST', headers: { 'CF-Connecting-IP': '203.0.113.9', Origin: ORIGIN }, body: JSON.stringify({ leadId, leadToken, start }) }),
+    env,
+    params: { customer },
+    waitUntil: (p) => pending.push(p),
+  })
+  responses.push(await res.clone().text())
+  await Promise.all(pending)
+  return res
+}
+
+test('event-driven: the confirmation and the owner new-booking notice go out right after the booking, once (the cron adds nothing)', async () => {
+  await seed('alpha', { zips: '29403' })
+  withEmail()
+  const l = (await lead('alpha')).json()
+  const start = await slotAfter('alpha', 3 * DAY)
+  assert.equal((await bookNow('alpha', l.leadId, l.leadToken, start)).status, 201)
+  const appt = db.sql.prepare('SELECT id FROM appointments').get()
+  assert.equal(db.sql.prepare("SELECT status FROM messages WHERE kind = 'confirmation'").get().status, 'sent', 'sent without waiting for the cron')
+  assert.deepEqual(db.sql.prepare("SELECT template, status FROM email_outbox WHERE id LIKE 'owner_booking:%'").all().map((r) => ({ ...r })), [{ template: 'owner_booking', status: 'sent' }])
+  const before = sentEmails().length
+  assert.deepEqual(sentEmails().map((e) => e.to[0]).sort(), ['jamie@example.net', 'owner@alpha.example'])
+  // The cron run afterwards finds nothing left to send for this booking: no duplicate confirmation or notice.
+  await processDueMessages(env, Date.now() + MIN)
+  await queueOwnerNotices(env, Date.now() + MIN)
+  await flushOutbox(env, Date.now() + MIN)
+  assert.equal(sentEmails().length, before)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM messages WHERE appointment_id = ? AND kind = 'confirmation'").get(appt.id).n, 1)
+})
+
+test('event-driven: the launch gate still applies (test mode → nothing sent, nothing waits to burst later)', async () => {
+  await seed('alpha', { zips: '29403' })
+  Object.assign(env, { RESEND_API_KEY: 're_SECRET', EMAIL_FROM: 'GetShowUps <bookings@getshowups.com>' }) // no MESSAGES_LIVE
+  const l = (await lead('alpha')).json()
+  assert.equal((await bookNow('alpha', l.leadId, l.leadToken, await slotAfter('alpha', 3 * DAY))).status, 201)
+  assert.equal(sentEmails().length, 0)
+  assert.deepEqual({ ...db.sql.prepare("SELECT status, error FROM messages WHERE kind = 'confirmation'").get() }, { status: 'skipped', error: 'test_mode' })
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM email_outbox WHERE id LIKE 'owner_booking:%'").get().n, 0, 'owner notice held by the gate, not queued')
+})
+
+test('outbox: stale owner notices and mail past the idempotency window are closed (never a late burst); invalid mail fails at once; an unknown outcome is retried with the same key', async () => {
+  withEmail()
+  const now = Date.now()
+  await enqueue(env, { id: 'owner_booking:old:x', to: 'owner@alpha.example', template: 'owner_booking', subject: 's', body: 'b' }, now - 3 * HOUR)
+  await enqueue(env, { id: 'owner_booking:new:x', to: 'owner@alpha.example', template: 'owner_booking', subject: 's', body: 'b' }, now - 10 * MIN)
+  await enqueue(env, { id: 'invite:old', to: 'a@alpha.example', template: 'invite', subject: 's', body: 'b' }, now - 25 * HOUR)
+  await flushOutbox(env, now)
+  const st = (id) => ({ ...db.sql.prepare('SELECT status, error, attempts FROM email_outbox WHERE id = ?').get(id) })
+  assert.deepEqual(st('owner_booking:old:x'), { status: 'failed', error: 'expired', attempts: 0 })
+  assert.deepEqual(st('invite:old'), { status: 'failed', error: 'expired', attempts: 0 })
+  assert.equal(st('owner_booking:new:x').status, 'sent')
+  assert.deepEqual(sentEmails().map((e) => e.to[0]), ['owner@alpha.example'])
+  // 422 from Resend (invalid message): failed right away, not retried.
+  resend = () => [422, { name: 'validation_error' }]
+  await enqueue(env, { id: 'bad', to: 'owner@alpha.example', template: 't', subject: 's', body: 'b' }, now)
+  await flushOutbox(env, now)
+  assert.deepEqual(st('bad'), { status: 'failed', error: 'http_422', attempts: 1 })
+  // Network error (outcome unknown): retried after the backoff with the SAME Idempotency-Key (Resend dedupes it).
+  const prev = globalThis.fetch
+  let first = true
+  globalThis.fetch = async (url, init) => {
+    if (String(url) === 'https://api.resend.com/emails' && first) {
+      first = false
+      fetches.push({ url: String(url), init })
+      throw new TypeError('network')
+    }
+    return prev(url, init)
+  }
+  resend = () => [200, { id: 'email_9' }]
+  await enqueue(env, { id: 'unknown', to: 'owner@alpha.example', template: 't', subject: 's', body: 'b' }, now)
+  await flushOutbox(env, now)
+  assert.deepEqual(st('unknown'), { status: 'pending', error: 'network_error', attempts: 1 })
+  await flushOutbox(env, now + 6 * MIN)
+  assert.equal(st('unknown').status, 'sent')
+  const keys = fetches.filter((f) => f.url === 'https://api.resend.com/emails' && f.init.headers['Idempotency-Key'] === 'unknown')
+  assert.equal(keys.length, 2, 'same key on the retry')
+  globalThis.fetch = prev
+  // An already-attempted message is never retried past the 23 h idempotency window.
+  resend = () => [503, {}]
+  await enqueue(env, { id: 'late', to: 'owner@alpha.example', template: 't', subject: 's', body: 'b' }, now)
+  await flushOutbox(env, now)
+  await flushOutbox(env, now + 24 * HOUR)
+  assert.deepEqual(st('late'), { status: 'failed', error: 'expired', attempts: 1 })
+})
+
+test('booking: a Google event that may exist after a failed booking is removed; if removal fails it is an open incident the cron retries until gone', async () => {
+  await seed('alpha', { zips: '29403' })
+  const { retryEventCleanups } = await import('../server/booking.js')
+  const l = (await lead('alpha')).json()
+  const start = await slotAfter('alpha', 3 * DAY)
+  // Event creation times out twice (unknown outcome), and the cleanup delete fails too (Google unreachable).
+  const prev = globalThis.fetch
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url)
+    if (u.endsWith('/events?sendUpdates=all') || (init.method === 'DELETE' && u.includes('/events/'))) {
+      fetches.push({ url: u, init })
+      throw new DOMException('timeout', 'TimeoutError')
+    }
+    return prev(url, init)
+  }
+  const r = await book('alpha', l.leadId, l.leadToken, start)
+  assert.deepEqual([r.status, r.json().error], [502, 'booking_failed'], 'never claims a booking')
+  globalThis.fetch = prev
+  const audit = () => db.sql.prepare("SELECT action, outcome, capability, resource_type FROM audit_log WHERE action LIKE 'booking.%' ORDER BY seq").all().map((x) => `${x.action}:${x.outcome}:${x.capability}:${x.resource_type}`)
+  assert.deepEqual(audit(), ['booking.event_cleanup:failure:calendar.google:calendar_event', 'booking.failed:failure:calendar.google:business'])
+  assert.ok(!JSON.stringify(db.sql.prepare('SELECT details FROM audit_log').all()).includes('jamie'), 'no personal data in events')
+  // Cron retry: Google reachable again → the event is removed and the incident closes.
+  googleDelete = () => [404, {}]
+  assert.deepEqual(await retryEventCleanups(env), { retried: 1, removed: 1 })
+  assert.deepEqual(await retryEventCleanups(env), { retried: 0, removed: 0 }, 'closed incidents are not retried')
+  // The next successful booking closes the business-level failure.
+  assert.equal((await book('alpha', l.leadId, l.leadToken, start)).status, 201)
+  assert.deepEqual(audit().slice(-2), ['booking.event_cleanup:success:calendar.google:calendar_event', 'booking.recovered:success:calendar.google:business'])
+  // A booking with no earlier failure records nothing extra.
+  const l2 = (await lead('alpha', { email: 'sam@example.net' })).json()
+  await book('alpha', l2.leadId, l2.leadToken, await slotAfter('alpha', 4 * DAY))
+  assert.equal(audit().length, 4)
 })
