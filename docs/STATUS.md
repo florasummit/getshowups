@@ -9,7 +9,7 @@ _Update at the end of every task. Newest first._
   the bundle consequences (recommendation: one SaaS business-use product, tax-exclusive), state-specific nexus thresholds (17–84 customers per
   state), California SB 122 from CDTFA L-1036, WA/MD 2025 changes, the information package and 13 questions; each statement labelled verified / preliminary / open.
 - No tax configuration changed; the live price stays blocked (docs/LAUNCH_CHECKLIST.md §B).
-- **Next:** the owner sends §6 to the accountant; Q1 (home state) first.
+- **Next:** the owner supplies the §7 facts (formation state, operating location, where people work) and sends §7–§8 to the accountant.
 
 ## Release 2026-11-19: Phase 1 starter live (#76), docs #77/#78
 
