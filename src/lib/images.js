@@ -1,11 +1,13 @@
 // Resizes a picked image in the browser before upload (fast pages, small storage). Logos keep PNG
 // transparency; photos become JPEG. Returns a Blob ≤ ~1 MB, or null if the file isn't an image.
+// Phone photos: the camera's EXIF orientation is applied while decoding (imageOrientation 'from-image'), so a portrait
+// photo stays upright; re-encoding through the canvas writes pixels only, so EXIF/GPS metadata is never uploaded.
 export async function prepareImage(file, { kind = 'photo', max: maxSide } = {}) {
   if (!file || !/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(file.type)) return null
   const max = maxSide || (kind === 'logo' ? 600 : 1600)
   let bitmap
   try {
-    bitmap = await createImageBitmap(file)
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   } catch {
     return null
   }
@@ -29,7 +31,7 @@ export async function uploadImage(file, kind) {
     const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type }, body: blob })
     const data = await res.json().catch(() => ({}))
     if (res.status === 201) return { asset: data.asset }
-    return { error: data.error === 'too_many' ? 'You’ve reached the photo limit (60). Remove one first.' : data.error === 'quota' ? 'You’ve used your 50 MB of photo storage. Remove photos you no longer use first.' : 'Upload failed. Please try again.' }
+    return { error: data.error === 'too_many' ? 'You’ve reached the photo limit. Remove photos you no longer use first.' : data.error === 'quota' ? 'You’ve used your 50 MB of photo storage. Remove photos you no longer use first.' : 'Upload failed. Please try again.' }
   } catch {
     return { error: 'Upload failed. Please try again.' }
   }

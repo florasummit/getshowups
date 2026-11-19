@@ -313,7 +313,7 @@ export default function WebsiteTab() {
         <div id="site-edit" className="site-edit-anchor">
           {designed && data.studio ? (
             // Website Studio editor: edit the AI-designed site directly (no AI), with live preview and autosave.
-            <SiteStudio key={editorKey} website={w} assets={data.assets} brand={data.brand} visit={data.visit} checkpoints={data.checkpoints || []} onSaved={refresh} onUnsaved={setUnsaved} />
+            <SiteStudio key={editorKey} storeKey={data.url} website={w} assets={data.assets} brand={data.brand} visit={data.visit} checkpoints={data.checkpoints || []} onSaved={refresh} onUnsaved={setUnsaved} />
           ) : (
             <section className="site-preview-wrap" aria-label="Preview">
               <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
