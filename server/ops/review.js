@@ -228,6 +228,7 @@ export async function businessReview(env, id, now = Date.now()) {
     testBusiness: summary.testBusiness,
     status: summary.status,
     onboarding: summary.onboarding,
+    createdVia: summary.createdVia,
     createdAt: summary.createdAt,
     attention: summary.attention,
     website: summary.website,

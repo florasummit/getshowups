@@ -7,10 +7,13 @@ import { SignOut } from '../dashboard/Home.jsx'
 import '../app.css'
 
 const Review = lazy(() => import('./Review.jsx'))
+const Control = lazy(() => import('./Control.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
+  ['control', 'Control Center', '/admin/control'],
   ['review', 'Business Review', '/admin/review'],
 ]
+const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : 'overview')
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -1131,18 +1134,18 @@ export default function Admin() {
 }
 
 function Console({ me }) {
-  const [section, setSection] = useState(() => (window.location.pathname.startsWith('/admin/review') ? 'review' : 'overview'))
+  const [section, setSection] = useState(() => sectionFor(window.location.pathname))
   const go = (id, href) => {
     window.history.pushState(null, '', href)
     setSection(id)
   }
   useEffect(() => {
-    const onPop = () => setSection(window.location.pathname.startsWith('/admin/review') ? 'review' : 'overview')
+    const onPop = () => setSection(sectionFor(window.location.pathname))
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   return (
-    <div className={`app${section === 'review' ? ' app--wide' : ''}`}>
+    <div className={`app${section !== 'overview' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
         <SignOut email={me.email} to="/admin" />
@@ -1166,6 +1169,10 @@ function Console({ me }) {
         {section === 'review' ? (
           <Suspense fallback={<div aria-busy="true" />}>
             <Review />
+          </Suspense>
+        ) : section === 'control' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Control />
           </Suspense>
         ) : (
           <Overview me={me} />

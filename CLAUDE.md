@@ -479,6 +479,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 
 ## Business Review and operational events (/admin/review)
 
+- Control Center (/admin/control, docs/CONTROL_CENTER.md): incident register (server/ops/incidents.js, migration 0031,
+  cron step) = one OPEN row per fingerprint; resolved only on evidence (success_seen | connected | no_new_failures;
+  quiet ≠ recovered); causes ONLY from the fixed CAUSES table (confirmed/suspected/unknown, never inferred); evidence
+  allowlisted codes/counts/times (≤ 2 KB); test businesses tagged, never customer impact. Account Inspector
+  (server/ops/inspector.js) reads records only; support never impersonates; "Diagnose calendar" is read-only, not
+  recorded as an availability event, rate-limited (supportDiagnose), audited. Journey/feature ids (server/ops/journeys.js)
+  are stable: rename = new title, replace = RETIRED entry; every step's feature must be a registered capability.
 - Every feature registers a capability (server/ops/registry.js `registerCapability`, imported from server/ops/catalog.js):
   id, name, journey step, dependsOn, external service, `state(env)` (live|sandbox|disabled|missing|unknown + note +
   approval), optional read-only `verify(env, now)` (database evidence of real activity, no outside calls) and

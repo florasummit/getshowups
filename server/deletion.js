@@ -33,7 +33,7 @@ export const ERASED_TABLES = [
   'website_versions', 'website_generations', 'website_ai_usage', 'website_assets', 'website_domains', 'websites', 'landing_pages',
   'business_profiles', 'service_settings', 'customer_settings', 'onboarding_marks', 'self_signups', 'account_invites',
   'onboarding_invites', 'customer_users', 'email_outbox', 'conversation_control', 'business_policies', 'email_suppressions', 'website_imports', 'ai_credentials', 'ai_key_usage', 'website_design_turns',
-  'website_asset_hidden',
+  'website_asset_hidden', 'ops_incidents',
 ]
 // Kept (no personal data, or needed for tax/accounting, disputes, security): see docs/DATA_RETENTION.md.
 export const FINANCIAL_EVENTS = ['revenue', 'payment_failed', 'payment_succeeded', 'subscription_started', 'subscription_status_changed', 'subscription_canceled']

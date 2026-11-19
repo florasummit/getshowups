@@ -72,8 +72,9 @@ async function availabilityIncidents(db, now) {
 
 // Hours confirmed but no calendar stored (owner disconnected or the token was removed): checked once an hour (it lists
 // KV keys), one alert per business per day.
+export const kvCheckDue = (now) => Math.floor(now / (5 * MIN)) % 12 === 0
 async function disconnectedCalendars(env, now) {
-  if (Math.floor(now / (5 * MIN)) % 12 !== 0 || !env.GOOGLE_TOKENS) return []
+  if (!kvCheckDue(now) || !env.GOOGLE_TOKENS) return []
   const connected = new Set()
   let cursor
   for (let page = 0; page < 100; page++) {
