@@ -227,9 +227,12 @@ export function validateSpec(raw, ctx = {}) {
     pages.push({ p, slug, pi })
   }
   const ids = new Set()
-  const target = (v, where) => {
+  // 'call': a tel: link whose number comes from the business record at render time (never from the spec); only for
+  // regular buttons (hero, cta, image + text), not composition blocks. No phone on record → the button isn't shown.
+  const target = (v, where, { call = false } = {}) => {
     const s = clean(v)
     if (s === 'book') return 'book'
+    if (s === 'call' && call) return 'call'
     if (s.startsWith('page:') && (s.slice(5) === '' || slugs.has(s.slice(5)))) return s
     if (s.startsWith('section:') && SLUG.test(s.slice(8))) return s
     if (s) warnings.push({ where, reason: 'link' })
@@ -238,7 +241,7 @@ export function validateSpec(raw, ctx = {}) {
   const cta = (v, where) => {
     if (!v || typeof v !== 'object') return null
     const label = txt(v.label, LIMITS.label, `${where}.label`)
-    return label ? { label, target: target(v.target, `${where}.target`) } : null
+    return label ? { label, target: target(v.target, `${where}.target`, { call: true }) } : null
   }
   let total = 0
   const outPages = []
@@ -440,7 +443,9 @@ export function validateSpec(raw, ctx = {}) {
           if (!out.heading) out.heading = 'Ready when you are.'
           break
         case 'area':
-          out = { ...base }
+          // showHours: the owner's confirmed booking hours, read from the record at render time. Stored only when on,
+          // so content saved before it existed validates to exactly the same spec.
+          out = { ...base, ...(bool(s.showHours) ? { showHours: true } : {}) }
           break
         case 'contact':
           // `form`: a contact or quote-request form (no script; posts to GetShowUps, which stores the lead).

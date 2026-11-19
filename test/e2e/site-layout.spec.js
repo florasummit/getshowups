@@ -30,7 +30,11 @@ for (const file of pages) {
       const h1 = [...document.querySelectorAll('h1')].filter(visible).map(box)
       const clipped = [...document.querySelectorAll('h1, h2, h3, .btn, a[href*="/book/"]')].filter((el) => visible(el) && el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflowX !== 'visible').map((el) => el.textContent.trim().slice(0, 40))
       const noAlt = [...document.querySelectorAll('img')].filter((i) => !i.hasAttribute('alt')).length
-      return { scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth, book, h1, clipped, noAlt }
+      // Call action (Phase 1 starter): with the booking button in the same button row (nothing between them).
+      const callEl = [...document.querySelectorAll('a.btn-call')].find(visible)
+      const rowBook = callEl?.closest('.actions')?.querySelector('a[href*="/book/"]')
+      const call = callEl ? { ...box(callEl), sameRow: Boolean(rowBook && visible(rowBook)), gap: rowBook ? callEl.getBoundingClientRect().top - rowBook.getBoundingClientRect().bottom : null, href: callEl.getAttribute('href') } : null
+      return { scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth, book, h1, clipped, noAlt, call }
     })
     expect(m.scrollW, 'no sideways scrolling').toBeLessThanOrEqual(m.clientW + 1)
     expect(m.noAlt, 'every image has alt text (empty for decoration)').toBe(0)
@@ -44,5 +48,14 @@ for (const file of pages) {
     const firstScreen = m.book.filter((b) => b.top >= 0 && b.bottom <= vh && b.left >= 0 && b.right <= vw + 1)
     expect(firstScreen.length, 'a booking button is visible without scrolling').toBeGreaterThan(0)
     if (vw < 600) expect(Math.max(...firstScreen.map((b) => b.height)), 'phone booking button is thumb-sized').toBeGreaterThanOrEqual(40)
+    if (html.includes('btn-call') && !/\.(about|services|contact|privacy)\.html$/.test(file)) {
+      expect(m.call, 'Call button visible').not.toBeNull()
+      expect(m.call.href).toMatch(/^tel:\+?\d{7,}$/)
+      expect(m.call.sameRow, 'Call sits with Book online').toBe(true)
+      expect(m.call.bottom, 'Call on the first screen').toBeLessThanOrEqual(vh)
+      expect(m.call.right, 'Call inside the screen').toBeLessThanOrEqual(vw + 1)
+      expect(m.call.gap, 'nothing between Book and Call (same row or wrapped directly below)').toBeLessThan(24)
+      if (vw < 600) expect(m.call.height, 'phone Call button is thumb-sized').toBeGreaterThanOrEqual(40)
+    }
   })
 }

@@ -49,6 +49,18 @@ const CASES = {
   'v2-cleaning': () => ({ biz: { name: 'Sparrow Cleaning', appointmentMode: 'at_customer' }, content: v2('House cleaning', 'Sparrow Cleaning', true, legacy('Home cleaning', 'Recurring and deep cleans.', [['Deep clean', '$240'], ['Recurring clean', '']])) }),
   'v2-lawn': () => ({ biz: { name: 'Greenline Lawn', appointmentMode: 'at_customer' }, content: v2('Lawn care', 'Greenline Lawn', true, legacy('Lawn care', 'Mowing, edging and cleanups.', [['Weekly mowing', '$45'], ['Spring cleanup', '']])) }),
   'v2-trades': () => ({ biz: { name: 'Bright Electric', appointmentMode: 'at_customer' }, content: v2('Electrician', 'Bright Electric', true, legacy('Electrical repairs', 'Panels, outlets and lighting.', [['Panel upgrade', ''], ['Outlet repair', '$129']])) }),
+  // Conversion-first starter (Phase 1, 2026-11-18): Book + Call, steps, hours and area, owner FAQ — and the same
+  // starter with none of the optional records (no phone, hours, towns or policies: those parts left out).
+  'v2-starter-full': () => {
+    const c = legacy('Electrical repairs in Charleston', 'Panels, outlets and lighting.', [['Panel upgrade', ''], ['Outlet repair', '$129']], { area: 'Charleston, Mount Pleasant' })
+    const biz = { name: 'Bright Electric', industry: 'Electrician', phone: '(843) 555-0100', visit: true, chat: false, cities: ['Charleston', 'Mount Pleasant'], hoursConfirmed: true, policies: { beforeVisit: 'Please make sure we can reach the breaker panel.', cancellation: 'Cancel or move your visit up to a day before at no charge.' } }
+    return { biz: { name: 'Bright Electric', appointmentMode: 'at_customer', cities: ['Charleston', 'Mount Pleasant'] }, content: valid({ ...c, site: starterSite(c, biz, { kinds: ['contact', 'privacy'], now: 1_700_000_000_000 }).site }) }
+  },
+  'v2-starter-minimal': () => {
+    const c = legacy('Bookkeeping for small businesses', 'Monthly books and tax prep.', [], { area: '', about: '' })
+    const biz = { name: 'Ledger & Co', industry: 'Accounting', phone: '', visit: false, chat: false, cities: [], hoursConfirmed: false, policies: { beforeVisit: '', cancellation: '' } }
+    return { biz: { name: 'Ledger & Co', appointmentMode: 'at_business', phone: '', cities: [], hours: null }, content: valid({ ...c, site: starterSite(c, biz, { now: 1_700_000_000_000 }).site }) }
+  },
   'v2-professional': () => ({ biz: { name: 'Ledger & Co', appointmentMode: 'at_business' }, content: v2('Accounting', 'Ledger & Co', false, legacy('Bookkeeping for small businesses', 'Monthly books and tax prep.', [['Monthly bookkeeping', '$300'], ['Tax preparation', '']])) }),
 }
 

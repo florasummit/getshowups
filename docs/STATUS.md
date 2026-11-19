@@ -2,6 +2,21 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio Phase 1: conversion-first starter (2026-11-18) — feat/studio-starter-phase1 (no migration)
+
+- **Approved scope (owner, 2026-11-18):** Book online + Call, service cards, 3-step booking explanation (production
+  behaviour only, no messaging promises, no "coming soon"), booking hours, service area, owner-sourced FAQ, final CTA;
+  records only; missing → omitted and the owner is asked; existing renders unchanged.
+- **Built:** server/site-starter.js (new home, bookingSteps, faqFromPolicies, `missing`); website-import.js
+  starterFacts() (the one facts builder: phone, towns, confirmed hours, policies); site-spec.js (`call` target on regular
+  buttons, area `showHours`); site-render-v2.js (Call shows + dials the CURRENT phone on record, dropped without one;
+  hours line; CSS only where used); Studio editor (Call target, "Show your booking hours"); Website tab notice listing
+  what's missing.
+- **Compatibility:** all 10 existing render goldens byte-identical (no golden regenerated); new fixtures
+  v2-starter-full / v2-starter-minimal; layout spec checks Book + Call together on the first screen (desktop + phone).
+  Applies only to NEW starter sites ("I'm starting fresh" / import without a site). Nothing published automatically.
+- **Next:** Phase 2 (onboarding produces this format) and Phase 3 (imagery) need separate approval.
+
 ## Reconciliation applies missed cancellations (2026-11-18) — fix/reconcile-ended-subscriptions (no migration)
 
 - **Finding:** delayed webhooks (Stripe retries ~3 days; older events ignored) and duplicates (idempotent per event)

@@ -151,19 +151,51 @@ export function ensureServices(site, content) {
   return { site: { ...site, pages }, added: true }
 }
 
-// biz: { name, industry, description, phone, chat, visit }. kinds: extra pages to create (see PAGE_KINDS).
+// biz: { name, industry, description, phone, chat, visit, cities[], hoursConfirmed, policies } (server/website-import.js
+// starterFacts). kinds: extra pages to create (see PAGE_KINDS). Returns { site, added[], missing[] }.
 export function starterSite(content, biz, { kinds = [], privacy = null, now = Date.now() } = {}) {
   const key = industryKey({ industry: biz.industry, services: content.services || [], description: biz.description, name: biz.name })
   const look = starterTheme(key)
   // The logo is never the first-screen photo (it stays in the header).
   const image = content.hero && content.hero !== content.logo ? `asset:${content.hero}` : look.heroImage
   const aboutPage = kinds.includes('about') && content.about
+  const visit = Boolean(biz.visit)
+  const cities = Array.isArray(biz.cities) ? biz.cities.filter(Boolean) : []
+  const hours = Boolean(biz.hoursConfirmed)
+  // The area line on the first screen only when the whole list fits (never a town cut in half).
+  const areaLine = content.area && `Serving ${content.area}`.length <= LIMITS.eyebrow ? `Serving ${content.area}` : ''
+  const faq = faqFromPolicies(biz.policies, visit)
   const home = [
-    { type: 'hero', id: 'top', layout: image ? 'split' : 'minimal', height: image ? 'tall' : 'auto', image, imageAlt: '', heading: content.headline || biz.name, text: content.intro || '', primaryCta: BOOK },
+    {
+      type: 'hero',
+      id: 'top',
+      layout: image ? 'split' : 'minimal',
+      height: image ? 'tall' : 'auto',
+      image,
+      imageAlt: '',
+      eyebrow: areaLine,
+      heading: content.headline || biz.name,
+      text: content.intro || '',
+      primaryCta: BOOK,
+      // Call dials the phone on record, rendered from the record at request time: it appears as soon as a phone is on
+      // record and disappears if it is removed (never a dead link, never a number copied into the page).
+      secondaryCta: { label: 'Call', target: 'call' },
+    },
     ...(content.services?.length ? [{ type: 'services', id: 'services', heading: 'Services', layout: 'cards', showPrices: true, items: [] }] : []),
+    bookingSteps(visit),
     ...(content.about && !aboutPage ? [{ type: 'text', id: 'about', heading: `About ${biz.name}`.slice(0, 120), body: content.about }] : []),
-    ...(content.area ? [{ type: 'area', id: 'area', heading: 'Where we work' }] : []),
+    // Towns and confirmed hours are read from the records at render time; with neither, the section isn't shown.
+    { type: 'area', id: 'area', heading: cities.length && !hours ? 'Where we work' : hours && !cities.length ? 'Booking hours' : 'Hours and service area', showHours: true },
+    ...(faq.length ? [{ type: 'faq', id: 'faq', heading: 'Good to know', items: faq }] : []),
     cta('book-cta'),
+  ]
+  // What the starter needed but didn't find: those parts are left out (never invented) and the owner is asked for them.
+  const missing = [
+    ...(biz.phone ? [] : ['phone']),
+    ...(content.services?.length ? [] : ['services']),
+    ...(hours ? [] : ['hours']),
+    ...(cities.length ? [] : ['area']),
+    ...(faq.length ? [] : ['policies']),
   ]
   const base = {
     name: look.name,
@@ -173,5 +205,33 @@ export function starterSite(content, biz, { kinds = [], privacy = null, now = Da
     footer: { layout: 'simple', text: content.area ? `${biz.name} · ${content.area}`.slice(0, 200) : '' },
     pages: [{ slug: '', navLabel: 'Home', seoTitle: (content.seoTitle || biz.name).slice(0, 70), seoDescription: (content.seoDescription || '').slice(0, 160), sections: home }],
   }
-  return withPages(base, content, biz, kinds, { privacy, now })
+  return { ...withPages(base, content, biz, kinds, { privacy, now }), missing }
+}
+
+// "How booking works": what the booking page does in production today (details → open times → booked on screen).
+// Deliberately no promise of emails, texts or reminders (messaging is not live) and nothing marked "coming soon".
+export function bookingSteps(visit) {
+  return {
+    type: 'steps',
+    id: 'how-booking-works',
+    heading: 'How booking works',
+    layout: 'numbered',
+    items: [
+      { title: 'Tell us what you need', text: visit ? 'Share a few details, how to reach you and the address for the visit.' : 'Share a few details and how to reach you.' },
+      { title: visit ? 'Pick a visit time' : 'Pick a time', text: 'Choose one of the open times shown.' },
+      { title: visit ? 'Visit booked' : 'You’re booked', text: 'Your time is reserved when you confirm, and the details are shown on screen.' },
+    ],
+  }
+}
+
+// FAQ only from what the owner wrote (Settings → What customers should know), word for word. The "do you come to
+// me" answer follows the owner's appointment setting and is added only alongside the owner's own notes.
+export function faqFromPolicies(policies, visit) {
+  const p = policies || {}
+  const own = [
+    ...(p.beforeVisit ? [{ question: visit ? 'How should I prepare for the visit?' : 'What should I know before my appointment?', answer: p.beforeVisit }] : []),
+    ...(p.cancellation ? [{ question: 'What if I need to cancel or change my time?', answer: p.cancellation }] : []),
+  ]
+  if (!own.length) return []
+  return visit ? [{ question: 'Do you come to me?', answer: 'Yes. We come to your address; you enter it when you book.' }, ...own] : own
 }

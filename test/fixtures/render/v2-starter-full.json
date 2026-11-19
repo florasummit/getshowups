@@ -1,0 +1,319 @@
+{
+  "biz": {
+    "id": "golden-v2-starter-full",
+    "phone": "(843) 555-0100",
+    "cities": [
+      "Charleston",
+      "Mount Pleasant"
+    ],
+    "hours": {
+      "dayStart": 540,
+      "dayEnd": 1020,
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-starter-full",
+    "name": "Bright Electric",
+    "appointmentMode": "at_customer"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Electrical repairs in Charleston",
+    "intro": "Panels, outlets and lighting.",
+    "about": "A small local team. We answer the phone and show up when we say we will.",
+    "services": [
+      {
+        "id": "v1tj3l9n1jc4s",
+        "name": "Panel upgrade",
+        "price": "",
+        "description": ""
+      },
+      {
+        "id": "v1aiqodz1bbup",
+        "name": "Outlet repair",
+        "price": "$129",
+        "description": ""
+      }
+    ],
+    "area": "Charleston, Mount Pleasant",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Pro Trade",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#f7f8fb",
+          "surface": "#e8ecf5",
+          "ink": "#121a2c",
+          "muted": "#525d77",
+          "accent": "#1f3a8a",
+          "onAccent": "#ffffff",
+          "line": "#d8deeb",
+          "accentText": "#1f3a8a"
+        },
+        "headingFont": "archivo",
+        "bodyFont": "inter",
+        "headingWeight": 800,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 6,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "solid",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": "Bright Electric · Charleston, Mount Pleasant"
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Bright Electric",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Electrical repairs in Charleston",
+              "eyebrow": "Serving Charleston, Mount Pleasant",
+              "text": "Panels, outlets and lighting.",
+              "layout": "split",
+              "image": "stock:tools-flat",
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "tall",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": {
+                "label": "Call",
+                "target": "call"
+              }
+            },
+            {
+              "type": "services",
+              "id": "services",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Services",
+              "eyebrow": "",
+              "text": "",
+              "layout": "cards",
+              "columns": 3,
+              "showPrices": true,
+              "items": [
+                {
+                  "serviceId": "v1tj3l9n1jc4s",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                },
+                {
+                  "serviceId": "v1aiqodz1bbup",
+                  "text": "",
+                  "icon": null,
+                  "image": null
+                }
+              ]
+            },
+            {
+              "type": "steps",
+              "id": "how-booking-works",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "How booking works",
+              "eyebrow": "",
+              "text": "",
+              "layout": "numbered",
+              "items": [
+                {
+                  "title": "Tell us what you need",
+                  "text": "Share a few details, how to reach you and the address for the visit."
+                },
+                {
+                  "title": "Pick a visit time",
+                  "text": "Choose one of the open times shown."
+                },
+                {
+                  "title": "Visit booked",
+                  "text": "Your time is reserved when you confirm, and the details are shown on screen."
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "about",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "About Bright Electric",
+              "eyebrow": "",
+              "text": "",
+              "body": "A small local team. We answer the phone and show up when we say we will.",
+              "columns": 1,
+              "lead": false
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Hours and service area",
+              "eyebrow": "",
+              "text": "",
+              "showHours": true
+            },
+            {
+              "type": "faq",
+              "id": "faq",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Good to know",
+              "eyebrow": "",
+              "text": "",
+              "items": [
+                {
+                  "question": "Do you come to me?",
+                  "answer": "Yes. We come to your address; you enter it when you book."
+                },
+                {
+                  "question": "How should I prepare for the visit?",
+                  "answer": "Please make sure we can reach the breaker panel."
+                },
+                {
+                  "question": "What if I need to cancel or change my time?",
+                  "answer": "Cancel or move your visit up to a day before at no charge."
+                }
+              ]
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        },
+        {
+          "slug": "contact",
+          "navLabel": "Contact",
+          "seoTitle": "Contact | Bright Electric",
+          "seoDescription": "Contact Bright Electric.",
+          "sections": [
+            {
+              "type": "contact",
+              "id": "contact",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Contact us",
+              "eyebrow": "",
+              "text": "",
+              "showPhone": true,
+              "form": "contact"
+            }
+          ]
+        },
+        {
+          "slug": "privacy",
+          "navLabel": "Privacy policy",
+          "seoTitle": "Privacy policy | Bright Electric",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "text",
+              "id": "privacy-text",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "m",
+              "align": "left",
+              "width": "narrow",
+              "animate": "none",
+              "heading": "Privacy policy",
+              "eyebrow": "",
+              "text": "",
+              "body": "This page explains how Bright Electric uses the details you share on this website.\n\nWhat we collect: when you send a message, request a quote or book a time, we receive the name, email address, phone number and message you enter, and the time you book. For visits at your property, we also receive the address you give us.\n\nHow we use it: only to reply to you, to arrange and confirm your appointment, and to send reminders about it. We do not sell your details.\n\nThis website does not use advertising trackers. It is hosted by GetShowUps, which stores the details you send on our behalf; bookings are added to our calendar.\n\nTo see, correct or delete the details we hold about you, contact Bright Electric.",
+              "columns": 1,
+              "lead": false
+            }
+          ],
+          "legal": true,
+          "source": {
+            "kind": "starter",
+            "at": 1700000000000
+          }
+        }
+      ]
+    }
+  }
+}

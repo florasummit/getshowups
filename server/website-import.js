@@ -8,6 +8,7 @@ import { recordEvent } from './auditlog.js'
 import { ensureServices, legalSections, PAGE_KINDS, starterSite, withPages } from './site-starter.js'
 import { getProfile } from './onboarding.js'
 import { receptionistOn } from './receptionist/engine.js'
+import { policiesOrEmpty } from './policies.js'
 
 export const IMPORT_FIELDS = ['headline', 'intro', 'about', 'services', 'area', 'seoTitle', 'seoDescription', 'redirects']
 const ID_RE = /^[a-f0-9]{32}$/
@@ -135,10 +136,24 @@ export async function applyImport(env, customer, importId, { fields = [], photos
   return { ok: true, applied: chosen.filter((f) => !rejected.some((r) => r.field === f)), rejected, photosAdded: added.length, photosFailed: failed.map((f) => f.reason), pagesAdded: site.added, siteCreated: Boolean(site.created), servicesSection: Boolean(site.servicesAdded), pagesSkipped: site.skipped || null }
 }
 
-// The business facts pages are built from (records, never the client): name, industry, phone, chat on/off, visits.
-async function bizFacts(env, customer) {
-  const profile = await getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
-  return { name: customer.name, industry: profile?.industry || '', description: profile?.description || '', phone: profile?.phone || '', chat: await receptionistOn(env, customer).catch(() => false), visit: customer.appointmentMode === 'at_customer' }
+// The business facts a starter site is built from (records, never the client): name, industry, phone, chat on/off,
+// visits, towns, whether booking hours are confirmed, and the owner's own policies (word for word). The ONE builder
+// for every starter caller (import and "I'm starting fresh").
+export async function starterFacts(env, customer) {
+  const db = env.ONBOARDING_DB
+  const profile = await getProfile(db, customer.id).catch(() => null)
+  const policies = await policiesOrEmpty(db, customer.id)
+  return {
+    name: customer.name,
+    industry: profile?.industry || '',
+    description: profile?.description || '',
+    phone: profile?.phone || '',
+    chat: await receptionistOn(env, customer).catch(() => false),
+    visit: customer.appointmentMode === 'at_customer',
+    cities: Array.isArray(profile?.cities) ? profile.cities : [],
+    hoursConfirmed: Boolean(customer.hoursConfirmed && customer.workdays?.length),
+    policies: { beforeVisit: policies.beforeVisit || '', cancellation: policies.cancellation || '' },
+  }
 }
 
 async function siteFromImport(env, customer, { draft, content, published, view, kinds, now }) {
@@ -147,7 +162,7 @@ async function siteFromImport(env, customer, { draft, content, published, view, 
   // The policy page's text, word for word, from THIS import only (never client-supplied text).
   const policy = offer('privacy')?.source === 'imported' ? legalSections(view.result.pages.find((p) => p.path === offer('privacy').path)) : null
   const privacy = policy?.ok ? { sections: policy.sections, url: `${view.sourceOrigin}${offer('privacy').path}` } : null
-  const biz = await bizFacts(env, customer)
+  const biz = await starterFacts(env, customer)
   if (!draft.site) {
     if (published || draft.design) return { added: [], skipped: wanted.length ? 'single_page_site' : null } // keep a look the owner chose
     const made = starterSite(content, biz, { kinds: wanted, privacy, now })

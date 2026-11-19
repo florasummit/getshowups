@@ -1,0 +1,168 @@
+{
+  "biz": {
+    "id": "golden-v2-starter-minimal",
+    "phone": "",
+    "cities": [],
+    "hours": null,
+    "offerSms": false,
+    "smsTermsUrl": "https://getshowups.com/sms-terms/golden-v2-starter-minimal",
+    "name": "Ledger & Co",
+    "appointmentMode": "at_business"
+  },
+  "content": {
+    "template": "clean",
+    "color": "ocean",
+    "headline": "Bookkeeping for small businesses",
+    "intro": "Monthly books and tax prep.",
+    "about": "",
+    "services": [],
+    "area": "",
+    "highlights": [
+      "Family run",
+      "Weekday appointments"
+    ],
+    "logo": null,
+    "hero": null,
+    "photos": [],
+    "seoTitle": "",
+    "seoDescription": "",
+    "site": {
+      "version": 2,
+      "name": "Counsel",
+      "direction": "",
+      "theme": {
+        "colors": {
+          "bg": "#ffffff",
+          "surface": "#f1f1ee",
+          "ink": "#141414",
+          "muted": "#5c5c58",
+          "accent": "#141414",
+          "onAccent": "#ffffff",
+          "line": "#e2e2dd",
+          "accentText": "#141414"
+        },
+        "headingFont": "fraunces",
+        "bodyFont": "inter",
+        "headingWeight": 600,
+        "headingCase": "none",
+        "headingTracking": -0.02,
+        "baseSize": 17,
+        "scale": 1.25,
+        "lineHeight": 1.6,
+        "radius": 4,
+        "density": "comfortable",
+        "maxWidth": 1200,
+        "buttons": "solid",
+        "motion": "none"
+      },
+      "nav": {
+        "layout": "left",
+        "sticky": true,
+        "showBook": true
+      },
+      "footer": {
+        "layout": "simple",
+        "text": ""
+      },
+      "pages": [
+        {
+          "slug": "",
+          "navLabel": "Home",
+          "seoTitle": "Ledger & Co",
+          "seoDescription": "",
+          "sections": [
+            {
+              "type": "hero",
+              "id": "top",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Bookkeeping for small businesses",
+              "eyebrow": "",
+              "text": "Monthly books and tax prep.",
+              "layout": "minimal",
+              "image": null,
+              "images": [],
+              "imageAlt": "",
+              "imageSide": "right",
+              "height": "auto",
+              "overlay": 0.45,
+              "primaryCta": {
+                "label": "Book online",
+                "target": "book"
+              },
+              "secondaryCta": {
+                "label": "Call",
+                "target": "call"
+              }
+            },
+            {
+              "type": "steps",
+              "id": "how-booking-works",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "How booking works",
+              "eyebrow": "",
+              "text": "",
+              "layout": "numbered",
+              "items": [
+                {
+                  "title": "Tell us what you need",
+                  "text": "Share a few details and how to reach you."
+                },
+                {
+                  "title": "Pick a time",
+                  "text": "Choose one of the open times shown."
+                },
+                {
+                  "title": "You’re booked",
+                  "text": "Your time is reserved when you confirm, and the details are shown on screen."
+                }
+              ]
+            },
+            {
+              "type": "area",
+              "id": "area",
+              "background": "bg",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "left",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Hours and service area",
+              "eyebrow": "",
+              "text": "",
+              "showHours": true
+            },
+            {
+              "type": "cta",
+              "id": "book-cta",
+              "background": "accent",
+              "backgroundImage": null,
+              "spacing": "l",
+              "align": "center",
+              "width": "normal",
+              "animate": "none",
+              "heading": "Ready when you are.",
+              "eyebrow": "",
+              "text": "",
+              "layout": "band",
+              "image": null,
+              "cta": {
+                "label": "Book online",
+                "target": "book"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
