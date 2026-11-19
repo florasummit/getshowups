@@ -114,6 +114,15 @@ async function openAvailability(db, customer, since) {
   return r?.n ? { count: r.n, last: r.last, seq: r.seq } : null
 }
 
+// A success for the incident's feature + business recorded after its first failure (generic incidents).
+const successSince = async (db, inc) =>
+  Boolean(
+    await db
+      .prepare("SELECT 1 FROM audit_log WHERE capability = ?1 AND customer IS ?2 AND outcome = 'success' AND at >= ?3 LIMIT 1")
+      .bind(inc.feature, inc.customer, inc.first_seen)
+      .first(),
+  )
+
 const journeyOf = (feature) => listCapabilities().find((c) => c.id === feature)?.journey || 'platform'
 
 function fromDetector(a) {
@@ -167,6 +176,9 @@ export async function syncIncidents(env, now = Date.now()) {
       } else {
         const g = generic.get(inc.fingerprint)
         if (g) still = { lastSeen: g.lastSeen, count: g.count, evidence: { code: g.code, action: g.step, capability: g.feature, events: g.events, count: g.count } }
+        // Gone from the open-failure groups: either a later success closed it, or the failures aged out of the
+        // lookback window without one. Only the first is "success seen".
+        else if (!(await successSince(db, inc))) resolution = 'no_new_failures'
       }
       detected.delete(inc.fingerprint)
       generic.delete(inc.fingerprint)

@@ -148,7 +148,15 @@ test('other failure events become incidents per feature + business + action; fol
   // A later success for the same resource resolves it.
   await recordEvent(db, { type: 'booking.recovered', actor: 'system:booking', customer: 'beta', capability: 'calendar.google', resource: { type: 'business', id: 'beta' }, outcome: 'success', details: {}, at: NOW + MIN })
   await syncIncidents(env, NOW + 2 * MIN)
-  assert.equal((await listIncidents(db, { status: 'resolved' })).length, 1)
+  const [res] = await listIncidents(db, { status: 'resolved' })
+  assert.equal(res.resolution, 'success_seen')
+  // A failure that ages out of the 14-day lookback WITHOUT a success is never reported as recovered.
+  await recordEvent(db, { type: 'sms.webhook_rejected', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'sender', id: 'unknown' }, outcome: 'failure', details: { reason: 'bad_signature' }, at: NOW })
+  await syncIncidents(env, NOW + 3 * MIN)
+  assert.equal((await listIncidents(db, { status: 'open' })).length, 1)
+  await syncIncidents(env, NOW + 15 * DAY)
+  const aged = (await listIncidents(db, { status: 'resolved' })).find((i) => i.feature === 'followups.sms_inbound')
+  assert.equal(aged.resolution, 'no_new_failures')
 })
 
 test('test businesses: incidents recorded and tagged, never counted as customer impact; unreadable test list = treated as test', async () => {
