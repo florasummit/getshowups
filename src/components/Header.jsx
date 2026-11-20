@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import Logo from './Logo.jsx'
 import GetStarted from './GetStarted.jsx'
 import { navLinks } from '../content/site.js'
+import { track } from '../lib/analytics.js'
 
 export default function Header() {
   const [open, setOpen] = useState(false)
@@ -47,7 +48,7 @@ export default function Header() {
         <a href="/dashboard" className="header-login">
           Sign in
         </a>
-        <GetStarted className="btn btn-primary btn-sm header-cta" />
+        <GetStarted className="btn btn-primary btn-sm header-cta" onClick={() => track('early_access_cta', { location: 'header' })} />
         <button
           type="button"
           className="menu-toggle"
@@ -72,7 +73,13 @@ export default function Header() {
         <a href="/dashboard" className="btn btn-ghost btn-block">
           Sign in
         </a>
-        <GetStarted className="btn btn-primary btn-block" onClick={close} />
+        <GetStarted
+          className="btn btn-primary btn-block"
+          onClick={() => {
+            track('early_access_cta', { location: 'mobile_nav' })
+            close()
+          }}
+        />
       </nav>
     </header>
   )

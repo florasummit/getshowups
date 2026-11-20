@@ -2,6 +2,20 @@
 
 _Update at the end of every task. Newest first._
 
+## Homepage conversion experience (2026-11-20) — feat/homepage-2027 (frontend only; draft, nothing deployed)
+
+- Hero: "More booked jobs. Less chasing.", $499/month + ad spend separate visible, Request early access (enrollment
+  closed → #book-demo, the existing Google Calendar appointment embed) + See it work (→ #demo), "Try the demo as a"
+  pool / HVAC / electrical. Illustrative product preview on desktop (labelled Example).
+- "See it work" (#demo, alias #simulation): interactive simulation, configured per trade in src/content/demo.js, mirrors
+  the live product only (booking page → lead saved → ZIP check: in area → times / outside → owner approves or declines
+  → booked on Google Calendar + Google invitation → owner records Job done / Visited, not done / Couldn't visit +
+  optional own estimate). No API calls, nothing stored. The scripted SMS simulation was removed (texting isn't live).
+- How it works: six steps kept, each labelled Live today / Partly live. Features grid removed (covered by steps + plan).
+- Funnel events (src/lib/analytics.js) are in-page only: there is no browser analytics endpoint. Sending them needs
+  approval (public rate-limited POST into the existing events table, allowlisted names, no personal data).
+- Next: founder visual/functional review of the preview; approve merge (= production deploy of the marketing page).
+
 ## Control Center experience (2026-11-20) — feat/control-center-experience (stacked on #88; no migration; nothing deployed)
 
 - Audit (real browser, isolated e2e environment) found: every admin `btn-ghost` button invisible (white on white:

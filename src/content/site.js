@@ -2,9 +2,8 @@
 // Rule: no testimonials, customer logos, or performance statistics until real data exists.
 
 export const navLinks = [
+  { href: '#demo', label: 'See it work' },
   { href: '#how-it-works', label: 'How it works' },
-  { href: '#features', label: 'Features' },
-  { href: '#simulation', label: 'Simulation' },
   { href: '#pricing', label: 'Pricing' },
   { href: '#faq', label: 'FAQ' },
 ]
@@ -17,78 +16,57 @@ export const enrollmentClosed = {
   href: '/#book-demo',
   label: 'Request early access',
   note: 'Online enrollment isn’t open yet. Book a short call and we’ll set you up as soon as it opens.',
+  // What happens after a visitor requests early access (shown in the early-access section).
+  next: [
+    'Pick a time for a short call. The calendar here books it directly; there’s no form to fill in first.',
+    'On the call we look at your services, service area and current website, and answer your questions.',
+    'When enrollment opens, we set you up first. Nothing is charged before you choose to sign up.',
+  ],
 }
 
-// Steps and features describe only what works today; anything not yet live says so.
+// Steps describe only what works today; anything not yet live says so (status: live | partly).
 export const steps = [
   {
     id: 'capture',
+    status: 'live',
     title: 'Capture',
     icon: 'inbox',
     body: 'Your own website, with booking built in, collects every inquiry in one place, so no lead sits unseen in an inbox.',
   },
   {
     id: 'qualify',
+    status: 'live',
     title: 'Qualify',
     icon: 'sparkles',
-    body: 'Leads outside the area you serve are flagged before they can book, so your calendar only fills with jobs you want.',
+    body: 'Every lead’s ZIP is checked against the area you serve. Outside it, they aren’t offered times; you approve or decline, so your calendar only fills with jobs you want.',
   },
   {
     id: 'book',
+    status: 'live',
     title: 'Book',
     icon: 'calendar',
     body: 'Leads pick a real open time from your Google Calendar. No phone tag, and a time can never be booked twice.',
   },
   {
     id: 'remind',
+    status: 'partly',
     title: 'Remind',
     icon: 'bell',
     body: 'Every booking sends the customer a Google Calendar invitation. Email and text reminders are coming soon.',
   },
   {
     id: 'show',
+    status: 'live',
     title: 'Show Up',
     icon: 'check',
     body: 'Mark each appointment as showed or no-show and see exactly where leads drop off.',
   },
   {
     id: 'follow',
+    status: 'partly',
     title: 'Follow Up',
     icon: 'refresh',
     body: 'Leads who haven’t booked and no-shows are listed for you to follow up. Automatic follow-ups are coming soon.',
-  },
-]
-
-export const features = [
-  {
-    icon: 'bolt',
-    title: 'Your website, done for you',
-    body: 'Answer a few questions and GetShowUps builds a mobile-friendly website from your services and service area. Preview it, edit anything, and publish. Hosting included.',
-  },
-  {
-    icon: 'calendar',
-    title: 'Real-time booking',
-    body: 'Customers book straight into your Google Calendar using your hours and appointment length. Busy times are hidden automatically.',
-  },
-  {
-    icon: 'sparkles',
-    title: 'Service-area screening',
-    body: 'Tell us the ZIP codes you serve and every lead is checked before booking.',
-  },
-  {
-    icon: 'bell',
-    title: 'Confirmations & reminders',
-    body: 'Every booking sends the customer a Google Calendar invitation. Email reminders and follow-ups, and text messages, are coming soon.',
-  },
-  {
-    icon: 'chart',
-    title: 'Show-up tracking',
-    body: 'See leads, bookings, show-ups and no-shows (or completed jobs for on-site visits) in one simple dashboard.',
-  },
-  {
-    icon: 'phoneMissed',
-    title: 'Ads, when you’re ready',
-    body: 'Google and Meta ad campaigns are coming for founding customers. You approve every dollar, and ad spend is paid directly to Google or Meta.',
   },
 ]
 
@@ -111,6 +89,14 @@ export const pricing = {
 }
 
 export const faqs = [
+  {
+    q: 'What happens after I request early access?',
+    a: 'You pick a time for a short call, straight from the calendar on this page. We look at your services, service area and current website together. Online enrollment isn’t open yet; when it opens, early-access businesses are set up first. Nothing is charged until you choose to sign up.',
+  },
+  {
+    q: 'Is the demo on this page the real product?',
+    a: 'It’s a simulation with an example business, so nothing you click is sent or booked. It follows the same steps the product takes today: your booking page, the service-area check, booking onto your Google Calendar, and recording how the visit went.',
+  },
   {
     q: 'What is GetShowUps?',
     a: 'GetShowUps is an appointment conversion platform for service businesses. It gives you a website that captures leads, checks they are in your service area, books them onto your Google Calendar, and tracks whether they actually showed up. Automatic reminders and follow-ups are coming soon.',
