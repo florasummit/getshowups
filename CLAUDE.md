@@ -28,7 +28,9 @@ src/                 React marketing site (Vite → dist/). Browser code only.
                      hours → website → address → publish → launch; older businesses: business → calendar → hours) →
                      Home.jsx tabs: Overview · Appointments · Website (WebsiteTab, WebsiteEditor, DomainSettings) · Settings
   booking/           Public booking page /book/:id (details → time → booked)
-  admin/             Platform console /admin (metrics, attention, customers, detail, invites, plans, email)
+  admin/             Platform console /admin (metrics, attention, customers, detail, invites, plans, email); Control
+                     Center /admin/control: Control.jsx (shell + Overview), control/ (Incidents, Accounts, Integrations,
+                     ui, lib: URL state), Qa.jsx (Testing), control.css. Labels/states come from server/ops/states.js
   lib/               api.js (fetch + formatting), connect.js (calendar connect hand-off)
   app.css            Styles for app pages (reuses index.css tokens)
 functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handlers thin

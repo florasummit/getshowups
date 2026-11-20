@@ -107,7 +107,10 @@ export async function startHumanRun(db, { journey, customer = null, provider = '
 
 const runRow = (db, id) => db.prepare("SELECT * FROM qa_runs WHERE id = ?1 AND kind = 'human'").bind(id).first()
 
-export async function recordStep(db, { run, step, status, observed = '', answers = {} }, now = Date.now()) {
+// Usability feedback is separate from the functional result: keep | simplify | change | remove | add (+ a note).
+// Stored inside the step's `answers` JSON (keys u / un) — no schema change.
+export const USABILITY = ['keep', 'simplify', 'change', 'remove', 'add']
+export async function recordStep(db, { run, step, status, observed = '', answers = {}, usability = null, usabilityNote = '' }, now = Date.now()) {
   const r = await runRow(db, String(run || ''))
   if (!r) return { error: 'not_found' }
   if (r.status !== 'running') return { error: 'run_finished' }
@@ -117,6 +120,10 @@ export async function recordStep(db, { run, step, status, observed = '', answers
   if (!RESULT_STATES.includes(status)) return { error: 'invalid_status' }
   const a = {}
   for (const [k, v] of Object.entries(answers && typeof answers === 'object' ? answers : {}).slice(0, 10)) if (/^\d$/.test(k)) a[k] = redact(v, 300)
+  if (usability !== null && usability !== '' && !USABILITY.includes(usability)) return { error: 'invalid_usability' }
+  if (usability) a.u = usability
+  const un = redact(usabilityNote, 300).trim()
+  if (un) a.un = un
   // Timed journeys: time since the previous recorded step (or the run start), measured on the server clock.
   const prev = await db.prepare('SELECT max(at) AS at FROM qa_results WHERE run_id = ?1 AND test_id <> ?2').bind(r.id, `${r.journey}.${step}`).first()
   const ms = j.timed ? now - (prev?.at || r.started_at) : null
@@ -190,7 +197,7 @@ export async function qaOverview(db, now = Date.now()) {
     activation: activation.length
       ? { measured: true, runs: activation.length, latest: { id: activation[0].id, status: activation[0].status, totalMinutes: Math.round((activation[0].summary.totalMs || 0) / 6000) / 10, targetMinutes: 20, provider: activation[0].provider, finishedAt: activation[0].finishedAt } }
       : { measured: false, runs: 0 },
-    journeys: JOURNEYS.map((j) => ({ id: j.id, title: j.title, audience: j.audience, timed: Boolean(j.timed), targetMinutes: j.targetMinutes ?? null, note: j.note ?? null, steps: j.steps, tests: j.tests.map((t) => ({ id: testId(j.id, t), ...t })) })),
+    journeys: JOURNEYS.map((j) => ({ id: j.id, title: j.title, purpose: j.purpose ?? null, audience: j.audience, timed: Boolean(j.timed), targetMinutes: j.targetMinutes ?? null, note: j.note ?? null, steps: j.steps, tests: j.tests.map((t) => ({ id: testId(j.id, t), ...t })) })),
     linkedTests: linkedTests().length,
   }
 }
@@ -203,7 +210,8 @@ export async function runDetail(db, id) {
   // Related incidents: open incidents on a feature used by a journey that failed in this run.
   const features = new Set(results.filter((x) => x.status === 'fail' && x.journey).flatMap((x) => journeyDef(x.journey)?.steps.map((s) => s.feature) || []))
   const related = features.size ? (await listIncidents(db, { status: 'open', limit: 200 })).filter((i) => features.has(i.feature)).slice(0, 20) : []
-  return { run: presentRun(r), results: results.map((x) => ({ ...x, answers: parse(x.answers) })), findings, related }
+  const def = r.kind === 'human' ? journeyDef(r.journey) : null
+  return { run: presentRun(r), results: results.map((x) => ({ ...x, answers: parse(x.answers) })), findings, related, journey: def ? { id: def.id, title: def.title, timed: Boolean(def.timed), targetMinutes: def.targetMinutes ?? null, steps: def.steps } : null }
 }
 
 export async function testHistory(db, testIdValue, limit = 10) {

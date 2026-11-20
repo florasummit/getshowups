@@ -2,6 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
+## Control Center experience (2026-11-20) — feat/control-center-experience (stacked on #88; no migration; nothing deployed)
+
+- Audit (real browser, isolated e2e environment) found: every admin `btn-ghost` button invisible (white on white:
+  QA Fail/Blocked/Not tested, Start, Diagnose calendar, Save), "hosting [object Object]" in the Account Inspector,
+  calendar shown "Ready" while failing, a medium platform incident shown next to "Nothing needs action", platform
+  incidents told to "open the event … for this business", incident rows / metrics / integrations not clickable, raw
+  JSON evidence, no account search, QA as one long form with no way to resume a session, no usability feedback.
+- Rebuilt the front end on the same APIs (docs/CONTROL_CENTER.md "The founder experience"). Server: read-only
+  additions only (states.js vocabulary, explain.js titles/next steps, incident detail, overview attention/approvals,
+  readiness), QA usability inside `answers` (no migration), journey purpose text. Engine untouched.
+- Original HTML prototype: not found (repo, local folders, artifacts, transcripts); comparison not possible.
+- Next: founder review of the draft PR; merge order #87 → #88 → this.
+
 ## Operational activation prep (2026-11-20) — feat/ops-activation (no migration; nothing activated)
 
 - Founder alerts panel in the Control Center Overview (GET/POST /api/platform/alerts): switch, deliverable admin count

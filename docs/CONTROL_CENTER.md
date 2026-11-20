@@ -9,6 +9,46 @@ product already writes; it never changes a customer's account.
 | #83 | Founder alerts (detectors: calendar, availability, comms); OFF by default | — |
 | B1 (this) | Incident register, Account + Journey Inspector, overview, feature/journey registry, demo e2e | 0031 |
 | B2 | Automated QA run history (Playwright results), guided human QA, activation timer, demo steps 6, 9, 11 | 0032 |
+| Experience | Redesign + navigation (Overview · Incidents · Accounts · Integrations · Testing), investigation pages, step-by-step QA sessions with pause/resume and usability feedback | — |
+
+## The founder experience (feat/control-center-experience)
+
+Every screen is a URL, so Back, deep links and new tabs work: `?view=incidents|accounts|integrations|qa`,
+`?incident=<id>`, `?business=<id>`, `?integration=<capability id>`, `?session=<qa run id>` (in progress),
+`?run=<qa run id>` (review). After a navigation the page heading takes focus. Code: src/admin/Control.jsx (shell +
+Overview), src/admin/control/ (Incidents, Accounts, Integrations, ui, lib), src/admin/Qa.jsx (Testing), styles in
+src/admin/control.css (scoped `.cc`, existing tokens).
+
+- **One vocabulary, defined and tested in server/ops/states.js** (the UI only displays it):
+  - Integrations: Healthy (seen working recently) · Degraded · Failed (open failure or failed check) · Disabled (off on
+    purpose, never "failed") · Setup required · Testing (test mode only) · Not verified (on, no evidence). Credentials
+    alone are never "healthy".
+  - Incidents: Active failure (failure in the last 24 h) · No new failures, awaiting verification (open, quiet, no
+    success) · Recovered, success confirmed (`success_seen` / `connected`) · Closed, no new failures, not confirmed
+    fixed (`no_new_failures`).
+  - Triage: Act now vs Monitor, with the reason. A real customer's critical/high incident is never "monitor"; test
+    accounts and medium platform-wide incidents with no business are.
+  - Account readiness per area: Verified working · Configured, not verified · Enabled · Eligible · Test mode · Not set
+    up · Disabled · Failed · Not applicable. Only a recorded success is "verified".
+- **Overview:** status banner, clickable metrics (each opens the filtered list), **Needs attention** = every open
+  incident + every flagged account in priority order (never "nothing needs action" while something is open),
+  integrations that fail, testing status, "Before real customers" (approvals from the capability registry + the
+  activation test), founder alerts, recent recoveries.
+- **Incident investigation** (GET /api/platform/incidents?id=…): plain-English title (server/ops/explain.js), scope
+  (platform-wide incidents get a platform next step, never "open the account"), first/last failure, occurrences, impact,
+  confirmed cause vs "not determined" (hypotheses labelled), recovery explanation + incident history, the underlying
+  audit events as codes, raw evidence only on request.
+- **Accounts:** search by name or id, filters (needs help, affected, production, test), 25 per page. Inspector:
+  readiness tiles, journey with plain reasons, open incidents, read-only calendar diagnosis, owner checklist + public
+  pages, recent activity, links to Business Review and to a QA session for the account.
+- **Integrations:** grouped by state; detail = what it does, configured / enabled / tested, last success and failure,
+  affected incidents and businesses, the safe diagnostic where one exists (none invented).
+- **Testing:** activation ("Not measured yet" until an observer finishes a real-person run) with the safe checklist,
+  sessions in progress (Resume), journeys with their purpose, completed sessions, automated runs (or "CI isn't
+  connected yet"). A session shows one step at a time (what to do, expected, what happened, Pass/Fail/Blocked/Not
+  tested, usability Keep/Simplify/Change/Remove/Add + note, context questions, defects/improvements), saves each step
+  on the server, can be paused and resumed at the first unrecorded step, and is finished explicitly (unrecorded steps =
+  not tested → Incomplete). Usability is stored in the step's `answers` JSON (`u`, `un`): no migration.
 
 ## Incident register (server/ops/incidents.js, cron step `incidents`)
 

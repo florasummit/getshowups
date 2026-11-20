@@ -17,6 +17,7 @@ import { stripeLiveEnabled } from '../stripe.js'
 import { getSettings, modelConfigured } from '../receptionist/engine.js'
 import { voiceStatus } from '../receptionist/voice.js'
 import { openSlots } from '../booking.js'
+import { accountReadiness, STEP_REASONS, withPhase } from './states.js'
 
 const DAY = 86400000
 const safe = async (fn, fallback) => {
@@ -77,7 +78,7 @@ export async function inspectAccount(env, id, now = Date.now()) {
   const customer = customerFromRow(await getCustomer(db, id))
   const calendar = Boolean(base.calendarConnected)
   const onboarding = await safe(() => onboardingSteps(env, customer, { calendar }), null)
-  const hosting = await safe(() => hostingStatus(db, id, now, env), 'unknown')
+  const hosting = await safe(() => hostingStatus(db, id, now, env), { status: 'unknown' })
   const bookable = Boolean(customer && customer.status === 'active' && customer.hoursConfirmed && calendar && isHosted(hosting))
   const lastLookup = await safe(() => db.prepare("SELECT outcome, at FROM audit_log WHERE customer = ?1 AND capability = 'calendar.google' AND resource_type = 'availability' ORDER BY seq DESC LIMIT 1").bind(id).first(), null)
   const msg = await safe(
@@ -94,23 +95,23 @@ export async function inspectAccount(env, id, now = Date.now()) {
   )
   const messages = { gate: messagesLive(env) && !base.testBusiness ? 'live' : 'test_only', sent7: msg?.sent || 0, failed7: (msg?.failed || 0) + (msg?.outbox_failed || 0), skipped7: msg?.skipped || 0, scheduled: msg?.scheduled || 0 }
   const receptionist = await safe(() => getSettings(db, id), { enabled: false })
-  const incidents = await safe(() => listIncidents(db, { customer: id, limit: 30 }), [])
+  const incidents = (await safe(() => listIncidents(db, { customer: id, limit: 30 }), [])).map((i) => withPhase(i, now))
   const billingLive = stripeLiveEnabled(env)
   const steps = journeySteps({ onboarding, incidents, bookable, billingLive, messages })
   const complete = steps.filter((s) => SELF_SERVE.includes(s.id)).every((s) => ['completed', 'skipped'].includes(s.state))
   const recovering = incidents.some((i) => i.status === 'open' && ['calendar', 'availability'].includes(i.kind))
   const type = journeyType({ testBusiness: base.testBusiness, createdVia: base.createdVia ?? customer?.createdVia, selfServe: Boolean(onboarding?.selfServe), complete, recovering })
-  return {
-    identity: { id, name: base.name, status: base.status, test: base.testBusiness, deleted: base.deleted, createdAt: base.createdAt, attention: base.attention },
+  const out = {
+    identity: { id, name: base.name, status: base.status, test: base.testBusiness, deleted: base.deleted, createdAt: base.createdAt, attention: base.attention, appointmentMode: customer?.appointmentMode ?? null },
     journey: {
       type,
       definition: type.recovery ? 'calendar-recovery' : type.primary === 'invited' ? 'invited-user' : type.primary === 'existing' ? 'returning-owner' : 'activation',
       title: journeyDef(type.recovery ? 'calendar-recovery' : type.primary === 'invited' ? 'invited-user' : type.primary === 'existing' ? 'returning-owner' : 'activation')?.title,
       steps,
     },
-    website: { ...base.website, hosting },
+    website: { ...base.website, hosting: hosting?.status || 'unknown' },
     calendar: { connected: calendar, lastLookup: lastLookup ? { outcome: lastLookup.outcome, at: lastLookup.at } : null },
-    booking: { ready: bookable, reasons: bookable ? [] : [!customer || customer.status !== 'active' ? 'not_active' : null, customer?.hoursConfirmed ? null : 'hours_not_confirmed', calendar ? null : 'calendar_not_connected', isHosted(hosting) ? null : `hosting_${hosting}`].filter(Boolean) },
+    booking: { ready: bookable, reasons: bookable ? [] : [!customer || customer.status !== 'active' ? 'not_active' : null, customer?.hoursConfirmed ? null : 'hours_not_confirmed', calendar ? null : 'calendar_not_connected', isHosted(hosting) ? null : `hosting_${hosting?.status || 'unknown'}`].filter(Boolean) },
     communications: messages,
     voice: { receptionist: Boolean(receptionist?.enabled), model: modelConfigured(env), status: voiceStatus(env, id) },
     billing: { selfServe: Boolean(onboarding?.selfServe), state: onboarding?.billing ?? 'unknown', liveBilling: billingLive, lifecycle: base.lifecycle ? { stage: base.lifecycle.stage ?? null, subscription: base.lifecycle.subscription?.status ?? null, hosting: base.lifecycle.hosting ?? null } : null },
@@ -123,6 +124,10 @@ export async function inspectAccount(env, id, now = Date.now()) {
       publicPages: [base.website?.live ? { label: 'Website', href: `/p/${id}` } : null, bookable ? { label: 'Booking page', href: `/book/${id}` } : null, receptionist?.enabled ? { label: 'Chat', href: `/chat/${id}` } : null].filter(Boolean),
     },
   }
+  // Plain-English readiness per area (server/ops/states.js): configured ≠ enabled ≠ verified working.
+  out.readiness = accountReadiness(out)
+  for (const s of out.journey.steps) s.reasonText = s.reason ? STEP_REASONS[s.reason] || null : null
+  return out
 }
 
 // Read-only calendar diagnosis: connection (token refresh) + freeBusy via the booking engine's own lookup. Returns

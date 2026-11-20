@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { recordEvent } from '../server/auditlog.js'
 import { recordAvailability } from '../server/booking.js'
-import { syncIncidents, listIncidents, sanitizeEvidence } from '../server/ops/incidents.js'
+import { syncIncidents, listIncidents, sanitizeEvidence, incidentDetail } from '../server/ops/incidents.js'
+import { INTEGRATION_STATES, integrationState, incidentPhase, triage, accountReadiness, withPhase } from '../server/ops/states.js'
 import { inspectAccount, journeySteps } from '../server/ops/inspector.js'
 import { controlOverview } from '../server/ops/control.js'
 import { JOURNEYS, linkedTests, matchTest } from '../server/ops/journeys.js'
@@ -277,4 +278,107 @@ test('registry: stable unique journey/step/test ids; every step names a register
   assert.equal(new Set(tests.map((t) => t.id)).size, tests.length)
   assert.deepEqual(matchTest('test/e2e/booking.spec.js', 'lead books a real appointment; owner sees it').map((t) => t.journey), ['booking'])
   assert.deepEqual(matchTest('test/e2e/booking.spec.js', 'something else'), [])
+})
+
+// ---------- Control Center experience: vocabulary, triage, investigation (read side) ----------
+test('integration states are evidence-based: credentials alone are never healthy; disabled is never failed', () => {
+  const s = (mode, health, extra = {}) => integrationState({ mode, health, ...extra })
+  assert.equal(s('disabled', 'not_applicable'), 'disabled')
+  assert.equal(s('disabled', 'failing'), 'disabled', 'switched off on purpose is not a failure')
+  assert.equal(s('missing', 'not_applicable'), 'setup_required')
+  assert.equal(s('live', 'unknown'), 'unknown', 'configured + live but no evidence = not verified')
+  assert.equal(s('live', 'healthy'), 'healthy')
+  assert.equal(s('live', 'degraded'), 'degraded')
+  assert.equal(s('live', 'failing'), 'failed')
+  assert.equal(s('sandbox', 'unknown'), 'testing')
+  assert.equal(s('sandbox', 'failing'), 'failed')
+  assert.equal(integrationState(null), 'unknown')
+  assert.equal(INTEGRATION_STATES.unknown.label, 'Not verified')
+})
+
+test('incident phases: quiet ≠ recovered; only a recorded success (or reconnect) is a recovery', () => {
+  const base = { status: 'open', lastSeen: NOW - 2 * 3600000, severity: 'medium' }
+  assert.equal(incidentPhase(base, NOW), 'active')
+  assert.equal(incidentPhase({ ...base, lastSeen: NOW - 3 * DAY }, NOW), 'quiet')
+  assert.match(withPhase({ ...base, lastSeen: NOW - 3 * DAY }, NOW).phaseLabel, /No new failures for 3 days · awaiting verification/)
+  assert.equal(incidentPhase({ status: 'resolved', resolution: 'success_seen' }, NOW), 'recovered')
+  assert.equal(incidentPhase({ status: 'resolved', resolution: 'connected' }, NOW), 'recovered')
+  assert.equal(incidentPhase({ status: 'resolved', resolution: 'no_new_failures' }, NOW), 'closed_unverified')
+  assert.match(withPhase({ status: 'resolved', resolution: 'no_new_failures' }, NOW).phaseLabel, /not confirmed fixed/)
+  // Triage: a real customer's critical/high problem is never "monitor".
+  assert.equal(triage({ severity: 'critical', customer: 'alpha', test: false }).action, 'act')
+  assert.equal(triage({ severity: 'medium', customer: 'alpha', test: false }).action, 'act')
+  assert.equal(triage({ severity: 'critical', customer: 'alpha', test: true }).action, 'monitor')
+  assert.equal(triage({ severity: 'medium', customer: null, test: false }).action, 'monitor')
+  assert.equal(triage({ severity: 'high', customer: null, test: false }).action, 'act')
+})
+
+test('platform-wide incident: plain title, platform next step (never "this business"), listed in Needs attention with a reason; detail = history + events + no contact data', async () => {
+  await recordEvent(db, { type: 'sms.webhook_rejected', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'webhook', id: 'inbound' }, outcome: 'failure', details: { reason: 'bad_signature', note: 'lee.secret@example.net' }, at: NOW - MIN })
+  await syncIncidents(env, NOW)
+  const [i] = await listIncidents(db, { status: 'open' })
+  assert.equal(i.scope, 'platform')
+  assert.equal(i.title, 'Text-message webhook refused a request')
+  assert.equal(i.featureName, 'Incoming text messages')
+  assert.doesNotMatch(`${i.next} ${i.impact}`, /this business|for this account/)
+  assert.match(i.next, /Twilio Console/)
+  const o = await controlOverview(env, NOW)
+  assert.ok(!o.nextActions.some((a) => a.incident === i.id), 'medium platform incident is not a "next action" (old behaviour)')
+  const att = o.attention.find((a) => a.id === i.id)
+  assert.ok(att, 'but it IS in Needs attention: never "nothing needs action" while something is open')
+  assert.equal(att.action, 'monitor')
+  assert.match(att.why, /Platform-wide/)
+  assert.equal(att.phase, 'active')
+  const d = await incidentDetail(db, i.id)
+  assert.equal(d.incident.id, i.id)
+  assert.equal(d.incident.phase, 'active')
+  assert.deepEqual(d.history.map((h) => h.action), ['incident.opened'])
+  assert.deepEqual(d.events.map((e) => [e.action, e.outcome, e.code]), [['sms.webhook_rejected', 'failure', 'bad_signature']])
+  assert.equal(d.lastSuccess, null)
+  assert.doesNotMatch(JSON.stringify(d), /lee\.secret/)
+  assert.equal(await incidentDetail(db, 'inc_nope000000'), null)
+})
+
+test('account incident detail links recovery evidence; account readiness never calls "connected" working without a recorded success', async () => {
+  await failSeq('alpha', 'reconnect_required', [NOW - MIN])
+  await syncIncidents(env, NOW)
+  const [inc] = await listIncidents(db, { customer: 'alpha', status: 'open' })
+  assert.equal(inc.title, 'Google Calendar connection broken')
+  assert.equal(inc.scope, 'account')
+  const a = await inspectAccount(env, 'alpha', NOW)
+  assert.equal(typeof a.website.hosting, 'string', 'hosting is a status, never [object Object]')
+  const r = Object.fromEntries(a.readiness.map((x) => [x.id, x.state]))
+  assert.equal(r.calendar, 'failed')
+  assert.equal(r.booking, 'failed')
+  assert.equal(r.messages, 'test_mode')
+  assert.equal(r.voice, 'disabled')
+  assert.ok(a.incidents[0].phaseLabel)
+  assert.ok(a.journey.steps.filter((s) => s.reason === 'legacy_setup').every((s) => /created before self-serve/.test(s.reasonText)))
+  // Pure readiness: connected but no lookup = configured (not verified); a success = verified.
+  const base = { incidents: [], calendar: { connected: true, lastLookup: null }, booking: { ready: true, reasons: [] }, website: { live: false, hosting: 'active' }, communications: { gate: 'test_only', sent7: 0, failed7: 0, skipped7: 0 }, voice: { status: 'testing', receptionist: false }, billing: { selfServe: false } }
+  assert.equal(accountReadiness(base).find((x) => x.id === 'calendar').state, 'configured')
+  assert.equal(accountReadiness({ ...base, calendar: { connected: true, lastLookup: { outcome: 'success', at: NOW } } }).find((x) => x.id === 'calendar').state, 'verified')
+  assert.equal(accountReadiness(base).find((x) => x.id === 'voice').state, 'not_applicable')
+})
+
+test('incident route: ?id is admin-only, validated, 404 when unknown; overview carries integration states and pending approvals', async () => {
+  await recordEvent(db, { type: 'booking.failed', actor: 'system:booking', customer: 'beta', capability: 'calendar.google', resource: { type: 'business', id: 'beta' }, outcome: 'failure', details: { error: 'calendar_error' }, at: NOW - MIN })
+  await syncIncidents(env, NOW)
+  const [i] = await listIncidents(db, { status: 'open' })
+  const admin = await cookie('founder@getshowups.example')
+  const owner = await cookie('owner@alpha.example')
+  assert.equal((await call(incidentsRoute, 'GET', `/api/platform/incidents?id=${i.id}`)).status, 401)
+  assert.equal((await call(incidentsRoute, 'GET', `/api/platform/incidents?id=${i.id}`, { c: owner })).status, 403)
+  assert.equal((await call(incidentsRoute, 'GET', '/api/platform/incidents?id=../x', { c: admin })).status, 400)
+  assert.equal((await call(incidentsRoute, 'GET', '/api/platform/incidents?id=inc_unknown000', { c: admin })).status, 404)
+  const ok = await call(incidentsRoute, 'GET', `/api/platform/incidents?id=${i.id}`, { c: admin })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.json.incident.customer, 'beta')
+  assert.match(ok.json.incident.next, /Open the account/)
+  const o = (await call(controlRoute, 'GET', '/api/platform/control', { c: admin })).json
+  assert.ok(o.integrations.every((c) => c.state in INTEGRATION_STATES && c.stateLabel && c.tone))
+  assert.ok(o.integrations.every((c) => !/\.js\)/.test(c.description || '')), 'no source file paths in descriptions')
+  assert.ok(Array.isArray(o.approvals))
+  assert.ok(o.businesses.every((b) => Array.isArray(b.labels) && typeof b.affected === 'boolean'))
+  assert.equal(o.businesses.find((b) => b.id === 'beta').affected, true)
 })

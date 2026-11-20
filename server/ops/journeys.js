@@ -22,6 +22,7 @@ export const JOURNEYS = [
   {
     id: 'activation',
     title: 'New owner activation (target ≤ 20 min)',
+    purpose: 'Can a first-time owner go from the website to a live booking page and a confirmed test booking in 20 minutes, without help?',
     audience: 'new',
     timed: true,
     targetMinutes: 20,
@@ -42,6 +43,7 @@ export const JOURNEYS = [
   {
     id: 'booking',
     title: 'Customer books on a business page',
+    purpose: 'Can a customer book a time on a business’s booking page and receive a confirmation?',
     audience: 'public',
     steps: [
       { id: 'page', title: 'Open booking page', action: 'Open the business booking page.', expected: 'Business name and the details form.', feature: 'calendar.google', ask: [q.clarity, q.visual] },
@@ -59,6 +61,7 @@ export const JOURNEYS = [
   {
     id: 'returning-owner',
     title: 'Existing owner signs in and manages bookings',
+    purpose: 'Can an existing owner sign in, find upcoming bookings and record what happened?',
     audience: 'existing',
     steps: [
       { id: 'signin', title: 'Sign in', action: 'Go to getshowups.com → Sign in → Google.', expected: '"Welcome back", then your dashboard.', feature: 'auth.google_signin', ask: [q.clarity] },
@@ -73,6 +76,7 @@ export const JOURNEYS = [
   {
     id: 'invited-user',
     title: 'Invited user joins a business',
+    purpose: 'Can someone invited to a business accept, sign in and connect their calendar?',
     audience: 'invited',
     steps: [
       { id: 'invite', title: 'Open invitation', action: 'Open the invitation link.', expected: 'The business name and who invited you.', feature: 'auth.google_signin', ask: [q.trust] },
@@ -84,6 +88,7 @@ export const JOURNEYS = [
   {
     id: 'calendar-recovery',
     title: 'Calendar connection recovery',
+    purpose: 'When a calendar connection breaks, is the owner told clearly, can they fix it, and does the incident close on evidence?',
     audience: 'recovery',
     steps: [
       { id: 'notice', title: 'Owner is told', action: 'Open the dashboard while the calendar connection is broken.', expected: '"Needs reconnecting" with one clear action.', feature: 'calendar.google', ask: [q.clarity, q.trust] },
@@ -95,6 +100,7 @@ export const JOURNEYS = [
   {
     id: 'admin-console',
     title: 'Platform admin console',
+    purpose: 'Can a GetShowUps admin sign in and find platform health, accounts and incidents (and customers can’t)?',
     audience: 'admin',
     steps: [
       { id: 'signin', title: 'Admin sign-in', action: 'Sign in at /admin.', expected: 'Console; customers never get in.', feature: 'platform.admin', ask: [q.clarity] },
