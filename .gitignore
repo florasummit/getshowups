@@ -40,4 +40,5 @@ client_secret*.json
 # Playwright output
 test-results/
 playwright-report/
+qa-report.json
 blob-report/

@@ -79,12 +79,16 @@ const sameSig = (a, b) => {
 // Signed by the account that owns the number (the business's subaccount; the parent's token is also accepted for
 // that subaccount). Returns { ok, customer } — customer = the business whose subaccount sent it (null = parent), so
 // callers can refuse a webhook that names another business's sender.
+// A refusal carries a reason code: 'unsigned' (no X-Twilio-Signature at all: Twilio always signs, so this was never
+// Twilio — a probe or our own smoke test), 'unknown_account' (AccountSid is neither ours nor an active subaccount),
+// 'bad_signature' (signed, but not with a token we hold for that account / that URL: possible misconfiguration).
 export async function verifyTwilio(env, request, params) {
   const given = request.headers.get('X-Twilio-Signature') || ''
-  if (!env.TWILIO_AUTH_TOKEN || !given) return { ok: false }
+  if (!env.TWILIO_AUTH_TOKEN) return { ok: false, reason: 'not_configured' }
+  if (!given) return { ok: false, reason: 'unsigned' }
   const keys = await signingKeys(env, params.get('AccountSid') || '').catch(() => null)
-  if (!keys) return { ok: false }
+  if (!keys) return { ok: false, reason: 'unknown_account' }
   // Twilio signs the public URL it called (behind Cloudflare: the request URL as received).
   for (const token of keys.tokens) if (sameSig(await twilioSignature(token, request.url, params), given)) return { ok: true, customer: keys.customer }
-  return { ok: false }
+  return { ok: false, reason: 'bad_signature' }
 }

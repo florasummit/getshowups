@@ -5,7 +5,10 @@ import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { founderAlerts, MAX_ALERTS, COOLDOWN_MS } from '../server/alerts.js'
+import { founderAlerts, MAX_ALERTS, COOLDOWN_MS, alertsStatus, sendTestAlert, TEST_COOLDOWN_MS } from '../server/alerts.js'
+import { syncIncidents } from '../server/ops/incidents.js'
+import * as alertsRoute from '../functions/api/platform/alerts.js'
+import { sha256Hex } from '../server/google-oauth.js'
 import { recordAvailability } from '../server/booking.js'
 import { flushOutbox } from '../server/email.js'
 import { recordEvent } from '../server/auditlog.js'
@@ -199,4 +202,80 @@ test('the email carries codes and counts only (no lead name, email or phone); th
   const ev = db.sql.prepare("SELECT action, details FROM audit_log WHERE capability = 'platform.alerts'").all()
   assert.equal(ev.length, 2)
   assert.ok(ev.every((e) => e.action === 'alert.queued' && !/casey|555/i.test(e.details)))
+})
+
+// ---------- delivery status + controlled test send ----------
+const ORIGIN = 'https://getshowups.example'
+async function cookie(email) {
+  const token = email.replace(/[^A-Za-z0-9]/g, 'x').padEnd(43, 'Q').slice(0, 43)
+  db.sql.prepare('INSERT OR IGNORE INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)').run(await sha256Hex(token), email, Date.now(), Date.now() + 86400000)
+  return `__Host-gsu_session=${token}`
+}
+const call = async (method, { c, body, origin = ORIGIN } = {}) => {
+  const headers = { ...(c ? { Cookie: c } : {}), ...(body ? { 'Content-Type': 'application/json', Origin: origin } : {}) }
+  const res = await alertsRoute[method === 'GET' ? 'onRequestGet' : 'onRequestPost']({ request: new Request(`${ORIGIN}/api/platform/alerts`, { method, headers, body: body ? JSON.stringify(body) : undefined }), env })
+  return { status: res.status, json: await res.json() }
+}
+
+test('status: switch, deliverable admin count (never addresses), last alert; works with alerts off', async () => {
+  env.FOUNDER_ALERTS_ENABLED = undefined
+  const s = await alertsStatus(env)
+  assert.deepEqual(s, { enabled: false, emailConfigured: true, admins: 2, deliverable: 1, held: 1, last: null })
+  assert.doesNotMatch(JSON.stringify(s), /@/)
+})
+
+test('test send: refused while alerts are off / no deliverable admin / within 10 min; otherwise one labelled email per deliverable admin, sent at once; no incident, no business', async () => {
+  env.FOUNDER_ALERTS_ENABLED = 'false'
+  assert.deepEqual(await sendTestAlert(env, NOW), { ok: false, error: 'alerts_disabled' })
+  env.FOUNDER_ALERTS_ENABLED = 'true'
+  env.MESSAGE_TEST_RECIPIENTS = 'someone-else@example.net'
+  assert.deepEqual(await sendTestAlert(env, NOW), { ok: false, error: 'no_recipient' })
+  env.MESSAGE_TEST_RECIPIENTS = 'founder@getshowups.example'
+  assert.equal(outbox().length, 0, 'refusals queue nothing')
+  const r = await sendTestAlert(env, NOW)
+  assert.deepEqual(r, { ok: true, recipients: 1, sent: 1, notSent: 0, errors: [] })
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0].body.to, ['founder@getshowups.example'])
+  assert.match(sent[0].body.subject, /^GetShowUps alert: TEST/)
+  assert.match(sent[0].body.text, /No incident is open because of this email/)
+  const [row] = outbox()
+  assert.equal(row.status, 'sent')
+  assert.equal(row.customer, null)
+  assert.deepEqual(await sendTestAlert(env, NOW + 5 * MIN), { ok: false, error: 'too_soon' })
+  assert.equal((await sendTestAlert(env, NOW + TEST_COOLDOWN_MS + MIN)).sent, 1)
+  // The test is recorded under platform.alerts, which the incident register ignores; the cron never re-sends it.
+  await syncIncidents(env, NOW + 20 * MIN)
+  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ops_incidents').get().n, 0)
+  await flushOutbox(env, NOW + 20 * MIN)
+  assert.equal(sent.length, 2)
+  // A provider failure is reported as not sent, with its code.
+  globalThis.fetch = async () => new Response('{}', { status: 500 })
+  const failed = await sendTestAlert(env, NOW + 2 * TEST_COOLDOWN_MS + 2 * MIN)
+  assert.equal(failed.ok, false)
+  assert.equal(failed.notSent, 1)
+  assert.equal(failed.errors.length, 1)
+})
+
+test('route: admin only (401/403), same-origin, confirm required, 409 codes, audited; GET is read-only', async () => {
+  Object.assign(env, { GOOGLE_TOKENS: { list: async () => ({ keys: [], list_complete: true }), get: async () => null }, GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 's', GOOGLE_REDIRECT_URI: `${ORIGIN}/x`, TOKEN_ENCRYPTION_KEY: btoa('k'.repeat(32)), ADMIN_API_TOKEN: 'a'.repeat(40) })
+  db.sql.prepare("INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@alpha.example', 'alpha', 1)").run()
+  assert.equal((await call('GET')).status, 401)
+  const owner = await cookie('owner@alpha.example')
+  assert.equal((await call('GET', { c: owner })).status, 403)
+  const admin = await cookie('founder@getshowups.example')
+  const g = await call('GET', { c: admin })
+  assert.equal(g.status, 200)
+  assert.equal(g.json.deliverable, 1)
+  assert.equal((await call('POST', { c: admin, body: { action: 'test', confirm: true }, origin: 'https://evil.example' })).status, 403)
+  assert.equal((await call('POST', { c: admin, body: { action: 'test' } })).status, 400)
+  assert.equal((await call('POST', { c: admin, body: { action: 'other', confirm: true } })).status, 400)
+  env.FOUNDER_ALERTS_ENABLED = undefined
+  assert.deepEqual(await call('POST', { c: admin, body: { action: 'test', confirm: true } }), { status: 409, json: { error: 'alerts_disabled' } })
+  env.FOUNDER_ALERTS_ENABLED = 'true'
+  const ok = await call('POST', { c: admin, body: { action: 'test', confirm: true } })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.json.sent, 1)
+  assert.doesNotMatch(JSON.stringify(ok.json), /@/)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM admin_audit WHERE action = 'alerts.test_sent'").get().n, 1)
+  assert.equal((await call('POST', { c: admin, body: { action: 'test', confirm: true } })).json.error, 'too_soon')
 })

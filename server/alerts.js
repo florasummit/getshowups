@@ -10,7 +10,7 @@
 // keys); no migration. Deduplicated by outbox id (one email per incident or per business per day). At most
 // MAX_ALERTS new alerts per run; the rest are counted in one digest. Content: business id + name, kind, error codes,
 // counts and times; never lead/customer names, emails, phones, addresses or event details.
-import { enqueue, recipientAllowed } from './email.js'
+import { emailConfigured, enqueue, flushOutbox, recipientAllowed } from './email.js'
 import { adminEmails } from './platform.js'
 import { recordEvent } from './auditlog.js'
 import { siteOrigin } from './auth.js'
@@ -211,4 +211,55 @@ export async function founderAlerts(env, now = Date.now()) {
     console.error('founder alerts failed:', err?.name)
     return { enabled: true, error: 'failed' }
   }
+}
+
+// ---------- Delivery status + controlled test (Control Center) ----------
+// Status: the switch, how many admins the launch gate delivers to NOW (counts only, never addresses), last alert.
+export async function alertsStatus(env) {
+  const admins = adminEmails(env)
+  const deliverable = admins.filter((e) => recipientAllowed(env, e)).length
+  let last = null
+  try {
+    last = await env.ONBOARDING_DB.prepare("SELECT created_at AS at, status, error FROM email_outbox WHERE id >= 'alert:' AND id < 'alert;' ORDER BY created_at DESC LIMIT 1").first()
+  } catch {
+    last = null
+  }
+  return { enabled: alertsEnabled(env), emailConfigured: emailConfigured(env), admins: admins.length, deliverable, held: admins.length - deliverable, last: last ? { at: last.at, status: last.status, error: last.error || null } : null }
+}
+
+export const TEST_COOLDOWN_MS = 10 * MIN
+const TEST_PREFIX = 'alert:test:'
+// One clearly labelled test email to every deliverable admin, through the same outbox, gate and provider as a real
+// alert, sent at once (not on the next cron). Only while FOUNDER_ALERTS_ENABLED is on, so it tests the real switch.
+// Creates no incident and touches no business. At most one per 10 minutes. Returns counts and error codes only.
+export async function sendTestAlert(env, now = Date.now()) {
+  if (!alertsEnabled(env)) return { ok: false, error: 'alerts_disabled' }
+  if (!emailConfigured(env)) return { ok: false, error: 'email_not_configured' }
+  const db = env.ONBOARDING_DB
+  const to = adminEmails(env).filter((e) => recipientAllowed(env, e))
+  if (!to.length) return { ok: false, error: 'no_recipient' }
+  const recent = await db.prepare('SELECT 1 FROM email_outbox WHERE id >= ?1 AND id < ?1 || \'~\' AND created_at >= ?2 LIMIT 1').bind(TEST_PREFIX, now - TEST_COOLDOWN_MS).first()
+  if (recent) return { ok: false, error: 'too_soon' }
+  const minute = Math.floor(now / MIN)
+  const subject = 'GetShowUps alert: TEST (no action needed)'
+  const body = [
+    'This is a test of GetShowUps founder alerts, sent from the Control Center by a platform admin.',
+    'No incident is open because of this email and no business is affected.',
+    '',
+    `Sent at: ${iso(now)}`,
+    `Control Center: ${siteOrigin(env)}/admin/control`,
+    '',
+    'Real alerts use the same sender and subject prefix ("GetShowUps alert:").',
+  ].join('\n')
+  const ids = []
+  for (const email of to) {
+    const id = `${TEST_PREFIX}${minute}:${await recipientRef(email)}`
+    if (await enqueue(env, { id, to: email, template: 'founder_alert', subject, body }, now)) ids.push(id)
+  }
+  await flushOutbox(env, now, ids.length || 1, { idPrefix: TEST_PREFIX })
+  const rows = ids.length ? (await db.prepare(`SELECT status, error FROM email_outbox WHERE id IN (${ids.map((_, i) => `?${i + 1}`).join(', ')})`).bind(...ids).all()).results : []
+  const sent = rows.filter((r) => r.status === 'sent').length
+  const errors = [...new Set(rows.filter((r) => r.status !== 'sent').map((r) => r.error || r.status))]
+  await recordEvent(db, { type: 'alert.test', actor: 'system:alerts', capability: 'platform.alerts', resource: { type: 'alert', id: 'test' }, outcome: sent === ids.length && sent > 0 ? 'success' : 'failure', details: { recipients: ids.length, sent }, at: now })
+  return { ok: sent > 0, recipients: ids.length, sent, notSent: ids.length - sent, errors }
 }

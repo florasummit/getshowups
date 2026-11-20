@@ -16,7 +16,10 @@ export async function onRequestPost({ request, env, waitUntil }) {
   const params = new URLSearchParams(await request.text())
   const v = await verifyTwilio(env, request, params)
   if (!v.ok) {
-    await recordEvent(env.ONBOARDING_DB, { type: 'sms.webhook_rejected', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'webhook', id: 'inbound' }, outcome: 'failure', details: { reason: 'bad_signature' } })
+    // Unsigned = never from Twilio (probe / our own smoke test): recorded for visibility, not as a service failure, so
+    // it never opens an incident. A signed request we can't verify may be a misconfigured number: that is a failure.
+    const unsigned = v.reason === 'unsigned'
+    await recordEvent(env.ONBOARDING_DB, { type: 'sms.webhook_rejected', actor: 'system:twilio', capability: 'followups.sms_inbound', resource: { type: 'webhook', id: 'inbound' }, outcome: unsigned ? 'info' : 'failure', details: { reason: v.reason || 'bad_signature' } })
     return new Response('Forbidden', { status: 403 })
   }
   const r = await handleInbound(env, { from: params.get('From'), to: params.get('To'), body: params.get('Body') || '', providerId: params.get('MessageSid'), messagingService: params.get('MessagingServiceSid'), optOutType: params.get('OptOutType'),

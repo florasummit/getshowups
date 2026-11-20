@@ -165,7 +165,8 @@ async function inbound(fields, { sign = true, path = '/api/sms/twilio/inbound', 
   const biz = accountOfSender(fields.To) || accountOfSender(fields.From) || 'alpha'
   const params = new URLSearchParams({ AccountSid: SUB[biz], ...fields })
   const sig = sign ? await twilioSignature(token || SUB_TOKEN[biz], ORIGIN + path, params) : 'bad'
-  return call(path.includes('status') ? statusApi : inboundApi, 'POST', path, { raw: params.toString(), headers: { 'X-Twilio-Signature': sig, 'Content-Type': 'application/x-www-form-urlencoded' } })
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded', ...(sign === null ? {} : { 'X-Twilio-Signature': sig }) }
+  return call(path.includes('status') ? statusApi : inboundApi, 'POST', path, { raw: params.toString(), headers })
 }
 const text = (from, body, sid, to = SENDER.alpha) => inbound({ From: from, To: to, Body: body, MessageSid: sid })
 
@@ -529,6 +530,11 @@ test('webhooks: unsigned or wrongly signed requests are refused and record nothi
   const l = await smsConsentLead()
   const bad = await inbound({ From: PHONE, To: SENDER.alpha, Body: 'hi', MessageSid: 'SMx' }, { sign: false })
   assert.equal(bad.status, 403)
+  assert.equal(threadMsgs(l).length, 0)
+  // Unsigned (no header: never Twilio, e.g. a smoke test) is recorded as info; a wrong signature is a failure.
+  assert.equal((await inbound({ From: PHONE, To: SENDER.alpha, Body: 'hi', MessageSid: 'SMy' }, { sign: null })).status, 403)
+  const rejected = db.sql.prepare("SELECT outcome, json_extract(details, '$.reason') AS reason FROM audit_log WHERE action = 'sms.webhook_rejected' ORDER BY seq").all()
+  assert.deepEqual(rejected.map((r) => [r.outcome, r.reason]), [['failure', 'bad_signature'], ['info', 'unsigned']])
   assert.equal(threadMsgs(l).length, 0)
   await text(PHONE, 'HELP', 'SMd1')
   const sent = threadMsgs(l).find((m) => m.direction === 'out')

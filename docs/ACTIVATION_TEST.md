@@ -2,7 +2,7 @@
 
 Primary acceptance criterion (docs/LAUNCH_READINESS.md §2a): a nontechnical owner who has never seen GetShowUps goes
 from "Get started" to a **published website and a confirmed test booking on their own Google Calendar in ≤ 20 min**,
-unassisted, on their own device. Status: **prepared, not run.** Run it after the #80–#82 release.
+unassisted, on their own device. Status: **prepared, not run.** Exact approvals before it can run: docs/OPERATIONAL_ACTIVATION.md §4 (A1–A5, incl. the Google consent-screen check).
 
 ## Before the session (approvals marked ⚠)
 

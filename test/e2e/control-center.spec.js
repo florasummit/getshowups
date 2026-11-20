@@ -140,6 +140,11 @@ test('Control Center: phone width has no sideways scroll; customers and signed-o
   // No real-person activation run exists: the dashboard says so (never derived from automated tests).
   await expect(page.locator('[data-overview-activation]')).toHaveAttribute('data-overview-activation', 'not-measured')
   await expect(page.locator('[data-overview-activation]')).toContainText('not measured yet')
+  // Founder alerts are off (as in production): status shown, no test button.
+  const alerts = page.locator('[data-alerts]')
+  await expect(alerts).toHaveAttribute('data-alerts', 'off')
+  await expect(alerts).toContainText(/^Founder alerts\s*Off · \d+ of \d+ admins? would receive alerts now/)
+  await expect(alerts.getByRole('button', { name: 'Send test alert' })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   await page.getByRole('button', { name: 'Open Control Demo Pools' }).click()
   await expect(page.getByRole('heading', { name: /Journey:/ })).toBeVisible()
