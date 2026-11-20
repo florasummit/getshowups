@@ -14,7 +14,12 @@ _Update at the end of every task. Newest first._
   use), AI_RULES_ENABLED=false (kill switch). Before 0033 the tab is hidden and the API answers 404.
 - Tests: 19 unit/integration (incl. mocked Retell socket), 51-scenario evaluation (51/51), 4 Playwright flows
   (desktop + phone); existing receptionist/eval/deletion/review suites unchanged and passing.
-- Next: approve migration 0033 → pilot with poolthru-llc per docs/INTELLIGENCE_STUDIO.md §7.
+- Released 2026-11-20 (founder approval, steps 1–3 of the sequence): backup prod-20261120T223537Z-pre-pr92.sql
+  (verified: integrity ok, fk 0, 76 tables = production); migration 0033 applied (78 tables, 0 rows, fk 0, existing
+  counts unchanged); PR #92 merged as 95e0a50 (deployment 47d786dc); AI_STUDIO_BUSINESSES=poolthru-llc set (this
+  commit redeploys to apply it). AI_RULES_LIVE_BUSINESSES is NOT set: published rules reach no conversation.
+  Rollback: deployment cbaf53de (6b34c5a); remove the secret to hide the Studio; tables stay.
+- Next: founder reviews PoolThru's first published version → decide on AI_RULES_LIVE_BUSINESSES (approval).
 
 ## Homepage conversion experience (2026-11-20) — feat/homepage-2027, PR #90 (frontend only; no migration)
 
