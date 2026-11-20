@@ -2,7 +2,7 @@
 
 _Update at the end of every task. Newest first._
 
-## Homepage conversion experience (2026-11-20) — feat/homepage-2027 (frontend only; draft, nothing deployed)
+## Homepage conversion experience (2026-11-20) — feat/homepage-2027, PR #90 (frontend only; no migration)
 
 - Hero: "More booked jobs. Less chasing.", $499/month + ad spend separate visible, Request early access (enrollment
   closed → #book-demo, the existing Google Calendar appointment embed) + See it work (→ #demo), "Try the demo as a"
@@ -14,7 +14,10 @@ _Update at the end of every task. Newest first._
 - How it works: six steps kept, each labelled Live today / Partly live. Features grid removed (covered by steps + plan).
 - Funnel events (src/lib/analytics.js) are in-page only: there is no browser analytics endpoint. Sending them needs
   approval (public rate-limited POST into the existing events table, allowlisted names, no personal data).
-- Next: founder visual/functional review of the preview; approve merge (= production deploy of the marketing page).
+- Built 2026-11-20 but left as a draft, so production kept the old homepage. Founder then asked for it to be finished
+  and released under the release gates: merged with main (b9db2ce), verify 682/682, Playwright 184 passed / 1 skipped,
+  before/after screenshots at 1440 and 390 px reviewed. Rollback: Pages → previous deployment (no data involved).
+- Next: funnel analytics endpoint (approval); real product screenshots once a non-customer demo business exists.
 
 ## Editing during deploys (2026-11-20) — fix/deploy-safety (no migration; nothing deployed)
 
