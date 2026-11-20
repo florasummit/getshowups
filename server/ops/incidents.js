@@ -15,6 +15,8 @@ import { randomToken } from '../google-oauth.js'
 import { statusIn, testStatuses } from '../testbusiness.js'
 import './catalog.js' // capability journeys (cycle-safe: only read inside functions)
 import { listCapabilities } from './registry.js'
+import { featureLabel, incidentNext, incidentTitle } from './explain.js'
+import { withPhase } from './states.js'
 
 const DAY = 86400000
 export const RETENTION_MS = 365 * DAY
@@ -234,9 +236,12 @@ export function present(row) {
   try {
     evidence = JSON.parse(row.evidence || '{}')
   } catch {}
+  const featureName = listCapabilities().find((c) => c.id === row.feature)?.name || featureLabel(row.feature)
+  const base = { customer: row.customer, kind: row.kind, step: row.step, feature: row.feature }
   return {
     id: row.id, fingerprint: row.fingerprint, customer: row.customer, feature: row.feature, journey: row.journey, step: row.step, kind: row.kind,
-    code: row.code, severity: row.severity, cause: row.cause, causeNote, impact: rule.impact, recovery: rule.recovery, status: row.status,
+    title: incidentTitle(base, featureName), featureName, scope: row.customer ? 'account' : 'platform', next: incidentNext(base, rule.recovery),
+    code: row.code, severity: row.severity, cause: row.cause, causeNote, impact: row.customer || row.kind !== 'failure' ? rule.impact : 'A platform operation failed and has not succeeded since. No single business is linked to it.', recovery: rule.recovery, status: row.status,
     test: Boolean(row.is_test), evidence, occurrences: row.occurrences, firstSeen: row.first_seen, lastSeen: row.last_seen,
     detectedAt: row.detected_at, resolvedAt: row.resolved_at, resolution: row.resolution,
   }
@@ -249,4 +254,39 @@ export async function listIncidents(db, { customer = null, status = null, limit 
     .bind(customer, status, Math.min(Math.max(Number(limit) || 50, 1), 200))
     .all()
   return results.map(present)
+}
+
+// One incident for the investigation view (admin only; read-only). Adds: the incident's own history (opened /
+// resolved events), the underlying failure events it points at (time, action, outcome, reason code only), and the
+// latest success for the same feature + business (recovery evidence). Bounded; never contact data or free text.
+const CODE_KEYS = ['reason', 'error', 'code', 'status']
+const codeOf = (details) => {
+  try {
+    const d = JSON.parse(details || '{}')
+    for (const k of CODE_KEYS) if (typeof d[k] === 'string') return d[k].replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 40)
+  } catch {}
+  return null
+}
+export async function incidentDetail(db, id) {
+  if (!(await registerReady(db))) return null
+  const row = await db.prepare('SELECT * FROM ops_incidents WHERE id = ?1').bind(String(id)).first()
+  if (!row) return null
+  const inc = present(row)
+  const { results: history } = await db
+    .prepare("SELECT at, action, outcome, details FROM audit_log WHERE resource_type = 'incident' AND resource_id = ?1 ORDER BY seq LIMIT 20")
+    .bind(inc.id)
+    .all()
+  const seqs = (Array.isArray(inc.evidence?.events) ? inc.evidence.events : []).filter(Number.isInteger).slice(-10)
+  const events = seqs.length
+    ? (await db.prepare(`SELECT seq, at, action, outcome, details FROM audit_log WHERE seq IN (${seqs.map((_, k) => `?${k + 1}`).join(', ')}) ORDER BY seq`).bind(...seqs).all()).results
+    : []
+  const lastSuccess = inc.feature
+    ? await db.prepare("SELECT at, action FROM audit_log WHERE capability = ?1 AND customer IS ?2 AND outcome = 'success' ORDER BY seq DESC LIMIT 1").bind(inc.feature, inc.customer).first()
+    : null
+  return {
+    incident: withPhase(inc),
+    history: history.map((h) => ({ at: h.at, action: h.action, outcome: h.outcome, resolution: (() => { try { return JSON.parse(h.details || '{}').resolution || null } catch { return null } })() })),
+    events: events.map((e) => ({ seq: e.seq, at: e.at, action: e.action, outcome: e.outcome, code: codeOf(e.details) })),
+    lastSuccess: lastSuccess ? { at: lastSuccess.at, action: lastSuccess.action } : null,
+  }
 }
