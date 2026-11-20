@@ -622,7 +622,7 @@ function WebsiteStep({ onDone, back }) {
       />
       <details className="more">
         <summary>Edit text and photos</summary>
-        <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
+        <WebsiteEditor key={editorKey} initial={w.draft} baseUpdatedAt={w.updatedAt} colors={data.options.colors} designOptions={data.options} compact onEdit={(c) => (latest.current = c)} onSaved={() => setStamp((n) => n + 1)} />
       </details>
       <details className="more">
         <summary>Start over with three new designs</summary>

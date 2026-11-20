@@ -103,7 +103,9 @@ beforeEach(() => {
     TOKEN_ENCRYPTION_KEY: KEY,
     ADMIN_API_TOKEN: 'a'.repeat(40),
     ONBOARDING_DB: db,
-    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), list: async () => ({ keys: [], list_complete: true }) },
+    GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => kv.set(k, v), // list() returns what is stored: the hourly disconnected-calendar check (alerts.js kvCheckDue, minutes 00–04 of
+    // each hour) must see the seeded calendars, or this file's cron counts depend on the time of day.
+    list: async ({ prefix = '' } = {}) => ({ keys: [...kv.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) },
   }
   resend = () => [200, { id: 'email_1' }]
   googleDelete = () => [200, {}]

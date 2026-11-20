@@ -13,6 +13,7 @@ import { inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { brandName, generateContent, logoAssetIdsFor, photoIds, validateContent, LIMITS } from './website.js'
 import { approvedClaimsFor } from './landing.js'
 import { unapprovedClaims } from './ads/spec.js'
+import { inventedNumbers } from './fact-numbers.js'
 import { FONTS, LAYOUTS, PALETTES, SECTIONS, SHAPES, directionFor, diversify, industryKey, presetDesigns, stockFor, validateDesign } from './site-design.js'
 
 export const WEBSITE_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct'
@@ -134,11 +135,9 @@ export const reviseMessages = (facts, current, instruction, images = []) => [
   { role: 'user', content: `Facts (JSON):\n${JSON.stringify(facts)}\n\nAvailable images: ${JSON.stringify(images)}\n\nCurrent website (JSON):\n${JSON.stringify(current)}\n\nOwner's request: ${JSON.stringify(instruction)}\n\nReturn the full revised copy and one design.` },
 ]
 
-// Every number in generated text must appear in the facts (blocks invented years, ratings, prices).
-export function inventedNumbers(text, factsText) {
-  const nums = (String(text).match(/\d[\d,.]*/g) || []).map((n) => n.replace(/[.,]+$/, ''))
-  return nums.filter((n) => !factsText.includes(n))
-}
+// Every number in generated text must be a number in the facts (blocks invented years, ratings, prices): see
+// server/fact-numbers.js (whole numbers, never digit substrings of a phone or ZIP).
+export { inventedNumbers }
 
 // Merges model output into the template content. Field by field: any text that is too long, makes an
 // unapproved claim or invents a number is replaced by the template's own text.

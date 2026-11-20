@@ -136,7 +136,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      mode removes all of it. Sections may be `hidden` (not rendered publicly; the
                      first screen cannot be); contact `form` none|contact|quote posts to /api/site-form/<id>
                      (server/site-form.js: signed render time + trap field + rate limits → createLead, the existing
-                     leads table); saves carry baseUpdatedAt (409 conflict, never a silent overwrite); live preview =
+                     leads table); saves AND publishes carry baseUpdatedAt (409 conflict, never a silent overwrite; the classic
+                     WebsiteEditor too); a version restore checkpoints the draft first (before_version_restore); live preview =
                      POST /api/dashboard/website/preview (validated, nothing stored). Owners may have 10 pages (AI: 5).
   ai-designer.js     Conversational designer on the owner's own key: one turn → { reply, site } → validateSpec →
                      design-checks.js (hard: unusable → error ai_design_incomplete, nothing saved; soft: generic first
@@ -393,6 +394,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   each have their own starter look (fonts, radius, buttons); professional + wellness have no licensed photos yet → text-led.
   App headers (functions/_middleware.js withAppHeaders): /dashboard and /admin are never frameable (X-Frame-Options DENY +
   frame-ancestors 'none'); HSTS on our host; WebSocket upgrades pass through untouched.
+- Lazy app chunks use lazyPage() (src/lib/lazy.js): a page open across a deploy reloads once instead of going blank.
+- Invented numbers: server/fact-numbers.js is the one check (whole numbers, never digit substrings of a phone/ZIP).
 - AI website copy: the model writes prose only; names, services, prices, area and phone always come from records.
   Every field passes the claims filter and the invented-number check, otherwise the template text is used. A
   generation never changes the draft or live site (apply → private draft; publish → live). Previews, design

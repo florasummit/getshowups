@@ -1,6 +1,7 @@
 // Dashboard after setup. Four places: Overview (is it working, what needs me), Appointments,
 // Website, Settings. Nothing technical; billing appears only when billing needs attention.
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
+import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
 import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
@@ -9,11 +10,11 @@ import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
 import { Pill } from './ui.jsx'
 
-const Ads = lazy(() => import('./Ads.jsx'))
-const GhlSettings = lazy(() => import('./GhlSettings.jsx'))
-const WebsiteTab = lazy(() => import('./WebsiteTab.jsx'))
-const FollowUps = lazy(() => import('./FollowUps.jsx'))
-const Receptionist = lazy(() => import('./Receptionist.jsx'))
+const Ads = lazyPage(() => import('./Ads.jsx'))
+const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
+const WebsiteTab = lazyPage(() => import('./WebsiteTab.jsx'))
+const FollowUps = lazyPage(() => import('./FollowUps.jsx'))
+const Receptionist = lazyPage(() => import('./Receptionist.jsx'))
 
 export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
   const signOut = async () => {
