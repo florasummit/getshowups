@@ -29,6 +29,28 @@ _Update at the end of every task. Newest first._
 - Runbook + numbered approval checklist: docs/OPERATIONAL_ACTIVATION.md (alerts test, Twilio findings, activation-run
   approvals A1–A5). Next: owner works through the checklist.
 
+## Release 2026-11-19/20: QA Control Center (#83 → #85 → #86, migrations 0031 + 0032) — owner-approved
+
+- Pre-checks passed: PR heads + CI green; 0031/0032 additive (CREATE … IF NOT EXISTS only); the expected incident
+  traced to a real record; FOUNDER_ALERTS_ENABLED and QA_INGEST_TOKEN absent; rollback target c378384e (main 0be8bf2).
+- Fix found by the pre-checks and made before merging (check 5): the incident sync ran before the outbox flush and
+  the ads safety stop. It now runs last (QA retention too), ≤150 open / ≤50 new incidents per run (+ test). New heads
+  #85 936426c, #86 0053501; merged trees identical to the CI-tested heads.
+- Backup ~/getshowups-backups/prod-20261119T233412Z-pre-pr83.sql (sha256 d9c5d721…): restored, integrity ok, 72
+  tables / 676 rows = production. Migrations 0031 → 0032 applied: 4 tables + 7 indexes, empty.
+- Deploys: #83 → 8dcd23b / 3c6bd755; #85 → 20ac738 / bf349d53; #86 → 005d162 / **b3522b5f** (live).
+- Verified after each deploy (read-only): PoolThru ×5, bob-electrical, toys-for-us HTML byte-identical to the
+  pre-release capture; enrollment {"open":false}; voice available for poolthru-llc + bob-electrical only;
+  /api/platform/{control,incidents,inspector,qa} 401 signed out; /api/qa/runs 503 not_configured; cron 200, no
+  errors in a full tail; no alert outbox rows; no new outbox mail.
+- Incident register: one open incident, inc_SCQKj1CNys20 (followups.sms_inbound, sms.webhook_rejected,
+  bad_signature, medium). **Cause confirmed: our own deliberate unsigned POST** in the PR #55 post-release smoke test
+  (2026-11-17 01:42:30 UTC, check "twilio inbound unsigned (403)", 43 s after the first build with Twilio
+  credentials). The webhook rejected it correctly. Not from Twilio; no business has a Twilio subaccount or sender;
+  no inbound text ever existed; no customer impact. Incidents have no manual close (by design): it resolves itself as
+  "no new failures" after the 14-day window (~2026-12-01). Follow-up: unsigned requests should not count as failures.
+- Not activated (separate approvals): founder alert delivery, QA ingestion token + CI job, real-person activation run.
+
 ## Control Center B2: QA history + guided human QA (2026-11-19) — feat/control-center-qa (stacked on B1, migration 0032)
 
 - Automated run ingest (POST /api/qa/runs, QA_INGEST_TOKEN, off when unset; scripts/qa-report.mjs from Playwright
