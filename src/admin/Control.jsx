@@ -177,6 +177,7 @@ function Overview({ o, onOpen, onQa }) {
           </button>
         )}
       </section>
+      <FounderAlerts />
       {o.incidents.recentlyResolved.length > 0 && (
         <section className="card" aria-labelledby="cc-res">
           <h2 id="cc-res" className="card-title">Recently resolved</h2>
@@ -188,6 +189,74 @@ function Overview({ o, onOpen, onQa }) {
         </section>
       )}
     </div>
+  )
+}
+
+// Founder alert delivery: the switch, how many admins would receive mail now (counts only), and a controlled test
+// email through the real outbox + launch gate + provider (only while alerts are on; confirmed; rate-limited).
+const TEST_REFUSED = {
+  alerts_disabled: 'Founder alerts are off (FOUNDER_ALERTS_ENABLED).',
+  no_recipient: 'No platform admin is on the test-recipient list, so nothing can be delivered.',
+  email_not_configured: 'Email delivery is not configured.',
+  too_soon: 'A test was sent in the last 10 minutes.',
+}
+function FounderAlerts() {
+  const [s, setS] = useState(null)
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  useEffect(() => {
+    let live = true
+    api('/api/platform/alerts').then(({ status, data }) => live && setS(status === 200 ? data : { error: data.error || 'failed' }))
+    return () => {
+      live = false
+    }
+  }, [result])
+  const send = async () => {
+    setBusy(true)
+    const { status, data } = await api('/api/platform/alerts', { method: 'POST', body: { action: 'test', confirm: true } })
+    setBusy(false)
+    setConfirming(false)
+    setResult(status === 200 ? { ...data, code: data.ok ? 'sent' : 'not_sent' } : { code: data.error || 'failed' })
+  }
+  return (
+    <section className="card" aria-labelledby="cc-alerts" data-alerts={s?.enabled ? 'on' : 'off'}>
+      <h2 id="cc-alerts" className="card-title">Founder alerts</h2>
+      {!s ? (
+        <p aria-busy="true">Loading…</p>
+      ) : s.error ? (
+        <p className="fine">Alert status isn’t available ({s.error}).</p>
+      ) : (
+        <>
+          <p className="fine">
+            {s.enabled ? 'On' : 'Off'} · {s.deliverable} of {s.admins} admin{s.admins === 1 ? '' : 's'} would receive alerts now
+            {s.held ? ` (${s.held} not on the test-recipient list)` : ''}
+            {s.last ? ` · last alert ${when(s.last.at)} (${s.last.status}${s.last.error ? `: ${s.last.error}` : ''})` : ' · no alert sent yet'}
+          </p>
+          {s.enabled && !confirming && (
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirming(true)} disabled={busy}>
+              Send test alert
+            </button>
+          )}
+          {confirming && (
+            <p className="fine">
+              Send one test email to {s.deliverable} admin{s.deliverable === 1 ? '' : 's'} now?{' '}
+              <button type="button" className="btn btn-primary" onClick={send} disabled={busy}>
+                {busy ? 'Sending…' : 'Send test email'}
+              </button>{' '}
+              <button type="button" className="link-btn" onClick={() => setConfirming(false)} disabled={busy}>
+                Cancel
+              </button>
+            </p>
+          )}
+        </>
+      )}
+      <p className="fine" role="status" aria-live="polite" data-alert-test={result?.code || ''}>
+        {result?.code === 'sent' && `Test sent to ${result.sent} admin${result.sent === 1 ? '' : 's'}${result.notSent ? `; ${result.notSent} not sent (${result.errors.join(', ')})` : ''}.`}
+        {result?.code === 'not_sent' && `Not delivered (${result.errors.join(', ') || 'unknown'}).`}
+        {result && !['sent', 'not_sent'].includes(result.code) && (TEST_REFUSED[result.code] || `Couldn’t send (${result.code}).`)}
+      </p>
+    </section>
   )
 }
 

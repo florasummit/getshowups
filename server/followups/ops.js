@@ -28,7 +28,7 @@ export async function followupOps(env, now = Date.now()) {
     ).all(),
     q("SELECT count(*) AS n FROM thread_messages WHERE status = 'sending' AND updated_at < ?1", now - 10 * 60_000).first(),
     q("SELECT count(*) AS n FROM lead_threads WHERE next_action IN ('reply', 'replying') AND next_action_at < ?1", now - 15 * 60_000).first(),
-    q("SELECT count(*) AS n FROM audit_log WHERE action IN ('sms.webhook_rejected', 'sms.inbound_unrouted') AND at > ?1", day).first(),
+    q("SELECT count(*) AS n FROM audit_log WHERE action IN ('sms.webhook_rejected', 'sms.inbound_unrouted') AND outcome = 'failure' AND at > ?1", day).first(),
     q("SELECT action, count(*) AS n FROM audit_log WHERE action IN ('followups.send_failed', 'followups.delivery_failed', 'followups.ai_fallback', 'sms.opt_out', 'sms.inbound_spike', 'followups.handoff') AND at > ?1 GROUP BY action", day).all(),
     q("SELECT customer, count(*) AS n FROM thread_messages WHERE direction = 'out' AND created_at > ?1 GROUP BY customer HAVING n > ?2", now - HOUR, SPIKE_PER_HOUR).all(),
     q('SELECT r.customer, c.name, r.status, r.status_at, r.approved_at IS NOT NULL AS owner_approved, (r.messaging_service IS NOT NULL OR r.sender_phone IS NOT NULL) AS has_sender FROM sms_registrations r JOIN customers c ON c.id = r.customer ORDER BY r.updated_at DESC LIMIT 200').all(),

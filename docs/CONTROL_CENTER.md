@@ -30,6 +30,23 @@ product already writes; it never changes a customer's account.
   test list means every new incident is tagged test.
 - **Audit trail:** each open and resolve writes an `incident.opened` / `incident.resolved` event (capability
   `platform.incidents`).
+- **Only real failures count.** An event becomes an incident only with outcome `failure`.
+  - A request that was never from the provider is recorded as `info` and opens nothing. Example: a Twilio webhook
+    with no `X-Twilio-Signature`, i.e. a probe or our own smoke test.
+  - A signed request we can't verify (`bad_signature`, `unknown_account`) stays a failure: it may be a misconfigured
+    number.
+  - Incidents have no manual close. The first one (inc_SCQKj1CNys20, our own smoke test) resolves as "no new
+    failures" after the 14-day window.
+
+## Founder alerts panel (Overview; GET/POST /api/platform/alerts)
+
+- **Status:** shows the switch and how many admins the launch gate would deliver to now (counts only, never
+  addresses), plus the last alert email and its status.
+- **Send test alert:** shown only while `FOUNDER_ALERTS_ENABLED` is on, after an inline confirm.
+  - Sends one email labelled TEST to each deliverable admin, at once, through the real outbox, gate and Resend.
+  - Creates no incident and touches no business.
+  - At most one per 10 minutes, and 3 per hour per admin. Audited as `alerts.test_sent`.
+- **Not delivered:** the panel shows the provider's error code. The runbook is in docs/OPERATIONAL_ACTIVATION.md.
 
 ## Account Inspector + Journey Inspector (server/ops/inspector.js, GET/POST /api/platform/inspector)
 
@@ -68,7 +85,7 @@ product already writes; it never changes a customer's account.
 | Item | Estimate |
 | --- | --- |
 | `ops_incidents` row | ~0.5–1 KB. At 100 incidents/month that is under 1.2 MB/year; resolved rows are purged after 365 days |
-| Cron step | ~6 + 2×(open incidents) D1 queries per run, bounded by LIMIT 500 per query. The KV list runs once an hour (reused by alerts). Well under D1's ~1,000 queries/request at 1,000 businesses |
+| Cron step | Runs LAST in the cron. ~6 + 2×(open incidents) D1 queries per run; at most 150 open and 50 new incidents handled per run (the rest next run). The KV list runs once an hour (reused by alerts). Well under D1’s ~1,000 queries/request |
 | Overview page | Same cost as Business Review (capability checks + customer rows), on demand only |
 | Inspector | ~15 queries per account view; diagnosis = 1 token refresh + 1 freeBusy call, rate-limited |
 | New services, AI agents, vendors | None |

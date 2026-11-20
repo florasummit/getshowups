@@ -2,6 +2,20 @@
 
 _Update at the end of every task. Newest first._
 
+## Operational activation prep (2026-11-20) — feat/ops-activation (no migration; nothing activated)
+
+- Founder alerts panel in the Control Center Overview (GET/POST /api/platform/alerts): switch, deliverable admin count
+  (counts only), last alert; "Send test alert" (only while FOUNDER_ALERTS_ENABLED is on; confirm; ≤1/10 min, 3/h per
+  admin; audited) sends one TEST email at once through the real outbox + gate + Resend. No incident, no business.
+- Twilio webhook: an unsigned request (never Twilio; probe or our smoke test) is recorded as `info` with
+  reason `unsigned` and opens no incident; signed-but-invalid stays a failure (`bad_signature` / `unknown_account`).
+  inc_SCQKj1CNys20 was exactly that (our PR #55 smoke test, 2026-11-17 01:42:30 UTC); it resolves itself ~2026-12-01.
+- CI ingestion prepared: playwright.config.js writes qa-report.json in CI; docs/ci-with-qa-report.yml = proposed
+  workflow (secret-free verify unchanged; qa-report job on main pushes only, environment qa-ingest, pinned actions,
+  no npm install); scripts/qa-ingest-token.sh (dry-run default, never prints the token).
+- Runbook + numbered approval checklist: docs/OPERATIONAL_ACTIVATION.md (alerts test, Twilio findings, activation-run
+  approvals A1–A5). Next: owner works through the checklist.
+
 ## Release 2026-11-19/20: QA Control Center (#83 → #85 → #86, migrations 0031 + 0032) — owner-approved
 
 - Pre-checks passed: PR heads + CI green; 0031/0032 additive (CREATE … IF NOT EXISTS only); the expected incident

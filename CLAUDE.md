@@ -38,7 +38,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/     Session routes: me, calendar, overview (GET); business, hours, connect-link, outcome (POST)
   api/book/[customer]/  Public: index (GET slots), lead (POST), appointment (POST books on Google Calendar)
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
-                     invite-action, status, plans, test-business. Every write is same-origin and audited.
+                     invite-action, status, plans, test-business, alerts (founder alert status + TEST email). Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
   api/email/webhook  Resend delivery feedback (Svix signature, 5-min tolerance; 503 until RESEND_WEBHOOK_SECRET)
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records); &do=cancel: customer cancels
@@ -438,7 +438,7 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Twilio answered. STOP (carrier keywords incl. CANCEL) suppresses immediately (queued and
   scheduled texts retired, provider confirms); START resubscribes; HELP and human requests get fixed replies; a
   cancel request gets the person's own signed cancel link (never cancels by itself). Owner pause stops every automatic
-  message incl. fixed answers (owner is asked). Webhooks: Twilio signature required; MessageSid unique; status updates
+  message incl. fixed answers (owner is asked). Webhooks: Twilio signature required (an unsigned request is logged as info, never an incident); MessageSid unique; status updates
   forward-only. An unknown send outcome is never resent. Conversation text: owner inbox only, never logged or in admin
   views; purged after 365 days; erased with the account. Live SMS / registration submission / number purchase need
   approval (docs/TEXTING_ACTIVATION.md).
