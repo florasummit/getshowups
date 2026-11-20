@@ -2,6 +2,20 @@
 
 _Update at the end of every task. Newest first._
 
+## Teach Your AI / Business Intelligence Studio (2026-11-20) — feat/teach-your-ai (migration 0033; nothing released)
+
+- Phase 0 audit (docs/INTELLIGENCE_STUDIO.md §1): one shared Retell Custom-LLM agent, routed by our call id, prompt and
+  tools entirely ours → owner rules need NO Retell change; measured voice latency p50 first chunk 4.7 s (model-bound).
+- Built: provider-neutral intelligence engine (server/intelligence/: versioned config, understanding, decisions,
+  compile, Teach a Change, simulation, recommendations, store, adapter boundary), owner API (/api/dashboard/ai-rules),
+  dashboard tab (About / How it works / Teach a change / Test / Publish with history + rollback), receptionist
+  integration (rules block, per-turn note, tool guards, note_answer) for chat AND voice through the same engine.
+- Gates (all off): migration 0033 (approval), AI_STUDIO_BUSINESSES (owner editing), AI_RULES_LIVE_BUSINESSES (live
+  use), AI_RULES_ENABLED=false (kill switch). Before 0033 the tab is hidden and the API answers 404.
+- Tests: 19 unit/integration (incl. mocked Retell socket), 51-scenario evaluation (51/51), 4 Playwright flows
+  (desktop + phone); existing receptionist/eval/deletion/review suites unchanged and passing.
+- Next: approve migration 0033 → pilot with poolthru-llc per docs/INTELLIGENCE_STUDIO.md §7.
+
 ## Homepage conversion experience (2026-11-20) — feat/homepage-2027, PR #90 (frontend only; no migration)
 
 - Hero: "More booked jobs. Less chasing.", $499/month + ad spend separate visible, Request early access (enrollment

@@ -15,6 +15,7 @@ const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
 const WebsiteTab = lazyPage(() => import('./WebsiteTab.jsx'))
 const FollowUps = lazyPage(() => import('./FollowUps.jsx'))
 const Receptionist = lazyPage(() => import('./Receptionist.jsx'))
+const TeachAI = lazyPage(() => import('./TeachAI.jsx'))
 
 export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
   const signOut = async () => {
@@ -571,17 +572,19 @@ const TABS = [
 ]
 const tabFromPath = () => {
   const t = window.location.pathname.split('/')[2]
-  return ['appointments', 'followups', 'receptionist', 'website', 'settings', 'ads'].includes(t) ? t : 'overview'
+  return ['appointments', 'followups', 'receptionist', 'teach', 'website', 'settings', 'ads'].includes(t) ? t : 'overview'
 }
 
 export default function Home({ me, reload }) {
   const [requested, setView] = useState(tabFromPath)
-  // /dashboard/ads for a business without the Ads feature (e.g. back from a refused ad sign-in) → Overview.
-  const view = requested === 'ads' && !me.features?.ads ? 'overview' : requested
+  // /dashboard/ads (or /teach) for a business without that feature (e.g. back from a refused ad sign-in) → Overview.
+  const view = (requested === 'ads' && !me.features?.ads) || (requested === 'teach' && !me.features?.teachAi) ? 'overview' : requested
   const billing = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()
-  const tabs = me.features?.ads ? [...TABS.slice(0, -1), ['ads', 'Ads'], TABS.at(-1)] : TABS
+  // Optional tabs: Teach Your AI right after Receptionist (AI_STUDIO_BUSINESSES), Ads before Settings.
+  const base = me.features?.teachAi ? TABS.flatMap((t) => (t[0] === 'receptionist' ? [t, ['teach', 'Teach Your AI']] : [t])) : TABS
+  const tabs = me.features?.ads ? [...base.slice(0, -1), ['ads', 'Ads'], base.at(-1)] : base
   useEffect(() => {
     const onPop = () => setView(tabFromPath())
     window.addEventListener('popstate', onPop)
@@ -636,6 +639,11 @@ export default function Home({ me, reload }) {
         {view === 'receptionist' && (
           <Suspense fallback={<div aria-busy="true" />}>
             <Receptionist />
+          </Suspense>
+        )}
+        {view === 'teach' && (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <TeachAI />
           </Suspense>
         )}
         {view === 'website' && (

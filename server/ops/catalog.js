@@ -453,6 +453,21 @@ registerCapability({
     return s === 'available' ? { status: 'ok', summary: 'Voice released' } : { status: 'off', summary: s === 'testing' ? 'Voice in testing (not released)' : 'Voice not configured' }
   },
 })
+// ---------- Teach Your AI (server/intelligence/, migration 0033) ----------
+registerCapability({
+  id: 'intelligence.studio',
+  name: 'Teach Your AI: owner rules for the receptionist',
+  journey: 'lead',
+  description: 'Owners configure, test and publish versioned AI rules. Published rules reach real conversations only for AI_RULES_LIVE_BUSINESSES.',
+  dependsOn: ['receptionist.chat'],
+  state: (env) => {
+    const studio = String(env.AI_STUDIO_BUSINESSES || '').split(',').filter((s) => s.trim()).length
+    const live = env.AI_RULES_ENABLED === 'false' ? 0 : String(env.AI_RULES_LIVE_BUSINESSES || '').split(',').filter((s) => s.trim()).length
+    if (!studio && !live) return { mode: 'disabled', note: 'No business released', approval: 'Migration 0033 + AI_STUDIO_BUSINESSES (owner editing) / AI_RULES_LIVE_BUSINESSES (live use)' }
+    return live ? { mode: 'sandbox', note: `Studio for ${studio}, live rules for ${live} business(es)`, approval: 'Pilot sign-off before wider release' } : { mode: 'sandbox', note: `Studio for ${studio} business(es); live use off`, approval: 'AI_RULES_LIVE_BUSINESSES' }
+  },
+  verify: seen('conversation using published AI rules', 30, `SELECT max(e.at) AS at FROM receptionist_events e WHERE e.kind = 'rules' AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
+})
 registerCapability({
   id: 'crm.ghl',
   name: 'GoHighLevel sync',

@@ -27,9 +27,9 @@ export function PageHeader({ title, status, actions, children }) {
   )
 }
 
-export function Section({ title, label, action, children, className = '' }) {
+export function Section({ title, label, action, children, className = '', id }) {
   return (
-    <section className={`ui-section ${className}`} aria-label={label || title}>
+    <section id={id} className={`ui-section ${className}`} aria-label={label || title}>
       {(title || action) && (
         <div className="ui-section-head">
           {title && <h2 className="ui-section-title">{title}</h2>}

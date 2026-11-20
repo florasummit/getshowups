@@ -74,6 +74,14 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
 - **Data:** stored in `receptionist_*` tables (migrations 0026, 0027), kept 365 days (purged by the scheduler) and erased with
   the account. The privacy policy names Anthropic and Retell.
 
+## Owner rules (Teach Your AI)
+
+Owners can configure how the receptionist works (intake order, exclusions, fully served towns, urgent situations,
+hand-offs, after hours, prices, tone) in Dashboard → Teach Your AI: `server/intelligence/`, docs/INTELLIGENCE_STUDIO.md.
+Published rules reach conversations only for businesses in `AI_RULES_LIVE_BUSINESSES`; without that the engine is
+exactly as described above. Rules add a short block to the cached system prompt, one deterministic note per turn (what
+is known, the one thing to ask next) and extra tool guards; they never remove a platform guard.
+
 ## Activation (each step needs approval)
 
 1. **Migration 0026** (4 additive tables):

@@ -158,6 +158,21 @@ for E in "$E2E_FLOW_CUSTOMER:$E2E_FLOW_SESSION_TOKEN" "$E2E_FLOW_M_CUSTOMER:$E2E
   "
 done
 
+# Teach Your AI: a pool business per browser project (visits the customer; towns + ZIP list for coverage rules).
+for E in "$E2E_TEACH_CUSTOMER:$E2E_TEACH_SESSION_TOKEN" "$E2E_TEACH_M_CUSTOMER:$E2E_TEACH_M_SESSION_TOKEN"; do
+  TC=${E%%:*}
+  TT=${E#*:}
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$TC', 'Harbor Pools', 'America/New_York', '29464,29466,29401', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES ('$TC', 'at_customer', $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$TC.example', '$TC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$TT")', 'owner@$TC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('$TC', '(843) 555-0130', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$160/month\"},{\"name\":\"Green pool cleanup\",\"price\":\"\"}]', '[\"Mount Pleasant\",\"Charleston\"]', $NOW);
+  "
+done
+
 # Visual tour: one fictional business with bookings, receptionist conversations and an open callback request.
 d1 "$(node test/e2e/seed-tour.mjs "$E2E_TOUR_CUSTOMER" "$(hash "$E2E_TOUR_SESSION_TOKEN")" "$NOW")"
 
@@ -183,7 +198,7 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
@@ -244,4 +259,5 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example" \
   --binding FOLLOWUP_AI=true \
   --binding CRON_SECRET="$E2E_CRON_SECRET" \
-  --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN"
+  --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN" \
+  --binding AI_STUDIO_BUSINESSES="$E2E_TEACH_CUSTOMER,$E2E_TEACH_M_CUSTOMER"
