@@ -11,6 +11,10 @@ const NAMES = new Set([
   'demo_step', // { industry, step: 'inquiry' | 'check' | 'book' | 'after', path?: 'in_area' | 'outside' }
   'demo_finished', // { industry, outcome }
   'demo_reset', // { industry }
+  'demo_mode', // { mode: 'conversation' | 'booking' }
+  'conversation_started', // { industry }
+  'conversation_industry', // { industry }
+  'conversation_finished', // { industry }
   'early_access_cta', // { location: 'header' | 'hero' | 'demo' | 'pricing' | 'footer' | 'mobile_nav' }
   'early_access_open', // { how: 'embed_visible' | 'new_tab' }
 ])

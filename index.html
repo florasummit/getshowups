@@ -10,6 +10,9 @@
     />
     <meta name="theme-color" content="#0b0b0c" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- The two site fonts (self-hosted, OFL) load before first paint so the hero never reflows on font swap. -->
+    <link rel="preload" href="/site-fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/site-fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="GetShowUps" />

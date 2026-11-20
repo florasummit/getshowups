@@ -1,9 +1,11 @@
 // Marketing copy lives here so it can be edited without touching layout code.
-// Rule: no testimonials, customer logos, or performance statistics until real data exists.
+// Rule: no testimonials, customer logos, or performance statistics until real data exists. Every claim below
+// describes what works in production today; anything else says "coming soon" or "pilot".
 
 export const navLinks = [
   { href: '#demo', label: 'See it work' },
   { href: '#how-it-works', label: 'How it works' },
+  { href: '#teach', label: 'Teach Your AI' },
   { href: '#pricing', label: 'Pricing' },
   { href: '#faq', label: 'FAQ' },
 ]
@@ -16,7 +18,6 @@ export const enrollmentClosed = {
   href: '/#book-demo',
   label: 'Request early access',
   note: 'Online enrollment isn’t open yet. Book a short call and we’ll set you up as soon as it opens.',
-  // What happens after a visitor requests early access (shown in the early-access section).
   next: [
     'Pick a time for a short call. The calendar here books it directly; there’s no form to fill in first.',
     'On the call we look at your services, service area and current website, and answer your questions.',
@@ -24,50 +25,51 @@ export const enrollmentClosed = {
   ],
 }
 
-// Steps describe only what works today; anything not yet live says so (status: live | partly).
-export const steps = [
-  {
-    id: 'capture',
-    status: 'live',
-    title: 'Capture',
-    icon: 'inbox',
-    body: 'Your own website, with booking built in, collects every inquiry in one place, so no lead sits unseen in an inbox.',
-  },
-  {
-    id: 'qualify',
-    status: 'live',
-    title: 'Qualify',
-    icon: 'sparkles',
-    body: 'Every lead’s ZIP is checked against the area you serve. Outside it, they aren’t offered times; you approve or decline, so your calendar only fills with jobs you want.',
-  },
-  {
-    id: 'book',
-    status: 'live',
-    title: 'Book',
-    icon: 'calendar',
-    body: 'Leads pick a real open time from your Google Calendar. No phone tag, and a time can never be booked twice.',
-  },
-  {
-    id: 'remind',
-    status: 'partly',
-    title: 'Remind',
-    icon: 'bell',
-    body: 'Every booking sends the customer a Google Calendar invitation. Email and text reminders are coming soon.',
-  },
-  {
-    id: 'show',
-    status: 'live',
-    title: 'Show Up',
-    icon: 'check',
-    body: 'Mark each appointment as showed or no-show and see exactly where leads drop off.',
-  },
-  {
-    id: 'follow',
-    status: 'partly',
-    title: 'Follow Up',
-    icon: 'refresh',
-    body: 'Leads who haven’t booked and no-shows are listed for you to follow up. Automatic follow-ups are coming soon.',
-  },
+export const hero = {
+  eyebrow: 'AI booking for pool, HVAC and roofing businesses',
+  sub: 'Your customers write in. GetShowUps understands the request, checks it against your area and your rules, asks only for what’s missing, and books a real open time on your calendar.',
+}
+
+// The friction GetShowUps removes. Plain observations, not statistics.
+export const problem = {
+  title: 'The inquiries you answer late are the jobs you don’t get',
+  items: [
+    { title: 'Messages arrive while you’re on a job', body: 'A pool that turned green, an AC that quit, a roof after a storm: the person asking is already looking for who answers first.' },
+    { title: 'Every reply is the same ten questions', body: 'Where are you? What’s wrong? When works? Is it urgent? You’ve typed them a thousand times, usually from a truck.' },
+    { title: 'Nothing connects the dots', body: 'The lead is in a text, the time is in your head, the address is in an email, and the calendar is somewhere else.' },
+  ],
+}
+
+// Attract → Answer → Qualify → Book → Notify → Measure. Each says only what is live (status: live | partly | soon).
+export const journey = [
+  { id: 'attract', status: 'live', title: 'Attract', body: 'A professional website, built and hosted for you, with booking and chat built in. Use your GetShowUps address or your own domain.' },
+  { id: 'answer', status: 'live', title: 'Answer', body: 'The AI receptionist replies on your website in seconds, in your words, using only your services, prices, area and hours.' },
+  { id: 'qualify', status: 'live', title: 'Qualify', body: 'It checks the service area before offering times, follows the questions you set, and never invents a price or a promise.' },
+  { id: 'book', status: 'live', title: 'Book', body: 'Real open times from your Google Calendar, booked only after the customer’s own yes. A time can never be booked twice.' },
+  { id: 'notify', status: 'live', title: 'Notify', body: 'The visit lands on your calendar with the address; Google invites the customer; callback requests show up in Needs attention.' },
+  { id: 'measure', status: 'live', title: 'Measure', body: 'Every inquiry, booking, show-up and finished job in one place, so you can see where leads come from and where they drop.' },
+]
+
+export const journeyNotes = 'Text messaging, email reminders and automatic follow-ups are built and in testing, not live yet. Voice calls on your website are in a pilot. We say so everywhere they come up.'
+
+// Teach Your AI (released 2026-11-20 as a controlled pilot: the Studio is on for the first pilot business; published
+// rules reach live conversations only once GetShowUps switches that on per business).
+export const teach = {
+  title: 'Your AI, your rules',
+  sub: 'Teach Your AI is where you decide how it works: the questions it asks, in what order, what you don’t offer, which towns you serve completely, what counts as urgent, and when to hand off to you.',
+  points: [
+    ['Describe a change in plain words', '“Ask what the customer needs before asking where they live.” You see exactly what would change before anything is saved.'],
+    ['Test it before customers see it', 'Type what a customer might say and watch what the AI understands and does next. Nothing is sent or booked.'],
+    ['Publish when you’re ready', 'Every version is kept. Go back to an earlier one in one click.'],
+    ['Some rules are always on', 'Your area is checked before times, bookings need the customer’s yes, danger means 911 first, prices come only from your records.'],
+  ],
+  status: 'In pilot with founding customers',
+}
+
+export const industries = [
+  { id: 'pool', title: 'Pool service', body: 'Green pools, pump noise, weekly care. The AI knows the difference, confirms the area by town where you serve it completely, and books the visit at the customer’s address.' },
+  { id: 'hvac', title: 'HVAC', body: 'No cooling in July isn’t a tune-up. Your AI can be told to settle urgency first, get the soonest time for the ones that can’t wait, and flag you.' },
+  { id: 'roofing', title: 'Roofing', body: 'Storm damage means an inspection first and a person for the estimate. The AI books the look, records the callback, and never quotes a roof.', upcoming: true },
 ]
 
 export const pricing = {
@@ -79,8 +81,10 @@ export const pricing = {
   includes: [
     'A professional website, built and hosted for you',
     'Use your GetShowUps address or connect your own domain',
+    'AI receptionist on your website chat',
     'Online booking straight into your Google Calendar',
     'Service-area screening for every lead',
+    'Teach Your AI: your questions, rules and hand-offs',
     'Google Calendar invitations for every booking',
     'Show-up and no-show tracking',
     'Direct help from the founding team',
@@ -89,40 +93,13 @@ export const pricing = {
 }
 
 export const faqs = [
-  {
-    q: 'What happens after I request early access?',
-    a: 'You pick a time for a short call, straight from the calendar on this page. We look at your services, service area and current website together. Online enrollment isn’t open yet; when it opens, early-access businesses are set up first. Nothing is charged until you choose to sign up.',
-  },
-  {
-    q: 'Is the demo on this page the real product?',
-    a: 'It’s a simulation with an example business, so nothing you click is sent or booked. It follows the same steps the product takes today: your booking page, the service-area check, booking onto your Google Calendar, and recording how the visit went.',
-  },
-  {
-    q: 'What is GetShowUps?',
-    a: 'GetShowUps is an appointment conversion platform for service businesses. It gives you a website that captures leads, checks they are in your service area, books them onto your Google Calendar, and tracks whether they actually showed up. Automatic reminders and follow-ups are coming soon.',
-  },
-  {
-    q: 'Who is it for?',
-    a: 'Appointment-driven service businesses: home services, dental and medical practices, med spas, salons, fitness studios, legal and financial consultations, and similar teams that live or die by booked, attended appointments.',
-  },
-  {
-    q: 'Do I need any other software?',
-    a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.',
-  },
-  {
-    q: 'Will my website say things I didn’t approve?',
-    a: 'No. Your website is drafted from what you tell us and stays private until you publish it. Promises like guarantees, discounts, ratings or credentials are never added unless you’ve confirmed them.',
-  },
-  {
-    q: 'Can I use my own domain? What if I cancel?',
-    a: 'Yes. Your website works on a free GetShowUps address, and you can connect a domain you own (like www.yourbusiness.com) from your dashboard. Your domain always stays yours. If you cancel, your website stays online until the end of the period you paid for plus 14 days, you can download your text and photos, and you can point your domain anywhere else.',
-  },
-  {
-    q: 'What does it cost?',
-    a: 'The founding plan is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta.',
-  },
-  {
-    q: 'When will text messages work?',
-    a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, every booking is confirmed with a Google Calendar invitation.',
-  },
+  { q: 'What happens after I request early access?', a: 'You pick a time for a short call, straight from the calendar on this page. We look at your services, service area and current website together. Online enrollment isn’t open yet; when it opens, early-access businesses are set up first. Nothing is charged until you choose to sign up.' },
+  { q: 'Is the AI on this page the real product?', a: 'The conversations are scripted examples with made-up businesses, so nothing you click is sent, booked or stored. They follow the same behaviour as the real AI receptionist: facts from the customer’s words, the service-area check, questions one at a time, real calendar times, and a booking only after a clear yes.' },
+  { q: 'Will the AI say things I didn’t approve?', a: 'No. It only uses your records: services, prices, towns, ZIP codes, hours and the notes you approve. Prices that aren’t in your records are never stated. Guarantees, discounts or credentials never appear unless you’ve written them down.' },
+  { q: 'Can I control how it handles my customers?', a: 'Yes. Teach Your AI lets you set the order of questions, what’s required before times are offered, services you don’t do, which towns you serve completely, urgent situations, hand-offs and tone. Some protections can’t be switched off: the area check, the customer’s yes before a booking, and safety advice when danger is described.' },
+  { q: 'What if someone asks for a person?', a: 'The AI says plainly that it can’t transfer the call, then records a callback request or a message with their name and number. It shows up in your dashboard under Needs attention. It never promises when someone will call.' },
+  { q: 'Do I need any other software?', a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.' },
+  { q: 'Can I use my own domain? What if I cancel?', a: 'Yes. Your website works on a free GetShowUps address, and you can connect a domain you own from your dashboard. Your domain always stays yours. If you cancel, your website stays online until the end of the period you paid for plus 14 days, you can download your text and photos, and you can point your domain anywhere else.' },
+  { q: 'What does it cost?', a: 'The founding plan is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta.' },
+  { q: 'When will text messages work?', a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, every booking is confirmed with a Google Calendar invitation.' },
 ]

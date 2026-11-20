@@ -4,6 +4,10 @@ import { test, expect } from './test.js'
 
 let errors
 let apiCalls
+const openModeB = async (page) => {
+  await page.locator('#demo').getByRole('tab', { name: 'Booking page & dashboard' }).click()
+  await expect(page.locator('[data-demo]')).toBeVisible()
+}
 test.beforeEach(async ({ page }) => {
   errors = []
   apiCalls = []
@@ -14,6 +18,10 @@ test.beforeEach(async ({ page }) => {
     if (u.pathname.startsWith('/api/')) apiCalls.push(`${r.method()} ${u.pathname}`)
   })
   await page.goto('/', { waitUntil: 'networkidle' }) // page-load reads (enrollment) finish before the demo starts
+  // The booking-page demo (Mode B) lives behind the showcase's second tab since the flagship redesign (flagship.spec.js
+  // covers Mode A, the AI conversation, and the hero's trade buttons which now pick the conversation's scenario).
+  await openModeB(page)
+  await page.evaluate(() => window.scrollTo(0, 0))
 })
 test.afterEach(() => expect(errors, 'no console or page errors').toEqual([]))
 
@@ -31,7 +39,7 @@ test('hero: outcome first, price visible, honest early access, See it work opens
   await expect(hero.getByText('Online enrollment isn’t open yet', { exact: false })).toBeVisible()
   await expect(page.locator('a[href="/dashboard?plan=founding"]')).toHaveCount(0)
 
-  await hero.getByRole('link', { name: 'See it work' }).click()
+  await hero.getByRole('link', { name: 'See it answer a customer' }).click()
   await expect(page).toHaveURL(/#demo$/)
   await expect(demo(page)).toBeInViewport()
   await expect(demo(page).getByRole('note')).toHaveText(/Simulation · example business · nothing is sent or booked/)
@@ -131,7 +139,9 @@ test('industry switching: hero buttons and the demo tabs change business, reques
   await d.getByRole('button', { name: 'Continue' }).click()
   await expect(d).toHaveAttribute('data-stage', 'time')
 
-  await page.locator('[data-try="electrical"]').click()
+  // The hero's trade buttons now pick the AI conversation's scenario (flagship.spec.js); Mode B's own trade tabs
+  // still switch its business, and switching resets progress.
+  await d.getByRole('group', { name: 'Business type' }).getByRole('button', { name: 'Electrical' }).click()
   await expect(d).toHaveAttribute('data-industry', 'electrical')
   await expect(d).toHaveAttribute('data-stage', 'inquiry')
   await expect(d.getByRole('group', { name: 'Business type' }).getByRole('button', { name: 'Electrical' })).toHaveAttribute('aria-pressed', 'true')
@@ -146,7 +156,7 @@ test('industry switching: hero buttons and the demo tabs change business, reques
   await d.getByRole('radio', { name: '7:30 AM' }).check()
   await d.getByRole('button', { name: /^Book / }).click()
   await expect(d.locator('.dm-lead-when')).toContainText('90 min visit')
-  expect(await events(page)).toEqual(expect.arrayContaining([{ name: 'hero_cta', props: { cta: 'industry', industry: 'electrical' } }, { name: 'demo_industry', props: { industry: 'hvac' } }]))
+  expect(await events(page)).toEqual(expect.arrayContaining([{ name: 'demo_industry', props: { industry: 'electrical' } }, { name: 'demo_industry', props: { industry: 'hvac' } }]))
 })
 
 test('keyboard only: the demo can be completed without a mouse and focus follows the change', async ({ page }) => {
@@ -181,6 +191,7 @@ test('keyboard only: the demo can be completed without a mouse and focus follows
 test('reduced motion: no animations or smooth scrolling', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.reload()
+  await openModeB(page)
   await demo(page).getByRole('button', { name: 'Continue' }).click()
   const lead = demo(page).locator('[data-lead]')
   const dur = await lead.evaluate((e) => parseFloat(getComputedStyle(e).animationDuration))
@@ -201,6 +212,7 @@ for (const width of [320, 375, 390, 768, 1024, 1440]) {
     await expect(cta).toBeInViewport()
     const box = await cta.boundingBox()
     expect(box.height).toBeGreaterThanOrEqual(44)
+    await openModeB(page)
     // Walk the demo to the end: still no sideways scroll.
     const d = demo(page)
     await d.getByRole('button', { name: 'Continue' }).click()

@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Flagship marketing website (2026-11-20) — feat/flagship-site (frontend only; marketing site, no app/backend change)
+
+- Direction A "Editorial Intelligence" chosen from three rendered prototypes (scratchpad, not deployed): Fraunces +
+  Inter (both already self-hosted, OFL), warm-white editorial sections, dark product demonstrations, orange restrained
+  to the logo, the italic "Less chasing." and the primary action. The logo (src/components/Logo.jsx) is byte-identical
+  to main and renders identically (SVG, wordmark, 28×28, stroke rgb(255,106,26)); only its surroundings changed.
+- AI conversation simulation restored as the flagship demo (src/components/Conversation.jsx + content/conversation.js):
+  scripted, deterministic, offline (no API, no storage, no model); pool / HVAC / roofing (roofing labelled upcoming);
+  facts recognized → check or owner rule → reply, booked only after the customer's own yes; owner's view afterwards.
+  The booking-page + dashboard walkthrough (Demo.jsx) stays as Mode B behind a tab. #demo and #simulation both land here.
+- New story: problem → showcase → how it works (Attract → Answer → Qualify → Book → Notify → Measure, each "Live today")
+  → Teach Your AI (labelled "In pilot with founding customers": released 2026-11-20 for the first pilot business, live
+  rules per business still gated) → industries → pricing ($499/month, ad spend separate, no trial) → early access → FAQ.
+- Header adapts (dark over dark sections); mobile action panel is inline (no sticky overlap); fonts preloaded (CLS → 0).
+- Measured (Playwright; Lighthouse/axe not installed): 7 requests, 0 external hosts, script 274 KB (unchanged), fonts
+  82 KB, 0 console errors, computed AA contrast 0 failures at 1440 and 390, 0 sideways scroll at 320–1440.
+- Tests: test/e2e/flagship.spec.js (logo preservation, first viewport + CTAs, pool end-to-end, industry switching, all
+  three scenarios, mode switch, keyboard, reduced motion, mobile menu, sections/CTA destinations/dark header, honest
+  claims); home.spec.js and site.spec.js updated for the new layout (nothing weakened). Analytics allowlist gained the
+  conversation/mode events (in-page only, still sent nowhere).
+
 ## Teach Your AI / Business Intelligence Studio (2026-11-20) — feat/teach-your-ai (migration 0033; nothing released)
 
 - Phase 0 audit (docs/INTELLIGENCE_STUDIO.md §1): one shared Retell Custom-LLM agent, routed by our call id, prompt and

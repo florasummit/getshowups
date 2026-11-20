@@ -59,7 +59,7 @@ function SchedulerSlot() {
 export default function BookDemo() {
   const start = useStartAction()
   return (
-    <section id="book-demo" className="section section--muted" aria-labelledby="demo-title">
+    <section id="book-demo" className="section" aria-labelledby="demo-title">
       <div className="container demo-grid">
         <div className="demo-copy">
           <p className="eyebrow">{start.closed ? 'Early access' : 'Talk to us'}</p>
