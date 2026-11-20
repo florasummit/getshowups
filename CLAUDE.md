@@ -503,17 +503,26 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Conversation providers (server/conversations/): adapters only propose actions (validateAction); GetShowUps executes
   them. One controller per conversation (control.js, migration 0017): a person always wins; providers hold leases.
 
-## Release state (verified 2026-11-14; details in docs/STATUS.md and docs/OPERATIONS.md)
+## Release state (verified 2026-11-20; details in docs/STATUS.md and docs/OPERATIONS.md)
 
-- Production: deployment 0020f305 (main d426fef), migrations through 0014. Draft stack #24 → #25 → #26 → #27 → #28 is
-  NOT merged. Release it as one set, in order: #24; apply 0015 then #25; apply 0016 then #26; #27; apply 0017 then
-  #28. Never apply a migration out of order or merge a PR before its migration. Rollback target: 0020f305.
+- Production: deployment b3522b5f (main 005d162, QA Control Center: #83 founder alerts, #85 incidents + Account
+  Inspector, #86 QA history), migrations through 0032 applied. Rollback target for that release: c378384e (main
+  0be8bf2); the 0031/0032 tables stay (older code ignores them). Backup:
+  ~/getshowups-backups/prod-20261119T233412Z-pre-pr83.sql (verified: integrity ok, 72 tables = production).
+- Off / not configured (each needs approval): FOUNDER_ALERTS_ENABLED (unset: cron reports alerts disabled),
+  QA_INGEST_TOKEN (unset: /api/qa/runs answers 503) + the CI qa-report job, MESSAGES_LIVE, SMS_LIVE,
+  STRIPE_LIVE_ENABLED, ADS_LIVE_LAUNCH; enrollment closed ({"open":false}). Voice:
+  RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical.
+- Releases: apply a PR's migration before merging it, never out of order; merge pinned to the reviewed head
+  (--match-head-commit); after each deploy diff the live customer HTML against a pre-release capture.
 - Each system exists once: audit = server/auditlog.js (audit_log); ads safety stop = server/ads/holds.js; deletion =
   server/deletion.js; lifecycle/recovery = server/lifecycle.js; reconciliation = server/reconcile.js; scheduler =
   workers/scheduler → /api/cron/run. The other agent's business-review.patch was reviewed, not merged (see
   docs/OPERATIONS.md §7): never add audit_events, lifecycle_states, deletion_requests, ads/shutdown.js or a second 0015.
 - Cron batch sizes come from measurements (scripts/scale-bench.mjs): keep a cron run well under D1's ~1,000 queries
-  per request; admin views must not do per-business KV reads (Workers ~1,000 KV ops per request).
+  per request; admin views must not do per-business KV reads (Workers ~1,000 KV ops per request). Observability
+  steps (incident register, QA retention) run LAST in the cron and are bounded per run (≤150 open, ≤50 new
+  incidents), so they can never use up the budget of delivery, ads safety-stop or billing steps.
 
 ## GitHub automation (PRs and CI)
 
