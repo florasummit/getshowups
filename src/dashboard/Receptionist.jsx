@@ -30,6 +30,8 @@ const REASON = {
   phone_needed: 'needed a phone number first',
   contact_needed: 'needed a phone number or email first',
   calendar_unavailable: 'your calendar couldn’t be reached',
+  rules_not_ready: 'your AI rules needed something first',
+  not_said: 'the customer hadn’t said it yet',
 }
 const ACTIVITY = {
   save_customer_details: ['Noted the customer’s details', 'Asked the customer to repeat a detail'],
@@ -42,6 +44,7 @@ const ACTIVITY = {
   model: [null, 'The AI was briefly unavailable; the customer was given your booking link'],
   limit: [null, 'Conversation limit reached; the customer was given your booking link'],
   ended: ['Customer ended the conversation', null],
+  note_answer: ['Noted an answer to one of your questions', null],
 }
 function activity(e) {
   const [ok, fail] = ACTIVITY[e.kind] || []

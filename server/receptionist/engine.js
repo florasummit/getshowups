@@ -28,6 +28,9 @@ import { syncLead, syncStage, syncNote } from '../ghl.js'
 import { keepableAttribution, recordAttribution } from '../ads/attribution.js'
 import { areaFor, checkZip } from '../zipcode.js'
 import { knowledgeFor, systemPrompt, factText } from './knowledge.js'
+import { spokenToDigits } from './digits.js'
+import { activeRules, decisionFor, noteAnswer, observe, ruleBlock, NOTE_ANSWER_TOOL } from '../intelligence/runtime.js'
+import { rulesInstructions, turnNote } from '../intelligence/compile.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
 export const DEFAULT_MODEL = 'claude-opus-5-5'
@@ -136,14 +139,8 @@ async function spentToday(db, customerId, now) {
 
 // ---------- deterministic customer-detail checks ----------
 
-const WORD_DIGIT = { zero: '0', oh: '0', o: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9' }
-// "two nine four zero three" / "double five" → digits, so spoken numbers match what the customer said.
-export function spokenToDigits(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/\b(double|triple)\s+(zero|oh|one|two|three|four|five|six|seven|eight|nine|\d)\b/g, (_, n, d) => (WORD_DIGIT[d] || d).repeat(n === 'double' ? 2 : 3))
-    .replace(/\b(zero|oh|one|two|three|four|five|six|seven|eight|nine)\b/g, (w) => WORD_DIGIT[w])
-}
+// "two nine four zero three" / "double five" → digits (server/receptionist/digits.js; re-exported for existing callers).
+export { spokenToDigits }
 // All digits the customer has said or typed, in order (separators between digit groups removed).
 const customerWords = (conv) => conv.transcript.filter((m) => m.role === 'user' && typeof m.content === 'string').map((m) => m.content)
 const digitsSaid = (conv) => customerWords(conv).map((t) => spokenToDigits(t).replace(/[^\d]/g, '')).join('|')
@@ -397,7 +394,14 @@ async function runTool(ctx, name, input) {
       tell_customer: `Say ${customer.name} has their details and will confirm whether they can help at ZIP ${c.zip}. Do not promise service, a time or when they will hear back. Do not offer times.`,
     }
   }
+  if (name === 'note_answer') {
+    if (!ctx.rules) return { ok: false, error: 'unknown_tool' }
+    return noteAnswer(conv, input)
+  }
   if (name === 'find_available_times') {
+    // Owner rules (e.g. "know whether it's urgent before offering times"), checked before the calendar is touched.
+    const held = ctx.rules ? ruleBlock(decisionFor(ctx.rules, conv), 'find_available_times') : null
+    if (held) return held
     const r = await openSlots(env, customer, now)
     await recordAvailability(env, customer.id, r, now)
     if (!r.ok) return { ok: false, error: 'calendar_unavailable', note: "The calendar can't be reached right now. Offer a callback request or the booking page instead; do not guess times." }
@@ -429,6 +433,10 @@ async function runTool(ctx, name, input) {
     if (!quote || !norm(ctx.userText).includes(quote) || !AFFIRM.test(input.confirmation_quote)) {
       return { ok: false, error: 'confirmation_required', note: "The customer's latest message must clearly confirm this exact time. Read it back and ask them to confirm." }
     }
+    // Owner rules on top of the platform guards below (never instead of them): excluded services, required intake,
+    // after-hours handling, urgent situations that must be handed off first.
+    const held = ctx.rules ? ruleBlock(decisionFor(ctx.rules, conv), 'book_appointment') : null
+    if (held) return held
     const c = s.customer
     const missing = missingForBooking(c, customer)
     if (missing.length) return { ok: false, error: 'details_missing', missing, note: `Ask only for: ${missing.join(', ')} (save them with save_customer_details).` }
@@ -559,7 +567,15 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   if (!text) return { ok: false, error: 'empty_message' }
   if (conv.state.endedAt) return { ok: false, error: 'conversation_ended' }
   const settings = await getSettings(db, customer.id)
-  const k = await knowledgeFor(env, customer, settings)
+  const k0 = await knowledgeFor(env, customer, settings)
+  // The owner's PUBLISHED AI rules (Teach Your AI), only for businesses released in AI_RULES_LIVE_BUSINESSES. Without
+  // them everything below is exactly the pre-rules behaviour. A rules failure never stops the conversation.
+  const rules = await activeRules(env, customer, now).catch((err) => {
+    console.error('receptionist: rules unavailable:', err?.name)
+    return null
+  })
+  // "Never quote prices": the model doesn't see them, and any $ amount is then caught by the price check.
+  const k = rules?.config.pricing === 'no_prices' ? { ...k0, services: k0.services.map((s) => ({ ...s, price: '' })), knowledge: String(k0.knowledge || '').replace(/\$\s?\d[\d,]*(\.\d{2})?/g, '') } : k0
   const facts = factText(k)
   const log = (who, t) => {
     conv.state.log = [...(conv.state.log || []), { who, text: t, channel, at: now }].slice(-LIMITS.log)
@@ -571,22 +587,31 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     return { ok: true, reply, status: conv.status, limited: true }
   }
 
-  const ctx = { env, customer, conv, now, userText: text, knowledge: k, channel, after: [], committed: false }
+  const ctx = { env, customer, conv, now, userText: text, knowledge: k, channel, after: [], committed: false, rules }
   const transcript = conv.transcript
   transcript.push({ role: 'user', content: text })
   // Operator notes for this turn: what is already known (so it is never asked again) and any correction from the
   // previous turn (e.g. a blocked price). Mid-conversation system messages keep the cached history intact.
   const notes = [knownLine(conv.state, customer), conv.state.note].filter(Boolean)
   delete conv.state.note
+  if (rules) {
+    // Deterministic: what this message says (town, ZIP, address, need, urgency, equipment, day…) + the owner's
+    // workflow → one note: known facts, the ONE thing to ask next, what isn't allowed yet. No extra model or tool call.
+    const flags = observe(rules, conv, text)
+    notes.push(turnNote(decisionFor(rules, conv), rules.version))
+    await event(env, conv, 'rules', true, [`v${rules.version}`, ...flags].join(';'), now)
+  }
   if (notes.length) transcript.push({ role: 'system', content: notes.join('\n') })
-  const system = [{ type: 'text', text: systemPrompt(k, channel, { requests: await receptionistRequestsReady(db) }), cache_control: { type: 'ephemeral' } }]
+  const prompt = systemPrompt(k, channel, { requests: await receptionistRequestsReady(db) })
+  const system = [{ type: 'text', text: rules ? `${prompt}\n\n${rulesInstructions(rules.config, rules.records)}` : prompt, cache_control: { type: 'ephemeral' } }]
+  const tools = rules ? [...TOOLS, NOTE_ANSWER_TOOL] : TOOLS
   let spent = 0
   let reply = ''
   let failed = null
   let blocked = null
   let held = null // voice holding line spoken while a slow tool ran (not an answer: no_reply still applies without one)
   const anthropic = client(env, channel)
-  const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools: TOOLS, messages: transcript })
+  const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools, messages: transcript })
   // Per-turn timings (numbers only; voice records them as a voice_turn event). opts.timing is filled in place so the
   // caller has them on every return path, including a dropped (talked-over) turn.
   const timing = opts.timing || {}

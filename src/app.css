@@ -3060,3 +3060,74 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .qa-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .qa-list { list-style: none; padding: 0; margin: 0; }
 .cc-views { margin-bottom: 0; }
+
+/* ---------- Teach Your AI (src/dashboard/TeachAI.jsx) ---------- */
+.ui-callout--ok { background: var(--ok-bg); color: var(--ok-text); }
+.ui-callout--bad { background: var(--bad-bg); color: var(--bad-text); }
+.ta-steps { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.ta-steps a { padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-sm); color: var(--text); text-decoration: none; }
+.ta-steps a:hover { border-color: var(--text-muted); }
+.ta-section { display: grid; gap: var(--s-4); scroll-margin-top: var(--s-5); }
+.ta-label { margin: 0; font-size: var(--fs-sm); font-weight: 700; }
+.ta-facts { display: grid; gap: var(--s-2) var(--s-5); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.ta-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.ta-chips li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 12px; border-radius: 999px; background: var(--surface-muted); font-size: var(--fs-sm); }
+.ta-chip-x { width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--text-muted); font-size: 1.1rem; cursor: pointer; }
+.ta-chip-x:hover, .ta-chip-x:focus-visible { background: var(--surface-sunken); color: var(--text); }
+.ta-add { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-2); }
+.ta-add .field { flex: 1 1 220px; min-width: 0; margin: 0; }
+.ta-add .field input, .ta-add .field select { width: 100%; min-width: 0; }
+.ta-add--wide .field { flex: 1 1 180px; }
+.ta-intake { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.ta-intake-row { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: var(--s-3); padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.ta-intake-n { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-muted); font-size: var(--fs-sm); font-weight: 700; }
+.ta-intake-main { display: grid; gap: 4px; min-width: 0; }
+.ta-intake-opts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); }
+.ta-intake-opts .check { margin: 0; }
+.ta-move { display: flex; gap: 2px; }
+.ta-move .ui-icon-btn { font-size: 1.05rem; }
+.ta-move .ui-icon-btn:disabled { opacity: 0.3; cursor: default; }
+.ta-list { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.ta-list li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); }
+.ta-selects { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.ta-selects legend { grid-column: 1 / -1; }
+.ta-locked, .ta-notes, .ta-describe, .ta-diff { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.ta-diff li::marker { content: '→ '; }
+.ta-savebar { display: grid; gap: var(--s-2); padding: var(--s-3) var(--s-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 -4px 16px rgb(0 0 0 / 0.06); }
+/* Sticky only while there is something to save, so it never covers the page's own buttons otherwise. */
+.ta-savebar--dirty { position: sticky; bottom: var(--s-2); z-index: 2; border-color: var(--warn-dot); }
+.ta-problems { margin: 0; padding-left: 1.2em; color: var(--bad-text); font-size: var(--fs-sm); }
+.ta-proposal { display: grid; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); }
+.ta-proposal .ui-callout { margin: 0; }
+.ta-suggest { display: grid; gap: var(--s-2); }
+.ta-test-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s-2); }
+.ta-toggle { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); }
+.ta-toggle .check { margin: 0; }
+.ta-chat { display: grid; gap: var(--s-4); }
+.ta-turn { display: flex; flex-direction: column; gap: var(--s-2); }
+.ta-msg { max-width: min(85%, 560px); }
+.ta-why { display: grid; gap: var(--s-1); max-width: 640px; padding: var(--s-2) var(--s-3); border-left: 3px solid var(--border); font-size: var(--fs-sm); }
+.ta-understood { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.ta-fact { padding: 0 8px; border-radius: 999px; background: var(--info-bg); color: var(--info-text); font-size: var(--fs-xs); font-weight: 600; }
+.ta-explain { margin: 0; padding-left: 1.1em; display: grid; gap: 2px; color: var(--text-muted); }
+.ta-explain--safety, .ta-explain--excluded, .ta-explain--handoff, .ta-explain--emergency { color: var(--text); font-weight: 600; }
+.ta-send { display: flex; gap: var(--s-2); align-items: flex-end; }
+.ta-send .field { flex: 1; min-width: 0; margin: 0; }
+.ta-send .field input { width: 100%; min-width: 0; }
+.ta-send .btn { flex: none; }
+.ta-compare { display: grid; gap: var(--s-4); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.ta-compare > div { display: grid; gap: var(--s-2); align-content: start; padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.ta-history { display: grid; gap: var(--s-2); }
+.ta-versions { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.ta-versions li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--s-2); padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.ta-versions p { margin: 2px 0 0; }
+.ta-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); max-width: 420px; }
+@media (max-width: 560px) {
+  .ta-intake-row { grid-template-columns: 24px 1fr; }
+  .ta-move { grid-column: 2; }
+  .ta-msg { max-width: 100%; }
+}
+/* Long option labels (e.g. pricing choices) must not set the page's minimum width on phones. */
+.ta > *, .ta-section > *, .ta .ui-group > * { min-width: 0; }
+.ta .field select, .ta .field input, .ta .field textarea { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+.ta .link-btn { white-space: normal; text-align: left; overflow-wrap: anywhere; }

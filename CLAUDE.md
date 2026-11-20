@@ -59,6 +59,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
   api/dashboard/ai-key  GET (provider + last 4) · POST save (validated) | remove
+  api/dashboard/ai-rules Teach Your AI: GET state · POST save|teach|apply|simulate|publish|rollback|reset (404 unless released)
   api/dashboard/website/import  GET latest import; POST start (url, confirm) | apply (importId, fields, photos)
   api/dashboard/website/ Website: index (GET state; POST save|publish|unpublish|restore|regenerate), preview (owner-only
                      HTML), assets (image upload), export (owner's content + images as JSON)
@@ -99,6 +100,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      submit/paid steps need TWILIO_REGISTRATION_SUBMIT=true + approve; unknown outcomes never resent;
                      'approved' only when Twilio reports the campaign VERIFIED), ops (admin counts, Business Review)
   links.js           HMAC-signed resume/confirm links (key derived from TOKEN_ENCRYPTION_KEY, nothing stored)
+  intelligence/      Teach Your AI engine (schema, understand, decide, compile, teach, simulate, store, access, providers)
   ai-usage.js        AI website allowances per business/UTC day (tiers; AI_TESTING_BUSINESSES), 30-day cost ceiling
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
@@ -431,6 +433,17 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   the outbox) is tracked separately: recorded / pending / sent / failed / not_sent (held). Phone routing settings stay
   disabled and labelled "not connected" until a line exists. Voice: an interrupted turn that did nothing is never
   saved; a call continues the page's conversation; ending the conversation ends the call.
+- Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
+  structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
+  published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in
+  their own tables (read at decision time, re-validated). Platform rules (area check, offered slot + customer's yes,
+  contact/address, safety, no invented prices, caps, tenant isolation) are not configurable: validateConfig refuses
+  them, Teach a Change answers "Not changed: <reason>". Teach a Change = fixed patterns first, Claude (json_schema ops
+  from the same catalog) only for the rest; proposals are applied server-side to the CURRENT draft on approval. "Test
+  your AI" is a deterministic simulation (no model, no calendar, nothing stored). Gates: AI_STUDIO_BUSINESSES (owner
+  editing, customers unaffected), AI_RULES_LIVE_BUSINESSES (receptionist uses the PUBLISHED version; chat + Retell
+  voice through the same engine), AI_RULES_ENABLED=false kill switch; all empty = exactly the pre-rules behaviour.
+  Retell needs no agent change (custom LLM served by our engine; providers.js is the adapter boundary).
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
   the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the

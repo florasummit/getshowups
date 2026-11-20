@@ -6,6 +6,7 @@ import { signupPlan } from '../../../server/onboarding.js'
 import { billingMisconfigured, listPlans, sandboxCheckoutAllowed, stripeConfigured } from '../../../server/stripe.js'
 import { adsEnabledFor } from '../../../server/ads/access.js'
 import { deletionEnabled } from '../../../server/deletion.js'
+import { studioAccess } from '../../../server/intelligence/access.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env, { needCustomer: false })
@@ -23,6 +24,6 @@ export async function onRequestGet({ request, env }) {
     customer,
     progress: await progress(env, customer),
     bookingUrl: customer ? `${siteOrigin(env)}/book/${customer.id}` : null,
-    features: { ads: customer ? adsEnabledFor(env, customer.id) : false, ghl: env.GHL_ENABLED === 'true', accountDeletion: Boolean(customer) && deletionEnabled(env) },
+    features: { ads: customer ? adsEnabledFor(env, customer.id) : false, ghl: env.GHL_ENABLED === 'true', accountDeletion: Boolean(customer) && deletionEnabled(env), teachAi: customer ? await studioAccess(env, customer).catch(() => false) : false },
   })
 }
