@@ -369,12 +369,17 @@ export async function saveDraft(db, customerId, content, now = Date.now(), { exp
 // Publishes `content` as a new version and makes it live.
 // The new version is stored and made live in ONE batch (all or nothing): a failure leaves the previous live version
 // serving. The draft is saved first (it is what the owner confirmed).
-export async function publish(db, customerId, content, now = Date.now()) {
-  await saveDraft(db, customerId, content, now)
+// `expect`: the draft version the owner reviewed (see saveDraft). If the draft changed since (another tab or device, the
+// AI designer), nothing is saved or published and null comes back, so a stale page can never publish over newer work.
+export async function publish(db, customerId, content, now = Date.now(), { expect } = {}) {
+  const saved = await saveDraft(db, customerId, content, now, { expect })
+  if (saved.conflict) return null
   const json = JSON.stringify(content)
+  // updated_at keeps the draft's new version stamp (never moves backwards), so an editor that saw an older stamp still
+  // gets a conflict instead of matching an earlier version by chance.
   await db.batch([
     db.prepare('INSERT INTO website_versions (customer, version, content, created_at) SELECT ?1, coalesce(max(version), 0) + 1, ?2, ?3 FROM website_versions WHERE customer = ?1').bind(customerId, json, now),
-    db.prepare('UPDATE websites SET live_version = (SELECT max(version) FROM website_versions WHERE customer = ?1), published_at = ?2, updated_at = ?2 WHERE customer = ?1').bind(customerId, now),
+    db.prepare('UPDATE websites SET live_version = (SELECT max(version) FROM website_versions WHERE customer = ?1), published_at = ?2, updated_at = ?3 WHERE customer = ?1').bind(customerId, now, saved.updatedAt),
   ])
   const row = await db.prepare('SELECT live_version AS version FROM websites WHERE customer = ?1').bind(customerId).first()
   return row.version

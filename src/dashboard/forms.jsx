@@ -1,6 +1,9 @@
 // Business and booking-hours forms, shared by setup and settings.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
+
+// A settings save refused because the saved values changed elsewhere (another tab or device) since this page loaded.
+const CHANGED_ELSEWHERE = 'These settings were changed somewhere else (another tab or device) since this page opened, so this change wasn’t saved. Reload the page to see the latest, then make your change again.'
 
 const ERRORS = {
   invalid_name: 'Enter your business name.',
@@ -92,19 +95,22 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
   const [dayEnd, setDayEnd] = useState(customer.dayEnd)
   const [slotMinutes, setSlotMinutes] = useState(customer.slotMinutes)
   const [state, setState] = useState({})
+  // The saved hours this form started from: sent as `base` (a change made elsewhere meanwhile → 409, nothing replaced).
+  const base = useRef({ workdays: customer.workdays, dayStart: customer.dayStart, dayEnd: customer.dayEnd, slotMinutes: customer.slotMinutes })
 
   const toggle = (d) => setWorkdays((w) => (w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort()))
 
   const submit = async (e) => {
     e.preventDefault()
     setState({ saving: true })
-    const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes } })
+    const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes, base: base.current } })
     if (status === 200) {
+      base.current = data.hours || base.current
       setState({ saved: true })
       setTimeout(() => setState((s) => (s.saved ? {} : s)), 2000)
       return onSaved?.()
     }
-    setState({ error: errorText(data.error) })
+    setState({ error: status === 409 ? CHANGED_ELSEWHERE : errorText(data.error) })
   }
 
   return (
@@ -155,8 +161,14 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
 export function ProfileForm({ onSaved }) {
   const [p, setP] = useState(undefined)
   const [state, setState] = useState({})
+  // The saved details this form shows (only when they loaded): sent as `base`, so a change made elsewhere meanwhile is
+  // never silently replaced (409 conflict).
+  const base = useRef(null)
   useEffect(() => {
-    api('/api/dashboard/profile').then(({ status, data }) => setP(status === 200 ? data.profile || {} : {}))
+    api('/api/dashboard/profile').then(({ status, data }) => {
+      if (status === 200 && data.profile) base.current = data.profile
+      setP(status === 200 ? data.profile || {} : {})
+    })
   }, [])
   if (p === undefined) return <div aria-busy="true" />
   const submit = async (e) => {
@@ -165,13 +177,15 @@ export function ProfileForm({ onSaved }) {
     setState({ saving: true })
     const { status, data } = await api('/api/dashboard/profile', {
       method: 'POST',
-      body: { phone: f.get('phone'), industry: f.get('industry'), description: f.get('description'), cities: f.get('cities'), services: p.services || [] },
+      body: { phone: f.get('phone'), industry: f.get('industry'), description: f.get('description'), cities: f.get('cities'), services: p.services || [], ...(base.current ? { base: base.current } : {}) },
     })
     if (status === 200) {
+      base.current = data.profile
       setP(data.profile)
       setState({ saved: true })
       onSaved?.()
-    } else setState({ error: data.fields?.includes('phone') ? 'Enter a 10-digit US phone number, or leave it empty.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the details and try again.' })
+    } else if (status === 409) setState({ error: CHANGED_ELSEWHERE })
+    else setState({ error: data.fields?.includes('phone') ? 'Enter a 10-digit US phone number, or leave it empty.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the details and try again.' })
   }
   return (
     <form className="form" onSubmit={submit}>
@@ -219,19 +233,25 @@ const POLICY_ERRORS = {
 export function PoliciesForm() {
   const [p, setP] = useState(undefined)
   const [state, setState] = useState({})
+  const base = useRef(null) // the saved policies this form shows (see ProfileForm)
   useEffect(() => {
-    api('/api/dashboard/policies').then(({ status, data }) => setP(status === 200 ? data.policies : { beforeVisit: '', cancellation: '' }))
+    api('/api/dashboard/policies').then(({ status, data }) => {
+      if (status === 200) base.current = data.policies
+      setP(status === 200 ? data.policies : { beforeVisit: '', cancellation: '' })
+    })
   }, [])
   if (p === undefined) return <div aria-busy="true" />
   const submit = async (e) => {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
     setState({ saving: true })
-    const { status, data } = await api('/api/dashboard/policies', { method: 'POST', body: { beforeVisit: f.get('beforeVisit'), cancellation: f.get('cancellation') } })
+    const { status, data } = await api('/api/dashboard/policies', { method: 'POST', body: { beforeVisit: f.get('beforeVisit'), cancellation: f.get('cancellation'), ...(base.current ? { base: base.current } : {}) } })
     if (status === 200) {
+      base.current = data.policies
       setP(data.policies)
       setState({ saved: true })
-    } else setState({ error: POLICY_ERRORS[data.fields?.[0]] || 'Couldn’t save. Please try again.' })
+    } else if (status === 409) setState({ error: CHANGED_ELSEWHERE })
+    else setState({ error: POLICY_ERRORS[data.fields?.[0]] || 'Couldn’t save. Please try again.' })
   }
   return (
     <form className="form" onSubmit={submit}>

@@ -1,12 +1,13 @@
-import { Suspense, lazy } from 'react'
+import { Suspense } from 'react'
+import { lazyPage } from './lib/lazy.js'
 import App from './App.jsx'
 
 // App pages are separate lazy chunks so the marketing page stays small.
-const Dashboard = lazy(() => import('./dashboard/Dashboard.jsx'))
-const BookingPage = lazy(() => import('./booking/BookingPage.jsx'))
-const Admin = lazy(() => import('./admin/Admin.jsx'))
-const Privacy = lazy(() => import('./legal/Privacy.jsx'))
-const ChatPage = lazy(() => import('./receptionist/ChatPage.jsx'))
+const Dashboard = lazyPage(() => import('./dashboard/Dashboard.jsx'))
+const BookingPage = lazyPage(() => import('./booking/BookingPage.jsx'))
+const Admin = lazyPage(() => import('./admin/Admin.jsx'))
+const Privacy = lazyPage(() => import('./legal/Privacy.jsx'))
+const ChatPage = lazyPage(() => import('./receptionist/ChatPage.jsx'))
 
 // First-touch acquisition source (utm_source or ref), kept on this device for signup attribution.
 try {

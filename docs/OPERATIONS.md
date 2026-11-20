@@ -67,6 +67,23 @@ Command per migration (from a checkout containing the file):
 - **Migrations:** never drop the new tables. Older code ignores them. `audit_log` must never be edited or emptied.
 - **Switches:** turning a switch off (`ACCOUNT_DELETION_ENABLED`, `RETENTION_SCHEDULE_ENABLED`) stops new work at the next
   request/cron run; an in-progress deletion pauses (steps already done are not undone — deletion has no undo).
+- **Customers keep working during a deploy and a rollback.** A code rollback never touches data: drafts, published
+  versions, bookings and settings stay as the owners left them. Never restore a database backup to "undo" a release
+  (it would erase owner edits made since); restore data only for a confirmed data incident, with approval.
+- **Website content written by newer code (rollback limit).** Live sites render per request from the stored live
+  version, using whatever renderer is deployed. If a release adds a new website section type, theme option or content
+  field and an owner publishes content using it, rolling the code back means the older renderer meets content it
+  doesn't know: the renderer's `switch (s.type)` has no case for an unknown section, so that section is left out (the
+  rest of the page renders), and an unknown option value becomes a CSS class the older stylesheet doesn't style. The
+  next save through the older code would also run validateSpec, which drops or reports unknown choices. Before rolling back past such a
+  release: list the businesses whose live version uses the new feature (query `website_versions` for the live
+  version's `content.site`), render their live pages with the rollback target in a scratch worktree and diff, and tell
+  the owner. Prefer a forward fix over a rollback in that case. Releases that only change validation, the editor or
+  APIs (e.g. fix/deploy-safety) have no such limit: everything they store is readable by the previous release.
+- **Open dashboards across a deploy.** Old chunk files disappear with a deploy (the server answers with the HTML page);
+  lazyPage() reloads the page once. Studio keeps unsaved edits in localStorage and warns before unload; the classic
+  editor sends a waiting change on leaving (keepalive). Every draft/settings save carries the version it saw, so a
+  page from before the deploy can't overwrite newer work (409; older pages without the field still save).
 
 ## 5. Incident recovery
 

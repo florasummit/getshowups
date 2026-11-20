@@ -3,7 +3,8 @@
 // Testing, each one click from the side navigation. Every screen is a URL (?view=…, ?incident=…, ?business=…,
 // ?integration=…, ?session=…, ?run=…), so Back, deep links and new tabs work. Read-only except guided-QA records,
 // the read-only calendar diagnosis and the founder-alert test (each confirmed, rate-limited and audited).
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { lazyPage } from '../lib/lazy.js'
 import { api } from '../lib/api.js'
 import { Badge, Empty, Link, LoadError, Loading, PageHead, Section, Severity, TestTag } from './control/ui.jsx'
 import { ago, plural, useLocation, when } from './control/lib.js'
@@ -12,9 +13,9 @@ import { AccountInspector, AccountsList } from './control/Accounts.jsx'
 import { IntegrationDetail, IntegrationsList } from './control/Integrations.jsx'
 import './control.css'
 
-const Testing = lazy(() => import('./Qa.jsx'))
-const Session = lazy(() => import('./Qa.jsx').then((m) => ({ default: m.Session })))
-const RunReview = lazy(() => import('./Qa.jsx').then((m) => ({ default: m.RunReview })))
+const Testing = lazyPage(() => import('./Qa.jsx'))
+const Session = lazyPage(() => import('./Qa.jsx').then((m) => ({ default: m.Session })))
+const RunReview = lazyPage(() => import('./Qa.jsx').then((m) => ({ default: m.RunReview })))
 
 // ---------- Overview ----------
 function Banner({ o }) {

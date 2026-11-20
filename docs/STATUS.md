@@ -16,6 +16,36 @@ _Update at the end of every task. Newest first._
   approval (public rate-limited POST into the existing events table, allowlisted names, no personal data).
 - Next: founder visual/functional review of the preview; approve merge (= production deploy of the marketing page).
 
+## Editing during deploys (2026-11-20) — fix/deploy-safety (no migration; nothing deployed)
+
+- Audit question: do owners editing websites, bookings and settings stay safe while we deploy? Read-only production
+  checks + local tests. Deploys never write data; migrations are additive; live sites render from the stored live
+  version only (drafts never reach visitors); bookings keep the double-booking index; all 31 saved production backups
+  restore with integrity ok and 0 foreign-key violations (71 FK constraints, checked with enforcement on).
+- PoolThru's draft change at 2026-11-11 02:27:59 UTC (during the 44a59ca deploy) was the owner's own dashboard
+  session (generate → save → revise → publish v2 at 02:34). Owner edits during deploys are normal; never restored.
+- Fixed (verified gaps):
+  - Publish had no stale check: a page showing an older draft published it over newer work. Publish now sends
+    baseUpdatedAt → 409 conflict (nothing published; latest state returned). Pages without it still publish.
+  - publish() set updated_at back to the publish clock (could repeat an earlier stamp); it now keeps the save's stamp.
+  - The classic editor (WebsiteEditor: non-Studio drafts, onboarding) saved without baseUpdatedAt (last write won);
+    it now sends it and stops with an explanation on 409.
+  - Restoring a published version replaced the draft with no copy; the draft is now checkpointed first
+    (`before_version_restore`, History: "Before going back to a published version"), and the confirmation says the draft changes.
+  - A page loaded before a deploy went blank opening a not-yet-loaded tab (old chunk → HTML). src/lib/lazy.js
+    lazyPage reloads once (30 s loop guard).
+  - Invented-number check matched digit substrings ("15 years" passed via ZIP 33156, "12 technicians" via the phone):
+    server/fact-numbers.js compares whole numbers (phones in any format). Generation-time only; live sites unchanged.
+  - Business settings (profile, policies, booking hours) were last-write-wins: the Settings forms now send `base` (the
+    values they loaded) → 409 conflict, nothing replaced (server/stale.js; value based, no migration; base-less
+    requests from older pages and onboarding still save).
+  - The classic editor dropped a change typed < 700 ms before leaving (tab switch, reload after a deploy): it now sends
+    it on unmount/pagehide (keepalive).
+- Documented: rollback limit for website content using section types/options newer than the rollback target
+  (docs/OPERATIONS.md §4).
+- Not changed (reported): AI copy filters still allow superlatives ("the best … in Miami"), unverifiable product claims
+  and promises of reminders/texts; inner AI-site pages without a hero have no h1.
+
 ## Control Center experience (2026-11-20) — feat/control-center-experience (stacked on #88; no migration; nothing deployed)
 
 - Audit (real browser, isolated e2e environment) found: every admin `btn-ghost` button invisible (white on white:

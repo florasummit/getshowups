@@ -141,7 +141,10 @@ test('changes stay private until published again; an earlier version can be rest
   expect(await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).not.toContain('A brand new headline')
   await page.getByRole('button', { name: 'Publish changes' }).first().click()
   await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+  // Wait for the publish itself: the site was already Live before, so the Live badge alone doesn't mean it finished.
+  const published = page.waitForResponse((r) => r.url().endsWith('/api/dashboard/website') && r.request().method() === 'POST' && r.request().postDataJSON()?.action === 'publish')
   await page.getByRole('button', { name: 'Publish changes' }).last().click()
+  expect((await published).status()).toBe(200)
   await expect(page.locator('.site-status').getByText('Live', { exact: true })).toBeVisible()
   expect(await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).toContain('A brand new headline')
 
@@ -149,4 +152,39 @@ test('changes stay private until published again; an earlier version can be rest
   page.once('dialog', (d) => d.accept()) // restoring replaces the live site: the owner confirms
   await page.getByRole('button', { name: 'Restore' }).first().click()
   await expect.poll(async () => (await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).includes('Pool care in Charleston')).toBe(true)
+})
+
+test('a page showing an older draft never saves or publishes over newer work (another tab, device or a deploy)', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_PUBLISH_SESSION_TOKEN)
+  await page.goto('/dashboard/website')
+  await page.getByLabel('Headline').fill('Edited on this page')
+  await expect(page.getByText('All changes saved')).toBeVisible()
+  // Meanwhile the draft changes elsewhere (another tab or device): saved straight through the API.
+  const latest = await (await page.request.get('/api/dashboard/website')).json()
+  const other = await page.request.post('/api/dashboard/website', {
+    data: { action: 'save', content: { ...latest.website.draft, headline: 'Saved on another device' }, baseUpdatedAt: latest.website.updatedAt },
+    headers: { Origin: new URL(page.url()).origin },
+  })
+  expect(other.status()).toBe(200)
+  // Publishing from this page (which still shows the older draft) is refused and says why; nothing goes live.
+  const liveBefore = await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()
+  await page.getByRole('button', { name: 'Publish changes' }).first().click()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+  await page.getByRole('button', { name: 'Publish changes' }).last().click()
+  await expect(page.getByText(/changed somewhere else .* nothing was published/)).toBeVisible()
+  expect(await (await page.request.get(`/p/${fixtures.E2E_PUBLISH_CUSTOMER}`)).text()).toBe(liveBefore)
+  // Editing on this page doesn't overwrite the newer draft either.
+  await page.keyboard.press('Escape')
+  await page.getByLabel('Headline').fill('Typed on the older page')
+  await expect(page.getByText(/changed somewhere else .* wasn’t saved/)).toBeVisible()
+  expect((await (await page.request.get('/api/dashboard/website')).json()).website.draft.headline).toBe('Saved on another device')
+})
+
+test('a change typed just before leaving the page is saved, not dropped (another tab, a reload after a deploy)', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_PUBLISH_SESSION_TOKEN)
+  await page.goto('/dashboard/website')
+  await page.getByLabel('Headline').fill('Typed right before leaving')
+  // Leave at once, before the autosave delay: the waiting change goes out as the editor closes.
+  await page.locator('.tabs').getByRole('link', { name: 'Overview' }).click()
+  await expect.poll(async () => (await (await page.request.get('/api/dashboard/website')).json()).website.draft.headline).toBe('Typed right before leaving')
 })

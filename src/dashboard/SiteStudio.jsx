@@ -1633,7 +1633,7 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
 }
 
 // ---------- history ----------
-const REASON = { autosave: 'Saved while editing', published: 'Published', before_restore: 'Before a restore' }
+const REASON = { autosave: 'Saved while editing', published: 'Published', before_restore: 'Before a restore', before_version_restore: 'Before going back to a published version' }
 function HistoryPanel({ checkpoints, busy, onRestore }) {
   const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   return (
