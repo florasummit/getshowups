@@ -10,28 +10,61 @@ import { uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 const withCopies = (c, copies) => (Object.keys(copies).length ? { variants: { ...(c.variants || {}), ...copies }, responsiveImages: true } : {})
 
 const STYLE_LABELS = { clean: 'Clean', bold: 'Bold', warm: 'Warm' }
+export const CONFLICT_TEXT = 'Your draft was changed somewhere else (another tab, device or the designer), so this change wasn’t saved. Reload the page to continue from the latest draft.'
+
 // Saves `content` a moment after the last change. Returns the save status for a quiet indicator.
-function useAutosave(content, onSaved) {
+// `baseUpdatedAt`: the draft version this editor started from. Every save sends the version it last saw, so a draft
+// changed elsewhere meanwhile (another tab, a phone, the AI designer, an older page open during a deploy) is never
+// silently overwritten: the server answers 409 and this editor stops saving until the page is reloaded.
+function useAutosave(content, onSaved, baseUpdatedAt) {
   const [status, setStatus] = useState('saved')
   const first = useRef(true)
   const saved = useRef(onSaved)
+  const base = useRef(baseUpdatedAt)
+  const stale = useRef(false)
+  const pending = useRef(null) // { timer, content }: a change waiting for its autosave
   useEffect(() => {
     saved.current = onSaved
   })
+  // Leaving before the autosave ran (another dashboard tab, a reload after a deploy, closing the page): the waiting
+  // change is sent right away (keepalive, so it survives the unload) instead of being dropped.
+  useEffect(() => {
+    const flush = () => {
+      const p = pending.current
+      if (!p || stale.current) return
+      clearTimeout(p.timer)
+      pending.current = null
+      const body = { action: 'save', content: p.content, ...(Number.isFinite(base.current) ? { baseUpdatedAt: base.current } : {}) }
+      fetch('/api/dashboard/website', { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
+    }
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [])
   useEffect(() => {
     if (first.current) {
       first.current = false
       return
     }
+    if (stale.current) return
     setStatus('pending')
     const t = setTimeout(async () => {
+      pending.current = null
       setStatus('saving')
-      const { status: s, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'save', content } })
+      const body = { action: 'save', content, ...(Number.isFinite(base.current) ? { baseUpdatedAt: base.current } : {}) }
+      const { status: s, data } = await api('/api/dashboard/website', { method: 'POST', body })
       if (s === 200) {
+        if (Number.isFinite(data?.website?.updatedAt)) base.current = data.website.updatedAt
         setStatus('saved')
         saved.current?.(data)
+      } else if (s === 409 && data?.error === 'conflict') {
+        stale.current = true
+        setStatus({ error: CONFLICT_TEXT })
       } else setStatus({ error: data.fields ? problemText(data.fields) : 'Couldn’t save. Check your connection.' })
     }, 700)
+    pending.current = { timer: t, content }
     return () => clearTimeout(t)
   }, [content])
   return status
@@ -190,9 +223,9 @@ function Photos({ c, set }) {
 // `initial`: website content; `colors`: { name: hex }; `onSaved(state)`: after each autosave.
 // `designed`: the draft is an AI-designed site (content.site). Its layout, colours, type and wording come from the AI
 // designer, so the template controls (style, colours, logo, Google text) are hidden: they would save but change nothing.
-export default function WebsiteEditor({ initial, colors, designOptions, onSaved, onEdit, compact = false, designed = false }) {
+export default function WebsiteEditor({ initial, baseUpdatedAt, colors, designOptions, onSaved, onEdit, compact = false, designed = false }) {
   const [c, setC] = useState(initial)
-  const status = useAutosave(c, onSaved)
+  const status = useAutosave(c, onSaved, baseUpdatedAt)
   const edited = useRef(onEdit)
   useEffect(() => {
     edited.current = onEdit

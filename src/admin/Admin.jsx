@@ -1,13 +1,14 @@
 // /admin — platform console for GetShowUps staff. Access requires a Google sign-in whose email is in
 // PLATFORM_ADMIN_EMAILS (checked server-side on every request). Customer lead details are never shown.
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
 import '../app.css'
 
-const Review = lazy(() => import('./Review.jsx'))
-const Control = lazy(() => import('./Control.jsx'))
+const Review = lazyPage(() => import('./Review.jsx'))
+const Control = lazyPage(() => import('./Control.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
   ['control', 'Control Center', '/admin/control'],

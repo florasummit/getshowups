@@ -11,6 +11,7 @@
 //   - every text passes the claims filter (and, for AI output, the invented-number check) or is removed
 //   - resource limits: pages, sections, items, text lengths, total size
 import { unapprovedClaims } from './ads/spec.js'
+import { inventedNumbers } from './fact-numbers.js'
 import { STOCK_IDS } from './site-design.js'
 
 export const SPEC_VERSION = 2
@@ -131,8 +132,7 @@ export function validateSpec(raw, ctx = {}) {
   const serviceRef = (j) => (services[j]?.id ? { serviceId: services[j].id } : { serviceIndex: j })
   const numbersOk = (t) => {
     if (!ctx.factsText) return true
-    const facts = ctx.factsText.replace(/[,\s]/g, '')
-    return (String(t).match(/\d[\d,.]*/g) || []).map((n) => n.replace(/[.,]+$/, '').replace(/,/g, '')).every((n) => facts.includes(n))
+    return inventedNumbers(t, ctx.factsText).length === 0 // whole numbers only (server/fact-numbers.js)
   }
   // Text gate: limits + claims filter + invented numbers. A failing text becomes '' (and is reported).
   const txt = (v, max, where, body = false) => {

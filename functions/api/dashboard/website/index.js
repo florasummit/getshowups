@@ -215,7 +215,11 @@ export async function onRequestPost({ request, env }) {
       if (hasStudioOutput(content) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
       // Every page must render before anything goes live; otherwise the current live version keeps serving.
       if (!(await rendersCleanly(db, customer, content))) return json(422, { error: 'render_failed' })
-      const version = await publish(db, customer.id, content)
+      // baseUpdatedAt: the draft version the owner reviewed. Changed elsewhere since → 409 with the latest state (nothing
+      // published); there is no "keep mine" here: the owner reviews the latest draft before it goes live.
+      const expect = Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
+      const version = await publish(db, customer.id, content, Date.now(), { expect })
+      if (version == null) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
       if (await studioAccess(env, customer)) await saveCheckpoint(db, customer.id, content, 'published').catch((e) => console.error('checkpoint failed:', e?.name))
       await track(env, 'website_published', { customer: customer.id, props: { version } })
       await recordEvent(db, { type: 'website.publish', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version } })
@@ -245,6 +249,12 @@ export async function onRequestPost({ request, env }) {
       const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customer.id, Number(body.version) || 0).first()
       if (v && hasStudioOutput(JSON.parse(v.content)) && !studioPublishAllowed(env)) return json(409, { error: 'studio_publish_off' })
       if (v && !(await rendersCleanly(db, customer, JSON.parse(v.content)))) return json(422, { error: 'render_failed' })
+      // Restoring also replaces the draft: keep the current draft as a recoverable copy first (Draft history), so
+      // unpublished work is never lost. Best effort, like the other checkpoints; never blocks the restore.
+      if (v && (await studioAccess(env, customer))) {
+        const current = (await loadWebsite(db, customer)).draft
+        await saveCheckpoint(db, customer.id, current, 'before_version_restore').catch((e) => console.error('checkpoint failed:', e?.name))
+      }
       if (!(await restore(db, customer.id, body.version))) return json(404, { error: 'not_found' })
       await track(env, 'website_restored', { customer: customer.id, props: { version: body.version } })
       await recordEvent(db, { type: 'website.restore', actor: `owner:${session.email}`, customer: customer.id, capability: 'website', resource: { type: 'website', id: customer.id }, outcome: 'success', details: { version: Number(body.version) || null } })

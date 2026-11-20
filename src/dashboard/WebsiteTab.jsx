@@ -27,11 +27,15 @@ export function PublishBox({ data, onDone, label = 'Publish', secondary }) {
   const legal = (data.website.draft?.site?.pages || []).filter((p) => p.legal)
   const publish = async () => {
     setState({ busy: true })
-    const { status, data: d } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'publish', content: data.website.draft, confirm: true, ...(legal.length ? { legalReviewed: legalOk } : {}) } })
+    // baseUpdatedAt: the draft version shown here. If it changed elsewhere meanwhile, nothing is published (409).
+    const base = Number.isFinite(data.website.updatedAt) ? { baseUpdatedAt: data.website.updatedAt } : {}
+    const { status, data: d } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'publish', content: data.website.draft, confirm: true, ...base, ...(legal.length ? { legalReviewed: legalOk } : {}) } })
     if (status === 200) return onDone(d)
     setState({
       error:
-        d.error === 'not_ready'
+        d.error === 'conflict'
+          ? 'Your draft was changed somewhere else (another tab, device or the designer), so nothing was published. Reload the page to review the latest draft, then publish.'
+          : d.error === 'not_ready'
           ? 'Connect your calendar and set your hours first, so customers can book.'
           : d.error === 'plan_required'
             ? 'Your plan isn’t active. Reactivate it in Settings to publish.'
@@ -324,7 +328,7 @@ export default function WebsiteTab() {
           {!(designed && data.studio) && (
             <section className="card site-editor" aria-label="Edit website">
               <h2 className="card-title">Edit text and photos</h2>
-              <WebsiteEditor key={editorKey} initial={w.draft} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? 'locked' : false} />
+              <WebsiteEditor key={editorKey} initial={w.draft} baseUpdatedAt={w.updatedAt} colors={data.options.colors} designOptions={data.options} onSaved={refresh} designed={designed ? 'locked' : false} />
             </section>
           )}
         </div>
@@ -358,7 +362,7 @@ export default function WebsiteTab() {
                     </p>
                   </div>
                   {!v.live && (
-                    <button type="button" className="btn btn-quiet btn-sm" disabled={more.busy} onClick={() => window.confirm(`Make the version published ${day(v.createdAt)} your live website again? Visitors will see it right away. You can switch back from this list.`) && post({ action: 'restore', version: v.version, confirm: true })}>
+                    <button type="button" className="btn btn-quiet btn-sm" disabled={more.busy} onClick={() => window.confirm(`Make the version published ${day(v.createdAt)} your live website again? Visitors will see it right away, and your draft becomes that version too.${data.studio ? ' Your current draft is kept under History in the editor.' : ''} You can switch back from this list.`) && post({ action: 'restore', version: v.version, confirm: true })}>
                       Restore
                     </button>
                   )}
