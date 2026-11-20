@@ -18,7 +18,7 @@ test('homepage renders headline, metadata, and all sections', async ({ page }) =
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('More booked jobs. Less chasing.')
   await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /appointment/)
   // #simulation stays as an alias of the demo so old links still land on it.
-  for (const id of ['demo', 'simulation', 'how-it-works', 'pricing', 'book-demo', 'faq']) {
+  for (const id of ['problem', 'demo', 'simulation', 'how-it-works', 'teach', 'industries', 'pricing', 'book-demo', 'faq']) {
     await expect(page.locator(`#${id}`)).toBeAttached()
   }
 })

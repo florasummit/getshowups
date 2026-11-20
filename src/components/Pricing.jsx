@@ -8,7 +8,7 @@ import { track } from '../lib/analytics.js'
 export default function Pricing() {
   const start = useStartAction()
   return (
-    <section id="pricing" className="section" aria-labelledby="pricing-title">
+    <section id="pricing" className="section section--muted" aria-labelledby="pricing-title">
       <div className="container">
         <SectionHeading
           id="pricing-title"

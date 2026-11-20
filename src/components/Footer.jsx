@@ -9,13 +9,15 @@ export default function Footer() {
   return (
     <footer className="site-footer">
       <div className="container footer-cta">
-        <h2>Ready for more booked jobs and less chasing?</h2>
+        <h2>
+          More booked jobs. <em>Less chasing.</em>
+        </h2>
         <GetStarted className="btn btn-primary btn-lg" onClick={() => track('early_access_cta', { location: 'footer' })} />
       </div>
       <div className="container footer-inner">
         <div className="footer-brand">
           <Logo className="logo--light" />
-          <p>Online booking and show-up tracking for service businesses.</p>
+          <p>AI answering, qualifying and booking for pool, HVAC and roofing businesses.</p>
         </div>
         <nav aria-label="Footer">
           <ul className="footer-links">

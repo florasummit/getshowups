@@ -9,11 +9,23 @@ export default function Header() {
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
+  const [dark, setDark] = useState(false)
+
+  // Solid after a few pixels; dark while a dark section (or the footer) sits under the header line.
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8)
+    const onScroll = () => {
+      setScrolled(window.scrollY > 8)
+      const y = window.scrollY + 34
+      const under = [...document.querySelectorAll('main > section, footer')].find((s) => s.offsetTop <= y && s.offsetTop + s.offsetHeight > y)
+      setDark(Boolean(under && (under.classList.contains('section--dark') || under.tagName === 'FOOTER')))
+    }
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
   }, [])
 
   useEffect(() => {
@@ -33,7 +45,7 @@ export default function Header() {
   const close = () => setOpen(false)
 
   return (
-    <header className={`site-header ${scrolled || open ? 'is-solid' : ''}`}>
+    <header className={`site-header ${scrolled || open ? 'is-solid' : ''} ${dark && !open ? 'is-dark' : ''}`}>
       <div className="container header-inner">
         <Logo />
         <nav aria-label="Primary" className="desktop-nav">
