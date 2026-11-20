@@ -1,6 +1,7 @@
 import Logo from './Logo.jsx'
 import GetStarted from './GetStarted.jsx'
 import { navLinks } from '../content/site.js'
+import { track } from '../lib/analytics.js'
 
 const year = new Date().getFullYear()
 
@@ -8,8 +9,8 @@ export default function Footer() {
   return (
     <footer className="site-footer">
       <div className="container footer-cta">
-        <h2>Ready to turn more leads into booked appointments?</h2>
-        <GetStarted className="btn btn-primary btn-lg" />
+        <h2>Ready for more booked jobs and less chasing?</h2>
+        <GetStarted className="btn btn-primary btn-lg" onClick={() => track('early_access_cta', { location: 'footer' })} />
       </div>
       <div className="container footer-inner">
         <div className="footer-brand">

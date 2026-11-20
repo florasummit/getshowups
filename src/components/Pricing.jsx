@@ -3,6 +3,7 @@ import SectionHeading from './SectionHeading.jsx'
 import GetStarted from './GetStarted.jsx'
 import { useStartAction } from '../lib/enrollment.js'
 import { pricing } from '../content/site.js'
+import { track } from '../lib/analytics.js'
 
 export default function Pricing() {
   const start = useStartAction()
@@ -39,7 +40,7 @@ export default function Pricing() {
               {start.note}
             </p>
           )}
-          <GetStarted className="btn btn-primary btn-lg btn-block" />
+          <GetStarted className="btn btn-primary btn-lg btn-block" onClick={() => track('early_access_cta', { location: 'pricing' })} />
           {!start.closed && (
             <a href="#book-demo" className="price-alt">
               Questions first? Book a call

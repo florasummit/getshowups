@@ -21,7 +21,8 @@ First-time setup: `npm ci && npx playwright install chromium`. Node ≥ 22.13 (C
 ```
 src/                 React marketing site (Vite → dist/). Browser code only.
   components/        One component per section; reuse SectionHeading, Icon
-  content/           Copy and data (site.js, simulation.js); edit copy here, not in components
+  content/           Copy and data (site.js; demo.js = the homepage "See it work" demo, simulated, no API calls);
+                     edit copy here, not in components. lib/analytics.js: homepage funnel events, in-page only (no sender)
   config/ghl.js      Public embed URLs from VITE_* env (booking calendar / GHL form)
   Root.jsx           Chooses marketing site, /dashboard, or /book/:id (app pages are lazy chunks)
   dashboard/         Sign-in → self-serve onboarding (Setup.jsx: business → plan → details → services → calendar →

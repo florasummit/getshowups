@@ -2,6 +2,8 @@ import Icon from './Icon.jsx'
 import SectionHeading from './SectionHeading.jsx'
 import { steps } from '../content/site.js'
 
+const STATUS = { live: 'Live today', partly: 'Partly live' }
+
 export default function HowItWorks() {
   return (
     <section id="how-it-works" className="section" aria-labelledby="how-title">
@@ -9,19 +11,22 @@ export default function HowItWorks() {
         <SectionHeading
           id="how-title"
           eyebrow="How it works"
-          title="One workflow from first inquiry to follow-up"
-          intro="Every lead moves through the same six stages, automatically — and your team steps in only where it matters."
+          title="Six steps from first inquiry to follow-up"
+          intro="What each step does today. Where part of a step is still coming, it says so."
         />
-        <ol className="steps">
+        <ol className="flow">
           {steps.map((s, i) => (
-            <li key={s.id} className="step">
-              <div className="step-top">
-                <span className="step-icon">
-                  <Icon name={s.icon} size={22} />
+            <li key={s.id} className="flow-step" data-step={s.id}>
+              <div className="flow-head">
+                <span className="flow-num" aria-hidden="true">
+                  {String(i + 1).padStart(2, '0')}
                 </span>
-                <span className="step-num">{String(i + 1).padStart(2, '0')}</span>
+                <span className="flow-icon" aria-hidden="true">
+                  <Icon name={s.icon} size={20} />
+                </span>
+                <h3>{s.title}</h3>
+                <span className={`flow-status is-${s.status}`}>{STATUS[s.status]}</span>
               </div>
-              <h3>{s.title}</h3>
               <p>{s.body}</p>
             </li>
           ))}

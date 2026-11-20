@@ -1,12 +1,8 @@
 import Icon from './Icon.jsx'
 import { ghl } from '../config/ghl.js'
-
-const agenda = [
-  'A walkthrough of the full lead-to-appointment workflow',
-  'How qualification questions and reminders would work for your services',
-  'What setup involves, including SMS registration requirements',
-  'Current pricing and next steps — no obligation',
-]
+import { enrollmentClosed } from '../content/site.js'
+import { useStartAction } from '../lib/enrollment.js'
+import { track } from '../lib/analytics.js'
 
 /**
  * GHL integration point.
@@ -26,7 +22,7 @@ function SchedulerSlot() {
           loading="lazy"
           referrerPolicy="strict-origin-when-cross-origin"
         />
-        <a className="embed-fallback" href={src} target="_blank" rel="noopener noreferrer">
+        <a className="embed-fallback" href={src} target="_blank" rel="noopener noreferrer" onClick={() => track('early_access_open', { how: 'new_tab' })}>
           Calendar not loading? Open booking page in a new tab ↗
         </a>
       </>
@@ -61,23 +57,26 @@ function SchedulerSlot() {
 }
 
 export default function BookDemo() {
+  const start = useStartAction()
   return (
     <section id="book-demo" className="section section--muted" aria-labelledby="demo-title">
       <div className="container demo-grid">
         <div className="demo-copy">
-          <p className="eyebrow">Book a demo</p>
-          <h2 id="demo-title">See GetShowUps mapped to your business</h2>
+          <p className="eyebrow">{start.closed ? 'Early access' : 'Talk to us'}</p>
+          <h2 id="demo-title">{start.closed ? 'Request early access' : 'Questions first? Book a short call'}</h2>
           <p className="section-intro">
-            A short call to walk through how leads would move from inquiry to appointment for your team.
+            A short call about your business: how your inquiries would become booked visits, and what setup involves.
           </p>
-          <ul className="demo-agenda">
-            {agenda.map((a) => (
-              <li key={a}>
-                <Icon name="tick" size={18} strokeWidth={2.5} />
-                {a}
-              </li>
-            ))}
-          </ul>
+          {start.closed && (
+            <>
+              <h3 className="demo-next-title">What happens next</h3>
+              <ol className="demo-next">
+                {enrollmentClosed.next.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ol>
+            </>
+          )}
         </div>
         <div className="demo-panel">
           <SchedulerSlot />
