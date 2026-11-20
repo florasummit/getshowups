@@ -4,10 +4,10 @@ import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 
-test.describe.configure({ mode: 'serial', timeout: 90_000 }) // both tests use the same business, in order
+test.describe.configure({ mode: 'serial', timeout: 90_000 }) // both tests use the same business (e2e-import, its own), in order
 
 test('owner imports their current website into the draft (text, prices, photos); the live site is unchanged @mobile', async ({ page, context }) => {
-  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await useSession(context, fixtures.E2E_IMPORT_SESSION_TOKEN)
   await page.goto('/dashboard/website')
   const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Bring your current website' }) })
   // A previous run (other viewport) may already have imported: the site is then AI-editable, the import sits in the
@@ -54,7 +54,7 @@ test('owner imports their current website into the draft (text, prices, photos);
 })
 
 test('owner connects their own Claude key (checked, stored encrypted, shown by last 4 only) and can remove it', async ({ page, context }) => {
-  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await useSession(context, fixtures.E2E_IMPORT_SESSION_TOKEN)
   await page.goto('/dashboard/website')
   // After the import above, the site is AI-editable: the import + designer tools sit in one labelled row.
   const tools = page.locator('details.site-more')
