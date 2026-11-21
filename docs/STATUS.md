@@ -2,6 +2,42 @@
 
 _Update at the end of every task. Newest first._
 
+## Flagship design: less text, more product (2026-11-21) — feat/flagship-design (frontend only; nothing switched on)
+
+- Reference study: stripe.com, /payments, /billing, /payments/checkout, /pricing rendered at 1440 and 390 with
+  Playwright (screenshots + computed styles in the session scratchpad; notes in the PR). Techniques taken as
+  principles, not copied: one angled gradient canvas, product UI as the hero image, layered negative-spread shadows,
+  bento cells with one line of copy, ink + slate two-tone headings on a cool `#f6f9fc`-style canvas, one accent for
+  actions, phone layouts re-composed rather than shrunk.
+- Visual system (src/index.css tokens, scoped use in src/app.css): the orange logo unchanged (byte-identical,
+  flagship.spec asserts the SVG); `--beam` gradient (logo orange → sky → lavender) as the hero canvas, the setup/sign-in
+  canvas and 4–5 px accent edges; tints sky / mint / lavender on the `--cloud` canvas; three shadow tiers.
+- Homepage: hero beam; the dark stage now floats on a light sky-to-lavender wash (header stays light; flagship.spec
+  updated). The problem section is one inquiry on two timelines (answered late → "Booked someone else"; answered now →
+  "Booked · on your calendar"), labelled as an example. How it works = six cards drawn as the product state each step
+  produces (website, chat reply, area/rule checks, open times, the appointment, the counts). Teach Your AI = the
+  owner's rules beside the reply one of them decides ("Rule 3 applied"). Industries = three cards. Pricing card with a
+  beam edge on the canvas. Copy cut to a line per idea: visible words 1,269 → 1,159 at 1440 (problem/industries/teach
+  copy −35–45 %), no paragraph over 240 characters; flagship.spec guards both.
+- Teach Your AI (src/dashboard/TeachAI.jsx, presentation only): a flow strip answers "what it knows → what it does →
+  test it → publish" with live counts and the draft/published state; the editor sits left, the test conversation and
+  publish panel right and sticky on wide screens (≥1100 px; the tab is now wide like Website); hints shortened; the
+  draft-vs-published description is collapsed behind a summary; every control, validation message, platform-rule note
+  and confirmation unchanged (teach-ai.spec unchanged and green). Rule engine, API and persistence untouched.
+- App shell: cool canvas with a full-width white header band, cards with the small shadow tier, the Next step card as
+  the one dark surface (beam edge, orange action), stage-coloured edges on the 30-day figures and attention rows,
+  sign-in/setup on the beam canvas with a pill step bar. Semantic colours unchanged.
+- Test clock fixes found on the way: test/release.test.js rate-limit tests now start away from a fixed-window edge (CI straddled 20:10:00 UTC and saw the per-IP count reset: 201 instead of 429); test/control-center.test.js freezes NOW at 2026-11-20 15:05 UTC but
+  `incidentDetail` read the real clock for the phase label, so from 2026-11-21 15:05 UTC the open incident read
+  "quiet" instead of "active" and `npm run verify` failed on main. `incidentDetail(db, id, now = Date.now())` now
+  takes the clock (production call unchanged) and the test passes NOW. No behaviour change.
+- Verification: unit 701/701, lint clean, build, Functions, Playwright full suite; three screenshot critique passes at 1440/1024/768/390/320
+  (homepage) and 1440/390 (overview, appointments, follow-ups, receptionist, Teach Your AI, website, ads, settings,
+  onboarding) in the scratchpad (design/baseline, pass1, pass2, pass3). Contrast (approximate AA script): homepage 0
+  failures on opaque backgrounds after fixing the taken-slot colour; Teach Your AI and overview 0 failures.
+- Untouched by design: customer websites (render goldens unchanged, live HTML compared after deploy), the customer
+  booking page (.booking), the public chat page (.rcp; its pre-existing 22 px overflow at 320 px is noted, not changed).
+
 ## Launch readiness and first paying customer (2026-11-21) — feat/launch-readiness (no migration; nothing switched on)
 
 - Decision page: docs/LAUNCH_DECISION.md. **Owner-operated pilot: GO with conditions** (founder alerts on,

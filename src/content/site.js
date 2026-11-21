@@ -1,6 +1,8 @@
 // Marketing copy lives here so it can be edited without touching layout code.
 // Rule: no testimonials, customer logos, or performance statistics until real data exists. Every claim below
 // describes what works in production today; anything else says "coming soon" or "pilot".
+// Flagship (2026-11-21): one screen, one message, one next action. Sections explain through product visuals
+// (components/Story.jsx) built from this data; visible copy is one or two short lines per idea.
 
 export const navLinks = [
   { href: '#demo', label: 'See it work' },
@@ -18,58 +20,84 @@ export const enrollmentClosed = {
   href: '/#book-demo',
   label: 'Request early access',
   note: 'Online enrollment isn’t open yet. Book a short call and we’ll set you up as soon as it opens.',
-  next: [
-    'Pick a time for a short call. The calendar here books it directly; there’s no form to fill in first.',
-    'On the call we look at your services, service area and current website, and answer your questions.',
-    'When enrollment opens, we set you up first. Nothing is charged before you choose to sign up.',
-  ],
+  next: ['Pick a time. The calendar here books it directly.', 'We look at your services, service area and website together.', 'When enrollment opens, you’re set up first. Nothing is charged until you sign up.'],
 }
 
 export const hero = {
-  eyebrow: 'AI receptionist and booking for pool, HVAC and roofing businesses',
-  sub: 'Your customers write in. GetShowUps understands the request, checks it against your area and your rules, asks only for what’s missing, and books a real open time on your calendar.',
+  eyebrow: 'For pool, HVAC and roofing businesses',
+  sub: 'Your AI receptionist answers every inquiry, checks your area and your rules, and books a real open time on your calendar.',
 }
 
-// The friction GetShowUps removes. Plain observations, not statistics.
+// The friction GetShowUps removes, told as one example day (components/Story.jsx → Problem). Fictional, illustrative,
+// not a measured result; the two columns use the same inquiry so the only difference is who answers.
 export const problem = {
   title: 'The inquiries you answer late are the jobs you don’t get',
-  items: [
-    { title: 'Messages arrive while you’re on a job', body: 'A pool that turned green, an AC that quit, a roof after a storm: the person asking is already looking for who answers first.' },
-    { title: 'Every reply is the same ten questions', body: 'Where are you? What’s wrong? When works? Is it urgent? You’ve typed them a thousand times, usually from a truck.' },
-    { title: 'Nothing connects the dots', body: 'The lead is in a text, the time is in your head, the address is in an email, and the calendar is somewhere else.' },
-  ],
+  legend: ['Messages arrive while you’re on a job', 'The same ten questions, every time', 'Lead, time and address in four places'],
+  inquiry: 'Pool turned green overnight. Can someone come this week? I’m in Mount Pleasant.',
+  without: {
+    label: 'Without GetShowUps',
+    events: [
+      { t: '9:12 AM', who: 'customer', text: 'Pool turned green overnight. Can someone come this week? I’m in Mount Pleasant.' },
+      { t: '9:12 AM', note: 'You’re on a job until 3 PM', tone: 'wait' },
+      { t: '11:40 AM', who: 'customer', text: 'Hello? Still there?' },
+      { t: '2:05 PM', note: 'Booked someone else', tone: 'bad' },
+    ],
+  },
+  with: {
+    label: 'With GetShowUps',
+    events: [
+      { t: '9:12 AM', who: 'customer', text: 'Pool turned green overnight. Can someone come this week? I’m in Mount Pleasant.' },
+      { t: '9:12 AM', who: 'ai', text: 'Yes, Mount Pleasant is in our area. Friday I have 10:30 AM or 1:00 PM. Which works?' },
+      { t: '9:13 AM', who: 'customer', text: '10:30. Book it.' },
+      { t: '9:13 AM', note: 'Booked · on your calendar', tone: 'ok' },
+    ],
+  },
 }
 
-// Attract → Answer → Qualify → Book → Notify → Measure. Each says only what is live (status: live | partly | soon).
+// Attract → Answer → Qualify → Book → Notify → Measure: each step is drawn as the product state it produces
+// (components/Story.jsx → HowItWorks). `status`: live | partly | soon. Bodies are one line.
 export const journey = [
-  { id: 'attract', status: 'live', title: 'Attract', body: 'A professional website, built and hosted for you, with booking and chat built in. Use your GetShowUps address or your own domain.' },
-  { id: 'answer', status: 'live', title: 'Answer', body: 'The AI receptionist replies on your website in seconds, in your words, using only your services, prices, area and hours.' },
-  { id: 'qualify', status: 'live', title: 'Qualify', body: 'It checks the service area before offering times, follows the questions you set, and never invents a price or a promise.' },
-  { id: 'book', status: 'live', title: 'Book', body: 'Real open times from your Google Calendar, booked only after the customer’s own yes. A time can never be booked twice.' },
-  { id: 'notify', status: 'live', title: 'Notify', body: 'The visit lands on your calendar with the address; Google invites the customer; callback requests show up in Needs attention.' },
-  { id: 'measure', status: 'live', title: 'Measure', body: 'Every inquiry, booking, show-up and finished job in one place, so you can see where leads come from and where they drop.' },
+  { id: 'attract', status: 'live', title: 'Attract', body: 'Your website, hosted for you, with booking and chat built in.' },
+  { id: 'answer', status: 'live', title: 'Answer', body: 'Replies in seconds, in your words, from your records only.' },
+  { id: 'qualify', status: 'live', title: 'Qualify', body: 'Your area and your rules, checked before any time is offered.' },
+  { id: 'book', status: 'live', title: 'Book', body: 'Real open times from Google Calendar. Never booked twice.' },
+  { id: 'notify', status: 'live', title: 'Notify', body: 'On your calendar with the address. Google invites the customer.' },
+  { id: 'measure', status: 'live', title: 'Measure', body: 'Inquiry → booked → showed → done, in one place.' },
 ]
 
-export const journeyNotes = 'Text messaging, email reminders and automatic follow-ups are built and in testing, not live yet. Voice calls on your website are in a pilot. We say so everywhere they come up.'
+export const journeyNotes = 'Texting, email reminders and automatic follow-ups are built and in testing, not live. Voice on your website is in a pilot.'
 
 // Teach Your AI (released 2026-11-20 as a controlled pilot: the Studio is on for the first pilot business; published
-// rules reach live conversations only once GetShowUps switches that on per business).
+// rules reach live conversations only once GetShowUps switches that on per business). The panel pairs an owner's
+// rules with the moment one of them decides what the AI says (components/Story.jsx → TeachYourAI).
 export const teach = {
   title: 'Your AI, your rules',
-  sub: 'Teach Your AI is where you decide how it works: the questions it asks, in what order, what you don’t offer, which towns you serve completely, what counts as urgent, and when to hand off to you.',
+  sub: 'Decide what it asks, what you don’t offer, what counts as urgent, and when to hand off to you.',
   points: [
-    ['Describe a change in plain words', '“Ask what the customer needs before asking where they live.” You see exactly what would change before anything is saved.'],
-    ['Test it before customers see it', 'Type what a customer might say and watch what the AI understands and does next. Nothing is sent or booked.'],
-    ['Publish when you’re ready', 'Every version is kept. Go back to an earlier one in one click.'],
-    ['Some rules are always on', 'Your area is checked before times, bookings need the customer’s yes, danger means 911 first, prices come only from your records.'],
+    ['Teach a change in plain words', 'You see exactly what would change before it’s saved.'],
+    ['Test it first', 'Type what a customer might say. Nothing is sent or booked.'],
+    ['Every version kept', 'Publish when you’re ready. Go back in one click.'],
   ],
+  locked: 'Always on: the area check, the customer’s yes before a booking, safety first, prices only from your records.',
   status: 'In pilot with founding customers',
+  rules: [
+    { n: 1, text: 'Ask what they need first' },
+    { n: 2, text: 'Check the service area', fixed: true },
+    { n: 3, text: '“No heat” is urgent → soonest open time', hit: true },
+    { n: 4, text: 'We don’t install equipment' },
+    { n: 5, text: 'Asks for a person → record a callback' },
+  ],
+  chat: [
+    { who: 'customer', text: 'No heat since last night. We’re in 29483.' },
+    { who: 'ai', text: 'Sorry to hear that, let’s get someone out today. The soonest I have is 3:00 PM. Shall I hold it?' },
+  ],
+  applied: 'Rule 3 applied: “no heat” is urgent, so the soonest open time comes first.',
 }
 
 export const industries = [
-  { id: 'pool', title: 'Pool service', body: 'Green pools, pump noise, weekly care. The AI knows the difference, confirms the area by town where you serve it completely, and books the visit at the customer’s address.' },
-  { id: 'hvac', title: 'HVAC', body: 'No cooling in July isn’t a tune-up. Your AI can be told to settle urgency first, get the soonest time for the ones that can’t wait, and flag you.' },
-  { id: 'roofing', title: 'Roofing', body: 'Storm damage means an inspection first and a person for the estimate. The AI books the look, records the callback, and never quotes a roof.', upcoming: true },
+  { id: 'pool', title: 'Pool service', body: 'Green pools, pump noise, weekly care. Booked at the customer’s address.' },
+  { id: 'hvac', title: 'HVAC', body: 'No cooling in July isn’t a tune-up. Urgency first, soonest time, you’re flagged.' },
+  { id: 'roofing', title: 'Roofing', body: 'Storm damage: an inspection is booked, a person gives the estimate.', upcoming: true },
 ]
 
 export const pricing = {
@@ -80,16 +108,16 @@ export const pricing = {
   note: 'Billed monthly. No free trial, no setup fee, cancel any time from your billing page.',
   includes: [
     'A professional website, built and hosted for you',
-    'Use your GetShowUps address or connect your own domain',
+    'Your GetShowUps address or your own domain',
     'AI receptionist on your website chat',
-    'Online booking straight into your Google Calendar',
+    'Online booking straight into Google Calendar',
     'Service-area screening for every lead',
     'Teach Your AI: your questions, rules and hand-offs',
     'Google Calendar invitations for every booking',
     'Show-up and no-show tracking',
     'Direct help from the founding team',
   ],
-  excludes: 'Advertising spend is separate and paid directly to Google or Meta. Text messaging, email reminders and ad management are coming soon for founding customers.',
+  excludes: 'Ad spend is separate, paid directly to Google or Meta. Texting, email reminders and ad management: coming soon.',
 }
 
 export const faqs = [

@@ -10,7 +10,7 @@ export default function Pricing() {
   return (
     <section id="pricing" className="section pricing" aria-labelledby="pricing-title">
       <div className="container">
-        <SectionHeading id="pricing-title" eyebrow="Pricing" title="One plan for founding customers" intro="Everything you need to start taking bookings. Ad spend is separate." />
+        <SectionHeading id="pricing-title" eyebrow="Pricing" title="One plan for founding customers" intro="Everything to start taking bookings. Ad spend is separate." />
         <div className="price-card">
           <div className="price-main">
             <div className="price-head">

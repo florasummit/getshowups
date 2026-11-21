@@ -1,5 +1,7 @@
 // The product stage: Mode A (AI conversation, primary) and Mode B (booking page + owner dashboard, the existing Demo)
 // on one charcoal surface that rises into the first viewport under the hero. #demo and #simulation both land here.
+// The section itself is light (a sky-to-lavender wash cut at an angle), so the dark stage floats on colour instead
+// of sitting in a black band; the header stays light over it.
 import { useState } from 'react'
 import Conversation from './Conversation.jsx'
 import Demo from './Demo.jsx'
@@ -12,7 +14,7 @@ export default function Showcase() {
     setMode(m)
   }
   return (
-    <section id="demo" className="section section--dark showcase" data-dark-from="120" aria-labelledby="demo-heading">
+    <section id="demo" className="section showcase" aria-labelledby="demo-heading">
       <span id="simulation" className="anchor-alias" aria-hidden="true" />
       <div className="container">
         <h2 id="demo-heading" className="visually-hidden">

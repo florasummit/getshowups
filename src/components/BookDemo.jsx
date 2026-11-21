@@ -64,9 +64,7 @@ export default function BookDemo() {
         <div className="demo-copy">
           <p className="eyebrow">{start.closed ? 'Early access' : 'Talk to us'}</p>
           <h2 id="demo-title">{start.closed ? 'Request early access' : 'Questions first? Book a short call'}</h2>
-          <p className="section-intro">
-            A short call about your business: how your inquiries would become booked visits, and what setup involves.
-          </p>
+          <p className="section-intro">A short call: how your inquiries become booked visits, and what setup involves.</p>
           {start.closed && (
             <>
               <h3 className="demo-next-title">What happens next</h3>

@@ -3673,6 +3673,10 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 }
 
 @media (max-width: 640px) {
+  .app {
+    background: linear-gradient(var(--white) 0 55px, var(--border) 55px 56px, var(--cloud) 56px);
+  }
+
   .app > .app-header {
     height: 56px;
   }
@@ -3690,5 +3694,367 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   .app .title--page,
   .app .ui-page-title {
     font-size: 1.35rem;
+  }
+}
+
+/* ============ Flagship (2026-11-21): depth and colour for the signed-in product ============ */
+/* The product sits on the site's cool canvas; white surfaces carry the site's layered shadows; the one action that
+   matters most on a screen (the next step) is the only dark surface. Semantic colours stay semantic. Customer
+   booking pages (.booking), the public chat page (.rcp) and customer websites are untouched. */
+.app {
+  background: linear-gradient(var(--white) 0 63px, var(--border) 63px 64px, var(--cloud) 64px);
+}
+
+.app > .app-header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.app .tabs {
+  background: transparent;
+}
+
+.app--wide .ta {
+  max-width: 1280px;
+}
+
+.ta-side .ta-compare-wrap {
+  font-size: var(--fs-sm);
+}
+
+.ta-side .ta-compare-wrap > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ta-side .ta-compare-wrap[open] > summary {
+  margin-bottom: var(--s-3);
+}
+
+.ta-side .ta-compare {
+  grid-template-columns: 1fr;
+}
+
+.ta-side .ta-notes {
+  color: var(--text-muted);
+}
+
+.app .card,
+.app .ui-section,
+.app .ui-tiles,
+.app .stats,
+.app .fu-stats {
+  box-shadow: var(--shadow-sm);
+}
+
+.app .ui-section--attention {
+  box-shadow: inset 3px 0 0 var(--bad-dot), var(--shadow-sm);
+}
+
+/* The next step: ink surface, beam edge, orange action. */
+.app .next-step {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--ink-900);
+  background: linear-gradient(135deg, #1b1e2e, var(--ink-900) 60%);
+  color: var(--white);
+  box-shadow: var(--shadow-card);
+}
+
+.app .next-step::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: var(--beam);
+}
+
+.app .next-step .eyebrow-sm {
+  color: var(--orange-400);
+}
+
+.app .next-step .next-step-title {
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+  color: var(--white);
+}
+
+.app .next-step .btn-primary {
+  background: var(--orange-500);
+  color: var(--ink-950);
+}
+
+.app .next-step .btn-primary:hover:not(:disabled) {
+  background: #ff7d36;
+}
+
+.app .next-step .link-btn {
+  color: var(--white);
+  text-decoration-color: rgb(255 255 255 / 0.4);
+}
+
+.app .next-step .fine {
+  color: var(--on-dark-muted);
+}
+
+.app .next-step .checklist-item strong {
+  color: var(--white);
+}
+
+/* Results: each figure carries its stage colour (inquiries sky, booked lavender, showed/visits mint, rate ink). */
+.app .stat {
+  position: relative;
+  padding-left: 22px;
+}
+
+.app .stat::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: var(--stat-tint, var(--ink-200));
+}
+
+.app section[aria-label='Last 30 days'] .stat:nth-child(1) {
+  --stat-tint: var(--sky-200);
+}
+
+.app section[aria-label='Last 30 days'] .stat:nth-child(2) {
+  --stat-tint: var(--lav-300);
+}
+
+.app section[aria-label='Last 30 days'] .stat:nth-child(3) {
+  --stat-tint: var(--mint-300);
+}
+
+.app section[aria-label='Last 30 days'] .stat:nth-child(4) {
+  --stat-tint: var(--orange-500);
+}
+
+/* Attention items: the tone also marks the row's edge. */
+.app .ui-attention-list li {
+  position: relative;
+  padding-left: 12px;
+}
+
+.app .ui-attention-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ink-200);
+}
+
+.app .ui-attention-list li:has(.ui-pill--bad)::before {
+  background: var(--bad-dot);
+}
+
+.app .ui-attention-list li:has(.ui-pill--warn)::before {
+  background: var(--warn-dot);
+}
+
+/* Sign-in, gates and setup: the same canvas and beam as the site, so the hand-off from the homepage is seamless. */
+.center-page:not(.booking) {
+  position: relative;
+  overflow: hidden;
+  background: var(--cloud);
+}
+
+.center-page:not(.booking)::before {
+  content: '';
+  position: absolute;
+  top: -30%;
+  right: -20%;
+  width: 70%;
+  height: 90%;
+  background: var(--beam);
+  clip-path: polygon(40% 0, 100% 0, 100% 100%, 0 100%);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.center-page:not(.booking) > * {
+  position: relative;
+}
+
+.app .center-page {
+  background: var(--cloud);
+}
+
+.center-page:not(.booking) .panel {
+  border-color: var(--white);
+  box-shadow: var(--shadow-float);
+}
+
+.center-page:not(.booking) .steps-bar {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- Teach Your AI: the flow strip and the two-column layout ---- */
+.ta-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ta-flow-card {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 16px 16px 16px 48px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+  color: var(--text);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ta-flow-card:hover {
+  border-color: var(--ink-900);
+}
+
+.ta-flow-card::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--flow-tint, var(--sky-200));
+}
+
+.ta-flow-card--1 {
+  --flow-tint: var(--sky-200);
+}
+
+.ta-flow-card--2 {
+  --flow-tint: var(--lav-300);
+}
+
+.ta-flow-card--3 {
+  --flow-tint: var(--orange-500);
+}
+
+.ta-flow-card--4 {
+  --flow-tint: var(--ink-300);
+}
+
+.ta-flow-card--4[data-tone='ok'] {
+  --flow-tint: var(--ok-dot);
+}
+
+.ta-flow-card--4[data-tone='info'] {
+  --flow-tint: var(--info-dot);
+}
+
+.ta-flow-n {
+  position: absolute;
+  left: 14px;
+  top: 18px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ink-900);
+  color: var(--white);
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ta-flow-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.ta-flow-line {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.ta-flow-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.ta-layout {
+  display: grid;
+  gap: var(--s-5);
+  align-items: start;
+}
+
+.ta-main,
+.ta-side {
+  display: grid;
+  gap: var(--s-5);
+  min-width: 0;
+}
+
+.app .ta .ui-section {
+  margin-top: 0;
+}
+
+.ta .ui-section-title {
+  font-size: 1.05rem;
+}
+
+.ta-side .ui-section {
+  border-color: var(--lav-300);
+  background: linear-gradient(180deg, var(--lav-50), var(--white) 120px);
+}
+
+.ta-side #ta-test {
+  border-color: var(--orange-500);
+  background: linear-gradient(180deg, var(--orange-50), var(--white) 120px);
+}
+
+.ta-chat {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ta-msg {
+  max-width: 100%;
+}
+
+@media (min-width: 1100px) {
+  .ta-layout {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+
+  .ta-side {
+    position: sticky;
+    top: 16px;
+  }
+
+  .ta-flow {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1099px) {
+  .ta-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .ta-flow {
+    grid-template-columns: 1fr;
   }
 }

@@ -6,11 +6,13 @@ import { hero } from '../content/site.js'
 
 // The first viewport: the promise across the full width, then one row — what it does on the left, the one primary
 // action (with a quiet "see it" link beside it) on the right — and the product stage (Showcase.jsx) rising into view
-// directly beneath. The hero itself is text only, so the product is the first thing with any visual weight.
+// directly beneath. The only colour is the beam: one diagonal gradient from the logo orange into sky and lavender,
+// drawn once behind the headline (decorative, CSS only).
 export default function Hero() {
   const start = useStartAction()
   return (
     <section className="hero" aria-labelledby="hero-title">
+      <div className="hero-beam" aria-hidden="true" />
       <div className="container">
         <p className="eyebrow">{hero.eyebrow}</p>
         <h1 id="hero-title">

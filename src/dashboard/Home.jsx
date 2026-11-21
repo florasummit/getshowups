@@ -602,7 +602,7 @@ export default function Home({ me, reload }) {
     window.scrollTo(0, 0)
   }
   return (
-    <div className={`app${view === 'website' || view === 'followups' ? ' app--wide' : ''}`}>
+    <div className={`app${view === 'website' || view === 'followups' || view === 'teach' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
         <SignOut email={me.email} />
