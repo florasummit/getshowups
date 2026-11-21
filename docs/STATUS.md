@@ -27,7 +27,7 @@ _Update at the end of every task. Newest first._
 - App shell: cool canvas with a full-width white header band, cards with the small shadow tier, the Next step card as
   the one dark surface (beam edge, orange action), stage-coloured edges on the 30-day figures and attention rows,
   sign-in/setup on the beam canvas with a pill step bar. Semantic colours unchanged.
-- Test clock fix found on the way (not a flake): test/control-center.test.js freezes NOW at 2026-11-20 15:05 UTC but
+- Test clock fixes found on the way: test/release.test.js rate-limit tests now start away from a fixed-window edge (CI straddled 20:10:00 UTC and saw the per-IP count reset: 201 instead of 429); test/control-center.test.js freezes NOW at 2026-11-20 15:05 UTC but
   `incidentDetail` read the real clock for the phase label, so from 2026-11-21 15:05 UTC the open incident read
   "quiet" instead of "active" and `npm run verify` failed on main. `incidentDetail(db, id, now = Date.now())` now
   takes the clock (production call unchanged) and the test passes NOW. No behaviour change.
