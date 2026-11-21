@@ -47,7 +47,10 @@ export const COST_ESTIMATES = {
   // uncached instructions → rounded up to $0.08/min. Longer calls cost more per minute (the whole history is
   // re-billed per response); never presented as measured spend.
   openai: { perMinuteMicros: 80_000, source: 'https://developers.openai.com/api/docs/pricing', asOf: '2026-11-21', model: 'gpt-realtime', estimate: true },
-  elevenlabs: { perMinuteMicros: null, source: null, asOf: null },
+  // ESTIMATE: ElevenLabs Agents "additional minute" rate, $0.08/min on every self-serve plan (Free … Business);
+  // included plan minutes are prepaid, LLM usage is billed separately on top ("based on the model you choose"),
+  // bursts over the concurrency limit cost $0.16/min. Not measured spend.
+  elevenlabs: { perMinuteMicros: 80_000, source: 'https://elevenlabs.io/pricing/agents', asOf: '2026-11-21', note: 'estimate: $0.08/min additional-minute rate; LLM usage billed separately by ElevenLabs' },
 }
 
 export const estimateMicros = (provider, seconds) => {
