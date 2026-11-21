@@ -4058,3 +4058,9 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
     grid-template-columns: 1fr;
   }
 }
+.designer-result {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}

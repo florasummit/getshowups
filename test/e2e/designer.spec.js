@@ -62,3 +62,50 @@ test('owner designs the website in conversation: first design, revision, undo @m
   await expect(frame.getByRole('heading', { level: 1 })).toHaveText('Quietly perfect pools.')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
+
+test('precise change: "Remove my logo" removes only the logo (no model), shows the applied result, and the logo stays removed through a later design turn @mobile', async ({ page, context }, info) => {
+  await useSession(context, info.project.name === 'mobile' ? fixtures.E2E_DESIGN_M_SESSION_TOKEN : fixtures.E2E_DESIGN_SESSION_TOKEN)
+  await page.goto('/dashboard/website')
+  const origin = new URL(page.url()).origin
+  const draft = async () => (await (await page.request.get('/api/dashboard/website')).json()).website
+  // A logo on the draft (uploaded as the editor would: the owner's own file, then the pointer saved).
+  const stock = (await import('node:fs')).readdirSync('public/site-stock').find((f) => f.endsWith('.jpg') && !f.includes('-sm'))
+  const up = await page.request.post('/api/dashboard/website/assets', { data: (await import('node:fs')).readFileSync(`public/site-stock/${stock}`), headers: { 'Content-Type': 'image/jpeg', Origin: origin } })
+  expect(up.status()).toBe(201)
+  const logo = (await up.json()).asset.id
+  const before = await draft()
+  expect((await page.request.post('/api/dashboard/website', { data: { action: 'save', content: { ...before.draft, logo }, baseUpdatedAt: before.updatedAt }, headers: { Origin: origin } })).status()).toBe(200)
+  expect((await draft()).draft.logo).toBe(logo)
+  await page.reload()
+  // With an AI-designed draft the designer sits under a collapsed row above the editor.
+  await page.getByText('Import your current website · AI designer').click()
+  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'AI designer' }) })
+  const frame = page.frameLocator('iframe[title="Editable website preview"]')
+  await expect(frame.locator('link[rel="icon"]')).toHaveAttribute('href', `/site-assets/${logo}`)
+  const h1 = await frame.getByRole('heading', { level: 1 }).textContent()
+  // Through the conversation: applied at once, nothing else touched, reported from the saved state.
+  await card.getByLabel('Ask for a change').fill('Remove my logo')
+  await card.getByRole('button', { name: 'Send' }).click()
+  await expect(card.getByText('Done: the logo is removed from your draft. Nothing else changed.')).toBeVisible({ timeout: 15_000 })
+  const result = card.getByRole('status', { name: 'Result of your request' })
+  await expect(result).toContainText('Applied: Logo removed')
+  await expect(frame.locator('link[rel="icon"]')).toHaveAttribute('href', /^\/site-icon\//, { timeout: 15_000 })
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(h1)
+  const after = await draft()
+  expect(after.draft.logo).toBeNull()
+  expect({ ...after.draft, logo: null }).toEqual({ ...before.draft, logo: null })
+  // Honest when there is nothing to do.
+  await card.getByLabel('Ask for a change').fill('take the logo off')
+  await card.getByRole('button', { name: 'Send' }).click()
+  await expect(result).toContainText('Not applied: Remove logo · There is no logo on the draft', { timeout: 15_000 })
+  // A real design turn afterwards (the mocked model): the design changes, the logo stays removed.
+  await card.getByLabel('Ask for a change').fill('Make it darker and more premium')
+  await card.getByRole('button', { name: 'Send' }).click()
+  await expect(card.getByText('Darker and more premium, with a serif headline.').last()).toBeVisible({ timeout: 30_000 })
+  await expect.poll(async () => (await draft()).draft.logo).toBeNull()
+  await expect(frame.locator('link[rel="icon"]')).toHaveAttribute('href', /^\/site-icon\//)
+  // Undo the logo removal from the conversation is not offered any more (a later turn exists); the editor history keeps
+  // the copy. Nothing was published by any of this.
+  expect((await draft()).published).toBe(false)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})
