@@ -267,7 +267,8 @@ const codeOf = (details) => {
   } catch {}
   return null
 }
-export async function incidentDetail(db, id) {
+// `now` only decides the phase label (active / quiet); callers that freeze the clock (tests) pass it explicitly.
+export async function incidentDetail(db, id, now = Date.now()) {
   if (!(await registerReady(db))) return null
   const row = await db.prepare('SELECT * FROM ops_incidents WHERE id = ?1').bind(String(id)).first()
   if (!row) return null
@@ -284,7 +285,7 @@ export async function incidentDetail(db, id) {
     ? await db.prepare("SELECT at, action FROM audit_log WHERE capability = ?1 AND customer IS ?2 AND outcome = 'success' ORDER BY seq DESC LIMIT 1").bind(inc.feature, inc.customer).first()
     : null
   return {
-    incident: withPhase(inc),
+    incident: withPhase(inc, now),
     history: history.map((h) => ({ at: h.at, action: h.action, outcome: h.outcome, resolution: (() => { try { return JSON.parse(h.details || '{}').resolution || null } catch { return null } })() })),
     events: events.map((e) => ({ seq: e.seq, at: e.at, action: e.action, outcome: e.outcome, code: codeOf(e.details) })),
     lastSuccess: lastSuccess ? { at: lastSuccess.at, action: lastSuccess.action } : null,

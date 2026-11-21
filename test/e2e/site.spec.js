@@ -58,7 +58,7 @@ test('no unsupported claims anywhere on the page, the interactive demo included'
   // Email messages to real customers are off in production (MESSAGES_LIVE unset: test recipients only), so the page
   // must not present email confirmations, reminders or follow-ups as working today.
   for (const claim of [/email confirmations/i, /reminds (them|customers)/i, /reminder emails/i, /get a follow-up/i]) expect(text).not.toMatch(claim)
-  await expect(page.getByText('Text messaging, email reminders and ad management are coming soon', { exact: false })).toBeVisible()
+  await expect(page.getByText('Texting, email reminders and ad management: coming soon', { exact: false })).toBeVisible()
 })
 
 // The scripted SMS simulation (texting isn't live) was replaced by the booking demo (#demo, home.spec.js), which shows
@@ -75,7 +75,7 @@ test('pricing shows the founding plan, no trial, ad spend separate; FAQ expands'
   const pricing = page.locator('#pricing')
   await expect(pricing.locator('.price-amount')).toContainText('$499/month')
   await expect(pricing.getByText('No free trial', { exact: false })).toBeVisible()
-  await expect(pricing.getByText('Advertising spend is separate', { exact: false })).toBeVisible()
+  await expect(pricing.getByText('Ad spend is separate, paid directly to Google or Meta', { exact: false })).toBeVisible()
   const item = page.locator('#faq details').first()
   await item.locator('summary').click()
   await expect(item).toHaveAttribute('open', '')

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, whenFull } from '../lib/api.js'
 import { PageHeader, Pill, Section } from './ui.jsx'
 
-// Teach Your AI: the owner decides how their AI receptionist works. Five parts, in the order an owner needs them:
-// what it knows (from their records) → how it works (their rules) → teach a change in plain words → test it → publish.
+// Teach Your AI: the owner decides how their AI receptionist works. The page opens with one strip that answers
+// "what does it know → what does it do → test it → publish" at a glance (Flow), then the editor on the left (what it
+// knows, how it works, teach a change) with the test conversation and publish panel beside it, always in reach.
 // Edits change a DRAFT only; customers get a rule set only after an explicit publish (and only once GetShowUps has
 // switched live use on for the business). Nothing here talks to customers, the calendar or the voice provider.
 
@@ -161,28 +162,58 @@ export default function TeachAI() {
         title="Teach Your AI"
         status={<Pill tone={data.liveVersion ? (status.rulesLive ? 'ok' : 'info') : 'neutral'}>{data.liveVersion ? (status.rulesLive ? `Live: version ${data.liveVersion}` : liveLabel) : liveLabel}</Pill>}
       >
-        Tell your AI receptionist how your business works: what to ask, in what order, what you don’t do, and when to hand off to your team. Changes stay in a draft until you test and publish them.
+        What it knows, what it asks, what counts as urgent, when to hand off. Edits stay in your draft until you test and publish.
       </PageHeader>
-      <nav className="ta-steps" aria-label="Teach Your AI steps">
-        <a href="#ta-about">1. About your business</a>
-        <a href="#ta-how">2. How your AI works</a>
-        <a href="#ta-teach">3. Teach a change</a>
-        <a href="#ta-test">4. Test your AI</a>
-        <a href="#ta-publish">5. Publish</a>
-      </nav>
+      <Flow data={data} draft={draft} dirty={dirty} />
       {msg && (
         <p className={`ui-callout ui-callout--${msg.tone === 'ok' ? 'ok' : msg.tone === 'warn' ? 'warn' : 'bad'}`} role={msg.tone === 'ok' ? 'status' : 'alert'}>
           {msg.text}
         </p>
       )}
-
-      <About rec={rec} draft={draft} edit={edit} />
-      <How draft={draft} rec={rec} c={c} edit={edit} platformRules={data.platformRules} />
-      <SaveBar dirty={dirty} busy={busy} save={save} problems={problems} discard={() => take(data)} />
-      <Teach data={data} dirty={dirty} post={post} />
-      <Test data={data} draft={draft} dirty={dirty} />
-      <Publish data={data} dirty={dirty} busy={busy} post={post} />
+      <div className="ta-layout">
+        <div className="ta-main">
+          <About rec={rec} draft={draft} edit={edit} />
+          <How draft={draft} rec={rec} c={c} edit={edit} platformRules={data.platformRules} />
+          <SaveBar dirty={dirty} busy={busy} save={save} problems={problems} discard={() => take(data)} />
+          <Teach data={data} dirty={dirty} post={post} />
+        </div>
+        <aside className="ta-side">
+          <Test data={data} draft={draft} dirty={dirty} />
+          <Publish data={data} dirty={dirty} busy={busy} post={post} />
+        </aside>
+      </div>
     </div>
+  )
+}
+
+// The strip at the top: four cards that read as a sentence (knows → does → test → publish), each a link to its
+// section. Derived from the same data the sections edit; nothing here is stored.
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+function Flow({ data, draft, dirty }) {
+  const rec = data.records
+  const c = data.choices
+  const asks = draft.intake.filter((i) => !(c.intake[i.id].visitOnly && !rec.visit) && (i.required || c.intake[i.id].platform)).length
+  const live = data.liveVersion
+  const state = !live ? ['neutral', 'Not published yet'] : dirty || data.hasDraftChanges ? ['info', `Draft differs from version ${live}`] : ['ok', `Version ${live} published`]
+  const cards = [
+    ['#ta-about', 'What it knows', `${plural(rec.services.length, 'service')} · ${plural(draft.coverage.cityWide.length, 'town')} fully served · ${rec.zipCount ? plural(rec.zipCount, 'ZIP code') : 'no ZIP limit'}`, draft.services.excluded.length ? `${draft.services.excluded.length} not offered` : 'From your records'],
+    ['#ta-how', 'What it does', `Asks ${plural(asks, 'thing')} before booking · ${plural(draft.emergency.triggers.length, 'urgent situation')}`, `${plural(draft.escalation.length, 'hand-off')} · ${c.styles[draft.style] || draft.style}`],
+    ['#ta-test', 'Test it', 'Type what a customer might say', 'Nothing is sent or booked'],
+    ['#ta-publish', 'Publish', state[1], dirty ? 'Unsaved edits' : data.hasDraftChanges ? `${plural(data.changesSinceLive.length, 'change')} to publish` : 'Draft matches'],
+  ]
+  return (
+    <nav className="ta-flow" aria-label="Teach Your AI steps">
+      {cards.map(([href, title, line, sub], i) => (
+        <a key={href} href={href} className={`ta-flow-card ta-flow-card--${i + 1}`} data-tone={i === 3 ? state[0] : undefined}>
+          <span className="ta-flow-n" aria-hidden="true">
+            {i + 1}
+          </span>
+          <span className="ta-flow-title">{title}</span>
+          <span className="ta-flow-line">{line}</span>
+          <span className="ta-flow-sub">{sub}</span>
+        </a>
+      ))}
+    </nav>
   )
 }
 
@@ -218,7 +249,7 @@ function About({ rec, draft, edit }) {
   return (
     <Section id="ta-about" title="1. About your business" label="About your business" className="ta-section">
       <p className="ui-hint">
-        Your AI only uses what’s in your records. To change services, prices, towns, ZIP codes or hours, use <a href="/dashboard/settings">Settings</a> — then they’re right everywhere at once.
+        From your records. Change services, prices, towns, ZIP codes or hours in <a href="/dashboard/settings">Settings</a>.
       </p>
       <dl className="ui-facts ta-facts">
         <div>
@@ -240,7 +271,7 @@ function About({ rec, draft, edit }) {
       </dl>
       <fieldset className="ui-group">
         <legend>Towns you serve completely</legend>
-        <p className="ui-hint">A caller who names one of these towns isn’t asked for a ZIP code to check your area. Bookings still record the ZIP code.</p>
+        <p className="ui-hint">Naming one of these towns confirms the area; no ZIP code is asked. Bookings still record the ZIP code.</p>
         {rec.towns.length === 0 && <p className="fine">Add the towns you serve in Settings first.</p>}
         {rec.towns.map((t) => (
           <label key={t} className="check">
@@ -259,7 +290,7 @@ function About({ rec, draft, edit }) {
       </fieldset>
       <fieldset className="ui-group">
         <legend>Services you don’t offer</legend>
-        <p className="ui-hint">The AI says so politely and never books these.</p>
+        <p className="ui-hint">Declined politely, never booked.</p>
         <Chips items={draft.services.excluded} label="Services you don’t offer" onRemove={(x) => edit((d) => (d.services.excluded = d.services.excluded.filter((y) => y !== x)))} />
         <AddRow label="Add a service you don’t offer" placeholder="e.g. New installations" max={80} onAdd={(v) => edit((d) => !d.services.excluded.some((x) => same(x, v)) && d.services.excluded.push(v))} />
       </fieldset>
@@ -286,7 +317,7 @@ function How({ draft, rec, c, edit, platformRules }) {
     <Section id="ta-how" title="2. How your AI works" label="How your AI works" className="ta-section">
       <fieldset className="ui-group">
         <legend>What it finds out, in this order</legend>
-        <p className="ui-hint">Customers often say several things at once. Your AI uses everything they’ve said and only asks for what’s missing, one question at a time.</p>
+        <p className="ui-hint">Uses everything the customer already said; asks only for what’s missing, one question at a time.</p>
         <ol className="ta-intake">
           {items.map((i, n) => {
             const meta = c.intake[i.id]
@@ -334,7 +365,7 @@ function How({ draft, rec, c, edit, platformRules }) {
 
       <fieldset className="ui-group">
         <legend>Urgent situations</legend>
-        <p className="ui-hint">Danger (gas, fire, sparks, carbon monoxide) is always handled first: the customer is told to get safe and call 911. Add your own urgent situations here.</p>
+        <p className="ui-hint">Danger (gas, fire, sparks, carbon monoxide) always comes first: get safe, call 911. Add your own urgent situations.</p>
         <Chips items={draft.emergency.triggers} label="Urgent situations" onRemove={(x) => edit((d) => (d.emergency.triggers = d.emergency.triggers.filter((y) => y !== x)))} />
         <AddRow label="Add an urgent situation" placeholder="e.g. no heat" onAdd={(v) => edit((d) => !d.emergency.triggers.some((x) => same(x, v)) && d.emergency.triggers.push(v))} />
         <label className="field">
@@ -351,7 +382,7 @@ function How({ draft, rec, c, edit, platformRules }) {
 
       <fieldset className="ui-group">
         <legend>Hand-offs to your team</legend>
-        <p className="ui-hint">Calls can’t be transferred live (no phone line is connected), so a hand-off records a callback request or a message for you.</p>
+        <p className="ui-hint">No live transfer exists (no phone line is connected): a hand-off records a callback request or a message for you.</p>
         {draft.escalation.length === 0 && <p className="fine">None yet.</p>}
         <ul className="ta-list">
           {draft.escalation.map((e) => (
@@ -477,7 +508,7 @@ function Teach({ data, dirty, post }) {
         <label className="field">
           <span>Describe the change in your own words</span>
           <textarea rows={3} maxLength={1200} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Ask what the customer needs before asking where they live. We don’t do commercial pools." />
-          <span className="ui-hint">You’ll see exactly what would change before anything is saved.</span>
+          <span className="ui-hint">You see exactly what would change before anything is saved.</span>
         </label>
         <div className="ui-form-actions">
           <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim() || dirty}>
@@ -590,10 +621,7 @@ function Test({ data, draft, dirty }) {
   }, [use])
   return (
     <Section id="ta-test" title="4. Test your AI" label="Test your AI" className="ta-section">
-      <p className="ui-hint">
-        Type what a customer might say. You’ll see what your AI understands and what it does next. This is a preview of your rules: no AI call, no calendar lookup, nothing is sent or booked. Real conversations word things naturally and check your calendar before offering
-        times.
-      </p>
+      <p className="ui-hint">A preview of your rules: what your AI understands and does next. No AI call, no calendar lookup, nothing is sent or booked.</p>
       <div className="ta-test-head">
         <div className="ta-toggle" role="radiogroup" aria-label="Rules to test">
           <label className="check">
@@ -687,28 +715,31 @@ function Publish({ data, dirty, busy, post }) {
   const notes = data.status.provider.notes
   return (
     <Section id="ta-publish" title="5. Publish" label="Publish" className="ta-section">
-      <div className="ta-compare">
-        <div>
-          <p className="ta-label">Your draft</p>
-          <ul className="ta-describe">
-            {data.describe.draft.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <p className="ta-label">{data.liveVersion ? `Published (version ${data.liveVersion})` : 'Published'}</p>
-          {data.describe.live ? (
+      <details className="ta-compare-wrap">
+        <summary>What your draft says, next to what’s published</summary>
+        <div className="ta-compare">
+          <div>
+            <p className="ta-label">Your draft</p>
             <ul className="ta-describe">
-              {data.describe.live.map((l) => (
+              {data.describe.draft.map((l) => (
                 <li key={l}>{l}</li>
               ))}
             </ul>
-          ) : (
-            <p className="fine">Nothing published yet. Your receptionist works as it does today until you publish.</p>
-          )}
+          </div>
+          <div>
+            <p className="ta-label">{data.liveVersion ? `Published (version ${data.liveVersion})` : 'Published'}</p>
+            {data.describe.live ? (
+              <ul className="ta-describe">
+                {data.describe.live.map((l) => (
+                  <li key={l}>{l}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="fine">Nothing published yet. Your receptionist works as it does today.</p>
+            )}
+          </div>
         </div>
-      </div>
+      </details>
       {data.changesSinceLive.length > 0 && (
         <>
           <p className="ta-label">Changes that publishing would make</p>

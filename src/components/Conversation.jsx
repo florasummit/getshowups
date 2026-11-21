@@ -208,10 +208,7 @@ export default function Conversation({ onSwitchMode }) {
           </div>
         </aside>
       </div>
-      <p className="cv-fine">
-        Replies are scripted examples of how the AI receptionist behaves. In the product it checks your real calendar, follows the rules you set in Teach Your AI, and never books without the customer’s own yes. Texting, email reminders and automatic
-        follow-ups aren’t shown because they aren’t live yet.
-      </p>
+      <p className="cv-fine">Scripted examples. The real AI checks your calendar, follows your Teach Your AI rules, and never books without the customer’s own yes. Texting and reminders aren’t shown: not live yet.</p>
     </div>
   )
 }

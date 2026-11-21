@@ -329,7 +329,7 @@ test('platform-wide incident: plain title, platform next step (never "this busin
   assert.equal(att.action, 'monitor')
   assert.match(att.why, /Platform-wide/)
   assert.equal(att.phase, 'active')
-  const d = await incidentDetail(db, i.id)
+  const d = await incidentDetail(db, i.id, NOW) // the frozen clock, so the phase stays "active" whenever the test runs
   assert.equal(d.incident.id, i.id)
   assert.equal(d.incident.phase, 'active')
   assert.deepEqual(d.history.map((h) => h.action), ['incident.opened'])

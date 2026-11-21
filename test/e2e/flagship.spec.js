@@ -188,11 +188,12 @@ test('mobile menu: opens, lists every section, closes on a link and on Escape; b
 test('every section and CTA destination; header adapts over dark sections; no sideways scroll at 320–1440 @mobile', async ({ page }) => {
   for (const id of ['problem', 'demo', 'simulation', 'how-it-works', 'teach', 'industries', 'pricing', 'book-demo', 'faq']) await expect(page.locator(`#${id}`)).toBeAttached()
   for (const [href] of [['/dashboard'], ['/privacy'], ['#book-demo']]) await expect(page.locator(`a[href="${href}"]`).first()).toBeAttached()
-  // The stage straddles the hero: the section's first pixels are still white, so the header stays light there.
-  await page.locator('#demo').evaluate((e) => window.scrollTo(0, e.offsetTop + 20))
-  await expect(page.locator('.site-header')).not.toHaveClass(/is-dark/)
+  // Flagship (2026-11-21): the dark stage floats on a light sky-to-lavender wash, so the header stays light over the
+  // whole showcase (it only goes dark over dark sections such as the footer); solid once scrolled.
   await page.locator('#demo').evaluate((e) => window.scrollTo(0, e.offsetTop + 200))
-  await expect(page.locator('.site-header')).toHaveClass(/is-dark/)
+  await expect(page.locator('.site-header')).not.toHaveClass(/is-dark/)
+  await expect(page.locator('.site-header')).toHaveClass(/is-solid/)
+  expect(await page.locator('#demo').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 255, 255)')
   await page.evaluate(() => window.scrollTo(0, 0))
   await expect(page.locator('.site-header')).not.toHaveClass(/is-dark/)
   for (const w of [1440, 1024, 768, 390, 320]) {
@@ -207,7 +208,38 @@ test('honest claims: pilot and upcoming are labelled; no invented metrics, testi
   expect(text).toMatch(/In pilot with founding customers/i) // the status chip is set in small caps
   expect(text).toMatch(/Roofing\s*Upcoming/i)
   for (const bad of [/\d+% (more|fewer|increase)/i, /customers? (love|trust) us/i, /testimonial/i, /guarantee/i, /(start|get|try|with) (your |a )?free trial/i, /instant SMS/i, /missed[- ]call text/i]) expect(text).not.toMatch(bad)
-  expect(text).toMatch(/Text messaging, email reminders and ad management are coming soon/)
+  expect(text).toMatch(/Texting, email reminders and ad management: coming soon/)
+  expect(text).toMatch(/Not a measured result/) // the problem story is an example, and says so
+})
+
+test('less text, more product: every story section explains with a product visual, copy stays within budget @mobile', async ({ page }) => {
+  // The problem: one inquiry, two mornings (fictional timelines), ending booked elsewhere vs booked on the calendar.
+  const problem = page.locator('#problem')
+  await expect(problem.locator('.pn-col')).toHaveCount(2)
+  await expect(problem.getByRole('figure', { name: 'Without GetShowUps' }).locator('.pn-note').last()).toHaveText('Booked someone else')
+  await expect(problem.getByRole('figure', { name: 'With GetShowUps' }).locator('.pn-note').last()).toHaveText(/Booked · on your calendar/)
+  await expect(problem.locator('.pn-event--ai')).toHaveCount(1)
+  // How it works: six product states (website, chat, checks, open times, the appointment, the counts), each live today.
+  const steps = page.locator('#how-it-works .jf-step')
+  await expect(steps).toHaveCount(6)
+  await expect(steps.locator('h3')).toHaveText(['Attract', 'Answer', 'Qualify', 'Book', 'Notify', 'Measure'])
+  await expect(steps.locator('.jf-card .jf-ui')).toHaveCount(6)
+  await expect(steps.locator('.status--ok')).toHaveCount(6)
+  await expect(page.locator('#how-it-works .jf-slot--on')).toHaveText('10:30 AM')
+  // Teach Your AI: the owner's rules beside the reply one of them decides; the applied rule is highlighted.
+  const teach = page.locator('#teach')
+  await expect(teach.locator('.teach-rule')).toHaveCount(5)
+  await expect(teach.locator('.teach-rule.is-hit')).toContainText('No heat')
+  await expect(teach.locator('.teach-msg--ai')).toContainText('soonest I have is 3:00 PM')
+  await expect(teach.locator('.teach-applied')).toContainText('Rule 3 applied')
+  await expect(page.locator('#industries .ind-card')).toHaveCount(3)
+  // Copy budget: no paragraph over 240 characters on the page body, and the whole story under 1,200 visible words.
+  const measure = await page.evaluate(() => {
+    const ps = [...document.querySelectorAll('main p')].filter((p) => p.offsetParent && !p.closest('details:not([open])') && p.textContent.trim().length > 240).map((p) => p.textContent.trim().slice(0, 60))
+    return { longParagraphs: ps, words: document.querySelector('main').innerText.split(/\s+/).filter(Boolean).length }
+  })
+  expect(measure.longParagraphs).toEqual([])
+  expect(measure.words).toBeLessThan(1200)
 })
 
 test('typography: Inter and Space Grotesk only, both self-hosted; no serif or italic display type anywhere', async ({ page }) => {

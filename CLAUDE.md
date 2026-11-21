@@ -183,6 +183,12 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 ## Conventions
 
 - Plain JavaScript (ESM), React 19, no TypeScript, no CSS framework. Styles in `src/index.css` with tokens on `:root`.
+  Flagship visual system (2026-11-21): the orange logo is the only brand mark (never recolour or redraw Logo.jsx);
+  one gradient "beam" token (`--beam`, logo orange → sky → lavender) used for the hero canvas and thin accent edges
+  only; three soft tints (`--sky-*`, `--mint-*`, `--lav-*`) on the cool canvas `--cloud`; three shadow tiers
+  (`--shadow-sm` / `--shadow-card` / `--shadow-float`); primary action = ink. Marketing sections explain with
+  product-derived visuals built from site.js data (Story.jsx), copy one line per idea (flagship.spec guards the
+  budget). No Prettier: single quotes, no semicolons, long lines (oxlint only).
 - New API route → `functions/api/<area>/<name>.js` exporting `onRequestGet`/`onRequestPost`; logic in `server/`.
 - Unexported methods do NOT get 405 from Pages: GET falls through to `index.html` (200), POST gets 405.
 - Every new backend behaviour gets tests in `test/` (auth, isolation, failure paths, leak checks).
