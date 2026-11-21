@@ -161,9 +161,12 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now(), { cl
         const timing = {}
         const r = await respond(env, customer, conv, text, { channel: 'voice', onText: (s) => ((spoke = true), sayT(s, false)), isStale: () => latest > id, signal: turn.controller.signal, timing, defer: (p) => void p }).catch(() => ({ ok: false, error: 'failed' }))
         const result = r.ok ? 'ok' : r.error === 'stale' ? 'stale' : r.error === 'busy' ? 'busy' : 'failed'
-        // Numbers and codes only: queue wait, first chunk, whole turn, model and tool time.
+        // Numbers and codes only, from the frame's arrival: queue wait (q), the model's first token (tok), the first
+        // chunk handed to Retell (first), the holding line if one was spoken (hold; -1 = none), whole turn (total),
+        // model and tool time, model calls. Diagnosable per turn in the owner's events and Business Review.
         const end = clock()
-        await ev('voice_turn', r.ok, `r=${result};q=${t.started - turn.received};first=${t.firstChunk === null ? -1 : t.firstChunk - turn.received};total=${end - turn.received};model=${timing.modelMs ?? 0};tools=${timing.toolMs ?? 0};calls=${timing.modelCalls ?? 0}`.slice(0, 80))
+        const ms = (v) => (Number.isFinite(v) ? v : -1)
+        await ev('voice_turn', r.ok, `r=${result};q=${t.started - turn.received};tok=${ms(timing.firstTokenMs == null ? null : timing.firstTokenMs + (t.started - turn.received))};first=${t.firstChunk === null ? -1 : t.firstChunk - turn.received};hold=${ms(timing.holdMs == null ? null : timing.holdMs + (t.started - turn.received))};total=${end - turn.received};model=${timing.modelMs ?? 0};tools=${timing.toolMs ?? 0};calls=${timing.modelCalls ?? 0}`.slice(0, 120))
         if (r.error === 'stale') {
           pending = text // not saved: the next turn carries these words
           return

@@ -95,8 +95,10 @@ P99 not reported (n too small to be meaningful for a mock). Real end-of-speech â
 
 ## 4. Retell agent settings (PROPOSED, unmeasured live)
 
-`scripts/retell-setup.mjs --tuned` sends these; without `--tuned` the agent keeps Retell's defaults, so both can be
-compared in the approved live test. Applying either to the real agent is an approval item (paid voice usage). Fields,
+`scripts/retell-setup.mjs --tuned --test-agent "<name>"` sends these to a separate TEST agent only (the script refuses
+`--tuned` for the live agent, 2026-11-21); without `--tuned` the live agent keeps Retell's defaults, so both can be compared
+in the approved live test. Applying anything is an approval item (paid voice usage). Latency diagnosis and the test-agent
+command: docs/RECEPTIONIST.md ("Latency: where the time goes"). Fields,
 ranges and defaults: docs.retellai.com/api-references/create-agent (read 2026-11-19).
 
 | Field | Retell default | Proposed | Why |

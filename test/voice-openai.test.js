@@ -171,7 +171,7 @@ test('route: admin + same-origin + Lab on + provider configured + a Lab session 
   assert.equal(data.model, 'gpt-realtime')
   assert.ok(data.expiresAt > Date.now())
   assert.match(data.sessionConfig.instructions, /alpha Co/)
-  assert.match(data.sessionConfig.instructions, /never say you are checking/)
+  assert.match(data.sessionConfig.instructions, /Yes, we service <place>/)
   assert.equal(data.sessionConfig.tools.length, 7)
   assert.equal(data.greeting, 'Thanks for calling alpha Co, this is Sam.')
   assert.ok(!JSON.stringify(data).includes(OPENAI_KEY))

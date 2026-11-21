@@ -17,7 +17,7 @@ export function rulesInstructions(config, records = {}) {
   const optional = config.intake.filter((i) => !i.required).map((i) => INTAKE[i.id].ask)
   if (optional.length) lines.push(`- Do not ask about these unless the customer brings them up: ${optional.join('; ')}.`)
   if (config.services.excluded.length) lines.push(`- The business does NOT offer: ${config.services.excluded.map(q).join(', ')}. Say so plainly and offer what it does; never book these.`)
-  if (config.coverage.cityWide.length) lines.push(`- These towns are fully served (no ZIP code needed to confirm the area): ${config.coverage.cityWide.map(q).join(', ')}. A ZIP code is still recorded with the booking details.`)
+  if (config.coverage.cityWide.length) lines.push(`- These towns are fully served (no ZIP code needed to confirm the area; check_service_area with the town as place answers served): ${config.coverage.cityWide.map(q).join(', ')}. A ZIP code is still recorded with the booking details, asked once, only when they book.`)
   if (config.emergency.triggers.length) {
     const act = { urgent_callback: 'record an urgent callback request', book_soonest: 'offer the soonest open time', callback_and_book: 'record an urgent callback request and offer the soonest open time' }[config.emergency.action]
     lines.push(`- Treat these as urgent: ${config.emergency.triggers.map(q).join(', ')}. When one comes up: ${act}.`)
@@ -50,7 +50,8 @@ export function turnNote(d, version) {
   for (const [id, v] of Object.entries(k.answers || {})) facts.push(`${id}=${v}`)
   parts.push(`Rules check (v${version}): known ${facts.length ? facts.join(', ') : 'nothing yet'} — never ask for these again.`)
   if (k.corrected?.length) parts.push(`They corrected: ${k.corrected.join(', ')}; use the newest value.`)
-  const cov = { verified: 'area verified by ZIP', verified_city: `area verified: ${k.city} is fully served (do not ask for a ZIP to confirm the area)`, not_limited: 'area not limited', rejected: 'ZIP outside the list: no times; offer a service-area request', uncertain: 'area not confirmed yet', unknown: 'area not known yet' }[d.coverage.status]
+  const uncertain = { town_partly_served: `area not confirmed yet: only part of ${k.city} is served; never say ${k.city} is covered`, town_not_listed: `area not confirmed yet: ${k.city} is not on the business's list; never say it is covered`, zip_not_listed_in_served_town: `${k.city} is fully served but ZIP ${k.zip} is not on the ZIP list: no times; offer a service-area request` }
+  const cov = { verified: 'area verified by ZIP', verified_city: `area verified: ${k.city} is fully served (say so plainly; do not ask for a ZIP to confirm the area)`, not_limited: 'area not limited', rejected: 'ZIP outside the list: no times; offer a service-area request', uncertain: uncertain[d.coverage.basis] || 'area not confirmed yet', unknown: 'area not known yet' }[d.coverage.status]
   parts.push(`Coverage: ${cov}.`)
   if (d.escalate) {
     const e = d.escalate
@@ -60,7 +61,8 @@ export function turnNote(d, version) {
     else if (e.kind === 'after_hours_urgent') parts.push('Urgent and outside booking hours: record an urgent callback request; booking is still allowed.')
     else parts.push(`Owner rule (${e.kind}): offer to ${e.action === 'message' ? 'take a message' : e.action === 'book_soonest' ? 'book the soonest open time' : 'record a callback request'}${e.urgent ? ' (urgent)' : ''}.`)
   }
-  if (d.nextAsk) parts.push(`Ask next (only this): ${d.coverage.ask && d.nextAsk === 'location' ? ASK_LINE[d.coverage.ask === 'zip' ? 'location_zip' : d.coverage.ask] || INTAKE.location.ask : INTAKE[d.nextAsk].ask}.`)
+  const locationAsk = d.coverage.ask === 'zip' && d.coverage.basis === 'town_partly_served' ? `which part of ${k.city} (one short question: "What part of ${k.city}?"; a neighbourhood or a ZIP code answers it)` : ASK_LINE[d.coverage.ask === 'zip' ? 'location_zip' : d.coverage.ask] || INTAKE.location.ask
+  if (d.nextAsk) parts.push(`Ask next (only this): ${d.coverage.ask && d.nextAsk === 'location' ? locationAsk : INTAKE[d.nextAsk].ask}.`)
   else if (d.flow === 'offer_times') parts.push('You may look up and offer open times now.')
   else if (d.flow === 'confirm_booking') parts.push('Everything needed is known: read back the time and book only after a clear yes.')
   if (!d.canOfferTimes && !d.escalate) parts.push(`Do NOT look up or offer times yet (still needed: ${d.timesBlockers.join(', ')}).`)

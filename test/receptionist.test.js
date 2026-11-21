@@ -11,8 +11,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
-import { checkDetails, inventedPrices, loadConversation, respond, sentenceProblem, spokenToDigits, startConversation, visibleTranscript } from '../server/receptionist/engine.js'
+import { checkDetails, executeTool, inventedPrices, loadConversation, respond, sentenceProblem, spokenToDigits, startConversation, visibleTranscript, HOLD_AFTER_MS, TOOLS } from '../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, factText, playbookFor, systemPrompt } from '../server/receptionist/knowledge.js'
+import { defaultConfig, validateConfig } from '../server/intelligence/schema.js'
+import { recordsFor } from '../server/intelligence/access.js'
+import { anthropicSchemaProblems } from './schema-limits.js'
 import { routeCall, withinHours } from '../server/receptionist/routing.js'
 import { attachRetellSocket, latestUserText, turnText, RECONNECT_MS } from '../server/receptionist/voice.js'
 import { queueOwnerNotices } from '../server/notify.js'
@@ -57,7 +60,7 @@ function d1({ skip = [] } = {}) {
   }
 }
 
-let env, db, kv, fetches, script, modelRequests, origFetch, origError, logs, responses, busy
+let env, db, kv, fetches, script, modelRequests, origFetch, origError, logs, responses, busy, googleDelayMs
 let deferred = [] // waitUntil promises of the last calls (event-driven work after a response)
 
 // Scripted model: each entry returns { content, stop_reason } for one /v1/messages call (or { status } for an error).
@@ -87,7 +90,7 @@ function sse(out, model) {
   return new Response(s, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
 }
 
-async function seed(id, { zips = '29401,29403', industry = 'Pool service', mode = 'at_business' } = {}) {
+async function seed(id, { zips = '29401,29403', industry = 'Pool service', mode = 'at_business', towns = ['Charleston'] } = {}) {
   const t = Date.now()
   db.sql
     .prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES (?, ?, 'UTC', ?, '00:00', '23:00', '0,1,2,3,4,5,6', ?, ?, ?)")
@@ -95,10 +98,21 @@ async function seed(id, { zips = '29401,29403', industry = 'Pool service', mode 
   if (mode === 'at_customer') db.sql.prepare("INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES (?, 'at_customer', ?)").run(id, t)
   db.sql.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?, ?, ?)').run(`owner@${id}.example`, id, t)
   db.sql
-    .prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES (?, '(843) 555-0199', ?, 'Family-run pool care.', ?, '[\"Charleston\"]', ?)")
-    .run(id, industry, JSON.stringify([{ name: 'Weekly pool care', price: '$280/month' }, { name: 'Green pool cleanup', price: '' }]), t)
+    .prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES (?, '(843) 555-0199', ?, 'Family-run pool care.', ?, ?, ?)")
+    .run(id, industry, JSON.stringify([{ name: 'Weekly pool care', price: '$280/month' }, { name: 'Green pool cleanup', price: '' }]), JSON.stringify(towns), t)
   kv.set(`google:${id}`, JSON.stringify({ customer: id, clientId: 'cid', scope: 'x', refreshToken: await encrypt({ TOKEN_ENCRYPTION_KEY: KEY }, '1//rt') }))
 }
+// Teach Your AI: publish the default rules for the business with these towns marked fully served, and make them live.
+async function liveRules(id, fully) {
+  const records = await recordsFor(env, await cust(id))
+  const { config, errors } = validateConfig({ ...defaultConfig(records), coverage: { cityWide: fully } }, records)
+  assert.deepEqual(errors, [])
+  const t = Date.now()
+  db.sql.prepare('INSERT INTO ai_rules (customer, draft, draft_updated_at, live_version, updated_at) VALUES (?, ?, ?, 1, ?)').run(id, JSON.stringify(config), t, t)
+  db.sql.prepare("INSERT INTO ai_rule_versions (customer, version, config, note, published_by, created_at) VALUES (?, 1, ?, 'First version.', 'ref:x', ?)").run(id, JSON.stringify(config), t)
+  env.AI_RULES_LIVE_BUSINESSES = [env.AI_RULES_LIVE_BUSINESSES, id].filter(Boolean).join(',')
+}
+const systemNote = (req) => req.messages.filter((m) => m.role === 'system').at(-1)?.content || ''
 const enable = (id, extra = {}) =>
   db.sql
     .prepare('INSERT OR REPLACE INTO receptionist_settings (customer, enabled, mode, greeting, knowledge, transfer_phone, updated_at) VALUES (?, 1, ?, ?, ?, ?, 1)')
@@ -113,6 +127,7 @@ beforeEach(() => {
   modelRequests = []
   script = []
   busy = []
+  googleDelayMs = 0
   env = {
     GOOGLE_CLIENT_ID: 'cid',
     GOOGLE_CLIENT_SECRET: 'cs',
@@ -141,7 +156,10 @@ beforeEach(() => {
       return json(200, { id: `msg_${modelRequests.length}`, type: 'message', role: 'assistant', model: body.model, content: out.content, stop_reason: out.stop_reason, stop_sequence: null, usage: { input_tokens: 1000, output_tokens: 50, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0 } })
     }
     if (u === 'https://oauth2.googleapis.com/token') return json(200, { access_token: 'ya29.at', scope: 'x', expires_in: 3600 })
-    if (u.endsWith('/freeBusy')) return json(200, { calendars: { primary: { busy } } })
+    if (u.endsWith('/freeBusy')) {
+      if (googleDelayMs) await new Promise((r) => setTimeout(r, googleDelayMs))
+      return json(200, { calendars: { primary: { busy } } })
+    }
     if (u.includes('/events?sendUpdates=all')) return json(200, { id: JSON.parse(init.body).id })
     if (u === 'https://api.resend.com/emails') return json(200, { id: 'email_1' })
     if (u.startsWith('http://127.0.0.1:9912/v3/create-web-call')) return json(201, { call_id: `call_${fetches.length}abcdef`, access_token: 'web_access_token', transport: 'gateway', ice_servers: [] })
@@ -280,23 +298,36 @@ test('spoken numbers: "two nine four zero three" and a spoken phone are understo
   assert.equal(checkDetails({ email: 'other@example.net' }, fake, 'chat').problems.email, 'email_not_typed')
 })
 
-test('voice: a calendar lookup with nothing said first gets a fixed holding line (spoken before the tool runs); chat never does', async () => {
+test('voice: a quick calendar lookup is answered directly; the holding line is spoken only when the lookup keeps the caller waiting (HOLD_AFTER_MS), once, before the tool returns; timings are kept as numbers; chat never holds', async () => {
   await seed('alpha')
   enable('alpha')
   const customer = await cust('alpha')
   const c = await startConversation(env, customer, 'voice')
   const conv = () => loadConversation(env, customer, c.id)
   const spoken = []
-  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), () => (assert.deepEqual(spoken, ['One moment while I check the calendar.'], 'held before the second model call'), say('I have Tuesday at 10 AM.')))
+  // Quick: Google answers at once and the second model call follows → the options, nothing else.
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), say('I have Tuesday at 10 AM.'))
   const r = await respond(env, customer, await conv(), 'What times do you have?', { channel: 'voice', onText: (s) => spoken.push(s) })
-  assert.deepEqual(spoken, ['One moment while I check the calendar.', 'I have Tuesday at 10 AM.'])
-  assert.equal(r.reply, 'One moment while I check the calendar. I have Tuesday at 10 AM.')
-  assert.equal((await conv()).state.log.at(-1).text, r.reply, 'the owner sees what was actually said')
-  // A tool that isn't slow (details) gets no holding line.
+  assert.deepEqual(spoken, ['I have Tuesday at 10 AM.'])
+  assert.equal(r.reply, 'I have Tuesday at 10 AM.')
+  // Slow: Google takes 1.2 s → the holding line goes out at about HOLD_AFTER_MS after the tool call started, before the
+  // tool returned and before the second model call; said once; the answer follows it.
+  googleDelayMs = 1200
   spoken.length = 0
-  script.push(calls(details({ zip: '29403' })), say('Thanks.'))
-  await respond(env, customer, await conv(), 'two nine four zero three', { channel: 'voice', onText: (s) => spoken.push(s) })
-  assert.deepEqual(spoken, ['Thanks.'])
+  const timing = {}
+  const t0 = Date.now()
+  let heldAt = null
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'afternoon' })), () => (assert.deepEqual(spoken, ['One moment while I check the calendar.'], 'held before the second model call'), say('I have Wednesday at 2 PM.')))
+  const r2 = await respond(env, customer, await conv(), 'anything in the afternoon?', { channel: 'voice', onText: (s) => ((heldAt ??= Date.now() - t0), spoken.push(s)), timing })
+  assert.deepEqual(spoken, ['One moment while I check the calendar.', 'I have Wednesday at 2 PM.'])
+  assert.ok(heldAt >= HOLD_AFTER_MS - 50 && heldAt < 1150, `holding line after ${heldAt} ms (HOLD_AFTER_MS ${HOLD_AFTER_MS}, Google 1200 ms)`)
+  assert.ok(Number.isInteger(timing.holdMs) && timing.toolMs >= 1100 && timing.totalMs >= timing.toolMs && timing.modelCalls === 2, JSON.stringify(timing))
+  assert.equal(r2.reply, 'One moment while I check the calendar. I have Wednesday at 2 PM.')
+  const line = (await conv()).state.log.at(-1)
+  assert.equal(line.text, r2.reply, 'the owner sees what was actually said')
+  assert.deepEqual(Object.keys(line.timing).sort(), ['firstTextMs', 'firstTokenMs', 'holdMs', 'modelCalls', 'modelMs', 'toolMs', 'totalMs'])
+  assert.ok(Object.values(line.timing).every((v) => v === null || Number.isInteger(v)), 'numbers only')
+  assert.deepEqual(visibleTranscript([], (await conv()).state).at(-1).timing, line.timing, 'exposed to the owner view')
   // The holding line is not an answer: no text after it still falls back (model:no_reply).
   spoken.length = 0
   script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), say(''))
@@ -304,7 +335,14 @@ test('voice: a calendar lookup with nothing said first gets a fixed holding line
   assert.equal(spoken[0], 'One moment while I check the calendar.')
   assert.ok(spoken.length === 2 && spoken[1] !== 'One moment while I check the calendar.', 'fallback spoken after it')
   assert.ok(db.sql.prepare("SELECT 1 FROM receptionist_events WHERE kind = 'model' AND detail = 'no_reply'").get())
-  // Chat: no holding line.
+  // A tool that isn't slow (details) never holds.
+  googleDelayMs = 0
+  spoken.length = 0
+  script.push(calls(details({ zip: '29403' })), say('Thanks.'))
+  await respond(env, customer, await conv(), 'two nine four zero three', { channel: 'voice', onText: (s) => spoken.push(s) })
+  assert.deepEqual(spoken, ['Thanks.'])
+  // Chat: no holding line, even with a slow calendar.
+  googleDelayMs = 900
   const chat = await startConversation(env, customer, 'chat')
   script.push(calls(tool('find_available_times', { date: '', part_of_day: 'any' })), say('Tuesday at 10 AM works.'))
   assert.equal((await respond(env, customer, await loadConversation(env, customer, chat.id), 'times?')).reply, 'Tuesday at 10 AM works.')
@@ -328,6 +366,9 @@ test('booking guards: never-offered, unconfirmed, missing details, out of area, 
   await respond(env, customer, await conv(), 'Jamie Rivera, (843) 555-0142, ZIP 90210, pool care')
   script.push(calls(book(slot, 'maybe')), (b) => (assert.equal(lastToolResults(b)[0].error, 'confirmation_required'), say('Shall I?')))
   await respond(env, customer, await conv(), 'maybe')
+  // A yes that is not a yes: the quoted word is affirmative, but the whole message hesitates (never booked).
+  script.push(calls(book(slot, 'okay')), (b) => (assert.equal(lastToolResults(b)[0].error, 'confirmation_required'), say('Take your time.')))
+  await respond(env, customer, await conv(), 'okay, let me think about it and check with my wife first')
   script.push(calls(book(slot, 'yes')), (b) => (assert.equal(lastToolResults(b)[0].error, 'out_of_area'), say('Sorry, we don’t serve 90210.')))
   await respond(env, customer, await conv(), 'yes')
   script.push(calls(details({ zip: '29401' })), say('Updated.'))
@@ -765,6 +806,7 @@ test('voice socket route: refuses without the secret path segment, wrong secret,
 test('Retell setup script: dry run writes nothing; creates the Custom LLM agent once; re-runs update the draft; duplicates stop it; never publishes; secrets never printed', async () => {
   const { setupAgent, AGENT_NAME, TUNED_SETTINGS } = await import('../scripts/retell-setup.mjs')
   const R = 'http://127.0.0.1:9913'
+  const TEST_AGENT = 'GetShowUps receptionist (test)'
   let agents = []
   const writes = []
   const prev = globalThis.fetch
@@ -776,32 +818,49 @@ test('Retell setup script: dry run writes nothing; creates the Custom LLM agent 
     if (u === `${R}/create-agent`) {
       const b = JSON.parse(init.body)
       writes.push(['create', b])
-      agents.push({ agent_id: 'agent_new123456', agent_name: b.agent_name })
-      return json(201, { agent_id: 'agent_new123456', version: 0, is_published: false })
+      const id = b.agent_name === AGENT_NAME ? 'agent_new123456' : 'agent_test7890ab'
+      agents.push({ agent_id: id, agent_name: b.agent_name })
+      return json(201, { agent_id: id, version: 0, is_published: false })
     }
-    if (u === `${R}/update-agent/agent_new123456`) {
-      writes.push(['update', JSON.parse(init.body)])
-      return json(200, { agent_id: 'agent_new123456', version: 0, is_published: false })
+    const upd = u.match(new RegExp(`^${R}/update-agent/(agent_[a-z0-9]+)$`))
+    if (upd) {
+      writes.push(['update', JSON.parse(init.body), upd[1]])
+      return json(200, { agent_id: upd[1], version: 0, is_published: false })
     }
     throw new Error(`unexpected ${init.method} ${u}`)
   }
   const lines = []
+  const liveWrites = () => writes.filter(([kind, b, id]) => (kind === 'create' ? b.agent_name === AGENT_NAME : id === 'agent_new123456')).length
   try {
     const opts = { apiKey: 'key_retell_SECRET_123456', wsSecret: WS_SECRET, base: R, log: (l) => lines.push(l) }
     assert.equal((await setupAgent({ ...opts, apply: false })).action, 'create')
     assert.equal(writes.length, 0)
     assert.equal((await setupAgent({ ...opts, apply: true })).action, 'created')
     assert.equal(writes[0][1].response_engine.llm_websocket_url, `wss://getshowups.com/api/receptionist/llm/${WS_SECRET}`)
-    assert.ok(!('interruption_sensitivity' in writes[0][1]) && !('data_storage_setting' in writes[0][1]), 'without --tuned: Retell defaults (nothing sent)')
+    assert.ok(!('interruption_sensitivity' in writes[0][1]) && !('data_storage_setting' in writes[0][1]) && !('stt_mode' in writes[0][1]), 'without --tuned: Retell defaults (nothing sent)')
     assert.equal((await setupAgent({ ...opts, apply: true })).action, 'updated')
-    // --tuned: the proposed settings, dry run first (still writes nothing), then sent on the draft update.
-    assert.equal((await setupAgent({ ...opts, apply: false, tuned: true })).tuned, true)
+    // --tuned never touches the live agent: it needs --test-agent (a second, separately named agent).
+    assert.equal((await setupAgent({ ...opts, apply: true, tuned: true })).error, 'tuned_needs_test_agent')
     assert.equal(writes.length, 2)
-    await setupAgent({ ...opts, apply: true, tuned: true })
+    // Test agent: dry run writes nothing; apply creates it with the proposed settings; the live agent is untouched.
+    const dry = await setupAgent({ ...opts, apply: false, tuned: true, name: TEST_AGENT })
+    assert.deepEqual([dry.tuned, dry.action, dry.name, writes.length], [true, 'create', TEST_AGENT, 2])
+    const made = await setupAgent({ ...opts, apply: true, tuned: true, name: TEST_AGENT })
+    assert.deepEqual([made.action, made.agentId, made.tuned], ['created', 'agent_test7890ab', true])
+    assert.equal(writes[2][1].agent_name, TEST_AGENT)
     assert.deepEqual(Object.fromEntries(Object.keys(TUNED_SETTINGS).map((k) => [k, writes[2][1][k]])), { ...TUNED_SETTINGS })
-    assert.ok(TUNED_SETTINGS.interruption_sensitivity >= 0 && TUNED_SETTINGS.interruption_sensitivity <= 1 && TUNED_SETTINGS.end_call_after_silence_ms >= 10000)
+    assert.equal(writes[2][1].response_engine.llm_websocket_url, `wss://getshowups.com/api/receptionist/llm/${WS_SECRET}`, 'the test agent talks to the same engine')
+    assert.equal(liveWrites(), 2, 'the live agent got exactly its two earlier writes')
+    assert.ok(TUNED_SETTINGS.interruption_sensitivity >= 0 && TUNED_SETTINGS.interruption_sensitivity <= 1 && TUNED_SETTINGS.end_call_after_silence_ms >= 10000 && TUNED_SETTINGS.responsiveness >= 0 && TUNED_SETTINGS.responsiveness <= 1)
+    // Custom end-of-turn silence: only with --tuned on the test agent, within Retell's range.
+    assert.equal((await setupAgent({ ...opts, apply: true, endpointingMs: 300 })).error, 'invalid_endpointing')
+    assert.equal((await setupAgent({ ...opts, apply: true, tuned: true, name: TEST_AGENT, endpointingMs: 5 })).error, 'invalid_endpointing')
+    const ep = await setupAgent({ ...opts, apply: true, tuned: true, name: TEST_AGENT, endpointingMs: 300 })
+    assert.deepEqual([ep.action, writes.at(-1)[2], writes.at(-1)[1].stt_mode, writes.at(-1)[1].custom_stt_config], ['updated', 'agent_test7890ab', 'custom', { provider: 'deepgram', endpointing_ms: 300 }])
+    assert.equal(liveWrites(), 2)
     agents.push({ agent_id: 'agent_dupe999999', agent_name: AGENT_NAME })
     assert.equal((await setupAgent({ ...opts, apply: true })).error, 'duplicate_agents')
+    assert.equal((await setupAgent({ ...opts, apply: true, name: '../x' })).error, 'invalid_agent_name')
     assert.ok(!lines.join('\n').includes(WS_SECRET))
   } finally {
     globalThis.fetch = prev
@@ -866,4 +925,198 @@ test('out of area in chat: never a dead end, never a booking — the lead is kep
   assert.equal(db.sql.prepare('SELECT outcome FROM receptionist_conversations').get().outcome, 'coverage_request')
   // The prompt itself never tells the model to turn people away.
   assert.match(modelRequests[0].system.map?.((b) => b.text).join('') ?? String(modelRequests[0].system), /never a dead end and never a booking/)
+})
+
+// ---------- direct answers, place-aware coverage, memory ----------
+
+test('narration never reaches a customer: "let me check", "I\'ll verify", "thank you for providing", "please wait" are dropped sentence by sentence (the rest of the answer still goes out); real answers pass', async () => {
+  for (const s of ['Let me check that for you.', "I'll verify the ZIP now.", 'Thank you for providing that information.', 'Please wait while I look that up.', 'One moment please.', 'Checking the calendar now.', "I'm just pulling that up.", 'Hold on a second.', 'Let me see what we have.', 'I will confirm that with the team.', 'The rule says I should call request_callback.']) {
+    assert.equal(sentenceProblem(s, ''), 'narration', s)
+  }
+  for (const s of ["Yes, we service West Ashley. What's going on with your pool?", 'Let me know if Tuesday at 10 works.', 'We check the chemicals at every visit.', 'Thanks for calling alpha Co!', 'I have Tuesday at 10 or Wednesday at 2.', 'The team will confirm the price.', 'Please have the gate unlocked before the visit.']) {
+    assert.equal(sentenceProblem(s, ''), null, s)
+  }
+  await seed('alpha')
+  enable('alpha')
+  const customer = await cust('alpha')
+  // Voice: the narration sentences are skipped, the answer is still spoken, the model is corrected next turn.
+  const c = await startConversation(env, customer, 'voice')
+  const spoken = []
+  script.push(say('Let me check that for you. Yes, we service 29403. One moment please. What is going on with your pool?'))
+  const r = await respond(env, customer, await loadConversation(env, customer, c.id), 'Do you serve 29403?', { channel: 'voice', onText: (s) => spoken.push(s) })
+  assert.deepEqual(spoken, ['Yes, we service 29403.', 'What is going on with your pool?'])
+  assert.equal(r.reply, 'Yes, we service 29403. What is going on with your pool?')
+  assert.ok(events(c.id).includes('blocked_narration:fail:narration'))
+  script.push((body) => (assert.match(systemNote(body), /narrated a check .* Checks are silent/), say('Green water, got it.')))
+  await respond(env, customer, await loadConversation(env, customer, c.id), 'it is green', { channel: 'voice', onText: () => {} })
+  // Chat: only the narration is removed; with nothing left, a neutral question.
+  script.push(say("Thank you for providing that. I'll verify the ZIP now."))
+  const t = await chat('alpha', 'I am in 29401')
+  assert.equal(t.json().reply, 'Could you tell me a bit more about what you need?')
+  // The prompt no longer invites a "Let me check" line.
+  assert.doesNotMatch(systemPrompt(await knowledgeFor(env, customer, {}), 'voice'), /Let me check the calendar/)
+  assert.match(systemPrompt(await knowledgeFor(env, customer, {}), 'voice'), /checks are silent/i)
+})
+
+test('coverage by place (owner rules live): a fully served town is served without a ZIP and answered directly; nothing is asked twice in "I\'m in West Ashley. My pool is green. Can someone come tomorrow?"; the booking asks for the ZIP once, when booking', async () => {
+  await seed('alpha', { towns: ['Charleston', 'West Ashley', 'Mount Pleasant'] })
+  enable('alpha')
+  await liveRules('alpha', ['West Ashley'])
+  const customer = await cust('alpha')
+  const c = await startConversation(env, customer, 'voice')
+  const conv = () => loadConversation(env, customer, c.id)
+  const spoken = []
+  const voice = { channel: 'voice', onText: (s) => spoken.push(s) }
+  // Turn 1: place, problem and day in one breath. The model checks the PLACE (no ZIP asked) → served.
+  script.push(calls(tool('check_service_area', { zip: '', place: 'West Ashley' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.deepEqual([r.served, r.basis, r.place], [true, 'town_fully_served', 'West Ashley'])
+    assert.match(r.note, /Say "Yes, we service West Ashley\." and move on/)
+    assert.match(r.note, /Do not ask for a ZIP code to confirm the area/)
+    return say('Yes, we service West Ashley. Tomorrow morning or afternoon?')
+  })
+  await respond(env, customer, await conv(), "I'm in West Ashley. My pool is green. Can someone come tomorrow?", voice)
+  const note1 = systemNote(modelRequests[0])
+  assert.match(note1, /town=West Ashley/)
+  assert.match(note1, /need=Green pool cleanup/, '"my pool is green" is read as the listed service')
+  assert.match(note1, /when=Tomorrow/)
+  assert.match(note1, /area verified: West Ashley is fully served \(say so plainly; do not ask for a ZIP to confirm the area\)/)
+  assert.doesNotMatch(note1, /Ask next \(only this\): (their ZIP|where|what they need)/)
+  assert.deepEqual(spoken, ['Yes, we service West Ashley.', 'Tomorrow morning or afternoon?'])
+  assert.ok(events(c.id).includes('check_service_area:ok:town_fully_served'))
+  // Turn 2: times are allowed (area verified by town); the note carries the place as served, ZIP needed only to book.
+  let offered
+  script.push(calls(tool('find_available_times', { date: '', part_of_day: 'morning' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.ok(r.ok && r.options.length, JSON.stringify(r))
+    offered = r.options[0]
+    return say(`I have ${offered.time}. Does that work?`)
+  })
+  await respond(env, customer, await conv(), 'morning please', voice)
+  const note2 = systemNote(modelRequests.at(-2))
+  assert.match(note2, /location: West Ashley \(served, fully served town; a ZIP code is needed only to book\)/)
+  assert.match(note2, /Still needed only if they want to book: name, phone, zip, what they need/)
+  assert.doesNotMatch(note2, /Ask next \(only this\): their ZIP code/)
+  // Turn 3: name, phone and need → the only thing left for the booking is the ZIP (asked once, now).
+  script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142', need: 'Green pool cleanup' })), (b) => {
+    assert.deepEqual(lastToolResults(b)[0].still_needed_to_book, ['zip'])
+    return say('Thanks Jamie. What is the ZIP code there?')
+  })
+  await respond(env, customer, await conv(), 'Jamie Rivera, 843-555-0142, yes that works, it is the green pool', voice)
+  assert.match(systemNote(modelRequests.at(-1)), /location: West Ashley \(served/)
+  // Turn 4: ZIP on the list → booked through the unchanged guards (offered slot, confirming words, areaFor).
+  script.push(calls(details({ zip: '29403' }), tool('book_appointment', { slot_id: offered.slot_id, confirmation_quote: 'yes book it' })), (b) => {
+    const [saved, booked] = lastToolResults(b)
+    assert.equal(saved.in_service_area, true)
+    assert.equal(booked.booked, true)
+    return say(`You're booked for ${offered.time}.`)
+  })
+  await respond(env, customer, await conv(), 'two nine four zero three, yes book it', voice)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM appointments WHERE status = 'booked'").get().n, 1)
+  assert.deepEqual((await conv()).state.area, { place: 'West Ashley', basis: 'zip', served: true, ask: null })
+  // A fully served town whose ZIP is NOT on the list still never books (booking validation unchanged).
+  const c2 = await startConversation(env, customer, 'chat')
+  const conv2 = () => loadConversation(env, customer, c2.id)
+  script.push(calls(tool('check_service_area', { zip: '', place: 'West Ashley' }), tool('find_available_times', { date: '', part_of_day: 'any' })), (b) => ((offered = lastToolResults(b)[1].options[0]), say('Served. Options…')))
+  await respond(env, customer, await conv2(), 'West Ashley, weekly care please')
+  script.push(calls(details({ name: 'Pat Kim', phone: '843-555-0199', zip: '29407', need: 'Weekly pool care' }), tool('book_appointment', { slot_id: offered.slot_id, confirmation_quote: 'yes' })), (b) => {
+    assert.equal(lastToolResults(b)[1].error, 'out_of_area')
+    return say('We may be able to help in your area.')
+  })
+  await respond(env, customer, await conv2(), 'Pat Kim, 843-555-0199, 29407, weekly pool care, yes')
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM appointments WHERE status = 'booked'").get().n, 1, 'no second booking')
+  // Owner view: the receptionist lines carry timings (numbers only) and the events the coverage basis.
+  const d = (await call(ownerApi, 'GET', `/api/dashboard/receptionist?id=${c.id}`, { cookie: await owner('alpha') })).json().conversation
+  const lines = d.transcript.filter((l) => l.who === 'receptionist')
+  assert.ok(lines.length >= 4 && lines.every((l) => Object.values(l.timing).every((v) => v === null || Number.isInteger(v))))
+  assert.ok(d.events.some((e) => e.kind === 'check_service_area' && e.detail === 'town_fully_served'))
+})
+
+test('coverage by place without rules: a listed town that is not fully served gets ONE clarification ("What part of Charleston?"), an unlisted place asks for the ZIP, nothing is ever claimed covered; towns come from the business\'s own records', async () => {
+  await seed('alpha', { towns: ['Charleston', 'Mount Pleasant'] })
+  await seed('beta', { zips: '', towns: ['West Ashley'] })
+  enable('alpha')
+  const customer = await cust('alpha')
+  assert.deepEqual(anthropicSchemaProblems({ type: 'object', properties: Object.fromEntries(TOOLS.map((t) => [t.name, t.input_schema])), required: TOOLS.map((t) => t.name), additionalProperties: false }), [])
+  assert.deepEqual(TOOLS.find((t) => t.name === 'check_service_area').input_schema.required, ['zip', 'place'])
+  const c = await startConversation(env, customer, 'chat')
+  const conv = () => loadConversation(env, customer, c.id)
+  // Turn 1: "Charleston" is listed but only partly served → exactly one clarification, no claim either way.
+  script.push(calls(tool('check_service_area', { zip: '', place: 'Charleston' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.deepEqual([r.ok, r.served, r.resolved, r.basis, r.ask], [true, null, false, 'town_partly_served', 'What part of Charleston?'])
+    assert.match(r.note, /Do not say it is covered and do not say it isn't\. Ask exactly one short question: "What part of Charleston\?"/)
+    return say('What part of Charleston are you in?')
+  })
+  await respond(env, customer, await conv(), "I'm in Charleston, my pump is dead.")
+  assert.match(systemNote(modelRequests[0]), /place they named: Charleston \(check it with check_service_area place="Charleston" before offering times; do not ask where they are\)/)
+  assert.match(systemNote(modelRequests[0]), /problem\/need they described: pump/)
+  // Turn 2: a neighbourhood that is not on the list → ask for the ZIP (never "we cover it", never "we don't").
+  script.push(calls(tool('check_service_area', { zip: '', place: 'James Island' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.deepEqual([r.served, r.resolved, r.basis, r.ask], [null, false, 'place_not_listed', 'their ZIP code'])
+    return say('What is the ZIP code there?')
+  })
+  await respond(env, customer, await conv(), 'James Island')
+  assert.match(systemNote(modelRequests.at(-1)), /location: Charleston \(area NOT confirmed yet; ask only: "What part of Charleston\?"\)/, 'the turn note is built before its tools run')
+  // Turn 3: the ZIP decides (areaFor, unchanged): 29412 is a real ZIP not on alpha's list → service-area request path.
+  script.push(calls(tool('check_service_area', { zip: '29412', place: '' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.deepEqual([r.served, r.zip], [false, '29412'])
+    assert.match(r.note, /We may be able to help in your area/)
+    return say("We may be able to help in your area. Leave your details and we'll confirm availability.")
+  })
+  await respond(env, customer, await conv(), '29412')
+  assert.match(systemNote(modelRequests.at(-1)), /location: James Island \(area NOT confirmed yet; ask only: the ZIP code there\)/)
+  assert.deepEqual((await conv()).state.area, { place: 'James Island', basis: 'zip', served: false, ask: null })
+  assert.equal((await conv()).state.inArea, false)
+  // Resolution rules, directly: longest listed town wins; a direction-prefixed name never matches a shorter town; a
+  // published fully served list counts ONLY while rules are live; another business's towns never count; no ZIP list = served.
+  const k = await knowledgeFor(env, customer, {})
+  const run = async (cust_, place, rules = null) => {
+    const conv_ = { id: 'x', customer: cust_.id, state: {}, transcript: [{ role: 'user', content: place }], status: 'open', outcome: null }
+    return executeTool({ env, customer: cust_, conv: conv_, now: Date.now(), userText: place, knowledge: await knowledgeFor(env, cust_, {}), channel: 'chat', after: [], committed: false, rules }, 'check_service_area', { zip: '', place })
+  }
+  assert.equal((await run(customer, 'North Charleston')).basis, 'place_not_listed', 'prefix never matches the shorter town')
+  assert.deepEqual([(await run(customer, 'downtown Charleston')).basis, (await run(customer, 'downtown Charleston')).ask], ['town_partly_served', 'their ZIP code'], 'a part of a partly served town → ZIP')
+  assert.equal((await run(customer, 'mount pleasant')).ask, 'What part of Mount Pleasant?')
+  assert.equal((await run(customer, 'West Ashley')).basis, 'place_not_listed', "beta's town is not alpha's")
+  const beta = await cust('beta')
+  assert.deepEqual([(await run(beta, 'anywhere')).served, (await run(beta, 'anywhere')).basis], [true, 'not_limited'])
+  // Published but not live: the fully served list is ignored (rules are null for the engine), so still one clarification.
+  const records = await recordsFor(env, customer)
+  const { config } = validateConfig({ ...defaultConfig(records), coverage: { cityWide: ['Charleston'] } }, records)
+  assert.equal((await run(customer, 'Charleston', null)).basis, 'town_partly_served')
+  assert.equal((await run(customer, 'Charleston', { config, records, version: 1 })).basis, 'town_fully_served')
+  const bare = () => ({ env, customer, conv: { id: 'y', customer: 'alpha', state: {}, transcript: [], status: 'open', outcome: null }, now: Date.now(), userText: '', knowledge: k, channel: 'chat', after: [], committed: false, rules: null })
+  assert.equal((await executeTool(bare(), 'check_service_area', { zip: '', place: '' })).error, 'location_needed')
+  assert.equal((await executeTool(bare(), 'check_service_area', { zip: '294', place: '' })).error, 'invalid_zip')
+})
+
+test('conversation memory without rules: place, problem and day said once are never asked again; "actually it\'s Mount Pleasant" replaces the place', async () => {
+  await seed('alpha', { towns: ['Charleston', 'Mount Pleasant', 'West Ashley'] })
+  enable('alpha')
+  script.push(say('What part of West Ashley?'))
+  const t1 = await chat('alpha', "I'm in West Ashley. My pool is green. Can someone come tomorrow?")
+  const n1 = systemNote(modelRequests[0])
+  assert.match(n1, /place they named: West Ashley/)
+  assert.match(n1, /problem\/need they described: Green pool cleanup \(save it with save_customer_details; do not ask what they need\)/)
+  assert.match(n1, /when they asked for: Tomorrow \(look up that day\/part first; do not ask when\)/)
+  assert.match(n1, /^Known so far \(do NOT ask for any of this again\)/)
+  script.push(say('Mount Pleasant, got it.'))
+  await chat('alpha', "Actually it's Mount Pleasant, sorry.", t1.json())
+  const n2 = systemNote(modelRequests[1])
+  assert.match(n2, /place they named: Mount Pleasant/)
+  assert.doesNotMatch(n2, /West Ashley/)
+  assert.match(n2, /they corrected their city: use the newest value, do not mention the old one/)
+  assert.match(n2, /problem\/need they described: Green pool cleanup/)
+  assert.match(n2, /when they asked for: Tomorrow/)
+  // Details saved by the tool take over from the reading; the rest stays known.
+  script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142', need: 'Green pool cleanup' })), say('Thanks Jamie.'))
+  await chat('alpha', 'Jamie Rivera, 843-555-0142', t1.json())
+  script.push(say('Ok.'))
+  await chat('alpha', 'ok', t1.json())
+  const n4 = systemNote(modelRequests.at(-1))
+  assert.match(n4, /name: Jamie Rivera; phone: \+18435550142; place they named: Mount Pleasant \(check it.*?\); needs: Green pool cleanup; when they asked for: Tomorrow/)
+  assert.match(n4, /Still needed only if they want to book: zip\./)
 })
