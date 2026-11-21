@@ -69,12 +69,12 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
     return result // objects are JSON-stringified by the SDK for client_tool_result
   }
 
-  async function finish(s, reason) {
+  async function finish(s, reason, outcome) {
     if (flushTimer) clearTimeout(flushTimer)
     await flush().catch(() => {})
     emitMetrics()
     if (s === 'error') emit({ type: 'error', code: reason })
-    setState(s, { reason, reconnects })
+    setState(s, { reason, reconnects, ...(outcome ? { outcome } : {}) })
   }
 
   async function onDisconnect(details) {
@@ -169,14 +169,16 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
         await finish('error', err?.code || 'connect_failed')
       }
     },
-    async stop() {
+    // { outcome }: the Lab's outcome code for this session (e.g. 'booked'), echoed on the final status event; the page
+    // sends it with action 'end'. Idempotent.
+    async stop({ outcome } = {}) {
       stopping = true
       const c = conversation
       conversation = null
       try {
         await c?.endSession()
       } catch {}
-      if (state !== 'ended' && state !== 'error' && state !== 'idle') await finish('ended', 'stopped')
+      if (state !== 'ended' && state !== 'error' && state !== 'idle') await finish('ended', 'stopped', typeof outcome === 'string' && /^[a-z_]{1,32}$/.test(outcome) ? outcome : undefined)
     },
   }
 }

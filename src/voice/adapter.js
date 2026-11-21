@@ -4,12 +4,12 @@
 //
 //   const adapter = create<Provider>Adapter()
 //   await adapter.start({ customer, id, token, onEvent })   // the Lab session from POST /api/platform/voice-lab/session
-//   await adapter.stop()
+//   await adapter.stop({ outcome })   // outcome: the Lab's outcome code (optional), echoed on the final status event
 //   adapter.state   // 'idle' | 'connecting' | 'live' | 'reconnecting' | 'ended' | 'error'
 //   adapter.metrics()   // the latest metrics snapshot (same keys as the 'metrics' event)
 //
 // Events (onEvent({ type, ... })):
-//   { type: 'status', status, mode?, reconnects?, reason? }   mode: 'speaking' | 'listening' while live
+//   { type: 'status', status, mode?, reconnects?, reason?, outcome? }   mode: 'speaking' | 'listening' while live
 //   { type: 'transcript', who: 'customer' | 'receptionist', text, at }   final lines only (also posted to the session)
 //   { type: 'tool', name, ok, simulated, error?, ms }   every business tool call, after our server answered it
 //   { type: 'metrics', metrics }   see createTurnMetrics(); the Lab sends the last one with action 'end'

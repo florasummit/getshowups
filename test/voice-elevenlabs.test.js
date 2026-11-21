@@ -425,10 +425,10 @@ test('browser adapter: a refused connection ends in a coded error; stop() ends t
   await adapter.start({ customer: 'alpha', id: 'c', token: 't', onEvent: (e) => ev3.push(e) })
   await tick()
   assert.equal(adapter.state, 'live')
-  await adapter.stop()
+  await adapter.stop({ outcome: 'booked' })
   assert.equal(good.sessions[0].ended, true)
   assert.equal(adapter.state, 'ended')
-  assert.deepEqual(ev3.at(-1), { type: 'status', status: 'ended', reason: 'stopped', reconnects: 0 })
+  assert.deepEqual(ev3.at(-1), { type: 'status', status: 'ended', reason: 'stopped', reconnects: 0, outcome: 'booked' })
   assert.equal(ev3.at(-2).type, 'metrics')
   await adapter.stop() // idempotent
   assert.equal(adapter.state, 'ended')
