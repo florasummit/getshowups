@@ -133,6 +133,8 @@ export function WebsitePreview({ stamp, live = false, title = 'Website preview',
   )
 }
 
+// Logo and main photo: upload / replace / "Remove from website". Removing changes only the pointer in the content (the
+// logo becomes null = no logo, on purpose); the uploaded file stays in the media library.
 function ImagePicker({ label, hint, value, kind, onPick, onRemove }) {
   const [state, setState] = useState({})
   const pick = async (e) => {
@@ -153,12 +155,12 @@ function ImagePicker({ label, hint, value, kind, onPick, onRemove }) {
         {hint && <p className="fine">{hint}</p>}
         <div className="image-pick-actions">
           <label className="btn btn-quiet btn-sm">
-            {state.busy ? 'Uploading…' : value ? 'Replace' : 'Upload'}
+            {state.busy ? 'Uploading…' : `${value ? 'Replace' : 'Upload'} ${label.toLowerCase()}`}
             <input type="file" accept="image/*" className="sr-only" onChange={pick} disabled={state.busy} />
           </label>
           {value && (
-            <button type="button" className="link-btn" onClick={onRemove}>
-              Remove
+            <button type="button" className="btn btn-quiet btn-sm" onClick={onRemove}>
+              Remove from website
             </button>
           )}
         </div>

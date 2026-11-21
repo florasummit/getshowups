@@ -1,8 +1,13 @@
 // Website images (logo and photos). The browser resizes before upload; the server accepts only real
 // JPEG/PNG/WebP files (checked by their bytes, never by the declared type; no SVG), within size and
 // count limits. Stored per business; served only when published or to the business's own owner.
-import { liveContent, logoAssetIdsFor } from './website.js'
+import { liveContent, logoAssetIdsFor, withoutAsset, withoutAssetInSpec } from './website.js'
 import { specImages } from './site-spec.js'
+
+// How long browsers and the CDN may keep a PUBLISHED image (functions/site-assets/[id].js Cache-Control max-age). A
+// permanently deleted file is gone from storage at once; a copy cached while it was on the live website can be served
+// for up to this long (the delete response states it).
+export const PUBLIC_MAX_AGE = 86400
 
 // Media policy (Website Studio, 2026-11-16): photos only (no hosted video), resized in the browser to ≤1600 px before
 // upload (a phone original up to 10 MB is refused in the browser, never stored), ≤1 MB each after resizing, at most
@@ -89,10 +94,97 @@ async function hiddenIds(db, customerId) {
     return new Set()
   }
 }
-const ownRow = (db, customerId, id) => db.prepare('SELECT id FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
+const ownRow = (db, customerId, id) => db.prepare('SELECT id, size FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).first()
+// Remembered "was the logo" rows for the file (server/website.js rememberLogoStatement): gone with the file.
+const forgetRole = (db, customerId, id) => db.prepare("DELETE FROM website_generations WHERE customer = ?2 AND json_extract(content, '$.kind') = 'logo' AND json_extract(content, '$.asset') = ?1").bind(id, customerId)
 const forget = async (db, customerId, id) => {
   await db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId).run()
   await db.prepare('DELETE FROM website_asset_hidden WHERE asset = ?1 AND customer = ?2').bind(id, customerId).run().catch(() => {})
+  await forgetRole(db, customerId, id).run()
+}
+
+// Permanently deletes one uploaded file (owner action, confirmed in the route). The current website is authoritative:
+//   - refused while the LIVE version shows it ({ error: 'live' }) or the current DRAFT shows it ({ error: 'in_draft' }):
+//     the owner removes it from the website (and publishes) first, so the live site is never broken by a delete;
+//   - otherwise every stored reference is invalidated first, in the same batch as the delete: saved versions
+//     (website_versions.content), draft checkpoints and AI-designer turns (website_generations: draft / site / previous),
+//     so a later restore, undo or regeneration can never bring the file back; then the row goes, with its phone-sized
+//     copies (content.variants) and its "was the logo" marks. Other files and other businesses' rows are never touched
+//     (every statement is scoped to this business; ids are random and checked against the owner's rows).
+// Returns { ok, removed: [ids], references: { versions, checkpoints, turns }, bytes, cache: { maxAge } } or
+// { ok: false, httpStatus, error, usage? }.
+export async function destroyAsset(db, customerId, id) {
+  if (!/^[a-f0-9]{32}$/.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
+  const own = await ownRow(db, customerId, id)
+  if (!own) return { ok: false, httpStatus: 404, error: 'not_found' }
+  const usage = await photoUsage(db, customerId)
+  const u = usage.get(id)
+  if (u?.live) return { ok: false, httpStatus: 409, error: 'live', usage: u }
+  if (u?.draft) return { ok: false, httpStatus: 409, error: 'in_draft', usage: u }
+  const statements = []
+  const references = { versions: 0, checkpoints: 0, turns: 0 }
+  // Phone-sized copies named next to this photo anywhere (draft, versions, history): deleted with it when nothing else
+  // shows them. A copy of a photo that is still shown counts as shown (usedBy), so it is never taken from a live site.
+  const copies = new Set()
+  const copyOf = (c) => {
+    const small = c?.variants?.[id]
+    if (typeof small === 'string' && /^[a-f0-9]{32}$/.test(small) && small !== id) copies.add(small)
+  }
+  const w = await db.prepare('SELECT draft FROM websites WHERE customer = ?1').bind(customerId).first()
+  copyOf(parseJson(w?.draft))
+  const versions = await db.prepare('SELECT version, content FROM website_versions WHERE customer = ?1').bind(customerId).all()
+  for (const v of versions.results) {
+    const c = parseJson(v.content)
+    copyOf(c)
+    const r = withoutAsset(c, id)
+    if (!r.changed) continue
+    references.versions++
+    statements.push(db.prepare('UPDATE website_versions SET content = ?3 WHERE customer = ?1 AND version = ?2').bind(customerId, v.version, JSON.stringify(r.content)))
+  }
+  const kept = await db.prepare("SELECT id, content FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') IN ('designer', 'checkpoint')").bind(customerId).all()
+  for (const row of kept.results) {
+    const stored = parseJson(row.content)
+    if (!stored) continue
+    let changed = false
+    const next = { ...stored }
+    if (stored.kind === 'checkpoint') {
+      copyOf(stored.draft)
+      const r = withoutAsset(stored.draft, id)
+      if (r.changed) {
+        next.draft = r.content
+        changed = true
+      }
+    } else {
+      for (const k of ['site', 'previous']) {
+        const r = withoutAssetInSpec(stored[k], id)
+        if (!r.changed) continue
+        next[k] = r.spec
+        changed = true
+      }
+    }
+    if (!changed) continue
+    references[stored.kind === 'checkpoint' ? 'checkpoints' : 'turns']++
+    statements.push(db.prepare('UPDATE website_generations SET content = ?3 WHERE customer = ?1 AND id = ?2').bind(customerId, row.id, JSON.stringify(next)))
+  }
+  statements.push(db.prepare('DELETE FROM website_assets WHERE id = ?1 AND customer = ?2').bind(id, customerId), forgetRole(db, customerId, id))
+  await db.batch(statements)
+  // Hidden marks (migration 0030) go too; before it is applied there is nothing to remove.
+  await db.prepare('DELETE FROM website_asset_hidden WHERE asset = ?1 AND customer = ?2').bind(id, customerId).run().catch(() => {})
+  const removed = [id]
+  let bytes = own.size || 0
+  // Its phone-sized copies: with the photo's references gone, a copy nothing else shows goes too (a copy shown on its
+  // own, or as another photo's copy, stays).
+  if (copies.size) {
+    const after = await photoUsage(db, customerId)
+    for (const small of copies) {
+      const ownSmall = await ownRow(db, customerId, small)
+      if (!ownSmall || after.has(small)) continue
+      await forget(db, customerId, small)
+      removed.push(small)
+      bytes += ownSmall.size || 0
+    }
+  }
+  return { ok: true, removed, references, bytes, cache: { maxAge: PUBLIC_MAX_AGE } }
 }
 
 // Removes one of the business's photos, only if nothing recoverable still shows it. Its phone-sized copy (named in the

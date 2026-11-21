@@ -326,3 +326,129 @@ test('full screen + tablet view; "No photo" really removes an unwanted picture a
   // Undo brings it back (removal is reversible until the owner publishes).
   await studio.getByRole('group', { name: 'Mode' }).getByRole('button', { name: 'Edit' }).click()
 })
+
+test('logo: upload → replace → remove from website (stays removed after a reload and when published; letter-mark icon) → an old version brings it back → remove again → delete the file for good only once nothing live or in the draft shows it; the deleted file never comes back @mobile', async ({ page, context }, info) => {
+  test.setTimeout(240_000)
+  await useSession(context, tokenFor(info))
+  const dialogs = []
+  page.on('dialog', (d) => (dialogs.push(d.message()), d.accept()))
+  await page.goto('/dashboard/website')
+  const studio = page.locator('section[aria-label="Website Studio editor"]')
+  const frame = page.frameLocator('iframe[title="Editable website preview"]')
+  const status = page.locator('section[aria-label="Website status"]')
+  const site = `/p/${customerFor(info)}`
+  const saved = async () => {
+    await page.waitForTimeout(1300)
+    await expect(studio.locator('[data-save="saved"]')).toBeVisible({ timeout: 15_000 })
+  }
+  const stock = (await import('node:fs')).readdirSync('public/site-stock').filter((f) => f.endsWith('.jpg') && !f.includes('-sm'))
+  const logoPanel = studio.getByTestId('logo-panel')
+  const icon = frame.locator('link[rel="icon"]')
+  const draft = async () => (await (await page.request.get('/api/dashboard/website')).json()).website
+  const publishNow = async () => {
+    await saved()
+    await status.getByRole('button', { name: /^Publish/ }).first().click()
+    await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+    await page.getByRole('button', { name: /^Publish/ }).last().click()
+    await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(status.getByText('aren’t published yet')).toHaveCount(0, { timeout: 15_000 })
+    return (await draft()).liveVersion
+  }
+  // "Earlier versions and more" lists versions newest first, the live one without a Restore button.
+  const restoreVersion = async (v) => {
+    const live = (await draft()).liveVersion
+    const details = page.locator('details', { has: page.locator('summary', { hasText: 'Earlier versions and more' }) })
+    if (!(await details.evaluate((d) => d.open))) await details.locator('summary').click()
+    await page.getByRole('button', { name: 'Restore' }).nth(live - v - 1).click()
+    await expect.poll(async () => (await draft()).liveVersion, { timeout: 15_000 }).toBe(v)
+  }
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
+
+  // Upload a logo (plain button, no AI): it becomes the site icon in the preview and is saved.
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await expect(logoPanel.getByText('No logo')).toBeVisible()
+  await logoPanel.getByTestId('logo-file').setInputFiles(`public/site-stock/${stock[0]}`)
+  await expect(logoPanel.getByRole('img', { name: 'Current logo' })).toBeVisible({ timeout: 20_000 })
+  const first = (await logoPanel.getByRole('img', { name: 'Current logo' }).getAttribute('src')).split('/').pop()
+  await expect(icon).toHaveAttribute('href', `/site-assets/${first}`)
+  await saved()
+  expect((await draft()).draft.logo).toBe(first)
+
+  // Replace: only the pointer changes (a second file; the first stays in the library, marked Logo).
+  await logoPanel.getByTestId('logo-file').setInputFiles(`public/site-stock/${stock[1]}`)
+  await expect(logoPanel.getByRole('img', { name: 'Current logo' })).not.toHaveAttribute('src', `/site-assets/${first}`, { timeout: 20_000 })
+  const second = (await logoPanel.getByRole('img', { name: 'Current logo' }).getAttribute('src')).split('/').pop()
+  await expect(icon).toHaveAttribute('href', `/site-assets/${second}`)
+  await saved()
+  expect((await draft()).draft.logo).toBe(second)
+  await expect(logoPanel.getByRole('button', { name: 'Replace logo' })).toBeVisible()
+
+  // Publish with the logo (version with it), so an earlier version can bring it back later.
+  const logoVersion = await publishNow()
+  expect(await (await page.request.get(site)).text()).toContain(`<link rel="icon" href="/site-assets/${second}">`)
+
+  // Remove from website: explicit "no logo", saved, still gone after a reload; the files are still listed under Photos.
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await logoPanel.getByRole('button', { name: 'Remove from website' }).click()
+  await expect(logoPanel.getByText('No logo')).toBeVisible()
+  await expect(icon).toHaveAttribute('href', /^\/site-icon\//)
+  await saved()
+  expect((await draft()).draft.logo).toBeNull()
+  await page.reload()
+  await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await expect(logoPanel.getByText('No logo')).toBeVisible()
+  await expect(icon).toHaveAttribute('href', /^\/site-icon\//)
+  await studio.getByRole('tab', { name: 'Photos' }).click()
+  const rowOf = (id) => studio.locator('.studio-photo-list').first().locator('.studio-photo-row', { has: page.locator(`img[src="/site-assets/${id}"]`) }).first()
+  await expect(rowOf(first).getByText(/^Logo ·/)).toBeVisible()
+  await expect(rowOf(second).getByText(/^Logo ·/)).toBeVisible()
+  // The current logo is on the live website: no delete offered for it. The first file (replaced before publishing) is
+  // only in the library: it can be deleted, but we keep it to choose it again later.
+  await expect(rowOf(second).getByRole('button', { name: /for good$/ })).toHaveCount(0)
+  await expect(rowOf(first).getByRole('button', { name: /for good$/ })).toBeVisible({ timeout: 15_000 })
+
+  // Publish without the logo: the live site's icon is the letter mark; no image of the logo anywhere on it.
+  await publishNow()
+  const live = await (await page.request.get(site)).text()
+  expect(live).toMatch(/<link rel="icon" href="\/site-icon\//)
+  expect(live).not.toContain(`/site-assets/${second}`)
+  // The published logo file is now only in a saved version: the live site and the draft don't show it → deletable.
+  await studio.getByRole('tab', { name: 'Photos' }).click()
+  await expect(rowOf(second).getByRole('button', { name: /for good$/ })).toBeVisible({ timeout: 15_000 })
+
+  // An OLD version is an explicit owner action: restoring it brings its logo back (the file still exists).
+  await restoreVersion(logoVersion)
+  expect(await (await page.request.get(site)).text()).toContain(`/site-assets/${second}`)
+  expect((await draft()).draft.logo).toBe(second)
+  await expect(icon).toHaveAttribute('href', `/site-assets/${second}`, { timeout: 15_000 })
+
+  // Remove again and publish: back to no logo for good on the live site.
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await logoPanel.getByRole('button', { name: 'Remove from website' }).click()
+  await expect(icon).toHaveAttribute('href', /^\/site-icon\//)
+  await publishNow()
+  expect(await (await page.request.get(site)).text()).not.toContain(`/site-assets/${second}`)
+
+  // Delete the published logo file for good (confirmed): it leaves the library and every saved version, so restoring
+  // the version that showed it can no longer bring it back; the other file is untouched.
+  await studio.getByRole('tab', { name: 'Photos' }).click()
+  await rowOf(second).getByRole('button', { name: /for good$/ }).click()
+  expect(dialogs.at(-1)).toMatch(/Delete this photo for good\?.*saved version/)
+  await expect(rowOf(second)).toHaveCount(0)
+  await expect(studio.getByText(/^Photo deleted\./)).toBeVisible()
+  expect((await (await page.request.get('/api/dashboard/website')).json()).assets.map((a) => a.id)).not.toContain(second)
+  expect((await page.request.get(`/site-assets/${second}`)).status()).toBe(404)
+  await restoreVersion(logoVersion)
+  expect(await (await page.request.get(site)).text()).not.toContain(`/site-assets/${second}`)
+  expect((await draft()).draft.logo).toBeNull()
+  // The first file is still there and can be chosen again as the logo; then removed, leaving the draft without one.
+  await studio.getByRole('tab', { name: 'Style' }).click()
+  await logoPanel.getByRole('button', { name: 'Choose an uploaded file' }).click()
+  await logoPanel.locator('.studio-thumb', { has: page.locator(`img[src="/site-assets/${first}"]`) }).click()
+  await expect(icon).toHaveAttribute('href', `/site-assets/${first}`)
+  await logoPanel.getByRole('button', { name: 'Remove from website' }).click()
+  await saved()
+  expect((await draft()).draft.logo).toBeNull()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})

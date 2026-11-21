@@ -2,6 +2,32 @@
 
 _Update at the end of every task. Newest first._
 
+## AI designer: precise actions (2026-11-21) — feat/designer-intents (no migration; nothing switched on; merges feat/logo-lifecycle)
+
+- Problem: the conversational designer treated "remove my logo" or "change the headline to X" as a whole-site redesign,
+  and the model could claim logo changes it cannot make.
+- server/designer-intents.js: the message is read on the server BEFORE any model call (like Teach a Change). Fixed
+  patterns → ONE operation from an explicit allowlist with schema-checked arguments: remove_logo, restore_logo
+  (explicit "put my logo back" only; only an image this business owns and used as its logo), replace_logo (never picks
+  or uploads: points to the Logo control), set_headline (first-screen heading or classic headline), remove_image (one
+  referenced picture; ambiguity → the candidates are listed, nothing changes; a section's only content is protected),
+  set_section_text (one field of one section). Owner text goes through the same gates (claims, invented numbers,
+  limits) and refusals are named. Applied to a copy of the CURRENT draft → validateContent → saved → re-read →
+  reported as found ({ applied, notApplied } in the NDJSON `done` event and in the reply). No model, no key, no daily
+  allowance for these. Everything else (and `different`) is the unchanged designTurn.
+- Logo persistence: the model answer can never set logo/hero/photos (siteOnly + validateSpec); content fields are carried
+  from the current draft (`logo: ctx.draft.logo ?? null`); undo of a design turn restores the design only. Fixed on the
+  way: designTurn/undoTurn validated the whole document against owned-minus-logos, so any draft WITH a logo failed with
+  ai_invalid_output; now validateContent(…, owned, { photoIds }) (Agent A's option).
+- Undo of a precise change = the draft checkpoint taken before it (website-history.js, reason before_designer_change;
+  Agent A's SiteStudio REASON map should label it).
+- Tests: test/designer-intents.test.js (13), test/designer-security.test.js (5: tenant, asset ownership, no execution /
+  secrets, poisoned history / imported text / model replies, allowlist at schema and route), shared
+  test/designer-harness.js; test/e2e/designer.spec.js "Remove my logo" through the UI (desktop + phone), logo stays
+  removed through a later design turn. All mocked; nothing live-verified.
+- Next: founder review of the pattern list in a real conversation (PoolThru); extend the allowlist only with new
+  schema-checked operations, never free-form instructions.
+
 ## Flagship design: less text, more product (2026-11-21) — feat/flagship-design (frontend only; nothing switched on)
 
 - Reference study: stripe.com, /payments, /billing, /payments/checkout, /pricing rendered at 1440 and 390 with

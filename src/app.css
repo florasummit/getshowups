@@ -1984,9 +1984,14 @@
 }
 .image-pick-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   margin-top: 6px;
+  min-width: 0;
+}
+.image-pick > div:not(.image-pick-thumb) {
+  min-width: 0;
 }
 .photo-grid {
   display: grid;
@@ -4057,4 +4062,10 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   .ta-flow {
     grid-template-columns: 1fr;
   }
+}
+.designer-result {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
 }
