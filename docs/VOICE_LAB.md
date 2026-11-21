@@ -103,7 +103,40 @@ What the benchmark cannot see (needs provider credentials and a human caller in 
 accents and noise, turn-taking and barge-in, real response latency, voice quality, provider cost. The scenarios are
 written to be read aloud by a tester for exactly that.
 
+## Switching it on (2026-11-21: approved for restricted administrator testing)
+
+1. `VOICE_LAB_ENABLED=true` on the Pages project (a secret/variable; takes effect on the next deployment).
+2. Admin → Platform → "GetShowUps sells itself" → **Create** the Voice Lab test business (`getshowups-lab`, admin-marked
+   test, Software playbook). One click; nothing else is needed for Retell.
+3. Admin → Voice Lab → provider **Retell** (configured in production) → test business → Start conversation → speak →
+   Stop. Dry run is on by default. Transcript, timings (first/median/p95 reply from the browser), tool outcomes (from
+   the engine's events) and the estimated cost line show per session.
+4. OpenAI and ElevenLabs stay "Not configured" until their keys exist (approval: paid services).
+
+What is billable: every provider charges per minute (Retell on the GetShowUps Retell account, the same agent customers
+use). A session starts only on Start, one Lab call at a time, ≤ 15 minutes, inside the daily minute budget
+(`VOICE_LAB_DAILY_MINUTES`, default 60); Stop ends the call at once. Nothing here changes a customer's receptionist,
+the live Retell agent, or RECEPTIONIST_VOICE_BUSINESSES.
+
 ## Provider sections
+
+## Retell (production path)
+
+Files: `server/voice/retell.js`, `functions/api/platform/voice-lab/retell.js`, `src/voice/retell.js`,
+`server/receptionist/voice.js` (socket), `test/voice-retell-lab.test.js`.
+
+1. The Lab session is started (`POST …/session { action: 'start', provider: 'retell' }`) on an admin-marked test business.
+2. `POST /api/platform/voice-lab/retell { customer, id, token }` (platform admin, same-origin, Lab on, Retell configured)
+   creates a Retell web call for the shared GetShowUps agent with `RETELL_API_KEY` on the server and makes the Lab's call
+   row that call (`provider: 'retell-lab'`); the browser receives Retell's per-call access token only. ≤ 3 connects per session.
+3. The browser runs `retell-client-js-sdk` (speech, voice, turn-taking, barge-in); Retell connects to our custom-LLM
+   socket, which answers a `retell-lab` call for an admin-marked TEST business while the Lab is on even if that business
+   is not in RECEPTIONIST_VOICE_BUSINESSES; never a real business this way, never with the Lab off.
+4. The engine answers with the conversation's dry-run honoured on every path (`conv.state.lab.dryRun` → every consequential
+   tool is simulated). Tool outcomes are read from `receptionist_events` into the end-of-session summary.
+5. Browser metrics: end of the caller's speech (`user_stop_talking`) → `agent_start_talking` per turn; interruptions when
+   the caller starts while the agent talks. Transcript lines from Retell's `update` events, posted on Stop.
+
 
 ## OpenAI Realtime
 

@@ -16,6 +16,7 @@ import { CUSTOMER_RE } from '../invites.js'
 import { getCustomer } from '../customers.js'
 import { startConversation, loadConversation, respond, getSettings } from './engine.js'
 import { knowledgeFor } from './knowledge.js'
+import { testStatus } from '../testbusiness.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.RETELL_API_MOCK_ORIGIN) ? env.RETELL_API_MOCK_ORIGIN : 'https://api.retellai.com')
@@ -109,7 +110,10 @@ export async function attachRetellSocket(env, ws, callId, now = Date.now(), { cl
     return false
   }
   const customer = customerFromRow(await getCustomer(db, call.customer))
-  if (!customer || customer.status !== 'active' || !voiceAllowedFor(env, customer.id)) {
+  // Voice Lab calls (server/voice/retell.js): the production agent on an admin-marked TEST business, allowed while the
+  // Lab is switched on even if that business is not released for customer voice. Never a real business this way.
+  const labCall = call.provider === 'retell-lab' && env.VOICE_LAB_ENABLED === 'true' && (await testStatus(env, call.customer)).test === true
+  if (!customer || customer.status !== 'active' || !(voiceAllowedFor(env, customer.id) || labCall)) {
     ws.close(1008, 'unavailable')
     return false
   }

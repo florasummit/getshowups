@@ -88,25 +88,22 @@ also stops doing the "same ten questions" from the truck.
 | What if I cancel? | Your site stays online to the end of the period you paid for plus 14 days, you can download your content, and your domain is always yours. |
 | Does it text or call customers? | Not yet. Today it works on your website chat, and voice on the website is in a pilot. We say so everywhere. |
 
-## 6. The AI sales assistant: configuration (5-minute founder setup, no code)
+## 6. The AI sales assistant: one click, then the calendar
 
-The engine already supports it (industry "Software" selects the sales playbook; the prompt switches to consultation
-wording; no ZIP or address is required; prices come only from the listed plan and the notes). Setup, in the product:
+The engine supports it (industry "Software" selects the sales playbook; consultation wording; no ZIP or address;
+prices only from the listed plan and the approved answers in server/sales.js). Setup:
 
-1. Platform console → create/invite the business **GetShowUps** with id `getshowups` (invited businesses are never billed).
-2. Settings → Business: name GetShowUps, appointment mode "At my location", time zone, **no service ZIP codes**;
-   Booking hours = the hours you take consultation calls; visit length 20 minutes.
-3. Settings → Details: industry **Software**; description "AI receptionist and booking for pool, HVAC and roofing
-   businesses."; services: **Founding plan — $499/month** (only this; it is the only price the assistant may state).
-4. Google Calendar: connect the founder calendar the consultations should land on.
-5. Receptionist → on; greeting: "Hi, this is the GetShowUps assistant. What kind of business do you run, and how do
-   new inquiries reach you today?"; notes (owner-approved answers, ≤3000 chars) = the §5 table in prose, plus:
-   "What you get for $499/month: …" (the §3 list) and "Not yet: texting, email reminders, ad management, phone voice."
-6. Publish nothing else. From then on: `/chat/getshowups` answers, qualifies, records callback requests (= leads in
-   the dashboard), and books consultation calls on the founder's calendar; the homepage shows "Ask our AI about
-   GetShowUps" automatically (GET /api/enrollment → salesChat: true).
+1. Admin → Platform → "GetShowUps sells itself" → **Create** the GetShowUps sales assistant (real business
+   `getshowups`: Software, Founding plan $499/month, Mon–Fri 9–5 Eastern, 20-minute consultations, receptionist on with
+   the greeting and approved answers; the admin account is its owner). Idempotent.
+2. Sign in to the dashboard as that owner and connect the Google Calendar the consultations should land on (Settings →
+   Google Calendar). This is the one step that needs the founder's browser.
+3. From then on `/chat/getshowups` answers, qualifies, records callback requests (= leads in the dashboard) and books
+   consultation calls on that calendar; the homepage shows "Ask our AI about GetShowUps" automatically
+   (GET /api/enrollment → salesChat: true). Edit the greeting or answers any time in Receptionist settings.
 
 Dry run before linking: ask it the §5 objections and "can you do it for $299?"; the price guard blocks any amount not listed.
+The same configuration on the admin-marked test business `getshowups-lab` (second Create button) is what the Voice Lab uses.
 
 ## 7. Acquisition experiment (prepared; needs approval before any message is sent)
 

@@ -2,6 +2,34 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice Lab usable by the owner + one-click sales records (2026-11-21) — feat/voice-lab-usable (no migration)
+
+- **VOICE_LAB_ENABLED=true** set on the Pages project for restricted administrator testing (owner approval in the
+  brief of 2026-11-21), after re-checking the safeguards: every Lab route is platform-admin only (401/403 otherwise),
+  sessions run only on admin-marked TEST businesses, dry-run by default, a daily minute budget, one Lab call at a time
+  (new `lab_busy`), ≤ 15 minutes per session, nothing starts without the admin's Start, and no customer configuration
+  or the live Retell agent is touched. Ordinary customer accounts never see the Lab (the admin shell authorizes).
+- **Retell in the Lab = the production path on a test business**: `POST /api/platform/voice-lab/retell` creates the
+  Retell web call for the Lab session with the shared agent (key server-side; browser gets the per-call token); the
+  custom-LLM socket answers a `retell-lab` call for an admin-marked test business while the Lab is on, even if the
+  business is not in RECEPTIONIST_VOICE_BUSINESSES (never a real business this way). src/voice/retell.js is a real
+  adapter now (retell-client-js-sdk: speech, barge-in, transcript, browser-measured first/median/p95 reply). A Lab
+  conversation's dry-run now reaches the engine on every path (`respond()` reads `conv.state.lab.dryRun`), so a
+  Retell Lab booking is simulated; tool outcomes for Retell come from the engine's events into the summary.
+- The Lab says what each provider bills and the limits before Start; new error codes (lab_busy, reconnect_limit,
+  voice_billing, voice_unreachable).
+- **One click in Admin → Platform → "GetShowUps sells itself"**: creates the sales business `getshowups` (real;
+  Software playbook, Founding plan $499/month, Mon–Fri 9–5 Eastern, 20-minute consultations, receptionist on with the
+  greeting and approved answers from server/sales.js; the admin is its owner) and/or the Lab test business
+  `getshowups-lab` (admin-marked test, same configuration). Idempotent, audited. The founder still connects the
+  Google Calendar from the dashboard; until then the public sales chat (bookableCustomer) and the homepage entry stay
+  off and the console says so.
+- Tests: test/voice-retell-lab.test.js (call creation, row, socket authorization incl. Lab off / real business,
+  gates, reconnect cap, busy, dry-run simulated booking, tools from events), test/sales-business.test.js, e2e
+  voice-lab (one click → Lab offers the test business, sales record real, chat still closed).
+- Still not in production (approval): OPENAI_API_KEY, ELEVENLABS_API_KEY/AGENT_ID (those providers stay "Not
+  configured"), any phone number or telephony, outreach.
+
 ## Revenue-first: GetShowUps sells itself (2026-11-21) — feat/sales-agent (no migration; nothing switched on)
 
 - Audit (docs/SALES_PLAYBOOK.md §1): the funnel already works end to end for an owner-operated pilot; the two gaps for a

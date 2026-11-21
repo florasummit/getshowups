@@ -5,6 +5,7 @@ import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
+import { Pill } from '../dashboard/ui.jsx'
 import '../app.css'
 
 const Review = lazyPage(() => import('./Review.jsx'))
@@ -963,6 +964,62 @@ function CustomerRows({ list, onOpen }) {
   )
 }
 
+// GetShowUps selling itself (server/sales.js): the sales business (public chat, leads, consultations) and the Lab's
+// test business, each created once with one confirmed click; the founder then connects the Google Calendar from
+// the dashboard (the one step that needs their browser). Status is read from the records, never assumed.
+const SALES_KINDS = [
+  ['sales', 'GetShowUps sales assistant', 'Real business record "getshowups": public chat at /chat/getshowups, leads and consultation calls in the product, "Ask our AI about GetShowUps" on the homepage once its calendar is connected.'],
+  ['lab', 'Voice Lab test business', 'Admin-marked TEST business "getshowups-lab" with the same sales configuration, for Voice Lab sessions (dry run; never counted; never customer-facing).'],
+]
+function SalesSetup() {
+  const [status, setStatus] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const load = useCallback(() => api('/api/platform/sales-business').then(({ status: code, data }) => setStatus(code === 200 ? data : { error: true })), [])
+  useEffect(() => {
+    load()
+  }, [load])
+  const create = async (kind) => {
+    if (!window.confirm(kind === 'sales' ? 'Create the GetShowUps sales business record? It is a real business (not a test business); nothing is sent or charged.' : 'Create the Voice Lab test business "getshowups-lab"? It is admin-marked as a test business.')) return
+    setBusy(kind)
+    setError('')
+    const { status: code, data } = await api('/api/platform/sales-business', { method: 'POST', body: { kind, confirm: true } })
+    setBusy('')
+    if (code !== 200) return setError(`Couldn’t create it (${data?.error || code}).`)
+    load()
+  }
+  if (!status || status.error) return null
+  return (
+    <section className="card" aria-label="GetShowUps sells itself" data-sales-setup>
+      <h2 className="card-title">GetShowUps sells itself</h2>
+      <ul className="ui-list">
+        {SALES_KINDS.map(([kind, title, what]) => {
+          const st = status[kind]
+          return (
+            <li key={kind} className="ui-list-row" data-sales-kind={kind} data-sales-state={!st?.exists ? 'missing' : st.calendarConnected ? 'ready' : 'calendar'}>
+              <div>
+                <strong>{title}</strong> {st?.exists ? <Pill tone={st.calendarConnected ? 'ok' : 'warn'}>{st.calendarConnected ? 'Ready' : 'Calendar not connected'}</Pill> : <Pill tone="neutral">Not created</Pill>}
+                <p className="fine">{what}</p>
+                {st?.exists && !st.calendarConnected && <p className="fine">Next: sign in to the dashboard as the owner of {st.name} and connect the Google Calendar the consultations should land on (Settings → Google Calendar). Until then the chat answers questions and records callbacks but cannot offer times.</p>}
+              </div>
+              {!st?.exists && (
+                <button type="button" className="btn btn-sm btn-quiet" disabled={Boolean(busy)} onClick={() => create(kind)} data-sales-create={kind}>
+                  {busy === kind ? 'Creating…' : 'Create'}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 function Overview({ me }) {
   const [data, setData] = useState(null)
   const [query, setQuery] = useState('')
@@ -994,6 +1051,7 @@ function Overview({ me }) {
           {inviting ? 'Close' : 'Invite customer'}
         </button>
       </div>
+      <SalesSetup />
       {inviting && (
         <section className="card enter">
           <h2 className="card-title">Invite a new customer</h2>
