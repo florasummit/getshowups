@@ -169,7 +169,9 @@ server/              Shared backend modules imported by functions/ (bundled by P
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)
 workers/scheduler/   Cron Worker (own wrangler.toml, NOT the root) that POSTs /api/cron/run every 5 min
 test/*.test.js       node:test unit/integration tests for functions/ and server/
-test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config
+test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config.
+                     journey.js + journey.spec.js: state-aware NEW-customer journey (detect → act → verify, fixture
+                     testers listed in serve.sh, mock Google/Stripe); docs/LAUNCH_DECISION.md = readiness verdict
 docs/                WORKFLOW.md (how we build), STATUS.md (decisions, progress, next actions)
 ```
 

@@ -2,6 +2,34 @@
 
 _Update at the end of every task. Newest first._
 
+## Launch readiness and first paying customer (2026-11-21) — feat/launch-readiness (no migration; nothing switched on)
+
+- Decision page: docs/LAUNCH_DECISION.md. **Owner-operated pilot: GO with conditions** (founder alerts on,
+  founder present at the Calendar step, support mailbox monitored). **Self-serve paid launch: NO-GO** until the
+  non-engineering blockers clear (terms/refund/tax wording, accountant's sales-tax answer, Stripe live settings,
+  Google sensitive-scope verification). No P0 defect in the product.
+- Autonomous customer journey (test/e2e/journey.js + journey.spec.js, desktop + phone): a state-aware runner reads
+  the real backend, names the next step, acts with fixture identities (two new listed testers in serve.sh /
+  fixtures.env), waits for the state to move and diagnoses stuck steps. Proven MOCKED: sign_in → create_business →
+  payment (declined/retry handled elsewhere; signed webhook) → details → services → calendar (real OAuth handlers)
+  → hours → starter website → address → publish → launch → bookable; sign-out mid-way resumes at the pending step;
+  half-set-up business is 404 publicly; duplicate checkout 409; Ads / Teach Your AI 404 when not allowlisted;
+  invalid ZIP / honeypot / forged token / cross-site refused; booking lands on the mock calendar and the dashboard;
+  same slot and never-offered time refused; other owner sees nothing and cannot cancel; signed-out 401; revoked
+  Google grant → `calendar_reconnect` (owner told, founder live check `reconnect_required`, customer told honestly,
+  request saved) → new grant → ready; returning customer straight to the dashboard; founder console: live, paid,
+  1 booking, no flags. A non-tester is stopped at `create_business` ("Online sign-up opens soon"), nothing created.
+- Fixed (found by the runner): (1) after sign-out or session expiry a customer who first arrived via the sign-up
+  link saw "Online enrollment isn't open yet" with "Book a call" first, because the remembered plan was never
+  cleared once a business existed (Dashboard.jsx); (2) the booking page said "No open times right now" when the
+  calendar connection was broken, identical to a full calendar: it now says "Online booking isn't available right
+  now" and the request is still saved (BookingPage.jsx; customer websites untouched, renderer unchanged).
+- Read-only production checks: enrollment closed, dashboard/platform APIs 401 signed out, cross-origin writes 403,
+  HSTS + frame-ancestors 'none' on /dashboard, early-access appointment page reachable, customer pages unchanged.
+- Not done here (approvals): founder alerts on, pilot emails in MESSAGE_TEST_RECIPIENTS, legal/tax/Stripe live,
+  Google verification. Follow-ups (P2): 401 mid-session returns to sign-in; acquisition funnel strip in /admin;
+  inquiry record for early-access calls.
+
 ## Product-wide polish: one brand for the site and the signed-in app (2026-11-21) — feat/product-polish (frontend only)
 
 - Shared design system, incrementally: src/app.css gained a "Platform design system" block scoped to the dashboard /
