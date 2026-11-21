@@ -1,11 +1,17 @@
 // /api/dashboard/website/designer — the conversational AI website designer (server/ai-designer.js).
 //   GET  → { turns, key: { provider, hint, status } | null, hasSite }
-//   POST { action: 'message', message }        one design turn, streamed as NDJSON:
-//                                               {"type":"progress","chars":n}… then {"type":"done",reply,generationId,removed}
-//                                               or {"type":"error","error"}. The result is the PRIVATE draft (never live).
-//        { action: 'different' }               the same, but a fresh design in a genuinely different direction
-//        { action: 'undo', generationId }      put back the design from before that turn
-// Owner session, same-origin, the business's own AI key, rate limits and the daily AI allowance (runaway guard).
+//   POST { action: 'message', message }        one turn, streamed as NDJSON. The message is read on the server FIRST
+//                                               (server/designer-intents.js): a precise request ("remove my logo",
+//                                               "change the headline to …", "remove the photo in the About section") is
+//                                               ONE allowlisted operation on the current draft — no model, no key, no
+//                                               allowance — answered as {"type":"done",reply,generationId,applied,notApplied};
+//                                               an unclear one gets a clarifying reply (applied: [], nothing changed);
+//                                               anything else is a design turn: {"type":"progress","chars":n}… then
+//                                               {"type":"done",reply,generationId,removed} or {"type":"error","error"}.
+//                                               Every result is the PRIVATE draft (never live).
+//        { action: 'different' }               a fresh design in a genuinely different direction (always a design turn)
+//        { action: 'undo', generationId }      put back the draft from before that turn
+// Owner session, same-origin, the business's own AI key (design turns), rate limits and the daily AI allowance.
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
@@ -13,7 +19,10 @@ import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
 import { credentialView } from '../../../../server/ai-credentials.js'
 import { loadWebsite } from '../../../../server/website.js'
 import { conversation, designTurn, undoTurn } from '../../../../server/ai-designer.js'
+import { applyIntent, detectIntent } from '../../../../server/designer-intents.js'
 import { studioAccess } from '../../../../server/website-studio.js'
+
+const NDJSON = { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
@@ -44,7 +53,20 @@ export async function onRequestPost({ request, env }) {
   if (body?.action !== 'message' && body?.action !== 'different') return json(400, { error: 'invalid_request' })
   const rl = await hit(env, 'websiteAi', customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
+  const message = String(body.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 1200)
   const website = await loadWebsite(env.ONBOARDING_DB, customer)
+  // Precise requests are decided here, before any model is involved, from the message and the CURRENT draft only.
+  const intent = body.action === 'message' ? detectIntent(message, website.draft) : { kind: 'broad' }
+  if (intent.kind !== 'broad') {
+    try {
+      const r = await applyIntent(env, customer, { ...intent, message }, { by: session.email })
+      if (!r.ok) return json(r.httpStatus, { error: r.error })
+      return new Response(`${JSON.stringify({ type: 'done', reply: r.reply, generationId: r.generationId, applied: r.applied, notApplied: r.notApplied, options: r.options || [] })}\n`, { status: 200, headers: NDJSON })
+    } catch (err) {
+      console.error('designer change failed:', err?.name)
+      return json(503, { error: 'storage_error' })
+    }
+  }
   const different = body.action === 'different' && Boolean(website.draft.site)
   const kind = website.draft.site && !different ? 'revision' : 'generation'
   const usage = await aiUsage(env, customer, session.email)
@@ -59,7 +81,7 @@ export async function onRequestPost({ request, env }) {
   const heartbeat = setInterval(() => send({ type: 'progress', chars: last }), 10000)
   const work = (async () => {
     try {
-      const r = await designTurn(env, customer, different ? 'Show me a different direction' : body.message, {
+      const r = await designTurn(env, customer, different ? 'Show me a different direction' : message, {
         by: session.email,
         mode: different ? 'different' : 'design',
         onProgress: (chars) => {
@@ -83,5 +105,5 @@ export async function onRequestPost({ request, env }) {
     }
   })()
   void work
-  return new Response(readable, { status: 200, headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
+  return new Response(readable, { status: 200, headers: NDJSON })
 }

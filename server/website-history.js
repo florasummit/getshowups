@@ -6,7 +6,7 @@
 //   - bounded: the newest KEEP checkpoints per business are kept, older checkpoints are removed (copies only; the draft
 //     and published versions are never touched);
 //   - restore = the checkpoint becomes the draft (validated like a save; the current draft is checkpointed first).
-import { validateContent } from './website.js'
+import { validateContent, withoutMissingAssets } from './website.js'
 
 export const KEEP = 20
 export const EVERY_MS = 10 * 60 * 1000
@@ -48,7 +48,10 @@ export async function restoreCheckpoint(db, customerId, id, { claims = [], asset
   if (!ID_RE.test(String(id))) return { ok: false, httpStatus: 400, error: 'invalid_request' }
   const row = await db.prepare("SELECT content FROM website_generations WHERE id = ?1 AND customer = ?2 AND json_extract(content, '$.kind') = 'checkpoint'").bind(id, customerId).first()
   if (!row) return { ok: false, httpStatus: 404, error: 'not_found' }
-  const { draft } = JSON.parse(row.content)
+  const { draft: stored } = JSON.parse(row.content)
+  // Images permanently deleted since the checkpoint was taken are left out (a restore brings back a logo or photo only
+  // while its file still exists); everything else comes back as it was.
+  const draft = assetIds ? withoutMissingAssets(stored, assetIds).content : stored
   const [errors, content] = validateContent(draft, claims, assetIds, { prior: current?.services || null })
   if (errors.length) return { ok: false, httpStatus: 409, error: 'checkpoint_invalid', fields: errors }
   if (current) await saveCheckpoint(db, customerId, current, 'before_restore', now)
