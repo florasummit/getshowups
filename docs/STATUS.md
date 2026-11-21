@@ -2,6 +2,64 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice Lab tab + simulated voice benchmark (2026-11-21) — feat/voice-lab (on feat/voice-core; nothing switched on)
+
+- `/admin/voice-lab` (src/admin/VoiceLab.jsx, lazy like Control/Review; Control Center tokens, one column, fits 390px):
+  provider cards with honest status from GET /api/platform/voice-lab/status (configured / "Unavailable: not configured
+  (which variables)"), daily minute budget used/left, test-business selector (server's list only), dry run ON by
+  default with a warning when off, Start disabled with the reason (unconfigured provider, adapter missing from the
+  build, no test business, budget used up), microphone asked inside the click (honest error, no session created),
+  live connection state, transcript / tool results / latency / usage as the ADAPTER reports them, end-of-session
+  summary from the engine (outcome, booked/simulated, estimated cost labelled "estimate, <source>" or "Not estimated"),
+  recent sessions. Adapters load through `import.meta.glob('../voice/*.js')`: a missing module says "adapter
+  unavailable in this build" (Agents D/E add openai.js / elevenlabs.js; coded against D's `create<Provider>Adapter()`
+  shape). Retell = production path only: src/voice/retell.js opens `/chat/<test business>` in a new tab; its metrics
+  come from engine events, no second Retell path. Nothing added to customer routes. The tab is shown to every admin
+  (the page says "switched off" when VOICE_LAB_ENABLED isn't true). Note: server/auth.js safeNext doesn't list
+  /admin/voice-lab (the console's sign-in link uses next=/admin, so sign-in lands on /admin); left for the owner.
+- server/voice/scenarios.js: 46 realistic home-service calls (pool/HVAC/plumbing, visits at the customer's address)
+  in 22 categories incl. every required one; lines carry what a competent listener would extract (the engine still
+  verifies every digit). scripts/voice-bench.mjs: SIMULATED runner through the real `respond()` text path with a
+  scripted stand-in or an adversarial model (fake Google; nothing external). test/voice-bench.test.js asserts the
+  set and the invariants. Result: scripted 46/46 (25/25 bookings, 0 unauthorized / without a yes / duplicates,
+  coverage 46/46, 0 repeated questions, 0 invented prices/times/promises, 0 leaks, 6/6 hand-offs, 2/2 interruptions
+  dropped); adversarial 239 guard refusals, 0 violations. Engine timings only (p50 5 ms, p95 55 ms per turn); audio
+  latency is NOT measured anywhere yet. The benchmark stays CLI-only (no /api/platform/voice-lab/bench route).
+- Observation for the engine owner (not changed here, engine.js isn't in this workstream): `book_appointment` accepts
+  any AFFIRM word contained in the caller's latest message as the confirmation quote, so "okay, let me think about
+  it" would pass the confirmation check once a slot was offered and details are complete; the benchmark's hesitation
+  scenario avoids that wording on purpose. Also unoffered times are not filtered by the engine on their own: in the
+  adversarial run they were suppressed only because the same reply carried an invented price.
+- e2e: test/e2e/voice-lab.spec.js (`--binding VOICE_LAB_ENABLED=true` added to serve.sh): statuses honest, start
+  disabled with reason, only test businesses offered, dry-run warning, non-admin 403/401 + no tab, server refuses an
+  unconfigured provider (409), @mobile no sideways scroll. docs/VOICE_LAB.md written (provider sections for D/E).
+- Needs real measurement (credentials + a human caller): speech recognition on accents/noise, barge-in, response
+  latency, voice quality, provider cost. The scenarios are written to be read aloud for that.
+
+## Voice Lab: ElevenLabs adapter (2026-11-21) — feat/voice-elevenlabs (on feat/voice-core; no migration; nothing switched on)
+
+- ElevenLabs Conversational AI as a Voice Lab provider (docs/VOICE_LAB.md §ElevenLabs; docs read 2026-11-21):
+  server/voice/elevenlabs.js mints a 15-minute signed URL per connection with the server-only `ELEVENLABS_API_KEY`
+  (`GET /v1/convai/conversation/get-signed-url`, header `xi-api-key`) and returns OUR per-conversation overrides
+  (engine prompt from voiceInstructions + the business greeting, English), public dynamic variables and the seven
+  client tool names; ≤ 3 connections per session (`reconnect_limit`); provider failures are codes and change nothing.
+  Route POST /api/platform/voice-lab/elevenlabs (platform admin, same-origin, rate limit `voiceLabConnect`; 404 when
+  the Lab is off or ElevenLabs is not configured). Browser adapter src/voice/elevenlabs.js (interface documented in
+  src/voice/adapter.js: start/stop/state, events status · transcript · tool · metrics · error) on the official
+  `@elevenlabs/client` 1.37.1 (exact, lazy-loaded on the Lab page only): WebSocket conversation with barge-in, every
+  client tool call forwarded to /api/platform/voice-lab/tool with the caller's latest words, refused calls answered
+  honestly (never thrown), transcript lines batched to the session, browser metrics (first/median/p95 response,
+  interruptions, tools, reconnects), up to 2 reconnects with fresh signed URLs.
+- scripts/elevenlabs-setup.mjs (key on STDIN; read-only unless `--apply`; never auto-run) creates/updates the Lab
+  agent: seven client tools (`POST/PATCH /v1/convai/tools`, attached via `tool_ids`), overrides enabled for
+  prompt/first_message/language, `enable_auth` + hostname allowlist, the client events the adapter needs, 15-minute
+  ceiling, placeholder prompt ("This line is not set up yet") so a conversation without our override says nothing.
+- COST_ESTIMATES.elevenlabs = $0.08/min (estimate; additional-minute rate on every Agents plan, LLM billed separately;
+  elevenlabs.io/pricing/agents, 2026-11-21).
+- Not live-verified: no ELEVENLABS_API_KEY / ELEVENLABS_AGENT_ID exist in production, so no real conversation was
+  run; shapes come from the docs + SDK source and are covered with the API mocked (test/voice-elevenlabs.test.js).
+- Next (approval items): create the ElevenLabs account/key, run the setup script with `--apply`, set the two secrets
+  on the Pages project, VOICE_LAB_ENABLED=true, then one admin dry-run conversation on a test business.
 ## AI designer: precise actions (2026-11-21) — feat/designer-intents (no migration; nothing switched on; merges feat/logo-lifecycle)
 
 - Problem: the conversational designer treated "remove my logo" or "change the headline to X" as a whole-site redesign,

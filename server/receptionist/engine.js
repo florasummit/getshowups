@@ -124,7 +124,7 @@ export async function endConversation(env, customer, conv, now = Date.now()) {
   return { ok: true }
 }
 
-async function event(env, conv, kind, ok, detail = null, now = Date.now()) {
+export async function event(env, conv, kind, ok, detail = null, now = Date.now()) {
   await env.ONBOARDING_DB.prepare('INSERT INTO receptionist_events (customer, conversation_id, kind, ok, detail, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
     .bind(conv.customer, conv.id, String(kind).slice(0, 40), ok ? 1 : 0, detail == null ? null : String(detail).slice(0, 80), now)
     .run()
@@ -290,6 +290,12 @@ async function upsertRequest(ctx, kind, note, urgent) {
   if (!c.name) return { ok: false, error: 'name_needed', note: 'Ask for their name first, then save it.' }
   if (kind === 'callback' && !c.phone) return { ok: false, error: 'phone_needed', note: 'Ask for the best phone number to call, then save it.' }
   if (kind === 'message' && !c.phone && !c.email) return { ok: false, error: 'contact_needed', note: 'Ask for a phone number or email so the business can reply.' }
+  if (ctx.dryRun) {
+    ctx.committed = true
+    if (conv.status !== 'booked') conv.status = 'handoff'
+    if (conv.outcome !== 'booked') conv.outcome = kind === 'callback' ? (urgent ? 'callback_urgent' : 'callback') : 'message'
+    return { ok: true, recorded: true, simulated: true, kind, tell_customer: `Dry run: say you've recorded their ${kind === 'callback' ? 'callback request' : 'message'} for the ${customer.name} team. Do not promise when they will hear back.` }
+  }
   const id = randomToken(12)
   await db
     .prepare(
@@ -341,6 +347,10 @@ async function leadFor(ctx, lead) {
   return leadId
 }
 
+// Every consequential tool, bound to the conversation's business. `ctx.dryRun` (Voice Lab): every guard still runs,
+// but nothing is created (no lead, appointment, request or coverage row) and the result says `simulated: true`.
+export const executeTool = (ctx, name, input) => runTool(ctx, name, input)
+
 async function runTool(ctx, name, input) {
   const { env, customer, conv, now } = ctx
   const s = conv.state
@@ -382,6 +392,11 @@ async function runTool(ctx, name, input) {
     if (missing.length) return { ok: false, error: 'details_missing', missing, note: `Ask only for: ${missing.join(', ')} (save them with save_customer_details).` }
     const [error, lead] = validateLead({ name: c.name, email: c.email || '', phone: c.phone, need: c.need, zip: c.zip, zipConfirmed: true }, 'at_business', { requireEmail: false })
     if (error) return { ok: false, error, note: 'Ask the customer to correct this detail.' }
+    if (ctx.dryRun) {
+      s.coverageRequested = true
+      conv.outcome = 'coverage_request'
+      return { ok: true, recorded: true, simulated: true, note: 'Dry run: no service-area request was saved. Say the team will confirm availability; do not offer times or book.' }
+    }
     const leadId = await leadFor(ctx, lead)
     if (!leadId) return { ok: false, error: 'in_progress', note: 'Their request is being saved right now: do not repeat it.' }
     s.coverageRequested = true
@@ -446,6 +461,13 @@ async function runTool(ctx, name, input) {
     if (customer.appointmentMode === 'at_customer') body.address = { street: c.street, unit: '', city: c.city, state: c.state, zip: c.zip }
     const [error, lead] = validateLead(body, customer.appointmentMode, { requireEmail: false })
     if (error) return { ok: false, error, note: 'Ask the customer to correct this detail.' }
+    if (ctx.dryRun) {
+      s.booked = { appointmentId: null, start, simulated: true }
+      conv.status = 'booked'
+      conv.outcome = 'booked'
+      ctx.committed = true
+      return { ok: true, booked: true, simulated: true, time: slotLabel(start, customer.timezone), confirmation: 'Dry run: nothing was put on the calendar and no email goes out.' }
+    }
     const leadId = await leadFor(ctx, lead)
     if (!leadId) return { ok: false, error: 'booking_in_progress', note: 'A booking for this customer is being made right now: say you are checking and do not book again.' }
     const r = await bookAppointment(env, customer, { leadId, leadToken: await linkToken(env, 'lead', leadId), start }, now)
