@@ -20,3 +20,18 @@ export async function bookableCustomer(env, params, { write = false, request } =
   if (!isHosted(await hostingStatus(env.ONBOARDING_DB, id, Date.now(), env))) return { response: json(404, { error: 'not_found' }) }
   return { customer }
 }
+
+// GetShowUps selling itself: the homepage offers "Ask our AI about GetShowUps" only when the GetShowUps business record
+// (SALES_BUSINESS) is bookable like any customer AND its receptionist is on. Read once per page through /api/enrollment
+// (no extra request, no 404 noise); a missing record, a storage error or the receptionist being off → false.
+export const SALES_BUSINESS = 'getshowups'
+export async function salesChatAvailable(env) {
+  try {
+    const { customer } = await bookableCustomer(env, { customer: SALES_BUSINESS })
+    if (!customer) return false
+    const { receptionistOn } = await import('./receptionist/engine.js')
+    return Boolean(await receptionistOn(env, customer))
+  } catch {
+    return false
+  }
+}

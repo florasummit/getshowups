@@ -225,3 +225,15 @@ for (const width of [320, 375, 390, 768, 1024, 1440]) {
     await ctx.close()
   })
 }
+
+test('early access: when the GetShowUps business runs its own receptionist (enrollment.salesChat), the section offers that chat; otherwise nothing is shown @mobile', async ({ page }) => {
+  // This server has no GetShowUps business record: salesChat is false, no chat link.
+  await expect(page.locator('#book-demo [data-sales-chat]')).toHaveCount(0)
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: false, salesChat: true } }))
+  await page.reload({ waitUntil: 'networkidle' })
+  await openModeB(page)
+  const link = page.locator('#book-demo [data-sales-chat]')
+  await expect(link).toHaveText('Ask our AI about GetShowUps')
+  await expect(link).toHaveAttribute('href', '/chat/getshowups')
+  await expect(page.locator('#book-demo').getByRole('heading', { name: 'Request early access' })).toBeVisible()
+})

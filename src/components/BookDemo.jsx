@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx'
 import { ghl } from '../config/ghl.js'
 import { enrollmentClosed } from '../content/site.js'
-import { useStartAction } from '../lib/enrollment.js'
+import { SALES_BUSINESS, useSalesChat, useStartAction } from '../lib/enrollment.js'
 import { track } from '../lib/analytics.js'
 
 /**
@@ -58,6 +58,9 @@ function SchedulerSlot() {
 
 export default function BookDemo() {
   const start = useStartAction()
+  // GetShowUps selling itself: the same receptionist every customer gets, with the sales playbook, on the GetShowUps
+  // business record. Offered only when that record runs it (read with the enrollment check; nothing else changes).
+  const salesChat = useSalesChat()
   return (
     <section id="book-demo" className="section" aria-labelledby="demo-title">
       <div className="container demo-grid">
@@ -65,6 +68,14 @@ export default function BookDemo() {
           <p className="eyebrow">{start.closed ? 'Early access' : 'Talk to us'}</p>
           <h2 id="demo-title">{start.closed ? 'Request early access' : 'Questions first? Book a short call'}</h2>
           <p className="section-intro">A short call: how your inquiries become booked visits, and what setup involves.</p>
+          {salesChat && (
+            <p className="demo-chat">
+              <a className="btn btn-line" href={`/chat/${SALES_BUSINESS}`} onClick={() => track('early_access_cta', { location: 'sales_chat' })} data-sales-chat>
+                Ask our AI about GetShowUps
+              </a>
+              <span className="fine">Questions, pricing, or book the call right there.</span>
+            </p>
+          )}
           {start.closed && (
             <>
               <h3 className="demo-next-title">What happens next</h3>

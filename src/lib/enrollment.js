@@ -8,21 +8,32 @@ let pending = null
 export function fetchEnrollment() {
   pending ??= fetch('/api/enrollment', { headers: { Accept: 'application/json' } })
     .then((r) => (r.ok ? r.json() : null))
-    .then((d) => (typeof d?.open === 'boolean' ? d.open : null))
+    .then((d) => (typeof d?.open === 'boolean' ? { open: d.open, salesChat: d.salesChat === true } : null))
     .catch(() => null)
   return pending
 }
 
-export function useEnrollmentOpen() {
-  const [open, setOpen] = useState(null)
+function useEnrollment() {
+  const [state, setState] = useState(null)
   useEffect(() => {
     let live = true
-    fetchEnrollment().then((v) => live && setOpen(v))
+    fetchEnrollment().then((v) => live && setState(v))
     return () => {
       live = false
     }
   }, [])
-  return open
+  return state
+}
+
+export function useEnrollmentOpen() {
+  return useEnrollment()?.open ?? null
+}
+
+// GetShowUps selling itself: true only when the GetShowUps business runs its own receptionist (server/public.js
+// salesChatAvailable), so the homepage can offer that chat; false while loading or when it can't be read.
+export const SALES_BUSINESS = 'getshowups'
+export function useSalesChat() {
+  return useEnrollment()?.salesChat === true
 }
 
 // The marketing site's start action: Get started (open or unknown) or Request early access (closed).

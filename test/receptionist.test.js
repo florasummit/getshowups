@@ -1120,3 +1120,47 @@ test('conversation memory without rules: place, problem and day said once are ne
   assert.match(n4, /name: Jamie Rivera; phone: \+18435550142; place they named: Mount Pleasant \(check it.*?\); needs: Green pool cleanup; when they asked for: Tomorrow/)
   assert.match(n4, /Still needed only if they want to book: zip\./)
 })
+
+test('GetShowUps selling itself: the Software playbook turns the same engine into a sales assistant — consultation wording, no visit/ZIP demands, listed price only, a consultation booked through the same guards', async () => {
+  await seed('getshowups', { zips: '', industry: 'Software', towns: [] })
+  db.sql.prepare('UPDATE business_profiles SET services = ?, description = ? WHERE customer = ?').run(JSON.stringify([{ name: 'Founding plan', price: '$499/month' }]), 'AI receptionist and booking for pool, HVAC and roofing businesses.', 'getshowups')
+  enable('getshowups', { greeting: 'Hi, this is the GetShowUps assistant. What kind of business do you run?', knowledge: 'The Founding plan is $499/month, billed monthly, no setup fee, cancel any time. Advertising spend is separate and paid to Google or Meta.' })
+  const customer = await cust('getshowups')
+  const k = await knowledgeFor(env, customer, { greeting: '', knowledge: '' })
+  assert.equal(k.playbook.key, 'sales')
+  const prompt = systemPrompt(k, 'chat')
+  assert.match(prompt, /sales assistant for getshowups Co/)
+  assert.match(prompt, /Consultation calls: a free call of about 60 minutes/)
+  assert.match(prompt, /Never promise lead volume, bookings, revenue or results/)
+  assert.doesNotMatch(prompt, /comes to getshowups Co|check the area;/)
+  assert.match(prompt, /or to book a consultation call/)
+  let offered
+  script.push(calls(details({ need: 'Pool service company in Mount Pleasant; misses calls while on jobs' }), tool('find_available_times', { date: '', part_of_day: 'any' })), (body) => {
+    const [saved, times] = lastToolResults(body)
+    assert.deepEqual(saved.still_needed_to_book, ['name', 'phone'], 'no ZIP and no address for a consultation')
+    assert.equal(saved.in_service_area, null)
+    offered = times.options[0]
+    return say(`The Founding plan is $499/month; ad spend is separate. I can do a call ${offered.time}. Want that?`)
+  })
+  const t1 = await chat('getshowups', 'I run a pool company in Mount Pleasant and we miss calls while on jobs. How much is it?')
+  assert.equal(t1.status, 200)
+  assert.match(t1.json().reply, /\$499\/month/, 'the listed price is allowed')
+  // An invented discount price is blocked like any other invented price.
+  script.push(say('I can do $299/month for you this week.'))
+  const t2 = await chat('getshowups', 'Any discount?', t1.json())
+  assert.doesNotMatch(t2.json().reply, /\$299/)
+  script.push(calls(details({ name: 'Jamie Rivera', phone: '843-555-0142' })), (body) => {
+    assert.deepEqual(lastToolResults(body)[0].still_needed_to_book, [])
+    return say(`Thanks Jamie. A call on ${offered.time}. Shall I book it?`)
+  })
+  const t3 = await chat('getshowups', 'Jamie Rivera, 843-555-0142', t2.json())
+  script.push(calls(tool('book_appointment', { slot_id: offered.slot_id, confirmation_quote: 'Yes, book it' })), (body) => {
+    assert.equal(lastToolResults(body)[0].booked, true)
+    return say('Booked. Talk soon!')
+  })
+  const t4 = await chat('getshowups', 'Yes, book it', t3.json())
+  assert.equal(t4.json().status, 'booked')
+  const lead = db.sql.prepare("SELECT customer, status, zip FROM leads WHERE customer = 'getshowups'").get()
+  assert.deepEqual([lead.customer, lead.status, lead.zip], ['getshowups', 'booked', ''])
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM appointments WHERE customer = 'getshowups'").get().n, 1)
+})
