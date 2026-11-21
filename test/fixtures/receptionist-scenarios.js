@@ -1,13 +1,21 @@
-// 100 receptionist evaluation scenarios: 4 service industries × 25. Each scenario is a scripted customer (one message
-// per turn) and what must / must not happen. Used by scripts/receptionist-eval.mjs (real model, measured) and by the
-// simulated guard suite in test/receptionist-eval.test.js (adversarial model, invariants only).
+// 106 receptionist evaluation scenarios: 4 service industries × 25, plus 6 conversation-quality scenarios (pool):
+// direct coverage answer for a fully served town, an ambiguous city → one clarification, no unnecessary ZIP request,
+// no narration, memory across one message, a correction. Each scenario is a scripted customer (one message per turn)
+// and what must / must not happen. Used by scripts/receptionist-eval.mjs (real model, measured) and by the simulated
+// guard suite in test/receptionist-eval.test.js (adversarial model, invariants only).
 //
 // expect: book (a booking must exist at the end), noBook (no booking may exist), handoff, urgent,
-//         noPrice (no $ amount may be shown), price (a listed price that should appear), area: 'in' | 'out'.
+//         noPrice (no $ amount may be shown), price (a listed price that should appear), area: 'in' | 'out',
+//         noNarration (no reply narrates a check), noZipAsk (no reply asks for a ZIP code), oneClarification: '<town>'
+//         (exactly one reply asks "what part of <town>"), noCoverageClaim: '<town>' (no reply says the town is served),
+//         directCoverage: '<town>' (some reply says the town is served), noReask: ['location'|'problem'|'day'] (no reply
+//         asks again for what the first message said).
 // Placeholders: {SLOT} = "the first time you offered", {ZIP} / {OUTZIP} = in / out of area ZIP, {EMAIL}, {PHONE}.
+// towns = the business's listed towns (records); fullyServed = towns the owner published as fully served (Teach Your
+// AI, live for that business in the eval world), so a caller naming one is served without a ZIP.
 
 export const BUSINESSES = {
-  pool: { id: 'eval-pool', name: 'Bluewater Pool Care', industry: 'Pool service', zips: ['29401', '29403', '29407'], services: [{ name: 'Weekly pool cleaning', price: '$160/month' }, { name: 'Green pool recovery', price: '' }, { name: 'Filter clean', price: '$95' }], knowledge: 'Weekly cleaning includes chemicals, skimming and brushing. Green pool recovery is quoted after an inspection. We do not service commercial pools.' },
+  pool: { id: 'eval-pool', name: 'Bluewater Pool Care', industry: 'Pool service', zips: ['29401', '29403', '29407'], towns: ['Charleston', 'West Ashley', 'Mount Pleasant'], fullyServed: ['West Ashley'], services: [{ name: 'Weekly pool cleaning', price: '$160/month' }, { name: 'Green pool recovery', price: '' }, { name: 'Filter clean', price: '$95' }], knowledge: 'Weekly cleaning includes chemicals, skimming and brushing. Green pool recovery is quoted after an inspection. We do not service commercial pools.' },
   hvac: { id: 'eval-hvac', name: 'Palmetto Heating & Air', industry: 'HVAC', zips: ['29464', '29466'], services: [{ name: 'AC tune-up', price: '$129' }, { name: 'Diagnostic visit', price: '$89' }, { name: 'System replacement', price: '' }], knowledge: 'The $89 diagnostic fee is credited toward any repair we do that day. We service all major brands. Replacements are quoted on site.' },
   plumbing: { id: 'eval-plumbing', name: 'Low Country Plumbing', industry: 'Plumbing', zips: ['29405', '29406', '29418'], services: [{ name: 'Drain cleaning', price: '$175' }, { name: 'Water heater install', price: '' }, { name: 'Leak repair', price: 'from $150' }], knowledge: 'We carry most water heaters on the truck. Water heater installs are quoted after we see the space. We do not do septic pumping.' },
   cleaning: { id: 'eval-cleaning', name: 'Sparkle Home Cleaning', industry: 'Residential cleaning', zips: ['29412', '29414'], services: [{ name: 'Standard clean (up to 3 bedrooms)', price: '$140' }, { name: 'Deep clean', price: '$260' }, { name: 'Move-out clean', price: '' }], knowledge: 'We bring all supplies. Pets are fine. Move-out cleans are quoted by home size. We do not clean windows outside.' },
@@ -53,4 +61,15 @@ function forIndustry(key) {
   ]
 }
 
-export const SCENARIOS = Object.keys(BUSINESSES).flatMap(forIndustry)
+// Conversation quality (pool business: Charleston listed but only partly served, West Ashley fully served).
+const q = (id, category, turns, expect) => ({ id: `pool-${id}`, industry: 'pool', business: BUSINESSES.pool.id, category, turns, expect })
+const QUALITY = [
+  q('coverage-town-direct', 'coverage', ["Hi, I'm in West Ashley. Do you service my area?"], { noBook: true, directCoverage: 'West Ashley', noZipAsk: true, noNarration: true }),
+  q('coverage-city-ambiguous', 'coverage', ["I'm in Charleston and my pool pump is dead."], { noBook: true, oneClarification: 'Charleston', noCoverageClaim: 'Charleston', noNarration: true }),
+  q('coverage-no-zip-demand', 'coverage', ['Can you come out to West Ashley tomorrow? The pool is green.'], { noBook: true, noZipAsk: true, noNarration: true, noReask: ['location', 'problem', 'day'] }),
+  q('no-narration', 'direct_answer', ['Do you serve 29403? What is the soonest you can come?'], { noBook: true, noNarration: true, area: 'in' }),
+  q('memory-one-message', 'memory', ["I'm in West Ashley. My pool is green. Can someone come tomorrow?", 'Jordan Lee, {PHONE}.'], { noBook: true, noReask: ['location', 'problem', 'day'], noNarration: true }),
+  q('correction-town', 'memory', ["I'm in Charleston and need weekly cleaning.", "Actually it's West Ashley, sorry.", 'What do you have tomorrow?'], { noBook: true, noCoverageClaim: 'Charleston', directCoverage: 'West Ashley', noNarration: true }),
+]
+
+export const SCENARIOS = [...Object.keys(BUSINESSES).flatMap(forIndustry), ...QUALITY]

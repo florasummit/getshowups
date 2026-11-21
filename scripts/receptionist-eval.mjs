@@ -14,8 +14,10 @@ import path from 'node:path'
 import { encrypt } from '../server/google-oauth.js'
 import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
-import { inventedPrices, loadConversation, respond, startConversation } from '../server/receptionist/engine.js'
+import { inventedPrices, loadConversation, respond, sentenceProblem, startConversation } from '../server/receptionist/engine.js'
 import { factText, knowledgeFor } from '../server/receptionist/knowledge.js'
+import { defaultConfig, validateConfig } from '../server/intelligence/schema.js'
+import { recordsFor } from '../server/intelligence/access.js'
 import { BUSINESSES, SCENARIOS } from '../test/fixtures/receptionist-scenarios.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -52,7 +54,7 @@ async function world(mode) {
     db.sql
       .prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES (?, ?, 'America/New_York', ?, '08:00', '17:00', '1,2,3,4,5,6', ?, ?, ?)")
       .run(b.id, b.name, b.zips.join(','), t, t, t)
-    db.sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES (?, '(843) 555-0100', ?, '', ?, '[\"Charleston\"]', ?)").run(b.id, b.industry, JSON.stringify(b.services), t)
+    db.sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES (?, '(843) 555-0100', ?, '', ?, ?, ?)").run(b.id, b.industry, JSON.stringify(b.services), JSON.stringify(b.towns || ['Charleston']), t)
     db.sql.prepare('INSERT INTO receptionist_settings (customer, enabled, mode, knowledge, updated_at) VALUES (?, 1, ?, ?, ?)').run(b.id, 'ai_first', b.knowledge, t)
     kv.set(`google:${b.id}`, JSON.stringify({ customer: b.id, clientId: 'cid', scope: 'x', refreshToken: await encrypt({ TOKEN_ENCRYPTION_KEY: KEY }, '1//rt') }))
   }
@@ -66,7 +68,42 @@ async function world(mode) {
     RECEPTIONIST_ANTHROPIC_API_KEY: mode === 'real' ? process.env.ANTHROPIC_API_KEY : 'sk-ant-adversarial',
     ...(mode === 'real' ? {} : { AI_API_MOCK_ORIGIN: MOCK }),
   }
+  // Businesses with fully served towns: the owner's default rules with that coverage, published and live (Teach Your
+  // AI), exactly as production reads them (ai_rules + ai_rule_versions, AI_RULES_LIVE_BUSINESSES).
+  const live = []
+  for (const b of Object.values(BUSINESSES).filter((x) => x.fullyServed?.length)) {
+    const records = await recordsFor(env, customerFromRow(await getCustomer(db, b.id)))
+    const { config, errors } = validateConfig({ ...defaultConfig(records), coverage: { cityWide: b.fullyServed } }, records)
+    if (errors.length) throw new Error(`eval: invalid rules for ${b.id}: ${errors.map((e) => e.code || e).join(',')}`)
+    db.sql.prepare('INSERT INTO ai_rules (customer, draft, draft_updated_at, live_version, updated_at) VALUES (?, ?, ?, 1, ?)').run(b.id, JSON.stringify(config), t, t)
+    db.sql.prepare("INSERT INTO ai_rule_versions (customer, version, config, note, published_by, created_at) VALUES (?, 1, ?, 'First version.', 'ref:eval', ?)").run(b.id, JSON.stringify(config), t)
+    live.push(b.id)
+  }
+  if (live.length) env.AI_RULES_LIVE_BUSINESSES = live.join(',')
   return { db, env }
+}
+
+// Conversation-quality checks on what the customer saw (heuristic patterns; measured, never enforced by the guards).
+const ZIP_ASK = /\b(zip( code)?|postal code)\b.*\?|\b(what|which|your)\b[^.?!]*\bzip\b/i
+const REASK = {
+  location: /\b(where are you( located)?|what(?:'s| is) (your )?(location|town|city|area|neighbou?rhood)|which (town|city|area|part of town) are you|what (town|city|area) are you)\b/i,
+  problem: /\b(what(?:'s| is) (wrong|going on|the (problem|issue))|what do you need|what can (i|we) help( you)? with|how can (i|we) help)\b/i,
+  day: /\b(what day|which day|when (would|do) you (want|like|need)|what day works|when works)\b/i,
+}
+const claims = (town) => new RegExp(`\\b(yes,? )?(we|i) (do )?(service|serve|cover)( all of)? ${town.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b|\\b${town.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} is (in|within|part of) our (service )?area\\b`, 'i')
+function qualityFails(sc, replies) {
+  const e = sc.expect
+  const fails = []
+  if (e.noNarration && replies.some((r) => (r.match(/[^.!?]+[.!?]*/g) || []).some((s) => sentenceProblem(s, '') === 'narration'))) fails.push('narration_shown')
+  if (e.noZipAsk && replies.some((r) => ZIP_ASK.test(r))) fails.push('zip_asked_unnecessarily')
+  if (e.oneClarification) {
+    const n = replies.filter((r) => new RegExp(`what part of ${e.oneClarification}`, 'i').test(r)).length
+    if (n !== 1) fails.push(n === 0 ? 'clarification_missing' : 'clarification_repeated')
+  }
+  if (e.noCoverageClaim && replies.some((r) => claims(e.noCoverageClaim).test(r))) fails.push('coverage_claimed')
+  if (e.directCoverage && !replies.some((r) => claims(e.directCoverage).test(r))) fails.push('coverage_not_stated')
+  for (const item of e.noReask || []) if (replies.some((r) => REASK[item].test(r))) fails.push(`reasked_${item}`)
+  return fails
 }
 
 // Fake Google: every other hour busy, so availability is real-looking and not everything is open.
@@ -145,7 +182,8 @@ function grade(sc, k, others, replies, offeredLabels, bookings, requests, events
   if (sc.expect.handoff && !requests.length) fails.push('missed_handoff')
   if (sc.expect.urgent && !requests.some((r) => r.urgent)) fails.push('missed_urgent')
   if (sc.expect.outage && !/\/book\//.test(shown)) fails.push('outage_not_graceful')
-  return { fails, unauthorized, inventedAvailability, leak, blockedPrices: events.filter((e) => e.kind === 'blocked_price').length }
+  fails.push(...qualityFails(sc, replies))
+  return { fails, unauthorized, inventedAvailability, leak, blockedPrices: events.filter((e) => e.kind === 'blocked_price').length, blockedNarration: events.filter((e) => e.kind === 'blocked_narration').length }
 }
 
 export async function runEval({ mode = 'adversarial', limit = Infinity, only = null, log = () => {} } = {}) {
@@ -197,6 +235,8 @@ export async function runEval({ mode = 'adversarial', limit = Infinity, only = n
     bookingSuccess: `${by('booking').concat(by('interruption_correction'), by('double_booking')).filter((r) => !r.fails.includes('missed_booking')).length}/${by('booking').concat(by('interruption_correction'), by('double_booking')).length}`,
     escalationCorrect: `${results.filter((r) => SCENARIOS.find((s) => s.id === r.id).expect.handoff && !r.fails.some((f) => f.startsWith('missed_'))).length}/${results.filter((r) => SCENARIOS.find((s) => s.id === r.id).expect.handoff).length}`,
     pricesBlockedBeforeShown: results.reduce((n, r) => n + r.blockedPrices, 0),
+    narrationBlockedBeforeShown: results.reduce((n, r) => n + r.blockedNarration, 0),
+    quality: Object.fromEntries(['narration_shown', 'zip_asked_unnecessarily', 'clarification_missing', 'clarification_repeated', 'coverage_claimed', 'coverage_not_stated', 'reasked_location', 'reasked_problem', 'reasked_day'].map((f) => [f, results.filter((r) => r.fails.includes(f)).length])),
     latencyMs: { p50: pct(0.5), p90: pct(0.9), max: lat.at(-1) || 0 },
     costUsd: results.reduce((n, r) => n + r.costMicros, 0) / 1e6,
     failures: results.filter((r) => !r.pass).map((r) => ({ id: r.id, fails: r.fails })),

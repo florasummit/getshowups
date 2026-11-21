@@ -31,6 +31,7 @@ import { knowledgeFor, systemPrompt, factText } from './knowledge.js'
 import { spokenToDigits } from './digits.js'
 import { activeRules, decisionFor, noteAnswer, observe, ruleBlock, NOTE_ANSWER_TOOL } from '../intelligence/runtime.js'
 import { rulesInstructions, turnNote } from '../intelligence/compile.js'
+import { understand, mergeFacts } from '../intelligence/understand.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
 export const DEFAULT_MODEL = 'claude-opus-5-5'
@@ -47,6 +48,9 @@ export const LIMITS = {
 }
 const MODEL_TIMEOUT_MS = 25_000
 export const VOICE_MODEL_TIMEOUT_MS = 10_000
+// Voice: a calendar lookup or booking is two model calls plus Google. The fixed holding line is spoken ONLY when the
+// caller would otherwise hear silence this long after the slow tool started (first words of the answer cancel it).
+export const HOLD_AFTER_MS = 700
 
 const ready = new WeakSet()
 export async function receptionistReady(db) {
@@ -124,9 +128,10 @@ export async function endConversation(env, customer, conv, now = Date.now()) {
   return { ok: true }
 }
 
+// Codes and numbers only in `detail` (≤ 120 chars: a voice turn's timings need the room; never text a customer said).
 export async function event(env, conv, kind, ok, detail = null, now = Date.now()) {
   await env.ONBOARDING_DB.prepare('INSERT INTO receptionist_events (customer, conversation_id, kind, ok, detail, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-    .bind(conv.customer, conv.id, String(kind).slice(0, 40), ok ? 1 : 0, detail == null ? null : String(detail).slice(0, 80), now)
+    .bind(conv.customer, conv.id, String(kind).slice(0, 40), ok ? 1 : 0, detail == null ? null : String(detail).slice(0, 120), now)
     .run()
     .catch(() => {})
 }
@@ -198,21 +203,50 @@ export function missingForBooking(c, customer) {
   return need
 }
 
-function knownLine(s, customer) {
+// What the area check resolved from a place the customer named (state.area), for the note and the owner summary.
+function areaLine(a) {
+  if (!a?.place) return null
+  if (a.served) return `location: ${a.place} (served${a.basis === 'town_fully_served' ? ', fully served town; a ZIP code is needed only to book' : ''})`
+  return `location: ${a.place} (area NOT confirmed yet; ask only: ${a.ask === 'zip' ? 'the ZIP code there' : `"What part of ${a.place}?"`})`
+}
+
+// Everything the customer has said so far, so nothing is asked twice: details saved through the tools, the place the
+// area check resolved, and (without live owner rules, which carry their own turn note) what the deterministic reading
+// of their words found: place, problem, day or part of day, with corrections ("actually it's Mount Pleasant") shown.
+function knownLine(s, customer, { rulesLive = false } = {}) {
   const c = s.customer || {}
+  const f = s.facts || {}
   const parts = []
   if (c.name) parts.push(`name: ${c.name}`)
   if (c.phone) parts.push(`phone: ${c.phone}`)
   if (c.email) parts.push(`email: ${c.email}`)
   if (c.zip) parts.push(`ZIP: ${c.zip}${s.inArea === false ? ' (OUTSIDE the service area)' : s.inArea ? ' (served)' : ''}`)
+  const area = areaLine(s.area)
+  if (area) parts.push(area)
+  else if (!rulesLive && f.city) parts.push(`place they named: ${f.city} (check it with check_service_area place=${JSON.stringify(f.city)} before offering times; do not ask where they are)`)
   if (c.street) parts.push(`address: ${[c.street, c.city, c.state].filter(Boolean).join(', ')}`)
   if (c.need) parts.push(`needs: ${c.need}`)
+  else if (!rulesLive && (f.service || f.need)) parts.push(`problem/need they described: ${f.service || f.need} (save it with save_customer_details; do not ask what they need)`)
+  if (!rulesLive && (f.day || f.part)) parts.push(`when they asked for: ${[f.day, f.part].filter(Boolean).join(' ')} (look up that day/part first; do not ask when)`)
+  if (!rulesLive && f.corrected?.length) parts.push(`they corrected their ${f.corrected.join(', ')}: use the newest value, do not mention the old one`)
   if (s.booked) parts.push(`BOOKED: ${slotLabel(s.booked.start, customer.timezone)}`)
   if (s.requests?.callback) parts.push('callback request: recorded')
   if (s.requests?.message) parts.push('message: recorded')
   if (!parts.length) return null
   const missing = s.booked ? [] : missingForBooking(c, customer)
-  return `Verified customer details so far (do NOT ask for these again): ${parts.join('; ')}.${missing.length && !s.booked ? ` Still needed only if they want to book: ${missing.join(', ')}.` : ''}`
+  return `Known so far (do NOT ask for any of this again): ${parts.join('; ')}.${missing.length && !s.booked ? ` Still needed only if they want to book: ${missing.join(', ')}.` : ''}`
+}
+
+// Deterministic reading of one customer message (server/intelligence/understand.js: no model, no I/O) folded into
+// conv.state.facts, so place, problem and day are remembered even for businesses without live owner rules. Towns come
+// from the business's own records; the newest statement wins (corrections).
+const INDUSTRY_KEY = (k) => (/electric/i.test(k.industry || '') ? 'electrical' : k.playbook?.key === 'pool' || k.playbook?.key === 'hvac' ? k.playbook.key : 'general')
+function rememberFacts(conv, text, k) {
+  const facts = understand(text, { industry: INDUSTRY_KEY(k), towns: k.towns || [], services: (k.services || []).map((s) => s.name), excluded: [], triggers: [], phrases: [] })
+  if (facts.zip) facts.zipKnown = checkZip(facts.zip).check !== 'unknown'
+  const { known } = mergeFacts(conv.state.facts || {}, facts)
+  conv.state.facts = { ...known, answers: conv.state.facts?.answers || {} }
+  return facts
 }
 
 // ---------- tools (server-side, bound to the conversation's business) ----------
@@ -233,8 +267,9 @@ export const TOOLS = [
   },
   {
     name: 'check_service_area',
-    description: 'Check whether the business serves a US ZIP code the customer gave. Use it before offering to book.',
-    input_schema: { type: 'object', properties: { zip: str('5-digit ZIP code') }, required: ['zip'], additionalProperties: false },
+    description:
+      'Check whether the business serves where the customer is, as soon as they say where: pass zip for a 5-digit US ZIP code, or place for a town, neighbourhood, street address or description (pass an empty string for the one not given). Answers served, or tells you the ONE short question to ask next. Never ask for a ZIP code just to check the area when they already named a place. Use it before offering times.',
+    input_schema: { type: 'object', properties: { zip: str('5-digit ZIP code as said, or empty'), place: str('Town, neighbourhood, street address or description as said, or empty') }, required: ['zip', 'place'], additionalProperties: false },
     strict: true,
   },
   {
@@ -347,6 +382,70 @@ async function leadFor(ctx, lead) {
   return leadId
 }
 
+// Coverage from a PLACE the customer named (town, neighbourhood, address, description), authoritative sources only:
+//   - no ZIP list                         → served (the business has not limited its area)
+//   - a town the owner PUBLISHED as fully served (Teach Your AI coverage.cityWide; only when rules are live for this
+//     business)                           → served without a ZIP (basis town_fully_served; a booking still records one)
+//   - a town on the business's list that is not fully served → not resolved: ask "What part of <town>?" (or the ZIP when
+//     the place already names a part of it)
+//   - anything else                       → not resolved: ask for the ZIP code there
+// It never claims coverage from closeness or from one listed ZIP, and never rejects: areaFor (the ZIP rule) decides
+// out-of-area, at the ZIP check and again at booking. Direction-prefixed names ("North Charleston") never match a
+// shorter town ("Charleston"); the longest listed town wins.
+const PREFIX_WORDS = /\b(north|south|east|west|new|old|mount|mt|port|fort|ft|lake|upper|lower|little|greater)$/
+function placeMatch(place, towns) {
+  const p = norm(place)
+  let best = null
+  for (const t of towns) {
+    const n = norm(t)
+    if (!n) continue
+    const whole = p === n
+    const tail = !whole && p.endsWith(` ${n}`) && !PREFIX_WORDS.test(p.slice(0, -n.length - 1))
+    if ((whole || tail) && (!best || n.length > norm(best.town).length)) best = { town: t, whole }
+  }
+  return best
+}
+function resolvePlace(ctx, place) {
+  const { customer, conv, rules } = ctx
+  const s = conv.state
+  if (!customer.serviceZips.length) {
+    s.area = { place, basis: 'not_limited', served: true, ask: null }
+    s.inArea = true
+    return { ok: true, place, served: true, basis: 'not_limited', note: 'The business has not limited its area: say it is served and move on.' }
+  }
+  const fully = rules?.config?.coverage?.cityWide || []
+  const listed = [...new Set([...(rules?.records?.towns || ctx.knowledge?.towns || []), ...fully])]
+  const hit = placeMatch(place, listed)
+  if (hit && fully.some((t) => norm(t) === norm(hit.town))) {
+    s.area = { place: hit.town, basis: 'town_fully_served', served: true, ask: null }
+    s.inArea = true
+    return { ok: true, place: hit.town, served: true, basis: 'town_fully_served', note: `Say "Yes, we service ${hit.town}." and move on to what they need. Do not ask for a ZIP code to confirm the area. A booking still records a ZIP code: ask for it once, together with the other booking details, only when they want a time booked.` }
+  }
+  if (hit) {
+    const ask = hit.whole ? 'part' : 'zip'
+    s.area = { place: hit.whole ? hit.town : place, basis: 'town_partly_served', served: null, ask }
+    return {
+      ok: true,
+      place: s.area.place,
+      served: null,
+      resolved: false,
+      basis: 'town_partly_served',
+      ask: ask === 'part' ? `What part of ${hit.town}?` : 'their ZIP code',
+      note: `${customer.name} serves part of ${hit.town}, not all of it. Do not say it is covered and do not say it isn't. Ask exactly one short question${ask === 'part' ? `: "What part of ${hit.town}?" (a neighbourhood or a ZIP code answers it)` : ': the ZIP code there'}, then check again. Do not offer times yet.`,
+    }
+  }
+  s.area = { place, basis: 'place_not_listed', served: null, ask: 'zip' }
+  return {
+    ok: true,
+    place,
+    served: null,
+    resolved: false,
+    basis: 'place_not_listed',
+    ask: 'their ZIP code',
+    note: `"${place}" is not a place on ${customer.name}'s list, so the area can't be confirmed from it. Do not say it is covered and do not say it isn't. Ask once for the ZIP code there, then check again. Do not offer times yet.`,
+  }
+}
+
 // Every consequential tool, bound to the conversation's business. `ctx.dryRun` (Voice Lab): every guard still runs,
 // but nothing is created (no lead, appointment, request or coverage row) and the result says `simulated: true`.
 export const executeTool = (ctx, name, input) => runTool(ctx, name, input)
@@ -360,21 +459,28 @@ async function runTool(ctx, name, input) {
     Object.assign(s.customer, values)
     if (values.zip) {
       s.inArea = areaFor(customer, values.zip) === 'in'
+      if (s.area) s.area = { ...s.area, basis: 'zip', served: s.inArea, ask: null } // the ZIP now decides the remembered place
       if (!s.inArea) conv.outcome = conv.outcome || 'out_of_area'
     }
     const notes = Object.entries(problems).map(([k, p]) => `${k}: ${PROBLEM_NOTE[p] || PROBLEM_NOTE[`${k}_${p}`] || p}`)
     return { ok: Object.keys(problems).length === 0, saved: Object.keys(values), known: s.customer, in_service_area: s.inArea ?? null, still_needed_to_book: s.booked ? [] : missingForBooking(s.customer, customer), ...(notes.length ? { recheck: notes } : {}) }
   }
   if (name === 'check_service_area') {
-    const zip = spokenToDigits(input.zip).replace(/\D/g, '').slice(0, 5)
-    if (!/^\d{5}$/.test(zip)) return { ok: false, error: 'invalid_zip', note: 'A ZIP code has 5 digits. Ask for it again.' }
+    const zip = spokenToDigits(input.zip || '').replace(/\D/g, '').slice(0, 5)
+    const place = String(input.place || '').trim().replace(/\s+/g, ' ').slice(0, 80)
+    if (!/^\d{5}$/.test(zip)) {
+      if (String(input.zip || '').trim() && !place) return { ok: false, error: 'invalid_zip', note: 'A ZIP code has 5 digits. Ask for it again.' }
+      if (!place) return { ok: false, error: 'location_needed', note: 'Ask where the service is needed: a town, neighbourhood, ZIP code or street address all work.' }
+      return resolvePlace(ctx, place)
+    }
     const { check } = checkZip(zip)
     const area = areaFor(customer, zip, check)
     const served = area === 'in'
     if (digitsSaid(conv).includes(zip)) s.customer.zip = zip
     s.inArea = served
+    if (place || s.area) s.area = { place: place || s.area.place, basis: 'zip', served, ask: null }
     if (!served) conv.outcome = conv.outcome || 'out_of_area'
-    if (served) return { ok: true, zip, served }
+    if (served) return { ok: true, zip, served, note: 'Say the area is served and move on; do not describe the check.' }
     // Not on the business's list (or not a ZIP we know): never a dead end, never a booking.
     return {
       ok: true,
@@ -438,7 +544,7 @@ async function runTool(ctx, name, input) {
       s.offered[id] = x.start
       return { slot_id: id, time: slotLabel(x.start, customer.timezone) }
     })
-    return { ok: true, timezone: customer.timezone, options, note: options.length ? 'Offer two or three of these.' : 'Nothing open for that request: say so and offer another day or part of the day.' }
+    return { ok: true, timezone: customer.timezone, options, note: options.length ? 'Offer two or three of these plainly (for example "I have Tuesday at 10 or Wednesday at 2. Does either work?"); do not describe the lookup.' : 'Nothing open for that request: say so and offer another day or part of the day.' }
   }
   if (name === 'book_appointment') {
     if (s.booked) return { ok: true, already_booked: true, time: slotLabel(s.booked.start, customer.timezone), note: 'This conversation already has a booking; do not book again.' }
@@ -500,8 +606,23 @@ export function inventedPrices(text, facts) {
 }
 // A price said in words ("two hundred dollars") can't be checked against the records, so it is never let through.
 export const wordPrice = (text) => /\b(dollars?|bucks)\b/i.test(text) && !/\$\s?\d/.test(text)
-// Model narration that must never reach a customer.
-const NARRATION = /\b(the rule|my instructions|system prompt|tool|function call|i should call|i('| wi)ll (call|use) (the )?\w+_\w+)\b/i
+// Model narration that must never reach a customer: talk about rules, tools or reasoning, and "working" lines. Checks
+// are silent (the answer is what the customer hears): no "let me check", "I'll verify", "checking now", "thank you for
+// providing", "please wait", "one moment". (The engine's own holding line is spoken directly, never through this check.)
+const NARRATION = new RegExp(
+  [
+    'the rule|my instructions|system prompt|tool|function call|i should call|i(\'| wi)ll (call|use) (the )?\\w+_\\w+',
+    'let me (just |quickly )?(check|verify|look (that |this |it )?(up|into)|confirm (that|this|whether|if)|pull (that |this |it )?up|see (what|if|whether)|run (that|this|a check)|take a look)',
+    'i(\'ll| will|\'m going to| am going to|\'m about to) (just |quickly )?(check|verify|look (that |this |it )?(up|into)|confirm (that|this|whether|if)|pull (that |this |it )?up|run (that|this|a check)|take a look)',
+    '(i\'m |i am |we\'re |we are |just )(just )?(checking|verifying|confirming|looking (that |this |it )?up|pulling (that |this |it )?up)',
+    '^\\s*(checking|verifying|confirming|looking (that |this |it )?up)\\b',
+    'thank(s| you) (so much )?for (providing|sharing|confirming|letting me know|that information|the information|those details|the details|your (details|information|patience))',
+    'please (wait|hold|hold on|bear with me|give me a (moment|second|sec|minute))',
+    '(one|just a|give me a|give me one) (moment|second|sec|minute)',
+    'hold on|bear with me|hang on',
+  ].map((p) => (p.startsWith('^') ? p : `\\b(?:${p})\\b`)).join('|'),
+  'i',
+)
 export function sentenceProblem(sentence, facts) {
   if (NARRATION.test(sentence)) return 'narration'
   if (inventedPrices(sentence, facts).length) return 'invented_price'
@@ -530,24 +651,33 @@ function client(env, channel = 'chat') {
 }
 
 // Streams one model call's text sentence by sentence through `emit`, checking each sentence first. Returns the
-// final message, the text actually emitted, and the first problem found (after which nothing more is emitted).
-// onToolStart(name): the model began a tool call (voice says its holding line now, not after the whole call).
+// final message, the text actually emitted, and the first problem found. A narration sentence is skipped on its own
+// (the rest of the answer still goes out); a price problem stops everything after it (the safe price line follows).
+// onToolStart(name): the model began a tool call (voice arms its holding line now, not after the whole call).
+// onFirstToken(): the model's first text delta arrived (time-to-first-token, before a whole sentence exists).
 // signal: aborts the request when the caller talked over this turn (Retell discards it), so the next turn starts
 // at once instead of waiting for an answer nobody will hear.
-async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart, signal }) {
+async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart, onFirstToken, signal }) {
   const stream = anthropic.messages.stream(params, signal ? { signal } : undefined)
   let buf = ''
   let emitted = ''
   let problem = null
+  let narrated = false
+  let first = false
+  const pass = (sentence) => {
+    if (problem) return false
+    const p = sentenceProblem(sentence, facts)
+    if (p === 'narration') narrated = true
+    else if (p) problem = p
+    return !p
+  }
   const flush = (all) => {
     for (;;) {
       const m = buf.match(/^([\s\S]*?[.!?])(\s+|$)/)
       if (!m || (!all && !m[2] && buf.length === m[1].length)) break
       const sentence = m[1]
       buf = buf.slice(m[0].length)
-      if (problem) continue
-      problem = sentenceProblem(sentence, facts)
-      if (!problem) {
+      if (pass(sentence)) {
         emitted += (emitted ? ' ' : '') + sentence.trim()
         emit(sentence.trim())
       }
@@ -555,17 +685,18 @@ async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart
     if (all && buf.trim()) {
       const rest = buf.trim()
       buf = ''
-      if (!problem) {
-        problem = sentenceProblem(rest, facts)
-        if (!problem) {
-          emitted += (emitted ? ' ' : '') + rest
-          emit(rest)
-        }
+      if (pass(rest)) {
+        emitted += (emitted ? ' ' : '') + rest
+        emit(rest)
       }
     }
   }
   stream.on('text', (delta) => {
     if (isStale?.()) return
+    if (!first) {
+      first = true
+      onFirstToken?.()
+    }
     buf += delta
     flush(false)
   })
@@ -576,13 +707,23 @@ async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart
   }
   const message = await stream.finalMessage()
   flush(true)
-  return { message, emitted, problem }
+  return { message, emitted, problem: problem || (narrated ? 'narration' : null) }
 }
 
 // One customer turn → { ok, reply, status, outcome, booked?, request? }.
 // opts: { channel: 'chat' | 'voice', onText(sentence) — voice: speak as it is generated, isStale() — voice: the caller
-// spoke again (Retell discards this answer), so an answer that did nothing is dropped instead of saved }.
+// spoke again (Retell discards this answer), so an answer that did nothing is dropped instead of saved, timing — filled
+// in place with the turn's numbers (firstTokenMs, firstTextMs, holdMs, toolMs, modelMs, modelCalls, totalMs) }.
 export async function respond(env, customer, conv, userText, opts = {}, now = Date.now()) {
+  const hold = { timer: null }
+  try {
+    return await respondTurn(env, customer, conv, userText, opts, now, hold)
+  } finally {
+    if (hold.timer) clearTimeout(hold.timer) // a holding line never fires after the turn ended, whatever path it took
+  }
+}
+
+async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   const channel = opts.channel === 'voice' ? 'voice' : 'chat'
   const db = env.ONBOARDING_DB
   const text = String(userText || '').trim().slice(0, LIMITS.textChars)
@@ -612,16 +753,24 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   const ctx = { env, customer, conv, now, userText: text, knowledge: k, channel, after: [], committed: false, rules }
   const transcript = conv.transcript
   transcript.push({ role: 'user', content: text })
+  // Event rows are written off the critical path (never awaited one by one between the model and its tools) and
+  // settled before the turn is saved.
+  const pending = []
+  const note = (kind, ok, detail) => pending.push(event(env, conv, kind, ok, detail, now))
+  // Deterministic memory first (no model, no I/O): what this message says (place, ZIP, address, problem, day…) is folded
+  // into the conversation's facts; corrections replace the old value. With live owner rules, observe() does it with the
+  // owner's context and turnNote carries it; otherwise knownLine does.
+  let flags = null
+  if (rules) flags = observe(rules, conv, text)
+  else rememberFacts(conv, text, k)
   // Operator notes for this turn: what is already known (so it is never asked again) and any correction from the
   // previous turn (e.g. a blocked price). Mid-conversation system messages keep the cached history intact.
-  const notes = [knownLine(conv.state, customer), conv.state.note].filter(Boolean)
+  const notes = [knownLine(conv.state, customer, { rulesLive: Boolean(rules) }), conv.state.note].filter(Boolean)
   delete conv.state.note
   if (rules) {
-    // Deterministic: what this message says (town, ZIP, address, need, urgency, equipment, day…) + the owner's
-    // workflow → one note: known facts, the ONE thing to ask next, what isn't allowed yet. No extra model or tool call.
-    const flags = observe(rules, conv, text)
+    // The owner's workflow → one note: known facts, the ONE thing to ask next, what isn't allowed yet.
     notes.push(turnNote(decisionFor(rules, conv), rules.version))
-    await event(env, conv, 'rules', true, [`v${rules.version}`, ...flags].join(';'), now)
+    note('rules', true, [`v${rules.version}`, ...flags].join(';'))
   }
   if (notes.length) transcript.push({ role: 'system', content: notes.join('\n') })
   const prompt = systemPrompt(k, channel, { requests: await receptionistRequestsReady(db) })
@@ -635,43 +784,63 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
   const anthropic = client(env, channel)
   const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools, messages: transcript })
   // Per-turn timings (numbers only; voice records them as a voice_turn event). opts.timing is filled in place so the
-  // caller has them on every return path, including a dropped (talked-over) turn.
+  // caller has them on every return path, including a dropped (talked-over) turn. firstTokenMs = the model's first
+  // text delta; firstTextMs = the first whole sentence handed to the caller; holdMs = when the holding line went out.
   const timing = opts.timing || {}
-  Object.assign(timing, { modelMs: 0, toolMs: 0, modelCalls: 0, firstTextMs: null })
+  Object.assign(timing, { modelMs: 0, toolMs: 0, modelCalls: 0, firstTokenMs: null, firstTextMs: null, holdMs: null, totalMs: null })
   const t0 = Date.now()
   const holdLine = (names) => (names.includes('find_available_times') ? 'One moment while I check the calendar.' : names.includes('book_appointment') ? 'One moment, please.' : null)
   let saidAny = false
+  const disarm = () => {
+    if (hold.timer) clearTimeout(hold.timer)
+    hold.timer = null
+  }
   const speak = opts.onText
     ? (s) => {
         if (timing.firstTextMs === null) timing.firstTextMs = Date.now() - t0
         saidAny = true
+        disarm() // words are going out: no holding line needed any more
         opts.onText(s)
       }
     : null
-  // Voice: the holding line goes out the moment the model starts a slow tool call (calendar lookup / booking), not
-  // after the whole model call finished, as long as nothing else has been said this turn.
-  const onToolStart = (name) => {
-    if (held || saidAny || opts.isStale?.()) return
-    const line = holdLine([name])
-    if (line) {
+  const onFirstToken = () => {
+    if (timing.firstTokenMs === null) timing.firstTokenMs = Date.now() - t0
+  }
+  // Voice: a slow tool (calendar lookup / booking) armed = the holding line is spoken only if HOLD_AFTER_MS pass
+  // without any words of the answer (a fast lookup + a quick second model call is heard as a direct answer). Armed the
+  // moment the model starts the tool call, not after the whole model call finished; never once something was said.
+  const arm = (names) => {
+    if (!speak || hold.timer || held || saidAny) return
+    const line = holdLine(names)
+    if (!line) return
+    hold.timer = setTimeout(() => {
+      hold.timer = null
+      if (held || saidAny || opts.isStale?.()) return
+      timing.holdMs = Date.now() - t0
       speak(line)
       held = line
-    }
+    }, HOLD_AFTER_MS)
+  }
+  const onToolStart = (name) => {
+    if (!opts.isStale?.()) arm([name])
+  }
+  const stale = async () => {
+    disarm()
+    note('turn', false, 'talked_over')
+    await Promise.all(pending)
+    return { ok: false, error: 'stale' }
   }
   for (let i = 0; i < LIMITS.modelCallsPerTurn; i++) {
     let res
     let emitted = ''
     // The caller talked over this turn and it hasn't acted: stop before another model call.
-    if (opts.isStale?.() && !ctx.committed) {
-      await event(env, conv, 'turn', false, 'talked_over', now)
-      return { ok: false, error: 'stale' }
-    }
+    if (opts.isStale?.() && !ctx.committed) return stale()
     // Aborting is only allowed while the turn has done nothing; after a booking/request the answer is still produced.
     const signal = opts.signal && !ctx.committed ? opts.signal : undefined
     const tm = Date.now()
     try {
       if (speak) {
-        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, signal })
+        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, onFirstToken, signal })
         res = s.message
         emitted = s.emitted
         if (s.problem) blocked = blocked || s.problem
@@ -679,10 +848,7 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     } catch (err) {
       timing.modelMs += Date.now() - tm
       timing.modelCalls++
-      if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) {
-        await event(env, conv, 'turn', false, 'talked_over', now)
-        return { ok: false, error: 'stale' }
-      }
+      if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) return stale()
       failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
       break
     }
@@ -701,20 +867,11 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
       break
     }
     // The caller already spoke again: stop before acting, unless something was done this turn.
-    if (opts.isStale?.() && !ctx.committed) {
-      await event(env, conv, 'turn', false, 'talked_over', now)
-      return { ok: false, error: 'stale' }
-    }
-    // Voice: a calendar lookup or booking is two model calls plus Google, several seconds of silence. A caller who
-    // hears nothing talks again and the turn is lost (talked_over), so say a fixed holding line first (never a claim).
-    // (Normally already said at the tool call's start, see onToolStart; this covers a non-streamed start.)
-    if (speak && !reply && !held && !saidAny) {
-      const line = holdLine(uses.map((u) => u.name))
-      if (line) {
-        speak(line)
-        held = line
-      }
-    }
+    if (opts.isStale?.() && !ctx.committed) return stale()
+    // Voice: a calendar lookup or booking is two model calls plus Google, seconds of silence a caller would talk over
+    // (the turn is then lost: talked_over). The holding line is armed at the tool call's start (onToolStart); this
+    // covers a non-streamed start. It fires only if the answer's first words take longer than HOLD_AFTER_MS.
+    if (speak && !reply && !held && !saidAny) arm(uses.map((u) => u.name))
     const results = []
     for (const u of uses) {
       let out
@@ -726,21 +883,19 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
         out = { ok: false, error: 'tool_failed', note: "Something went wrong on our side: say so honestly and offer a callback request or the booking page." }
       }
       timing.toolMs += Date.now() - tt
-      const detail = out.ok ? (out.booked ? 'booked' : out.already_booked ? 'already_booked' : out.recorded ? out.kind : out.recheck ? 'recheck' : null) : out.error
-      await event(env, conv, u.name, out.ok, detail, now)
+      const detail = out.ok ? (out.booked ? 'booked' : out.already_booked ? 'already_booked' : out.recorded ? out.kind : out.recheck ? 'recheck' : out.resolved === false ? out.basis : out.basis === 'town_fully_served' ? out.basis : null) : out.error
+      note(u.name, out.ok, detail)
       results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out), ...(out.ok ? {} : { is_error: true }) })
     }
     transcript.push({ role: 'user', content: results })
   }
   // Voice: the caller spoke again before this turn answered. Retell discards the answer, so this is not a model
   // failure (never 'no_reply', no fallback generated); record it as talked over so slow answers are diagnosable.
-  if (opts.isStale?.() && !ctx.committed && !failed) {
-    await event(env, conv, 'turn', false, 'talked_over', now)
-    return { ok: false, error: 'stale' }
-  }
+  if (opts.isStale?.() && !ctx.committed && !failed) return stale()
+  disarm()
   if (!reply && !failed) failed = 'no_reply'
   if (failed) {
-    await event(env, conv, 'model', false, failed, now)
+    note('model', false, failed)
     reply = fallbackText(k, channel)
     speak?.(reply)
     if (!conv.outcome) conv.outcome = 'error'
@@ -759,15 +914,23 @@ export async function respond(env, customer, conv, userText, opts = {}, now = Da
     reply = `${reply} ${fix}`.trim()
   }
   if (blocked) {
-    await event(env, conv, blocked === 'narration' ? 'blocked_narration' : 'blocked_price', false, blocked, now)
+    note(blocked === 'narration' ? 'blocked_narration' : 'blocked_price', false, blocked)
     if (blocked !== 'narration') conv.state.note = `Your previous reply stated a price that isn't in the verified facts (or said a price in words), so the customer was told instead: "${safePrice(k)}". Only state prices exactly as listed, in digits with $.`
+    else conv.state.note = 'Your previous reply narrated a check ("let me check", "one moment", "thank you for providing"…); that sentence was not shown. Checks are silent: give the answer directly.'
   }
-  if (opts.isStale?.() && !ctx.committed) return { ok: false, error: 'stale' }
+  if (opts.isStale?.() && !ctx.committed) {
+    await Promise.all(pending)
+    return { ok: false, error: 'stale' }
+  }
   if (!conv.outcome && !failed) conv.outcome = 'info'
   if (held) reply = `${held} ${reply}`.trim()
+  timing.totalMs = Date.now() - t0
   log('customer', text)
   log('receptionist', reply)
+  // The receptionist line carries the turn's timings (numbers only) for the owner's view.
+  conv.state.log[conv.state.log.length - 1].timing = { firstTokenMs: timing.firstTokenMs, firstTextMs: timing.firstTextMs, holdMs: timing.holdMs, toolMs: timing.toolMs, modelMs: timing.modelMs, modelCalls: timing.modelCalls, totalMs: timing.totalMs }
   conv.summary = summaryOf(conv, k)
+  await Promise.all(pending)
   const next = conv.turns + 1
   const saved = await db
     .prepare(
@@ -822,14 +985,16 @@ function summaryOf(conv, k) {
   if (s.requests?.callback) parts.push('Callback requested')
   if (s.requests?.message) parts.push('Left a message')
   if (s.customer?.zip) parts.push(`ZIP ${s.customer.zip}${s.inArea === false ? ' (outside area)' : ''}`)
+  else if (s.area?.place) parts.push(`${s.area.place}${s.area.served ? '' : ' (area not confirmed)'}`)
   if (!parts.length) parts.push('Questions answered')
   return parts.join(' · ').slice(0, 200)
 }
 
-// What the customer saw or heard (state.log), for the customer page and the owner. Older conversations without a log
-// fall back to the final text of each model answer (never text that came with a tool call).
+// What the customer saw or heard (state.log), for the customer page and the owner (receptionist lines carry the turn's
+// timings, numbers only). Older conversations without a log fall back to the final text of each model answer (never
+// text that came with a tool call).
 export function visibleTranscript(transcript, state = {}) {
-  if (Array.isArray(state.log) && state.log.length) return state.log.map((l) => ({ who: l.who, text: l.text, channel: l.channel, at: l.at ?? null }))
+  if (Array.isArray(state.log) && state.log.length) return state.log.map((l) => ({ who: l.who, text: l.text, channel: l.channel, at: l.at ?? null, ...(l.timing ? { timing: l.timing } : {}) }))
   const lines = []
   for (const m of transcript) {
     if (m.role === 'user' && typeof m.content === 'string') lines.push({ who: 'customer', text: m.content })

@@ -211,16 +211,19 @@ test('latency harness: first chunk follows the model\'s first token closely; tim
     done0 += got.length
   }
   assert.equal(t.length, N)
-  assert.ok(t.every((e) => e.r === 'ok' && e.first >= FIRST && e.total >= e.first && e.calls === 1))
-  // Our overhead before the first spoken words (D1 reads, prompt build, SDK), on top of the model's first token.
+  assert.ok(t.every((e) => e.r === 'ok' && e.tok >= FIRST && e.first >= e.tok && e.total >= e.first && e.calls === 1 && e.hold === -1), JSON.stringify(t[0]))
+  // Our overhead before the first spoken words (D1 reads, prompt build, SDK), on top of the model's first token;
+  // the gap between the model's first token (tok) and the first whole sentence handed to Retell (first).
   const overhead = t.map((e) => e.first - FIRST)
+  const before = t.map((e) => e.tok - FIRST)
+  const sentence = t.map((e) => e.first - e.tok)
   const totals = t.map((e) => e.total)
-  if (process.env.VOICE_BENCH) console.log(JSON.stringify({ harness: 'mocked', n: N, modelFirstTokenMs: FIRST, overheadP50: pct(overhead, 50), overheadP95: N >= 20 ? pct(overhead, 95) : null, overheadMax: Math.max(...overhead), totalP50: pct(totals, 50), totalP95: N >= 20 ? pct(totals, 95) : null }))
+  if (process.env.VOICE_BENCH) console.log(JSON.stringify({ harness: 'mocked', n: N, modelFirstTokenMs: FIRST, beforeModelP50: pct(before, 50), beforeModelP95: N >= 20 ? pct(before, 95) : null, firstTokenToSentenceP50: pct(sentence, 50), overheadP50: pct(overhead, 50), overheadP95: N >= 20 ? pct(overhead, 95) : null, overheadMax: Math.max(...overhead), totalP50: pct(totals, 50), totalP95: N >= 20 ? pct(totals, 95) : null }))
   assert.ok(pct(overhead, 50) < 250, `overhead P50 ${pct(overhead, 50)} ms`)
   // Events carry codes and numbers only (no transcript text).
   const raw = db.sql.prepare("SELECT detail FROM receptionist_events WHERE kind = 'voice_turn'").all().map((r) => r.detail).join('|')
   assert.ok(!/question|ZIP/i.test(raw))
-  assert.match(raw, /^r=ok;q=\d+;first=\d+;total=\d+;model=\d+;tools=\d+;calls=1/)
+  assert.match(raw, /^r=ok;q=\d+;tok=\d+;first=\d+;hold=-1;total=\d+;model=\d+;tools=\d+;calls=1/)
 })
 
 test('barge-in: the stale answer is aborted at once, so the new turn does not wait for it', async () => {
@@ -248,18 +251,34 @@ test('barge-in: the stale answer is aborted at once, so the new turn does not wa
   assert.deepEqual(turns.map((e) => e.r), ['stale', 'ok'])
 })
 
-test('holding line is spoken as soon as a calendar lookup starts, not after the whole model call', async () => {
+// Changed with the conditional holding line (HOLD_AFTER_MS): a quick lookup is answered directly; the line is spoken
+// only when the caller would otherwise wait, timed from the tool call's start (not from the end of the model call).
+test('holding line: a quick calendar lookup gets none; a slow one gets it once, about HOLD_AFTER_MS after the tool call started and before the tool returned', async () => {
+  const { HOLD_AFTER_MS } = await import('../server/receptionist/engine.js')
   await seed('alpha')
-  const { s } = await callFor('alpha')
-  const t0 = Date.now()
-  script.push(tools([use('find_available_times', { date: '', part_of_day: 'any' })], { firstMs: 10, stallMs: 400 }))
+  const { s, convId } = await callFor('alpha')
+  // Quick: tool call streamed in ~10 ms, Google at once, the answer's first token 10 ms later → no holding line.
+  script.push(tools([use('find_available_times', { date: '', part_of_day: 'any' })], { firstMs: 10 }))
   script.push(said('I have Tuesday at 9 or Wednesday at 2.', { firstMs: 10 }))
   ask(s, 1, [{ role: 'user', content: 'when can you come' }])
   assert.ok(await until(() => done(s, 1)))
-  const hold = s.sent.find((m) => m.response_id === 1 && m.content === 'One moment while I check the calendar.')
+  assert.deepEqual(s.sent.filter((m) => m.response_id === 1 && m.content).map((m) => m.content), ['I have Tuesday at 9 or Wednesday at 2.'], 'direct answer, no holding line')
+  // Slow: Google takes 1.5 s → the line at ~HOLD_AFTER_MS after the tool call started, once; the answer after it.
+  googleDelayMs = 1500
+  const t0 = Date.now()
+  script.push(tools([use('find_available_times', { date: '', part_of_day: 'morning' })], { firstMs: 10 }))
+  script.push(said('Thursday at 11 works.', { firstMs: 10 }))
+  ask(s, 2, [{ role: 'user', content: 'when can you come' }, { role: 'agent', content: 'I have Tuesday at 9 or Wednesday at 2.' }, { role: 'user', content: 'any mornings' }])
+  assert.ok(await until(() => done(s, 2), 5000))
+  const hold = s.sent.find((m) => m.response_id === 2 && m.content === 'One moment while I check the calendar.')
   assert.ok(hold, 'holding line spoken')
-  assert.ok(hold.t - t0 < 300, `holding line after ${hold.t - t0} ms (the tool call itself took 400+ ms to finish)`)
+  assert.ok(hold.t - t0 >= HOLD_AFTER_MS - 50 && hold.t - t0 < HOLD_AFTER_MS + 400, `holding line after ${hold.t - t0} ms (Google took 1500 ms)`)
   assert.equal(s.sent.filter((m) => m.content === 'One moment while I check the calendar.').length, 1, 'said once')
+  assert.deepEqual(s.sent.filter((m) => m.response_id === 2 && m.content).map((m) => m.content), ['One moment while I check the calendar.', 'Thursday at 11 works.'])
+  const [quick, slow] = turnEvents(convId)
+  assert.equal(quick.hold, -1)
+  // The holding line is the first chunk Retell gets (hold == first); the answer's first token (tok) comes after the tool.
+  assert.ok(slow.hold >= HOLD_AFTER_MS - 50 && Math.abs(slow.hold - slow.first) <= 5 && slow.tok > slow.hold && slow.tools >= 1400 && slow.calls === 2, JSON.stringify(slow))
 })
 
 test('a failed turn (storage error) never silences the rest of the call; a frame without response_id is ignored', async () => {

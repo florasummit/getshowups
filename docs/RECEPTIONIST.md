@@ -11,10 +11,22 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
   - The per-business system prompt is cached.
   - No server-side model fallback (owner decision 2026-11-16).
   - Voice: when the model's first move is a calendar lookup or a booking and it has said nothing yet, a fixed holding
-    line ("One moment while I check the calendar." / "One moment, please.") is spoken before the tool runs, so the
-    caller doesn't talk over the seconds of silence (lost turns are recorded as `turn:talked_over`). It is never an
+    line ("One moment while I check the calendar." / "One moment, please.") is armed the moment the tool call starts
+    and spoken ONLY if `HOLD_AFTER_MS` (700 ms) pass without the answer's first words (a quick lookup plus a quick
+    second model call is heard as a direct answer; a slow Google free/busy gets the line once, before the tool returns),
+    so the caller doesn't talk over seconds of silence (lost turns are recorded as `turn:talked_over`). It is never an
     answer by itself (`model:no_reply` still applies). `RECEPTIONIST_VOICE_MODEL` can point voice at a faster model
     (approval; cost is still estimated at Opus prices, so caps stay conservative).
+  - Direct answers: checks are silent. The prompt forbids "let me check / I'll verify / thank you for providing /
+    please wait / one moment", and the narration filter (`sentenceProblem` → `narration`) drops such a sentence on its
+    own, in voice before it is spoken and in chat before it is shown, while the rest of the answer still goes out
+    (`blocked_narration` event; the model is corrected on the next turn). When a check confirms the area the reply
+    states it ("Yes, we service West Ashley. What's going on with your pool?") and moves on.
+  - Memory: everything said once is never asked again. Every turn carries a "Known so far" note: details saved by the
+    tools, the place the area check resolved, and (without live owner rules) a deterministic reading of the customer's
+    words (`server/intelligence/understand.js`, no model, no I/O): place, problem/service, day or part of day, with
+    corrections ("actually it's Mount Pleasant") replacing the old value and flagged. With live owner rules the rules'
+    turn note carries the same facts. Receptionist lines in the transcript carry the turn's timings (numbers only).
 - **Knowledge:** only the business's records: services and prices, ZIPs, towns, hours, appointment mode, phone,
   "what customers should know" and the owner's receptionist notes. A generic industry playbook (pool, HVAC, plumbing,
   cleaning) shapes which questions to ask and what counts as urgent.
@@ -23,8 +35,20 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
     deterministically (phone/ZIP digits must be in what the customer typed or said, spoken digits like "two nine four
     zero three" included; email must be typed) and kept in the conversation's state. Every turn tells the model what is
     already known, so nothing is asked twice; a value that fails a check gets a targeted re-ask of just that value;
-  - `check_service_area`;
-  - `find_available_times`: real Google free/busy through `openSlots` (labels carry the time zone);
+  - `check_service_area {zip, place}` (one of them, the other empty): called the moment the customer says where they
+    are, without demanding a ZIP. Resolution, authoritative sources only: a 5-digit ZIP → `areaFor` (the ZIP rule,
+    unchanged: an exact listed ZIP, otherwise the service-area request path); a `place` (town, neighbourhood, street
+    address, description) → served when the business has no ZIP list, or when the place is one of the owner's
+    PUBLISHED fully served towns (Teach Your AI `coverage.cityWide`, only while rules are live for that business:
+    basis `town_fully_served`, a ZIP is asked once with the booking details); a listed town that is not fully served →
+    not resolved, the tool tells the model to ask exactly ONE clarification ("What part of Charleston?", or the ZIP when
+    the place already names a part); anything else → not resolved, ask for the ZIP. It never claims coverage from
+    closeness or from one listed ZIP, and never rejects a place: only a ZIP can be outside. "North Charleston" never
+    matches "Charleston" (direction prefixes; the longest listed town wins). Booking validation is unchanged: a booking
+    still records a ZIP and `areaFor` decides at booking, so a fully served town whose ZIP is not on the list still
+    becomes a service-area request, never a booking;
+  - `find_available_times`: real Google free/busy through `openSlots` (labels carry the time zone); the options are
+    offered plainly ("I have Tuesday at 10 or Wednesday at 2. Does either work?"), never narrated;
   - `book_appointment {slot_id, confirmation_quote}`: uses the saved details; the existing `bookAppointment`, with its
     double-booking guard, Google event, confirmation and reminders. Email is optional (no email → no invitee, no
     confirmation email, `no_email`);
@@ -124,7 +148,65 @@ Kill switch: `RECEPTIONIST_ENABLED=false` hides chat and voice everywhere. Owner
 
 Voice release gate (2026-11-19): voice is offered only to businesses listed in `RECEPTIONIST_VOICE_BUSINESSES`
 (comma-separated ids, no wildcard; empty = nobody). Others see "voice is in testing"; chat is unaffected. Details and
-the proposed Retell settings (`scripts/retell-setup.mjs --tuned`): docs/COMMS_RELIABILITY.md.
+the proposed Retell settings: docs/COMMS_RELIABILITY.md and "Latency: where the time goes" below.
+
+## Latency: where the time goes (Retell voice path, 2026-11-21)
+
+One caller turn travels: caller stops speaking → Retell end-of-turn detection → `response_required` frame over the
+WebSocket → our handler (`attachRetellSocket` → `respond`) → D1 reads → first model call (Claude, streaming) → tool
+(Google free/busy or a booking) → second model call → sentences streamed back → Retell TTS → audio. Only the middle of
+that chain runs on our side; what we can measure without a real call is exactly that middle, with the model mocked.
+
+**Measured locally (mocked model, in-memory SQLite as D1; `VOICE_BENCH=1 VOICE_BENCH_N=40 node --test
+test/voice-reliability.test.js`, 2026-11-21).** These are our own overhead, not Retell's and not Claude's:
+
+| What | Number |
+| --- | --- |
+| Work before the model request leaves (D1 reads, prompt build, SDK) | P50 3 ms, P95 5 ms |
+| Model first token → first whole sentence handed to Retell | P50 6 ms |
+| Total overhead over the model's first token until the first chunk reaches Retell | P50 9 ms, P95 11 ms, max 24 ms |
+| D1 statements per voice turn | 7 (plain answer), 9 (calendar lookup: + availability record and tool event) |
+| Cached system prompt / tools JSON | ≈5.5k chars (≈1.4k tokens) / ≈4.5k chars (≈1.1k tokens) |
+| Whole turn with a zero-latency model | ≈55 ms (40 ms of it is the mock's first token) |
+
+Event rows are now written off the critical path (settled before the save, never awaited one by one between the model
+and its tools). In production each D1 statement is a network round trip (not measured here), so the 7–9 statements
+per turn are the one part of our overhead that grows outside the harness.
+
+**Cannot be measured without a real call** (no numbers are claimed): Retell's end-of-turn delay (speech recognition
+`stt_mode`, endpointing, `responsiveness`), the WebSocket hop, Claude's time to first token for Opus 5.5 at effort
+`low` with a ≈2.5k-token cached prefix plus history, Google free/busy latency, and Retell's TTS start. Per-turn
+numbers for all of this are recorded for every real call as `voice_turn` events (`q` queue wait, `tok` model first
+token, `first` first chunk to Retell, `hold` holding line or -1, `total`, `model`, `tools`, `calls`), and the owner's
+transcript lines carry `firstTokenMs / firstTextMs / holdMs / toolMs / modelMs / modelCalls / totalMs`. The first real
+calls with these events are the measurement.
+
+**Where to expect the time, from the design:** (1) Claude's first token on each model call: a tool turn has two of
+them (one before, one after the tool); the holding line covers the gap only when it exceeds 700 ms. (2) Google
+free/busy (8 s timeout) inside `find_available_times`. (3) Retell end-of-turn detection before the frame even reaches
+us. (4) D1 round trips (7–9 per turn). Levers, in order: `RECEPTIONIST_VOICE_MODEL` (a smaller current-generation model
+for voice turns; approval, cost still estimated at Opus prices), keep effort `low` (Opus 5.5 cannot switch thinking
+off; effort is the only control), the Retell agent profile below, and fewer D1 reads per turn (knowledge is re-read
+every turn; a per-call cache would remove several statements but is not done here).
+
+**Proposed Retell agent profile (test agent only; unmeasured):** `scripts/retell-setup.mjs --tuned` sends
+`TUNED_SETTINGS` (responsiveness 1, interruption_sensitivity 0.8, backchannel off, stt_mode fast, background-speech
+denoising, reminders 10 s × 2, end call after 60 s of silence, 15 min max, PII-free storage kept 30 days, signed URLs).
+Retell has no separate end-of-turn field: end-of-turn is `responsiveness` + the STT endpointing
+(`--endpointing-ms <n>` → `custom_stt_config` with Deepgram, 10–3000 ms) + `interruption_sensitivity`. `--tuned` is
+refused for the live agent: it needs `--test-agent "<name>"`, which creates or updates a second agent with its own name
+(same engine URL, same secret), so defaults and profile can be compared call for call. Nothing is sent without
+`--apply`; nothing is published. Not run; approval needed (paid voice usage):
+
+```
+{ security find-generic-password -a getshowups -s getshowups-retell-api-key -w; printf '%s\n' "$RETELL_WS_SECRET"; } \
+  | node scripts/retell-setup.mjs --tuned --test-agent "GetShowUps receptionist (test)"            # dry run
+{ …same stdin… } | node scripts/retell-setup.mjs --tuned --test-agent "GetShowUps receptionist (test)" --apply
+{ …same stdin… } | node scripts/retell-setup.mjs --tuned --test-agent "GetShowUps receptionist (test)" --endpointing-ms 300 --apply
+```
+
+Pointing a test business's calls at the test agent needs a way to choose the agent per business (today one
+`RETELL_AGENT_ID`); that is not built here.
 
 ## Personal end-to-end test (after activation)
 
@@ -146,12 +228,16 @@ You, as a new business owner (Stripe stays in sandbox):
 
 ## Quality evaluation
 
-`test/fixtures/receptionist-scenarios.js`: 100 scenarios (pool, HVAC, plumbing, cleaning × 25) covering bookings,
+`test/fixtures/receptionist-scenarios.js`: 106 scenarios: 100 (pool, HVAC, plumbing, cleaning × 25) covering bookings,
 corrections, price objections, emergencies, frustration, unclear needs, wrong assumptions, unavailable and invented
-times, double booking, out of area, human requests, outages, prompt injection and cross-tenant attempts.
+times, double booking, out of area, human requests, outages, prompt injection and cross-tenant attempts, plus 6
+conversation-quality scenarios (pool, with West Ashley published as fully served): direct coverage answer, ambiguous
+city → one clarification, no unnecessary ZIP request, no narration, memory across one message, a correction.
 
-- **Simulated (free, in CI):** `test/receptionist-eval.test.js` runs all 100 scenarios against an adversarial model that
+- **Simulated (free, in CI):** `test/receptionist-eval.test.js` runs all 106 scenarios against an adversarial model that
   attacks on every turn. It requires 0 unauthorized bookings, 0 unoffered times shown, 0 invented prices shown and 0
   cross-tenant exposure. This measures the guards, not conversation quality.
 - **Real model (paid, approval):** `ANTHROPIC_API_KEY=… node scripts/receptionist-eval.mjs --real --yes-spend` measures
-  booking success, escalation, factual accuracy, latency and cost per scenario. Estimated $3–10 for all 100.
+  booking success, escalation, factual accuracy, latency and cost per scenario, and the quality counters
+  (`narration_shown`, `zip_asked_unnecessarily`, `clarification_missing/repeated`, `coverage_claimed`,
+  `coverage_not_stated`, `reasked_location/problem/day`). Estimated $3–10 for all 106.
