@@ -119,6 +119,8 @@ test('a Lab Retell call: our server creates it with the shared agent, the Lab ca
   // Gates on the route: other business / wrong token 404, non-admin 401/403, cross-origin 403, wrong provider 409, reconnect cap.
   assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { cookie: staff, body: { customer: 'realco', id, token } })).status, 404)
   assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { cookie: staff, body: { customer: 'getshowups-lab', id, token: 'wrong' } })).status, 404)
+  assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { cookie: staff, body: { customer: 'getshowups-lab', id } })).status, 404, 'a missing token is never a pass')
+  assert.equal(await loadLabSession(env, 'getshowups-lab', id, undefined), null)
   assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { body: { customer: 'getshowups-lab', id, token } })).status, 401)
   assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { cookie: staff, origin: 'https://evil.example', body: { customer: 'getshowups-lab', id, token } })).status, 403)
   for (let i = 1; i < RETELL_LAB_MAX_CONNECTS; i++) assert.equal((await call(retellApi, '/api/platform/voice-lab/retell', { cookie: staff, body: { customer: 'getshowups-lab', id, token } })).status, 200)

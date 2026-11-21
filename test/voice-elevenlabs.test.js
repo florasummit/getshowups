@@ -170,7 +170,8 @@ test('connect gates: unconfigured → 404 code; wrong provider → 409; ended �
   assert.equal(fetches.filter(([u]) => u.startsWith(EL)).length, n)
   const stored = JSON.parse(db.sql.prepare('SELECT state FROM receptionist_conversations WHERE id = ?').get(s.conv.id).state)
   assert.equal(stored.lab.elevenlabs.connects, MAX_CONNECTS_PER_SESSION)
-  // Ended sessions never get a new connection.
+  // Ended sessions never get a new connection (the first session is ended first: one Lab call at a time).
+  await endLabSession(env, s, {})
   const two = await startEl()
   await endLabSession(env, two.s, {})
   const reloaded = await loadLabSession(env, 'alpha', two.id, two.token)

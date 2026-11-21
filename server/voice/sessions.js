@@ -62,7 +62,9 @@ export async function loadLabSession(env, customerId, id, token) {
   const row = await getCustomer(env.ONBOARDING_DB, customerId)
   if (!row) return null
   const customer = customerFromRow(row)
-  const conv = await loadConversation(env, customer, id, token)
+  // The token is always checked here: loadConversation skips the check for an undefined token (server-internal
+  // callers), so a request body that leaves it out must not load someone else's session.
+  const conv = await loadConversation(env, customer, id, String(token ?? ''))
   if (!conv || !conv.state?.lab) return null
   return { customer, conv }
 }
