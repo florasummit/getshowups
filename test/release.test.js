@@ -161,7 +161,15 @@ const apptRows = () => db.sql.prepare('SELECT status FROM appointments').all().m
 
 // ---------- rate limits ----------
 
+// Fixed windows reset on wall-clock boundaries: a loop that straddles one sees the count start over (CI hit this at
+// 20:10:00 UTC). Start each limit test a safe distance from the next edge.
+const awayFromWindowEdge = async (windowSec) => {
+  const left = windowSec * 1000 - (Date.now() % (windowSec * 1000))
+  if (left < 4000) await new Promise((r) => setTimeout(r, left + 50))
+}
+
 test('rate limit: lead submissions per IP → 429 with Retry-After; other IPs unaffected', async () => {
+  await awayFromWindowEdge(600)
   seedBookable()
   for (let i = 0; i < 10; i++) assert.equal((await lead()).status, 201)
   const limited = await lead()
@@ -174,6 +182,7 @@ test('rate limit: lead submissions per IP → 429 with Retry-After; other IPs un
 })
 
 test('rate limit: per-business lead cap stops floods from many IPs', async () => {
+  await awayFromWindowEdge(3600)
   seedBookable()
   for (let i = 0; i < 100; i++) assert.equal((await lead({ ip: `10.0.${Math.floor(i / 250)}.${i % 250}` })).status, 201)
   assert.equal((await lead({ ip: '10.9.9.9' })).status, 429)
