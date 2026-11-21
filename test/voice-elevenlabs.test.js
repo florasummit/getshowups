@@ -147,8 +147,9 @@ test('connect gates: unconfigured → 404 code; wrong provider → 409; ended �
   const { s } = await startEl()
   assert.deepEqual(await connectElevenLabs({ ...env, ELEVENLABS_AGENT_ID: '' }, s), { ok: false, error: 'elevenlabs_not_configured', httpStatus: 404 })
   assert.equal(providerStatus({ ...env, ELEVENLABS_API_KEY: 'short' }).elevenlabs.reason, 'elevenlabs_not_configured')
-  const openai = await startLabSession(env, admin, { customer: 'alpha', provider: 'openai' })
-  const so = await loadLabSession(env, 'alpha', openai.session.id, openai.session.token)
+  // One Lab call at a time: the open session blocks a second start; a session of another provider is refused here.
+  assert.equal((await startLabSession(env, admin, { customer: 'alpha', provider: 'openai' })).error, 'lab_busy')
+  const so = { customer: s.customer, conv: { ...s.conv, state: { ...s.conv.state, lab: { ...s.conv.state.lab, provider: 'openai' } } } }
   assert.deepEqual(await connectElevenLabs(env, so), { ok: false, error: 'wrong_provider', httpStatus: 409 })
   // Provider failures: codes only, the session's connection count is untouched.
   signedUrlResponder = () => new Response('{"detail":"nope"}', { status: 401 })
