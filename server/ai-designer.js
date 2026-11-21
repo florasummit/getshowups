@@ -11,7 +11,8 @@ import { FONTS, ICONS, keepLegalPages, LIMITS, SECTION_TYPES, validateSpec } fro
 import { stockFor } from './site-design.js'
 import { industryOf } from './website-ai.js'
 import { approvedClaimsFor } from './landing.js'
-import { displayBrand, loadWebsite, logoAssetIdsFor, photoIds, saveDraft, validateContent } from './website.js'
+import { assetIdsFor, displayBrand, loadWebsite, logoAssetIdsFor, photoIds, saveDraft, validateContent } from './website.js'
+import { restoreCheckpoint } from './website-history.js'
 import { claudeError, openAiError, strictSchema } from './ai-providers.js'
 import { MAX_OUTPUT, inputTokensFor, resolveModel, settleUsage } from './ai-models.js'
 import { recordEvent } from './auditlog.js'
@@ -301,17 +302,21 @@ export async function designContext(env, customer) {
   // Only reviewed content: the draft (an import reaches it only through applyImport, where the owner chooses fields and
   // fixes). The raw import is NOT sent: it can hold copy the owner rejected (template text, typos), and anything in the
   // prompt's facts also counts as "known" for the invented-number check.
-  const [website, profile, claims, assets] = await Promise.all([
+  const [website, profile, claims, assets, owned] = await Promise.all([
     loadWebsite(db, customer),
     db.prepare('SELECT * FROM business_profiles WHERE customer = ?1').bind(customer.id).first(),
     approvedClaimsFor(db, customer.id),
     db.prepare('SELECT id FROM website_assets WHERE customer = ?1 ORDER BY created_at DESC LIMIT 24').bind(customer.id).all(),
+    assetIdsFor(db, customer.id),
   ])
+  // The CURRENT draft is authoritative (its logo included: `logo: null` = the owner chose no logo). Nothing here is
+  // read from earlier turns, previous designs or imports.
   const draft = website.draft
   const cities = profile ? JSON.parse(profile.cities || '[]') : []
   const services = (draft.services || []).map((s) => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: s.price || '' }))
   const industry = industryOf(customer, profile ? { ...profile, services: JSON.parse(profile.services || '[]') } : null, draft)
-  // Photos only: never a current OR earlier logo (server/website.js logoAssetIdsFor).
+  // Photos only: never a current OR earlier logo (server/website.js logoAssetIdsFor remembers every logo ever set, so
+  // a logo removed from an unpublished draft is never offered to the model as a photo either).
   const assetIds = photoIds(new Set(assets.results.map((a) => a.id)), await logoAssetIdsFor(db, customer.id, draft))
   const facts = {
     businessName: customer.name,
@@ -330,7 +335,17 @@ export async function designContext(env, customer) {
     ...stockFor(industry).map((s) => ({ ref: `stock:${s.id}`, kind: 'licensed stock photo', description: s.alt })),
   ]
   const factsText = JSON.stringify(facts)
-  return { db, draft, facts, images, assetIds, claims, services, cities, phone: profile?.phone || '', factsText }
+  // assetIds: photos the design may place (validateSpec). owned: every image of the business, logo included, for
+  // validating the whole content document (validateContent checks content.logo against it).
+  return { db, draft, facts, images, assetIds, owned, claims, services, cities, phone: profile?.phone || '', factsText }
+}
+
+// The model's answer may describe a site only: content fields (the logo above all) are carried from the CURRENT draft,
+// never taken from the answer, the conversation or earlier designs. A removed logo (null) stays removed.
+export const siteOnly = (answer) => {
+  if (!answer || typeof answer !== 'object') return answer
+  const { logo: _logo, hero: _hero, photos: _photos, ...site } = answer
+  return site
 }
 
 const userPrompt = (ctx, history, current, message) =>
@@ -454,7 +469,7 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
       await recordEvent(ctx.db, { type: 'website.design_turn', actor: by ? `owner:${by}` : 'system', customer: customer.id, capability: 'website.ai', resource: { type: 'website', id: customer.id }, outcome: 'failure', details: { error: r.error, provider: cred.provider, model: m.model, ...(r.detail ? { status: r.detail.status, type: r.detail.type, code: r.detail.code } : {}) } })
       return { ok: false, httpStatus: { invalid_key: 400, provider_billing: 402, provider_rejected: 422, provider_rate_limited: 429, ai_declined: 422 }[r.error] || 502, error: r.error }
     }
-    const answer = fromStrict(compact ? fromCompact(r.raw?.site) : r.raw?.site)
+    const answer = siteOnly(fromStrict(compact ? fromCompact(r.raw?.site) : r.raw?.site))
     const { spec, warnings } = validateSpec(answer, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims, factsText: ctx.factsText, brand: ctx.facts?.brandName || customer.name })
     const report = checkDesign({ raw: answer, spec, warnings, previous: different ? current : null, mode: different ? 'different' : 'design', fresh: !current || different })
     attempts.push({ r, spec, warnings, report, ms: Date.now() - t0 })
@@ -476,8 +491,10 @@ export async function designTurn(env, customer, message, { by, onProgress, now =
   }
   const { spec, warnings, report, r } = chosen
   const reply = String(r.raw?.reply || '').replace(/\s+/g, ' ').trim().slice(0, 600) || 'Here is the design.'
-  // The owner's legal pages (privacy policy, terms) are kept word for word through any redesign.
-  const [errors, content] = validateContent({ ...ctx.draft, site: keepLegalPages(spec, current) }, ctx.claims, ctx.assetIds)
+  // The owner's legal pages (privacy policy, terms) are kept word for word through any redesign. Everything that isn't
+  // the design (logo, photos, services, policies, redirects) is the CURRENT draft's, logo explicitly: null stays null.
+  // Validated against every image the business owns (ctx.owned): the logo is one of them even though it is never a photo.
+  const [errors, content] = validateContent({ ...ctx.draft, site: keepLegalPages(spec, current), logo: ctx.draft.logo ?? null }, ctx.claims, ctx.owned, { photoIds: ctx.assetIds })
   if (errors.length) return { ok: false, httpStatus: 502, error: 'ai_invalid_output' }
   await ctx.db.batch([
     ctx.db
@@ -505,13 +522,22 @@ export async function undoTurn(env, customer, generationId, now = Date.now()) {
   const g = await db.prepare('SELECT content FROM website_generations WHERE id = ?1 AND customer = ?2').bind(generationId, customer.id).first()
   if (!g) return { ok: false, httpStatus: 404, error: 'not_found' }
   const stored = JSON.parse(g.content)
-  if (stored.kind !== 'designer') return { ok: false, httpStatus: 400, error: 'invalid_request' }
   const ctx = await designContext(env, customer)
+  // A precise change (server/designer-intents.js) points at the server copy taken before it: that whole draft comes back.
+  if (stored.kind === 'checkpoint' && stored.reason === 'before_designer_change') {
+    const r = await restoreCheckpoint(db, customer.id, generationId, { claims: ctx.claims, assetIds: ctx.owned, current: ctx.draft, now })
+    if (!r.ok) return { ok: false, httpStatus: r.httpStatus, error: r.error }
+    await saveDraft(db, customer.id, r.content, now)
+    await db.prepare("INSERT INTO website_design_turns (customer, role, text, generation_id, created_at) VALUES (?1, 'designer', 'Undone: the draft is back as it was before that change.', NULL, ?2)").bind(customer.id, now).run()
+    return { ok: true }
+  }
+  if (stored.kind !== 'designer') return { ok: false, httpStatus: 400, error: 'invalid_request' }
+  // Only the DESIGN goes back; the logo and every other content field stay as the current draft has them.
   const site = stored.previous ? validateSpec(stored.previous, { assetIds: ctx.assetIds, services: ctx.services, claims: ctx.claims }).spec : null
   const next = { ...ctx.draft }
   if (site) next.site = site
   else delete next.site
-  const [errors, content] = validateContent(next, ctx.claims, ctx.assetIds)
+  const [errors, content] = validateContent(next, ctx.claims, ctx.owned, { photoIds: ctx.assetIds })
   if (errors.length) return { ok: false, httpStatus: 409, error: 'invalid_content' }
   await saveDraft(db, customer.id, content, now)
   await db.prepare("INSERT INTO website_design_turns (customer, role, text, generation_id, created_at) VALUES (?1, 'designer', 'Undone: the previous design is back.', NULL, ?2)").bind(customer.id, now).run()

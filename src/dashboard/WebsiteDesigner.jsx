@@ -23,6 +23,36 @@ const ERRORS = {
 }
 const FIRST = ['Design a modern, premium website from my current website’s content', 'Design a bright, friendly one-page site that makes booking easy', 'Design an elegant site with a separate Services page']
 const NEXT = ['Make it feel more premium', 'Make booking more prominent', 'Try a darker palette', 'Add a Services page', 'Simplify the home page']
+// Precise changes (server/designer-intents.js): what was applied, and why something was not. Shown exactly as the
+// server reports them after re-reading the saved draft; never inferred here.
+const APPLIED = {
+  logo_removed: 'Logo removed',
+  logo_restored: 'Logo put back',
+  headline_changed: 'Headline changed',
+  section_renamed: 'Section heading changed',
+  section_text_changed: 'Section text changed',
+  image_removed: 'Picture removed',
+}
+const NOT_APPLIED = {
+  no_logo: 'There is no logo on the draft',
+  already_logo: 'The logo is already on the draft',
+  no_logo_available: 'No logo of yours to put back; upload one with the Logo control',
+  use_logo_control: 'Use the Logo control (Replace / Upload) in the editor',
+  cannot_name_file: 'Pictures can’t be picked by file name; use the Logo control',
+  claim: 'The text contains a claim we can’t verify',
+  invented_number: 'The text contains a number that isn’t in your records',
+  too_long: 'The text is too long',
+  not_found: 'Couldn’t find that on your draft',
+  ambiguous: 'Please say which one',
+  several: 'One picture at a time',
+  only_content: 'That picture is all the section has',
+  logo_separately: 'Logo changes go in a message of their own',
+  invalid_content: 'The change couldn’t be made safely',
+  verify_failed: 'The change couldn’t be confirmed',
+  empty: 'No new text was given',
+  invalid: 'Couldn’t apply that exactly as written',
+}
+const OPS = { remove_logo: 'Remove logo', restore_logo: 'Put logo back', replace_logo: 'Replace logo', set_headline: 'Change headline', remove_image: 'Remove picture', set_section_text: 'Change section text', clarify: 'Your request' }
 
 export default function WebsiteDesigner({ onChanged }) {
   const [data, setData] = useState(undefined)
@@ -68,7 +98,8 @@ export default function WebsiteDesigner({ onChanged }) {
         }
       }
       if (result?.type === 'done') {
-        setState(result.removed ? { note: `${result.removed} item(s) were left out because they weren’t allowed (for example promises we can’t verify).` } : {})
+        const precise = Array.isArray(result.applied) || Array.isArray(result.notApplied)
+        setState(precise ? { result: { applied: result.applied || [], notApplied: result.notApplied || [] } } : result.removed ? { note: `${result.removed} item(s) were left out because they weren’t allowed (for example promises we can’t verify).` } : {})
         await load()
         onChanged?.()
       } else setState({ error: ERRORS[result?.error] || 'Something went wrong. Please try again.' })
@@ -117,7 +148,7 @@ export default function WebsiteDesigner({ onChanged }) {
               </li>
               <li className="chat-designer" aria-live="polite">
                 <span className="chat-who">Designer</span>
-                <p className="fine">{state.chars ? `Designing… (${Math.round(state.chars / 100) / 10}k characters of design written)` : 'Thinking about your website…'} This usually takes one to three minutes.</p>
+                <p className="fine">{state.chars ? `Designing… (${Math.round(state.chars / 100) / 10}k characters of design written) This usually takes one to three minutes.` : 'Reading your request… A precise change (a headline, a picture, the logo) is done in a moment; a design takes one to three minutes.'}</p>
               </li>
             </>
           )}
@@ -151,7 +182,7 @@ export default function WebsiteDesigner({ onChanged }) {
       >
         <label className="field">
           <span>{data.hasSite ? 'Ask for a change' : 'Describe your website'}</span>
-          <textarea rows={3} maxLength={1200} value={text} onChange={(e) => setText(e.target.value)} placeholder={data.hasSite ? 'e.g. Make the home page feel calmer and add a page about weekly service' : 'e.g. Modern and premium, lots of water and light, booking front and centre'} />
+          <textarea rows={3} maxLength={1200} value={text} onChange={(e) => setText(e.target.value)} placeholder={data.hasSite ? 'e.g. Make the home page feel calmer — or a precise change: Remove my logo · Change the headline to … · Remove the photo in the About section' : 'e.g. Modern and premium, lots of water and light, booking front and centre'} />
         </label>
         <button className="btn btn-primary" disabled={state.busy || !text.trim()}>
           {state.busy ? 'Designing…' : data.hasSite ? 'Send' : 'Design my website'}
@@ -161,6 +192,21 @@ export default function WebsiteDesigner({ onChanged }) {
         <p className="fine" role="status">
           {state.note}
         </p>
+      )}
+      {state.result && (
+        <ul className="fine designer-result" role="status" aria-label="Result of your request">
+          {state.result.applied.map((code) => (
+            <li key={code}>
+              <strong>Applied:</strong> {APPLIED[code] || code}
+            </li>
+          ))}
+          {state.result.notApplied.map((x, i) => (
+            <li key={`${x.op}-${i}`}>
+              <strong>Not applied:</strong> {OPS[x.op] || x.op} · {NOT_APPLIED[x.reason] || 'Nothing changed'}
+            </li>
+          ))}
+          {!state.result.applied.length && !state.result.notApplied.length && <li>Nothing changed.</li>}
+        </ul>
       )}
       {state.error && (
         <p className="form-error" role="alert">
