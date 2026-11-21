@@ -1,4 +1,4 @@
-// The homepage story between the hero and pricing: the problem, how it works, Teach Your AI, industries.
+// The homepage story between the stage and pricing: the problem, how it works, Teach Your AI, industries.
 // Copy in content/site.js. Every status is what runs in production today.
 import Icon from './Icon.jsx'
 import SectionHeading from './SectionHeading.jsx'
@@ -10,13 +10,14 @@ export function Problem() {
   return (
     <section id="problem" className="section problem" aria-labelledby="problem-title">
       <div className="container">
-        <h2 id="problem-title" className="problem-title">
-          {problem.title}
-        </h2>
+        <div className="split-head">
+          <p className="eyebrow">The problem</p>
+          <h2 id="problem-title">{problem.title}</h2>
+        </div>
         <div className="problem-grid">
           {problem.items.map((p, i) => (
             <div key={p.title} className="problem-item">
-              <span className="problem-n" aria-hidden="true">
+              <span className="num" aria-hidden="true">
                 0{i + 1}
               </span>
               <h3>{p.title}</h3>
@@ -34,25 +35,24 @@ export function HowItWorks() {
   return (
     <section id="how-it-works" className="section how" aria-labelledby="how-title">
       <div className="container">
-        <SectionHeading eyebrow="How it works" title="From first message to finished job" intro="Six steps, one system. Each one says what it does today." />
-        <ol className="journey">
+        <SectionHeading id="how-title" eyebrow="How it works" title="From first message to finished job" intro="Six steps, one system. Each one says what it does today." />
+        <ol className="jr" aria-label="The six steps">
           {journey.map((s, i) => {
             const [label, tone] = STATUS[s.status]
             return (
-              <li key={s.id} className="journey-step">
-                <div className="journey-head">
-                  <span className="journey-n" aria-hidden="true">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <h3>{s.title}</h3>
-                  <span className={`status status--${tone}`}>{label}</span>
-                </div>
+              <li key={s.id} className="jr-step">
+                <span className="jr-dot" aria-hidden="true" />
+                <span className="num" aria-hidden="true">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <h3>{s.title}</h3>
+                <span className={`status status--${tone}`}>{label}</span>
                 <p>{s.body}</p>
               </li>
             )
           })}
         </ol>
-        <p className="journey-note">{journeyNotes}</p>
+        <p className="jr-note">{journeyNotes}</p>
       </div>
     </section>
   )
@@ -77,7 +77,10 @@ export function TeachYourAI() {
           </ul>
         </div>
         <figure className="teach-panel" aria-label="Teach a change: an example proposal">
-          <p className="teach-panel-label">Teach a change · example</p>
+          <div className="teach-panel-head">
+            <p className="teach-panel-label">Teach a change · example</p>
+            <p className="teach-panel-label teach-panel-label--on">Nothing is saved until you add it</p>
+          </div>
           <p className="teach-ask">“We don’t install equipment, only repair it. Ask about the problem first. If someone reports no heat, get them the soonest time.”</p>
           <p className="teach-panel-label">This would change</p>
           <ul className="teach-diff">
@@ -106,17 +109,20 @@ export function Industries() {
   return (
     <section id="industries" className="section industries" aria-labelledby="industries-title">
       <div className="container">
-        <SectionHeading eyebrow="Built for" title="Trades where the first reply wins the job" />
-        <div className="industries-grid">
+        <div className="split-head">
+          <p className="eyebrow">Built for</p>
+          <h2 id="industries-title">Trades where the first reply wins the job</h2>
+        </div>
+        <div className="ind-list">
           {industries.map((i) => (
-            <article key={i.id} className="industry">
+            <article key={i.id} className="ind-row">
               <h3>
                 {i.title}
                 {i.upcoming && <span className="status status--neutral">Upcoming</span>}
               </h3>
               <p>{i.body}</p>
               <a href="#demo" className="link-btn" onClick={() => go(i.id)}>
-                See a {i.title.toLowerCase()} conversation →
+                See {/^[aeiou]/i.test(i.title) ? 'an' : 'a'} {i.title === i.title.toUpperCase() ? i.title : i.title.toLowerCase()} conversation →
               </a>
             </article>
           ))}

@@ -25,6 +25,7 @@ export const SCENARIOS = [
           ['Day', 'Friday'],
         ],
         check: 'Area confirmed by town · Still needed: name, phone, address',
+        action: 'Ask for the name and best number',
         reply: 'Got it — a green pool in Mount Pleasant, and you’d like Friday. You’re in our service area. What’s your name and the best number to reach you?',
       },
       {
@@ -34,6 +35,7 @@ export const SCENARIOS = [
           ['Phone', '(843) 555-0142'],
         ],
         check: 'Phone digits match what Jamie said · Still needed: service address',
+        action: 'Ask for the service address',
         reply: 'Thanks, Jamie. What’s the address for the visit?',
       },
       {
@@ -43,6 +45,7 @@ export const SCENARIOS = [
           ['ZIP', '29464 ✓ on the list'],
         ],
         check: 'Everything needed to book is known · Checking the calendar for Friday',
+        action: 'Offer Friday’s real open times',
         reply: 'Let me check the calendar. Friday I have 10:30 AM or 1:00 PM for a green pool cleanup at 14 Harbor Oak Lane. Which works?',
         offers: ['Fri 10:30 AM', 'Fri 1:00 PM'],
       },
@@ -50,6 +53,7 @@ export const SCENARIOS = [
         customer: '10:30 works. Yes, book it.',
         recognized: [['Confirmed', 'Friday 10:30 AM — “yes, book it”']],
         check: 'Booked only after a clear yes · On the calendar · Owner notified',
+        action: 'Book Friday 10:30 AM and tell Tidewater',
         reply: 'You’re booked for Friday at 10:30 AM. Tidewater Pools has the address and your number. See you then!',
         done: 'booked',
       },
@@ -68,6 +72,7 @@ export const SCENARIOS = [
           ['Urgency', 'Possibly urgent'],
         ],
         check: 'Owner rule: know urgency before offering times · Area not known yet',
+        action: 'Settle urgency first, then ask the ZIP',
         reply: 'Sorry about that — 90 degrees is no fun. Is anyone unwell in the heat, or is this something that can wait until tomorrow? And what’s your ZIP code?',
       },
       {
@@ -77,6 +82,7 @@ export const SCENARIOS = [
           ['ZIP', '29483 ✓ on the list'],
         ],
         check: 'Owner rule: urgent → soonest time and an urgent callback request',
+        action: 'Hold the soonest time and flag it urgent',
         reply: 'Understood, let’s get someone out today. I’ve flagged this as urgent for the team. The soonest I have is 3:00 PM this afternoon — shall I hold it? And what’s your name and number?',
         offers: ['Today 3:00 PM'],
       },
@@ -88,6 +94,7 @@ export const SCENARIOS = [
           ['Confirmed', 'Today 3:00 PM — “please”'],
         ],
         check: 'Booked after a clear yes · Urgent callback recorded for the owner',
+        action: 'Book 3:00 PM and record the urgent callback',
         reply: 'Done — 3:00 PM today, and the team has an urgent note with your number. Keep your mom cool and hydrated until then.',
         done: 'booked_urgent',
       },
@@ -107,6 +114,7 @@ export const SCENARIOS = [
           ['Cause', 'Storm damage'],
         ],
         check: 'Area not known yet · Owner rule: storm damage → inspection + callback',
+        action: 'Ask about leaks, then the ZIP',
         reply: 'Sorry to hear that. We can come and take a look. Is any water coming in right now, and what’s the ZIP code at the property?',
       },
       {
@@ -116,6 +124,7 @@ export const SCENARIOS = [
           ['ZIP', '29401 ✓ on the list'],
         ],
         check: 'Area confirmed · Inspection can be booked · Estimate needs a person',
+        action: 'Offer inspection times; a person gives the estimate',
         reply: 'Good — then it can wait for a proper inspection. I can book one for tomorrow at 9:00 AM or Thursday at 2:00 PM. Which suits you? A roofer will give you the estimate on site.',
         offers: ['Tomorrow 9:00 AM', 'Thu 2:00 PM'],
       },
@@ -127,11 +136,21 @@ export const SCENARIOS = [
           ['Confirmed', 'Thursday 2:00 PM'],
         ],
         check: 'Inspection booked · Callback request recorded for the estimate',
+        action: 'Book the inspection and record the callback',
         reply: 'Booked: Thursday at 2:00 PM for a storm-damage inspection. I’ve also left a note for the team to call you about the estimate. Anything else I can help with?',
         done: 'booked_callback',
       },
     ],
   },
+]
+
+// The five stages the trace beside the conversation walks through (what the AI is doing right now).
+export const STAGES = [
+  { id: 'inquiry', label: 'Inquiry', body: 'The customer writes in on the business’s website chat.' },
+  { id: 'understanding', label: 'Understanding', body: 'Facts taken only from the customer’s own words.' },
+  { id: 'qualification', label: 'Qualification', body: 'Service area and the owner’s rules, checked before any time is offered.' },
+  { id: 'action', label: 'Action', body: 'One missing detail at a time, or real open times from the calendar.' },
+  { id: 'booking', label: 'Booking', body: 'Only after the customer’s own yes. The owner is told.' },
 ]
 
 export const DONE = {

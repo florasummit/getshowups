@@ -16,15 +16,15 @@ export default function App() {
     if (/^[a-z][a-z0-9-]{0,40}$/.test(id)) document.getElementById(id)?.scrollIntoView()
   }, [])
   return (
-    <>
+    <div className="site">
       <a href="#main" className="skip-link">
         Skip to content
       </a>
       <Header />
       <main id="main">
         <Hero />
-        <Problem />
         <Showcase />
+        <Problem />
         <HowItWorks />
         <TeachYourAI />
         <Industries />
@@ -33,6 +33,6 @@ export default function App() {
         <Faq />
       </main>
       <Footer />
-    </>
+    </div>
   )
 }

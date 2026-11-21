@@ -2,6 +2,38 @@
 
 _Update at the end of every task. Newest first._
 
+## Marketing website v2: Cinematic Intelligence (2026-11-20) — feat/site-v2 (frontend only; marketing site, no app/backend change)
+
+- The editorial direction released earlier today (Fraunces serif, italic orange line, warm-white "notebook" strip)
+  was judged generic/magazine-like by the founder. Reset: three rendered concepts (scratchpad, not deployed) scored on
+  nine criteria — A Monochrome Precision 65/90, B Cinematic Intelligence 71/90 (selected), C The Job Card 62/90. B is the
+  only one that puts the product itself in the first viewport on desktop and phone.
+- Visual system: white editorial sections + charcoal product surfaces (#101114 / #17181c / #22242a); Inter for all
+  display and body type (bold, upright, no italics), Space Grotesk for small labels and numerals; both already
+  self-hosted (OFL) and preloaded; Fraunces no longer referenced. Orange is a signal only: the primary action on dark
+  surfaces, the current trace step, the booked state, focus. Primary actions on white are black. The logo
+  (src/components/Logo.jsx) is byte-identical to main and renders identically (SVG, "GetShowUps", 28×28, stroke
+  rgb(255,106,26)); only its surroundings changed. App-page token VALUES are unchanged (marketing-only tokens added).
+- First viewport: text-only hero (headline, one primary + one secondary CTA, price) and the product stage rising out of
+  the white into the charcoal (section `data-dark-from` keeps the header light until it is over the dark surface).
+- The stage = Mode A (AI conversation) / Mode B (booking page + dashboard, Demo.jsx unchanged in behaviour). Mode A
+  redesigned for progressive disclosure: chat on the left (customer, a one-line check caption, the reply, the next
+  customer line as a ghost bubble); on the right the trace of what the AI is doing — Inquiry → Understanding (facts
+  accumulate per turn) → Qualification (the owner's rule) → Action (per-turn `action` in content/conversation.js) →
+  Booking — one stage current at a time. Scripted, deterministic, offline, labelled a simulation; unchanged scripts.
+- Journey: the six-step strip is now one rail (`.jr-*`, avoiding app.css's `.journey-step`, which the previous
+  release's CSS leaked into); problem and industries are editorial split-heads with hairline rows; pricing is a split
+  card (dark price panel + inclusions); early access list counter fixed (every step showed "1").
+- Measured (Playwright; Lighthouse/axe not installed): 7 requests, 0 external hosts, script 274 KB (unchanged), fonts
+  69 KB, CLS 0.034 desktop / 0.026 phone (header CTA relabel + enrollment note after /api/enrollment), 0 console errors,
+  computed AA contrast 0 failures on visible text at 1440 and 390, heading order clean, min font 11.2 px, 0 sideways
+  scroll at 320–1440. Three screenshot critique passes (pass1/pass2/pass3/final in the scratchpad) fixed: section order
+  (stage was below the problem section), a four-line headline, a chat column overflowing under the trace, a collapsed
+  phone compose box, inconsistent status chips on the rail, a todo-step contrast of 3.7, 10 px labels, h2→h4 jump.
+- Tests: flagship.spec.js updated for the new structure (stage in the first viewport, five-stage trace progression,
+  industry switching from the stage + industries section, dark header only past the white strip, typography system:
+  Inter + Space Grotesk only, no italics, no external requests); home.spec.js / site.spec.js unchanged and passing.
+
 ## Flagship marketing website (2026-11-20) — feat/flagship-site (frontend only; marketing site, no app/backend change)
 
 - Direction A "Editorial Intelligence" chosen from three rendered prototypes (scratchpad, not deployed): Fraunces +

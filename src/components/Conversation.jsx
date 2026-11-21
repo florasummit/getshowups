@@ -1,10 +1,11 @@
 // "See it answer a customer": the AI conversation simulation (Mode A). Scripted and deterministic from
-// content/conversation.js: the visitor sends the customer's next line, the AI's understanding appears as facts, then
-// its reply, with the check or rule that applied. No network, no storage, no model. Labelled a simulation throughout.
+// content/conversation.js: the visitor sends the customer's next line; the reply appears in the chat, and the trace
+// beside it shows what the AI is doing (Inquiry → Understanding → Qualification → Action → Booking), one stage at a
+// time. No network, no storage, no model. Labelled a simulation throughout.
 // Mode B (the booking page + owner dashboard walkthrough) is components/Demo.jsx; the switch lives in Showcase.jsx.
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
-import { CONVERSATION_EVENT, DONE, SCENARIOS, ownerView } from '../content/conversation.js'
+import { CONVERSATION_EVENT, DONE, SCENARIOS, STAGES, ownerView } from '../content/conversation.js'
 import { track } from '../lib/analytics.js'
 
 const reduced = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -63,6 +64,12 @@ export default function Conversation({ onSwitchMode }) {
   }
 
   const shown = turns.slice(0, sent)
+  // Turns whose reply is on screen: the trace only ever shows what the AI has actually done.
+  const answered = phase === 'replied' ? shown : shown.slice(0, -1)
+  const current = sent === 0 ? 'inquiry' : phase === 'thinking' ? 'understanding' : finished ? 'booking' : 'action'
+  const currentIndex = STAGES.findIndex((s) => s.id === current)
+  const state = (i) => (finished ? 'done' : i < currentIndex ? 'done' : i === currentIndex ? 'now' : 'todo')
+
   return (
     <div className="cv" data-conversation data-industry={scenarioId} data-phase={phase}>
       <div className="cv-bar">
@@ -81,88 +88,116 @@ export default function Conversation({ onSwitchMode }) {
       </div>
 
       <div className="cv-panes">
-        <div className="cv-chat" aria-live="polite" aria-label="Conversation">
-          <p className="cv-rule">
-            <Icon name="sparkles" size={14} /> {scenario.rulesNote}
-          </p>
-          {shown.map((t, i) => {
-            const last = i === shown.length - 1
-            const answered = !last || phase === 'replied'
-            return (
-              <div key={i} className="cv-turn">
-                <p className="cv-msg cv-msg--customer">
-                  <span className="cv-who">Customer</span>
-                  {t.customer}
-                </p>
-                <ul className={`cv-facts${answered ? ' is-in' : ''}`} aria-label="What the AI understood">
-                  {t.recognized.map(([k, v]) => (
-                    <li key={k + v}>
-                      <span>{k}</span> {v}
-                    </li>
-                  ))}
-                </ul>
-                {answered ? (
-                  <>
-                    <p className="cv-check">{t.check}</p>
-                    <p className="cv-msg cv-msg--ai">
-                      <span className="cv-who">GetShowUps</span>
-                      {t.reply}
-                    </p>
-                    {t.offers && (
-                      <p className="cv-offers" aria-label="Times offered (illustrative)">
-                        {t.offers.map((o) => (
-                          <span key={o}>{o}</span>
-                        ))}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="cv-msg cv-msg--ai cv-typing" aria-label="GetShowUps is replying">
-                    <span />
-                    <span />
-                    <span />
+        <div className="cv-chat" aria-label="Conversation">
+          <div className="cv-thread" aria-live="polite">
+            {shown.map((t, i) => {
+              const last = i === shown.length - 1
+              const replied = !last || phase === 'replied'
+              return (
+                <div key={i} className="cv-turn">
+                  <p className="cv-msg cv-msg--customer">
+                    <span className="cv-who">Customer</span>
+                    {t.customer}
                   </p>
-                )}
-              </div>
-            )
-          })}
-          {done && (
-            <p className={`cv-done cv-done--${done.tone}`} role="status">
-              <Icon name="check" size={16} /> {done.label}
-            </p>
-          )}
-          <div ref={endRef} />
+                  {replied ? (
+                    <>
+                      <p className="cv-check">{t.check}</p>
+                      <p className="cv-msg cv-msg--ai">
+                        <span className="cv-who">GetShowUps</span>
+                        {t.reply}
+                      </p>
+                      {t.offers && (
+                        <p className="cv-offers" aria-label="Times offered (illustrative)">
+                          {t.offers.map((o) => (
+                            <span key={o}>{o}</span>
+                          ))}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="cv-msg cv-msg--ai cv-typing" aria-label="GetShowUps is replying">
+                      <span />
+                      <span />
+                      <span />
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+            {done && (
+              <p className={`cv-done cv-done--${done.tone}`} role="status">
+                <Icon name="check" size={16} /> {done.label}
+              </p>
+            )}
+            {next && (
+              <p className="cv-ghost cv-preview">
+                <span className="cv-who">Customer · next message</span>
+                {next.customer}
+              </p>
+            )}
+            <div ref={endRef} />
+          </div>
+          <div className="cv-compose">
+            <button type="button" className="btn btn-primary" onClick={send} disabled={!next} aria-busy={phase === 'thinking' || undefined} ref={live} data-send>
+              {sent === 0 ? 'Send the first message' : next ? 'Send the next message' : 'Conversation complete'}
+              {next && <Icon name="arrow" size={16} />}
+            </button>
+          </div>
         </div>
 
-        <aside className="cv-side" aria-label="Your side">
+        <aside className="cv-side" aria-label="What the AI is doing">
           {!showOwner ? (
-            <>
-              <p className="cv-side-title">Watch the customer’s side</p>
-              <p className="cv-side-text">Send the customer’s next message and see what the AI understands, which of your rules apply, and what it answers.</p>
-              <button type="button" className="btn btn-primary btn-block" onClick={send} disabled={!next} aria-busy={phase === 'thinking' || undefined} ref={live} data-send>
-                {sent === 0 ? 'Send the first message' : next ? 'Send the next message' : 'Conversation complete'}
-                {next && <Icon name="arrow" size={16} />}
-              </button>
-              {next && <p className="cv-preview">“{next.customer}”</p>}
-              {finished && (
-                <button type="button" className="btn btn-ghost btn-block" onClick={() => setShowOwner(true)} data-owner>
-                  See what you’d see
-                </button>
-              )}
-              <div className="cv-side-actions">
-                <button type="button" className="link-btn" onClick={() => reset()} disabled={sent === 0}>
-                  <Icon name="reset" size={14} /> Start over
-                </button>
-                {onSwitchMode && (
-                  <button type="button" className="link-btn" onClick={onSwitchMode}>
-                    Try the booking page instead →
-                  </button>
-                )}
-              </div>
-            </>
+            <ol className="cv-trace">
+              {STAGES.map((s, i) => {
+                const st = state(i)
+                return (
+                  <li key={s.id} className={`cv-node is-${st}`} aria-current={st === 'now' ? 'step' : undefined}>
+                    <span className="cv-node-i" aria-hidden="true">
+                      {st === 'done' ? <Icon name="tick" size={12} strokeWidth={3} /> : i + 1}
+                    </span>
+                    <div className="cv-node-body">
+                      <h3>{s.label}</h3>
+                      {s.id === 'inquiry' && <p>{sent ? 'The customer wrote in on the website chat.' : s.body}</p>}
+                      {s.id === 'understanding' &&
+                        (answered.length ? (
+                          answered.map((t, ti) => (
+                            <ul key={ti} className="cv-facts is-in" aria-label="What the AI understood">
+                              {t.recognized.map(([k, v]) => (
+                                <li key={k + v}>
+                                  <span>{k}</span> {v}
+                                </li>
+                              ))}
+                            </ul>
+                          ))
+                        ) : (
+                          <p>{s.body}</p>
+                        ))}
+                      {s.id === 'qualification' && <p>{answered.length ? scenario.rulesNote : s.body}</p>}
+                      {s.id === 'action' && <p>{answered.length ? answered[answered.length - 1].action : s.body}</p>}
+                      {s.id === 'booking' && (done ? <p className="cv-node-booked">{done.label}</p> : <p>{s.body}</p>)}
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
           ) : (
-            <OwnerCard outcome={turns[turns.length - 1].done} business={scenario.business} onBack={() => setShowOwner(false)} onReset={() => reset()} />
+            <OwnerCard outcome={turns[turns.length - 1].done} business={scenario.business} onBack={() => setShowOwner(false)} />
           )}
+          <div className="cv-side-actions">
+            {finished && !showOwner && (
+              <button type="button" className="btn btn-line btn-sm" onClick={() => setShowOwner(true)} data-owner>
+                See what you’d see
+              </button>
+            )}
+            <button type="button" className="link-btn" onClick={() => reset()} disabled={sent === 0}>
+              <Icon name="reset" size={14} /> Start over
+            </button>
+            {onSwitchMode && (
+              <button type="button" className="link-btn" onClick={onSwitchMode}>
+                Try the booking page instead →
+              </button>
+            )}
+          </div>
         </aside>
       </div>
       <p className="cv-fine">
@@ -173,11 +208,11 @@ export default function Conversation({ onSwitchMode }) {
   )
 }
 
-function OwnerCard({ outcome, business, onBack, onReset }) {
+function OwnerCard({ outcome, business, onBack }) {
   const [status, line, actions] = ownerView(outcome)
   return (
     <div className="cv-owner" role="region" aria-label="Your dashboard">
-      <p className="cv-side-title">Your dashboard · {business}</p>
+      <p className="cv-owner-title">Your dashboard · {business}</p>
       <p className="cv-owner-status">{status}</p>
       <p className="cv-owner-line">{line}</p>
       <ul className="cv-owner-actions">
@@ -187,15 +222,10 @@ function OwnerCard({ outcome, business, onBack, onReset }) {
           </li>
         ))}
       </ul>
-      <p className="cv-side-text">Every conversation shows what was said, what the AI did, and the outcome. Nothing you’d see here involves a real customer.</p>
-      <div className="cv-side-actions">
-        <button type="button" className="link-btn" onClick={onBack}>
-          ← Back to the conversation
-        </button>
-        <button type="button" className="link-btn" onClick={onReset}>
-          <Icon name="reset" size={14} /> Start over
-        </button>
-      </div>
+      <p className="cv-owner-text">Every conversation shows what was said, what the AI did, and the outcome. Nothing you’d see here involves a real customer.</p>
+      <button type="button" className="link-btn" onClick={onBack}>
+        ← Back to the conversation
+      </button>
     </div>
   )
 }
