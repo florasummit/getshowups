@@ -685,6 +685,7 @@ test('monthlyCents normalizes intervals and quantities', () => {
 test('metrics: empty platform shows unavailable values, never estimates', async () => {
   const m = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics
   assert.equal(m.billing, null)
+  assert.equal(m.sales, null, 'no GetShowUps business record → the sales funnel is unavailable, not zeros')
   assert.equal(m.activationRate, null)
   assert.equal(m.showUpRate30, null)
   assert.equal(m.cac, null)
@@ -876,4 +877,21 @@ test('payment recovery email: one per owner per invoice through the outbox (laun
   assert.equal(db.sql.prepare("SELECT count(*) n FROM audit_log WHERE action = 'billing.recovery_email'").get().n, 1)
   assert.equal((await signed(ev('evt_r3', 'in_r2'))).status, 200)
   assert.equal(db.sql.prepare("SELECT count(*) n FROM email_outbox WHERE template = 'billing_recovery'").get().n, owners * 2, 'a new invoice → a new email')
+})
+
+test('sales funnel (GetShowUps selling itself): counted only from the getshowups business records; leads, consultations, attendance, rates; test leads excluded', async () => {
+  seed('getshowups')
+  seed('alpha')
+  await connectKv('getshowups')
+  const now = Date.now()
+  const lead = (id, cust, status, email = `${id}@example.net`) => db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES (?, ?, 'P', ?, '5550100100', 'pool company', ?, 'x', ?, ?)").run(id, cust, email, status, now - 1000, now - 1000)
+  lead('l1', 'getshowups', 'booked')
+  lead('l2', 'getshowups', 'new')
+  lead('l3', 'getshowups', 'unqualified')
+  lead('l4', 'alpha', 'booked') // another business's lead never counts
+  db.sql.prepare("INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, google_event_id, created_at, updated_at) VALUES ('a1', 'getshowups', 'l1', ?, ?, 'showed', 'g1', ?, ?)").run(now - 500, now, now - 500, now - 500)
+  const m = (await call(pOverview, 'GET', '/api/platform/overview', { cookie: await admin() })).json().metrics
+  assert.deepEqual({ leads: m.sales.leads, qualified: m.sales.qualifiedLeads, booked: m.sales.consultationsBooked, attended: m.sales.consultationsAttended, missed: m.sales.consultationsMissed, bookingRate: m.sales.demoBookingRate, attendance: m.sales.demoAttendanceRate }, { leads: 3, qualified: 2, booked: 1, attended: 1, missed: 0, bookingRate: 50, attendance: 100 })
+  assert.equal(m.sales.paying, 0, 'no live billing: paying is 0, never a test subscription')
+  assert.equal(typeof m.sales.activated, 'number')
 })

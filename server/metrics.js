@@ -213,6 +213,11 @@ export async function growth(env, rows, now = Date.now()) {
     .bind(now - 8 * 7 * DAY)
     .all()
 
+  // GetShowUps selling itself: the sales funnel counted from the product's own records of the GetShowUps business
+  // (server/public.js SALES_BUSINESS): leads = prospects who left details in the sales chat or booked; consultations =
+  // its appointments; attended = marked showed. Paying/activated come from the customer rows above. null until that
+  // business exists (shown as "set up the GetShowUps business"), never zeros that look like data.
+  const sales = await salesFunnel(db, since30, internal)
   const billing = subs.any_sub > 0
   // Until live billing is switched on (STRIPE_LIVE_ENABLED, approval), every subscription and payment comes from
   // Stripe test mode (the webhook refuses live-mode events), so none of it is revenue: no MRR/ARR/revenue figures.
@@ -239,6 +244,7 @@ export async function growth(env, rows, now = Date.now()) {
   const revPrior = billing && live ? await revenue(prior30, since30) : null
   return {
     customers: { total: customers.total || 0, active: customers.active || 0 },
+    sales: sales && { ...sales, activated: activated.n || 0, paying: liveSubs?.paying ?? (billing && live ? null : 0) },
     signupsByWeek: weekly.map((w) => ({ weekStart: new Date(w.week * 7 * DAY).toISOString().slice(0, 10), count: w.n })),
     activationRate: pct(activated.n || 0, customers.total || 0),
     firstBookingRate: pct(firstBooked.n || 0, activated.n || 0),
@@ -271,5 +277,31 @@ export async function growth(env, rows, now = Date.now()) {
     cac: null,
     ltv: null,
     grossMargin: null,
+  }
+}
+
+export const SALES_BUSINESS = 'getshowups'
+async function salesFunnel(db, since, internal) {
+  const exists = await db.prepare('SELECT id FROM customers WHERE id = ?1').bind(SALES_BUSINESS).first()
+  if (!exists) return null
+  const leads = (await db
+    .prepare(`SELECT count(*) AS total, sum(CASE WHEN status <> 'unqualified' THEN 1 ELSE 0 END) AS qualified, sum(CASE WHEN status = 'booked' THEN 1 ELSE 0 END) AS booked FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`)
+    .bind(SALES_BUSINESS, since, internal)
+    .first()) || {}
+  const appts = (await db
+    .prepare(`SELECT sum(CASE WHEN a.status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS booked, sum(CASE WHEN a.status = 'showed' THEN 1 ELSE 0 END) AS attended, sum(CASE WHEN a.status = 'no_show' THEN 1 ELSE 0 END) AS missed FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`)
+    .bind(SALES_BUSINESS, since, internal)
+    .first()) || {}
+  const requests = await db.prepare('SELECT count(*) AS n FROM receptionist_requests WHERE customer = ?1 AND created_at >= ?2').bind(SALES_BUSINESS, since).first().catch(() => null)
+  return {
+    days: 30,
+    leads: leads.total || 0,
+    qualifiedLeads: leads.qualified || 0,
+    callbackRequests: requests ? requests.n || 0 : null,
+    consultationsBooked: appts.booked || 0,
+    consultationsAttended: appts.attended || 0,
+    consultationsMissed: appts.missed || 0,
+    demoBookingRate: pct(appts.booked || 0, leads.qualified || 0),
+    demoAttendanceRate: pct(appts.attended || 0, (appts.attended || 0) + (appts.missed || 0)),
   }
 }

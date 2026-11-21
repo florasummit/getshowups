@@ -112,6 +112,14 @@ function Metrics({ m }) {
               <dd>{v}</dd>
             </div>
           ))}
+          <div data-sales-funnel={m.sales ? 'on' : 'off'}>
+            <dt>Sales funnel (30 days, GetShowUps selling itself)</dt>
+            <dd>
+              {m.sales
+                ? `${m.sales.leads} leads · ${m.sales.qualifiedLeads} qualified · ${m.sales.callbackRequests ?? '—'} callback requests · ${m.sales.consultationsBooked} consultations booked (${pct(m.sales.demoBookingRate)} of qualified) · ${m.sales.consultationsAttended} attended (${pct(m.sales.demoAttendanceRate)}) · paying ${m.sales.paying ?? '—'} · activated ${m.sales.activated}`
+                : 'Set up the GetShowUps business (docs/SALES_PLAYBOOK.md §6) to count leads, consultations and outcomes here.'}
+            </dd>
+          </div>
           {m.signupsByWeek.length > 0 && (
             <div>
               <dt>Signups by week</dt>

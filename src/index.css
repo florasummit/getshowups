@@ -2372,6 +2372,18 @@ svg {
   place-items: center;
 }
 
+.demo-chat {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin-top: 20px;
+}
+
+.demo-chat .fine {
+  font-size: 0.85rem;
+  color: var(--gray-500);
+}
+
 /* ============ Footer ============ */
 .site-footer {
   background: var(--c9);

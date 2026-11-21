@@ -45,11 +45,11 @@ test('billing not configured or no plan on sale: unbilled setup, so not shown as
   assert.equal(await enrollmentOpen({ ...TEST_BILLING, ONBOARDING_DB: db([]) }), true)
 })
 
-test('route returns exactly { open } with no-store, and 503 without storage', async () => {
+test('route returns exactly { open, salesChat } with no-store, and 503 without storage', async () => {
   const req = new Request('https://getshowups.com/api/enrollment', { headers: { 'cf-connecting-ip': '203.0.113.7' } })
   const res = await onRequestGet({ request: req, env: { ...TEST_BILLING, ONBOARDING_DB: db([PLAN]) } })
   assert.equal(res.status, 200)
-  assert.deepEqual(await res.json(), { open: false })
+  assert.deepEqual(await res.json(), { open: false, salesChat: false }) // no GetShowUps business record here
   assert.match(res.headers.get('Cache-Control') || '', /no-store/)
   const none = await onRequestGet({ request: req, env: {} })
   assert.equal(none.status, 503)

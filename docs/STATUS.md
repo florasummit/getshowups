@@ -2,6 +2,28 @@
 
 _Update at the end of every task. Newest first._
 
+## Revenue-first: GetShowUps sells itself (2026-11-21) — feat/sales-agent (no migration; nothing switched on)
+
+- Audit (docs/SALES_PLAYBOOK.md §1): the funnel already works end to end for an owner-operated pilot; the two gaps for a
+  first sale were a sales conversation and a founder's view of the sales stages. Target market chosen: residential pool
+  service companies, Charleston area first (§2); the offer, demo path and objection answers are in §3–§5.
+- AI sales assistant = the existing receptionist on a GetShowUps business record: industry "Software" selects a new
+  `sales` playbook (server/receptionist/knowledge.js) that changes the questions and the wording only (sales assistant,
+  free consultation call instead of a visit, no ZIP/address, never promise results or invent features, ad spend
+  separate). Every guard is unchanged (listed price only, confirming words, one booking per conversation). Setup is a
+  5-minute founder task in the product (§6); no code or data change on our side. Test: a prospect conversation books a
+  consultation without a ZIP, "$499/month" allowed, "$299" blocked.
+- Homepage: GET /api/enrollment now also returns `salesChat` (server/public.js salesChatAvailable: the `getshowups`
+  business is bookable AND its receptionist is on); the early-access section then offers "Ask our AI about GetShowUps"
+  → /chat/getshowups. Absent today → nothing shown (e2e covers both).
+- Admin growth metrics gained a sales funnel row (leads · qualified · callback requests · consultations booked · attended
+  · paying · activated, 30 days) counted from the getshowups business's own records; null ("set up the GetShowUps
+  business") until it exists, never zeros that look like data.
+- Release 3 (customer value summary) skipped on purpose: Overview "Last 30 days", Appointments money per visit and Ads
+  results already answer "should I keep paying".
+- Not done (approval): sending outreach (drafts in §7), any ad spend (§7, prepared), creating the GetShowUps business
+  record and connecting the founder's calendar (owner, §6).
+
 ## Release record: logo lifecycle, designer intents, Voice Lab, Retell conversation (2026-11-21) — PRs #98, #99, #100
 
 - **Live:** main `896beee`, deployment `a418d208-7d0f-466b-a16b-8d7e0442626c`. Rollback target before all three:
