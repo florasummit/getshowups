@@ -668,22 +668,16 @@ svg {
 
 /* ============ Hero ============ */
 .hero {
-  padding: calc(var(--header-h) + clamp(36px, 5vw, 72px)) 0 clamp(32px, 4vw, 52px);
+  padding: calc(var(--header-h) + clamp(36px, 5vw, 64px)) 0 clamp(28px, 3.5vw, 44px);
   background: var(--white);
   color: var(--ink-900);
 }
 
-.hero-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 8fr) minmax(300px, 4fr);
-  gap: 24px clamp(32px, 4vw, 56px);
-  align-items: start;
-}
-
 .hero h1 {
   margin-top: 18px;
+  max-width: 15ch;
   font-weight: 650;
-  font-size: clamp(2.9rem, 5.6vw, 5rem);
+  font-size: clamp(2.9rem, 6.6vw, 6rem);
   line-height: 0.95;
   letter-spacing: -0.045em;
   text-wrap: initial;
@@ -693,30 +687,61 @@ svg {
   display: block;
 }
 
-.hero-aside {
-  padding-top: 4px;
+.hero-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px clamp(32px, 5vw, 72px);
+  align-items: start;
+  margin-top: clamp(24px, 3vw, 36px);
 }
 
 .hero-sub {
-  max-width: 36rem;
+  max-width: 46ch;
   font-size: clamp(1.05rem, 1.35vw, 1.2rem);
   line-height: 1.5;
   color: var(--gray-600);
 }
 
+.hero-aside {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 22px;
+  align-items: center;
+  gap: 10px 22px;
+}
+
+.hero-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 600;
+  color: var(--ink-900);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 0.15s;
+}
+
+.hero-secondary:hover {
+  text-decoration-color: var(--ink-900);
+}
+
+.hero-secondary .icon {
+  color: var(--orange-700);
 }
 
 .hero-price {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  margin-top: 16px;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   color: var(--gray-500);
 }
 
@@ -726,9 +751,8 @@ svg {
 }
 
 .hero-note {
-  max-width: 36rem;
-  margin-top: 10px;
-  font-size: 0.9rem;
+  max-width: 40ch;
+  font-size: 0.88rem;
   color: var(--gray-500);
 }
 
@@ -760,12 +784,11 @@ svg {
   background: var(--c9);
 }
 
-.stage-label {
-  font-family: var(--font-label);
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.stage-sim {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
   color: var(--on-dark-muted);
 }
 
@@ -858,9 +881,6 @@ svg {
 }
 
 .cv-sim {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   font-size: 0.82rem;
   color: var(--on-dark-muted);
 }
@@ -1041,10 +1061,38 @@ svg {
 
 .cv-compose {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 10px 16px;
   padding-top: 16px;
   border-top: 1px solid var(--c7);
+}
+
+.cv-hint {
+  flex: 1 1 16rem;
+  min-width: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--on-dark-muted);
+}
+
+.cv-node-owner {
+  margin-top: 6px !important;
+  padding: 8px 10px;
+  border: 1px solid var(--c6);
+  border-radius: 8px;
+  color: var(--on-dark) !important;
+}
+
+.cv-node-owner span {
+  display: block;
+  font-family: var(--font-label);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-dark-muted);
 }
 
 .cv-compose .btn:disabled {
@@ -1770,16 +1818,6 @@ svg {
   }
 }
 
-@media (max-width: 1100px) {
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .hero-aside {
-    padding-bottom: 0;
-  }
-}
-
 @media (max-width: 900px) {
   .split-head,
   .problem-grid,
@@ -1792,12 +1830,8 @@ svg {
     font-size: clamp(2.7rem, 12.5vw, 4.4rem);
   }
 
-  .hero-aside {
-    padding-bottom: 0;
-  }
-
-  .hero-actions .btn {
-    flex: 1 1 auto;
+  .hero-row {
+    grid-template-columns: 1fr;
   }
 
   .problem-item + .problem-item {
@@ -1851,8 +1885,25 @@ svg {
     border-radius: var(--radius);
   }
 
+  .hero-aside {
+    width: 100%;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
   .hero-actions .btn {
     width: 100%;
+  }
+
+  .hero-secondary {
+    width: 100%;
+    justify-content: center;
+    min-height: 48px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    text-decoration: none;
   }
 
   .hero-price {
@@ -1889,8 +1940,8 @@ svg {
     font-size: 0.84rem;
   }
 
-  .stage-label {
-    display: none;
+  .stage-sim {
+    width: 100%;
   }
 
   .cv-upcoming {

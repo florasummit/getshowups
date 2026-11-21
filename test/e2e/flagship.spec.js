@@ -28,9 +28,13 @@ test('first viewport: headline, the product stage already on screen, one primary
   const hero = page.locator('.hero')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('More booked jobs. Less chasing.')
   await expect(hero.getByText('$499/month')).toBeVisible()
+  // One dominant primary action; the demo link is visibly secondary (a text link, not a second button).
+  await expect(hero.locator('.btn')).toHaveCount(1)
+  await expect(hero.locator('.hero-secondary')).toHaveText(/See it answer a customer/)
   // The stage (the interactive demo) rises into the first viewport under the hero, before any scrolling.
   await expect(demo(page).locator('.stage')).toBeInViewport()
-  await expect(demo(page).getByText(/Simulation · Tidewater Pools is an example/)).toBeAttached()
+  await expect(demo(page).getByText(/Simulation · nothing is sent, booked or stored/)).toBeAttached()
+  await expect(demo(page).getByText(/Tidewater Pools is an example business/)).toBeAttached()
   await expect(demo(page).locator('.cv-ghost')).toHaveText(/My pool is green. I’m in Mount Pleasant and need someone Friday./)
   // The trace names the five stages and starts at the inquiry.
   await expect(demo(page).locator('.cv-node')).toHaveText([/Inquiry/, /Understanding/, /Qualification/, /Action/, /Booking/])

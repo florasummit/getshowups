@@ -28,7 +28,10 @@ export default function Showcase() {
                 Booking page &amp; dashboard
               </button>
             </div>
-            <p className="stage-label">Interactive demo · play the customer</p>
+            <p className="stage-sim" role="note">
+              <span className="cv-sim-dot" aria-hidden="true" />
+              Simulation · nothing is sent, booked or stored
+            </p>
           </div>
           <div id="mode-panel" role="tabpanel" aria-labelledby={mode === 'conversation' ? 'mode-conversation' : 'mode-booking'}>
             {mode === 'conversation' ? <Conversation onSwitchMode={() => pick('booking')} /> : <Demo embedded />}
