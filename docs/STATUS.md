@@ -4,6 +4,19 @@ _Update at the end of every task. Newest first._
 
 ## Voice Lab usable by the owner + one-click sales records (2026-11-21) — feat/voice-lab-usable (no migration)
 
+- **LIVE 2026-11-21**: PR #103 merged pinned (head 8d9087b) → main 48ea7c7 → production deployment
+  48b0da36-5316-4cad-ab44-f180b7d1ef1d. Rollback target: 466866fa-fc7f-48ea-8731-7872b08c41b6 (main 1caf455; the
+  VOICE_LAB_ENABLED secret would stay set but that code has no Lab routes). `VOICE_LAB_ENABLED=true` was set on the
+  project before the merge, so this deployment carries it. Verified after deploy: Lab routes answer 401 signed-out
+  (404 before the flag), sales-business route 401 signed-out, enrollment {open:false, salesChat:false},
+  /api/receptionist/getshowups 404 (record not created yet), homepage without the sales entry, 7 of 8 customer pages
+  byte-identical to the pre-release capture; the 8th (PoolThru home) differs only in its <title>/og:title ("PoolThru
+  Pool Care"), a content change by the owner between captures: the previous deployment renders the same page and no
+  renderer file changed in the release.
+- Founder's next clicks: Admin → Platform → "GetShowUps sells itself" → Create the Voice Lab test business; Admin →
+  Voice Lab → Retell → Start (dry run). Then Create the sales business and connect its Google Calendar from the
+  dashboard to open /chat/getshowups and the homepage entry.
+
 - **VOICE_LAB_ENABLED=true** set on the Pages project for restricted administrator testing (owner approval in the
   brief of 2026-11-21), after re-checking the safeguards: every Lab route is platform-admin only (401/403 otherwise),
   sessions run only on admin-marked TEST businesses, dry-run by default, a daily minute budget, one Lab call at a time
