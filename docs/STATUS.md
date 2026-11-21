@@ -2,6 +2,31 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice Lab: ElevenLabs adapter (2026-11-21) — feat/voice-elevenlabs (on feat/voice-core; no migration; nothing switched on)
+
+- ElevenLabs Conversational AI as a Voice Lab provider (docs/VOICE_LAB.md §ElevenLabs; docs read 2026-11-21):
+  server/voice/elevenlabs.js mints a 15-minute signed URL per connection with the server-only `ELEVENLABS_API_KEY`
+  (`GET /v1/convai/conversation/get-signed-url`, header `xi-api-key`) and returns OUR per-conversation overrides
+  (engine prompt from voiceInstructions + the business greeting, English), public dynamic variables and the seven
+  client tool names; ≤ 3 connections per session (`reconnect_limit`); provider failures are codes and change nothing.
+  Route POST /api/platform/voice-lab/elevenlabs (platform admin, same-origin, rate limit `voiceLabConnect`; 404 when
+  the Lab is off or ElevenLabs is not configured). Browser adapter src/voice/elevenlabs.js (interface documented in
+  src/voice/adapter.js: start/stop/state, events status · transcript · tool · metrics · error) on the official
+  `@elevenlabs/client` 1.37.1 (exact, lazy-loaded on the Lab page only): WebSocket conversation with barge-in, every
+  client tool call forwarded to /api/platform/voice-lab/tool with the caller's latest words, refused calls answered
+  honestly (never thrown), transcript lines batched to the session, browser metrics (first/median/p95 response,
+  interruptions, tools, reconnects), up to 2 reconnects with fresh signed URLs.
+- scripts/elevenlabs-setup.mjs (key on STDIN; read-only unless `--apply`; never auto-run) creates/updates the Lab
+  agent: seven client tools (`POST/PATCH /v1/convai/tools`, attached via `tool_ids`), overrides enabled for
+  prompt/first_message/language, `enable_auth` + hostname allowlist, the client events the adapter needs, 15-minute
+  ceiling, placeholder prompt ("This line is not set up yet") so a conversation without our override says nothing.
+- COST_ESTIMATES.elevenlabs = $0.08/min (estimate; additional-minute rate on every Agents plan, LLM billed separately;
+  elevenlabs.io/pricing/agents, 2026-11-21).
+- Not live-verified: no ELEVENLABS_API_KEY / ELEVENLABS_AGENT_ID exist in production, so no real conversation was
+  run; shapes come from the docs + SDK source and are covered with the API mocked (test/voice-elevenlabs.test.js).
+- Next (approval items): create the ElevenLabs account/key, run the setup script with `--apply`, set the two secrets
+  on the Pages project, VOICE_LAB_ENABLED=true, then one admin dry-run conversation on a test business.
+
 ## Flagship design: less text, more product (2026-11-21) — feat/flagship-design (frontend only; nothing switched on)
 
 - Reference study: stripe.com, /payments, /billing, /payments/checkout, /pricing rendered at 1440 and 390 with

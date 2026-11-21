@@ -39,7 +39,10 @@ export function providerStatus(env) {
 export const COST_ESTIMATES = {
   retell: { perMinuteMicros: null, source: null, asOf: null },
   openai: { perMinuteMicros: null, source: null, asOf: null },
-  elevenlabs: { perMinuteMicros: null, source: null, asOf: null },
+  // ESTIMATE: ElevenLabs Agents "additional minute" rate, $0.08/min on every self-serve plan (Free … Business);
+  // included plan minutes are prepaid, LLM usage is billed separately on top ("based on the model you choose"),
+  // bursts over the concurrency limit cost $0.16/min. Not measured spend.
+  elevenlabs: { perMinuteMicros: 80_000, source: 'https://elevenlabs.io/pricing/agents', asOf: '2026-11-21', note: 'estimate: $0.08/min additional-minute rate; LLM usage billed separately by ElevenLabs' },
 }
 
 export const estimateMicros = (provider, seconds) => {
