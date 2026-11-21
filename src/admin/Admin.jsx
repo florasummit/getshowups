@@ -9,12 +9,14 @@ import '../app.css'
 
 const Review = lazyPage(() => import('./Review.jsx'))
 const Control = lazyPage(() => import('./Control.jsx'))
+const VoiceLab = lazyPage(() => import('./VoiceLab.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
   ['control', 'Control Center', '/admin/control'],
   ['review', 'Business Review', '/admin/review'],
+  ['voicelab', 'Voice Lab', '/admin/voice-lab'],
 ]
-const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : 'overview')
+const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') ? 'voicelab' : 'overview')
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -1174,6 +1176,10 @@ function Console({ me }) {
         ) : section === 'control' ? (
           <Suspense fallback={<div aria-busy="true" />}>
             <Control />
+          </Suspense>
+        ) : section === 'voicelab' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <VoiceLab />
           </Suspense>
         ) : (
           <Overview me={me} />

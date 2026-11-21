@@ -260,4 +260,5 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding FOLLOWUP_AI=true \
   --binding CRON_SECRET="$E2E_CRON_SECRET" \
   --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN" \
-  --binding AI_STUDIO_BUSINESSES="$E2E_TEACH_CUSTOMER,$E2E_TEACH_M_CUSTOMER"
+  --binding AI_STUDIO_BUSINESSES="$E2E_TEACH_CUSTOMER,$E2E_TEACH_M_CUSTOMER" \
+  --binding VOICE_LAB_ENABLED=true
