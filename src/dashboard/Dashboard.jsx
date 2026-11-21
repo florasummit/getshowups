@@ -51,6 +51,16 @@ const clearInvite = () => {
     // ignore
   }
 }
+// Once this browser's account has a business, the remembered sign-up plan has done its job. Keeping it made a
+// returning customer's sign-in page read "Online enrollment isn't open yet" (with "Book a call" first) after signing
+// out or when the session expired, because the page still believed they were a new sign-up.
+const clearPlan = () => {
+  try {
+    localStorage.removeItem(PLAN_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 function SignIn({ invite, plan }) {
   const message = LOGIN_ERRORS[new URLSearchParams(window.location.search).get('login_error')]
@@ -172,6 +182,10 @@ export default function Dashboard() {
   }, [onlyLaunchLeft, deepLink, load])
 
   const noBusiness = Boolean(me.data && !me.data.customer)
+  const hasBusiness = Boolean(me.data?.customer)
+  useEffect(() => {
+    if (hasBusiness) clearPlan()
+  }, [hasBusiness])
   useEffect(() => {
     if (noBusiness) api('/api/platform/me').then(({ status }) => setAdmin(status === 200))
   }, [noBusiness])

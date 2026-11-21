@@ -273,10 +273,13 @@ function PickTime({ id, biz, lead, refresh, onBooked }) {
   }
 
   if (!days.length) {
+    // 'unavailable' = the business's calendar could not be reached (an integration problem the owner is told about on
+    // their dashboard), not a full calendar; the request itself is saved either way.
+    const outage = biz.status === 'unavailable'
     return (
       <>
-        <h1 className="title">No open times right now</h1>
-        <p className="lede">{biz.name} has your request and will reach out.</p>
+        <h1 className="title">{outage ? 'Online booking isn’t available right now' : 'No open times right now'}</h1>
+        <p className="lede">{biz.name} has your request and will reach out{outage ? ' to arrange a time' : ''}.</p>
       </>
     )
   }
