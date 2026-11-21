@@ -2,7 +2,7 @@
 // otherwise only the signed-in owner can load it (for the private preview).
 import { missingConfig } from '../../server/google-oauth.js'
 import { getSession } from '../../server/auth.js'
-import { readAsset } from '../../server/assets.js'
+import { PUBLIC_MAX_AGE, readAsset } from '../../server/assets.js'
 import { hostingStatus, isHosted } from '../../server/website.js'
 
 const notFound = () => new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
@@ -18,8 +18,9 @@ export async function onRequestGet({ request, env, params }) {
     return new Response(found.asset.bytes, {
       headers: {
         'Content-Type': found.asset.content_type,
-        // Ids are random and content never changes, so published images cache for a long time.
-        'Cache-Control': found.published ? 'public, max-age=86400' : 'private, no-store',
+        // Ids are random and content never changes, so published images cache for a long time (PUBLIC_MAX_AGE: a
+        // permanently deleted file may still be served from caches for that long; the delete response says so).
+        'Cache-Control': found.published ? `public, max-age=${PUBLIC_MAX_AGE}` : 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'",
         'Cross-Origin-Resource-Policy': 'same-site',

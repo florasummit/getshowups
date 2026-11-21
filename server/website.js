@@ -195,7 +195,11 @@ export async function generateContent(db, customer) {
 // Returns [errors[], content]. `assetIds`: ids this business owns (images are checked against them).
 // `prior`: the services as last saved (with ids), for an AI-designed site: ids carry over by name, and a design still
 // using positions (saved before ids, sent by an older page) is read against the list it was made for.
-export function validateContent(body, approvedClaims = [], assetIds = null, { prior = null } = {}) {
+// `photoIds`: the owned images the AI-designed site / design may place as PHOTOS (defaults to assetIds). The logo
+// pointer is always checked against assetIds, so a caller that offers the model photos only (owned minus current and
+// earlier logos, server/ai-designer.js designContext) passes { photoIds } and keeps the draft's logo valid.
+export function validateContent(body, approvedClaims = [], assetIds = null, { prior = null, photoIds: photoSet = null } = {}) {
+  const photoIdsFor = photoSet || assetIds
   const b = body && typeof body === 'object' ? body : {}
   const errors = []
   const designed = b.site != null
@@ -242,7 +246,7 @@ export function validateContent(body, approvedClaims = [], assetIds = null, { pr
   if (b.responsiveImages === true) c.responsiveImages = true
   // AI-designed site (v2 spec, server/site-spec.js): validated and repaired here too, so a saved or restored spec can never
   // carry anything the schema doesn't allow. Services/prices come from this content's own services list.
-  if (designed) c.site = validateSpec(b.site, { assetIds: assetIds || { has: () => true }, services, legacyServices: prior?.length ? prior : services, claims: approvedClaims }).spec
+  if (designed) c.site = validateSpec(b.site, { assetIds: photoIdsFor || { has: () => true }, services, legacyServices: prior?.length ? prior : services, claims: approvedClaims }).spec
   // Old-site addresses (≤30): to the home page, a section, booking, or (AI-designed sites) one of this site's own pages,
   // e.g. /privacy-policy → /privacy. A page that was since removed falls back to the home page instead of blocking saves.
   const pageSlugs = new Set((c.site?.pages || []).map((p) => p.slug).filter(Boolean))
@@ -251,7 +255,7 @@ export function validateContent(body, approvedClaims = [], assetIds = null, { pr
   else if (c.redirects.length > MAX_REDIRECTS || c.redirects.some((r) => !REDIRECT_FROM.test(r.from) || !(REDIRECT_TARGETS.includes(r.to) || PAGE_TARGET.test(r.to))) || new Set(c.redirects.map((r) => r.from)).size !== c.redirects.length) errors.push('redirects')
   // Optional AI-chosen design (layout, palette, type, images) from the safe design system.
   if (b.design != null) {
-    const [designErrors, design] = validateDesign(b.design, assetIds)
+    const [designErrors, design] = validateDesign(b.design, photoIdsFor)
     if (designErrors.length) errors.push('design')
     else c.design = design
   }
@@ -282,10 +286,11 @@ export async function assetIdsFor(db, customerId) {
   return new Set(results.map((r) => r.id))
 }
 
-// Images that are, or ever were, this business's logo (current draft + every saved version). Uploaded images carry no
-// role, so "logo" was judged only from the CURRENT draft: once a logo was replaced or cleared, the old file stayed in the
-// library and was offered as a photo (PoolThru, 2026-11-16: an old logo became the first-screen photo of an AI design).
-// A logo is never placed as a photo by the AI or offered in a photo picker; it stays available as the logo.
+// Images that are, or ever were, this business's logo (current draft + every saved version + every image ever SET as the
+// logo, remembered by saveDraft). Uploaded images carry no role, so "logo" was judged only from the CURRENT draft: once
+// a logo was replaced or cleared, the old file stayed in the library and was offered as a photo (PoolThru, 2026-11-16:
+// an old logo became the first-screen photo of an AI design). A logo is never placed as a photo by the AI or offered in
+// a photo picker; it stays available as the logo until the owner permanently deletes the file.
 export async function logoAssetIdsFor(db, customerId, draft = null) {
   const ids = new Set()
   const add = (v) => typeof v === 'string' && ASSET_RE.test(v) && ids.add(v)
@@ -294,7 +299,123 @@ export async function logoAssetIdsFor(db, customerId, draft = null) {
   if (w?.draft) add(parse(w.draft).logo)
   const { results } = await db.prepare("SELECT json_extract(content, '$.logo') AS logo FROM website_versions WHERE customer = ?1").bind(customerId).all()
   for (const r of results) add(r.logo)
+  for (const id of await rememberedLogos(db, customerId)) add(id)
   return ids
+}
+// "Was the logo" is remembered the moment a logo is set (saveDraft), as a { kind: 'logo', asset } row in
+// website_generations (the table draft checkpoints already use; no migration, no AI use: source 'template', cost 0).
+// A removed logo therefore stays marked in the media library even when it was never published; the row goes when the
+// file is permanently deleted (server/assets.js destroyAsset) or with the account.
+async function rememberedLogos(db, customerId) {
+  const { results } = await db.prepare("SELECT json_extract(content, '$.asset') AS asset FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') = 'logo'").bind(customerId).all()
+  return results.map((r) => r.asset)
+}
+export function rememberLogoStatement(db, customerId, assetId, now) {
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('')
+  return db
+    .prepare(
+      `INSERT INTO website_generations (id, customer, content, source, model, cost_micros, created_at)
+       SELECT ?1, ?2, ?3, 'template', NULL, 0, ?4
+       WHERE NOT EXISTS (SELECT 1 FROM website_generations WHERE customer = ?2 AND json_extract(content, '$.kind') = 'logo' AND json_extract(content, '$.asset') = ?5)`,
+    )
+    .bind(id, customerId, JSON.stringify({ kind: 'logo', asset: assetId }), now, assetId)
+}
+
+// ---------- removing an image from stored content ----------
+// A copy of `content` with every reference to image `id` taken out (used when a file is permanently deleted, and when a
+// restore meets an image that no longer exists): logo/hero → null, gallery entries and phone copies dropped, the older
+// design's hero/About image → null, AI-designed pages: section images and backgrounds removed, gallery/benefit images
+// dropped, a photo block of an opening removed (a block without a photo would be empty). Returns { content, changed }.
+const assetRef = (id) => `asset:${id}`
+export function withoutAssetInSpec(spec, id) {
+  if (!spec?.pages) return { spec, changed: false }
+  const r = assetRef(id)
+  let changed = false
+  const dropImage = ({ image: _image, ...rest }) => rest
+  const pages = spec.pages.map((p) => ({
+    ...p,
+    sections: (p.sections || []).map((s) => {
+      const out = { ...s }
+      for (const k of ['image', 'backgroundImage']) {
+        if (out[k] !== r) continue
+        delete out[k]
+        changed = true
+      }
+      if (Array.isArray(out.images) && out.images.includes(r)) {
+        out.images = out.images.filter((x) => x !== r)
+        changed = true
+      }
+      if (Array.isArray(out.items) && out.items.some((x) => x?.image === r)) {
+        out.items = out.items.map((x) => (x?.image === r ? dropImage(x) : x))
+        changed = true
+      }
+      if (Array.isArray(out.blocks) && out.blocks.some((b) => b?.image === r)) {
+        out.blocks = out.blocks.filter((b) => !(b?.image === r && b.kind === 'media')).map((b) => (b?.image === r ? dropImage(b) : b))
+        changed = true
+      }
+      return out
+    }),
+  }))
+  return { spec: changed ? { ...spec, pages } : spec, changed }
+}
+export function withoutAsset(content, id) {
+  if (!content || typeof content !== 'object') return { content, changed: false }
+  const c = { ...content }
+  let changed = false
+  for (const k of ['logo', 'hero']) {
+    if (c[k] !== id) continue
+    c[k] = null
+    changed = true
+  }
+  if (Array.isArray(c.photos) && c.photos.includes(id)) {
+    c.photos = c.photos.filter((x) => x !== id)
+    changed = true
+  }
+  if (c.variants && typeof c.variants === 'object' && Object.entries(c.variants).some(([k, v]) => k === id || v === id)) {
+    c.variants = Object.fromEntries(Object.entries(c.variants).filter(([k, v]) => k !== id && v !== id))
+    if (!Object.keys(c.variants).length) delete c.variants
+    changed = true
+  }
+  if (c.design && typeof c.design === 'object') {
+    const d = { ...c.design }
+    for (const k of ['heroImage', 'aboutImage']) {
+      if (d[k] !== assetRef(id)) continue
+      d[k] = null
+      changed = true
+    }
+    c.design = d
+  }
+  const s = withoutAssetInSpec(c.site, id)
+  if (s.changed) {
+    c.site = s.spec
+    changed = true
+  }
+  return { content: changed ? c : content, changed }
+}
+// Every image an AI-designed spec or a content refers to by asset id (owned images only; stock photos aren't assets).
+const specAssetIds = (spec) => {
+  const out = new Set()
+  for (const pg of spec?.pages || []) for (const s of pg.sections || []) for (const v of [s.image, s.backgroundImage, ...(s.images || []), ...(s.items || []).map((x) => x?.image), ...(s.blocks || []).map((b) => b?.image)]) if (typeof v === 'string' && v.startsWith('asset:')) out.add(v.slice(6))
+  return out
+}
+export const contentAssetIds = (content) => {
+  const out = new Set([content?.logo, content?.hero, ...(content?.photos || []), ...Object.keys(content?.variants || {}), ...Object.values(content?.variants || {}), ...specAssetIds(content?.site)].filter((v) => typeof v === 'string' && ASSET_RE.test(v)))
+  for (const k of ['heroImage', 'aboutImage']) if (typeof content?.design?.[k] === 'string' && content.design[k].startsWith('asset:')) out.add(content.design[k].slice(6))
+  return out
+}
+// Stored content (a saved version, a checkpoint) brought back by the owner may name images that have since been
+// permanently deleted: those references are dropped (a restore never resurrects a deleted file, and a logo comes back
+// only while its file still exists). Content whose images all exist is returned as is (byte-identical).
+export function withoutMissingAssets(content, assetIds) {
+  let out = content
+  let changed = false
+  for (const id of contentAssetIds(content)) {
+    if (assetIds.has(id)) continue
+    const r = withoutAsset(out, id)
+    out = r.content
+    changed = changed || r.changed
+  }
+  return { content: out, changed }
 }
 // Owned images that may be used as photos: everything the business uploaded except its logos.
 export const photoIds = (assetIds, logoIds) => new Set([...assetIds].filter((id) => !logoIds.has(id)))
@@ -354,15 +475,22 @@ async function ensureRow(db, customerId, content, now) {
 // nobody changed it since (another tab, the AI designer, an import); otherwise nothing is written and { conflict: true }
 // comes back, so newer work is never silently overwritten. Without `expect` (AI designer, import, older pages) it saves.
 export async function saveDraft(db, customerId, content, now = Date.now(), { expect } = {}) {
+  // The logo the stored draft had, read before the row may be created: a logo that is being SET (new, or different from
+  // the stored one) is remembered as "was the logo" (rememberLogoStatement), whatever path saved it.
+  const before = await db.prepare("SELECT json_extract(draft, '$.logo') AS logo FROM websites WHERE customer = ?1").bind(customerId).first()
   await ensureRow(db, customerId, content, now)
   // Strictly later than the last save, so two quick saves never share a version stamp.
   const row = await db.prepare('SELECT updated_at FROM websites WHERE customer = ?1').bind(customerId).first()
   const at = Math.max(now, (row?.updated_at ?? 0) + 1)
+  const setsLogo = typeof content?.logo === 'string' && ASSET_RE.test(content.logo) && content.logo !== before?.logo
   if (Number.isFinite(expect)) {
     const r = await db.prepare('UPDATE websites SET draft = ?2, updated_at = ?3 WHERE customer = ?1 AND updated_at = ?4').bind(customerId, JSON.stringify(content), at, expect).run()
-    return (r?.meta?.changes ?? r?.changes) ? { ok: true, updatedAt: at } : { ok: false, conflict: true }
+    if (!(r?.meta?.changes ?? r?.changes)) return { ok: false, conflict: true }
+    if (setsLogo) await rememberLogoStatement(db, customerId, content.logo, now).run()
+    return { ok: true, updatedAt: at }
   }
   await db.prepare('UPDATE websites SET draft = ?2, updated_at = ?3 WHERE customer = ?1').bind(customerId, JSON.stringify(content), at).run()
+  if (setsLogo) await rememberLogoStatement(db, customerId, content.logo, now).run()
   return { ok: true, updatedAt: at }
 }
 
@@ -391,12 +519,20 @@ export async function unpublish(db, customer, now = Date.now()) {
   await db.prepare('UPDATE websites SET live_version = NULL, updated_at = ?2 WHERE customer = ?1').bind(customer.id, now).run()
 }
 
-// Rollback: an earlier version becomes live again (and the draft, so editing continues from it).
+// Rollback: an earlier version becomes live again (and the draft, so editing continues from it). An explicit owner
+// action, so the version's logo and photos come back with it, but only those whose files still exist: references to
+// permanently deleted images are dropped from what becomes the draft and live version (the stored version row itself is
+// already free of them, server/assets.js destroyAsset; this guards older rows). Unchanged content is stored verbatim.
 export async function restore(db, customerId, version, now = Date.now()) {
   if (!Number.isInteger(version) || version < 1) return false
   const v = await db.prepare('SELECT content FROM website_versions WHERE customer = ?1 AND version = ?2').bind(customerId, version).first()
   if (!v) return false
-  await db.prepare('UPDATE websites SET draft = ?2, live_version = ?3, published_at = ?4, updated_at = ?4 WHERE customer = ?1').bind(customerId, v.content, version, now).run()
+  const scrubbed = withoutMissingAssets(parse(v.content), await assetIdsFor(db, customerId))
+  const json = scrubbed.changed ? JSON.stringify(scrubbed.content) : v.content
+  await db.batch([
+    ...(scrubbed.changed ? [db.prepare('UPDATE website_versions SET content = ?3 WHERE customer = ?1 AND version = ?2').bind(customerId, version, json)] : []),
+    db.prepare('UPDATE websites SET draft = ?2, live_version = ?3, published_at = ?4, updated_at = ?4 WHERE customer = ?1').bind(customerId, json, version, now),
+  ])
   return true
 }
 

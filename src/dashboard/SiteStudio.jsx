@@ -5,7 +5,7 @@
 // kept in this browser until the server confirms them. The server validates every save (it is the trust boundary).
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { makePhoneCopy, uploadPhotoWithCopy } from '../lib/images.js'
+import { makePhoneCopy, uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 import { ADDABLE, BACKGROUNDS, BUTTONS, FONT_PAIRS, LAYOUTS, PAGE_TYPES, SECTION_LABEL, colorsFor, newId, pageTemplate, sectionTemplate, takenIds, toneOf } from './site-templates.js'
 import { draftPlaces, replacePhoto, usageText } from './photo-refs.js'
 
@@ -809,13 +809,30 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
                 <p className="studio-empty">Click any part of your website to edit it.</p>
               ))}
             {tab === 'page' && <PageEditor site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} actionsFor={actionsFor} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s2) => (setSlug(s2), setSelected(null))} onAdd={(type) => addSectionAfter(selected, type)} />}
-            {tab === 'site' && <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />}
+            {tab === 'site' && (
+              <>
+                <LogoPanel
+                  logo={content.logo}
+                  assets={assets}
+                  variants={content.variants}
+                  onLogo={(id) => {
+                    // Only the pointer changes (null = no logo, on purpose). A file chosen as the logo is marked at once,
+                    // so the photo pickers stop offering it (the server remembers it on save).
+                    change((c) => (c.logo = id))
+                    if (id) setAssets((l) => l.map((a) => (a.id === id ? { ...a, logo: true } : a)))
+                  }}
+                  onUploaded={(a) => setAssets((l) => [a, ...l])}
+                />
+                <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />
+              </>
+            )}
             {tab === 'photos' && (
               <PhotosPanel
                 assets={assets}
                 variants={content.variants}
                 content={content}
                 saved={save.state === 'saved'}
+                stamp={website.updatedAt}
                 onReplace={(from, to) => {
                   const r = replacePhoto(content, from, to)
                   if (r.count) change((c) => Object.assign(c, r.content))
@@ -1386,6 +1403,69 @@ function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect
   )
 }
 
+// ---------- logo ----------
+// The logo is one pointer in the content (content.logo). null means "no logo, on purpose": the business name is shown in
+// the header and the site icon is a letter mark. "Remove from website" changes only that pointer (saved like any edit,
+// undoable, published when the owner publishes); the uploaded file stays in the media library marked Logo and can be
+// chosen again. Deleting the file for good is a separate, confirmed action under Photos. No AI anywhere here.
+function LogoPanel({ logo, assets, variants, onLogo, onUploaded }) {
+  const [state, setState] = useState({})
+  const [choosing, setChoosing] = useState(false)
+  const copies = new Set(Object.values(variants || {}))
+  const choices = assets.filter((a) => !copies.has(a.id) && a.id !== logo)
+  const pick = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setState({ busy: true })
+    const r = await uploadImage(file, 'logo')
+    setState(r.error ? { error: r.error } : {})
+    if (r.asset) {
+      onUploaded({ ...r.asset, createdAt: Date.now(), logo: true })
+      onLogo(r.asset.id)
+    }
+  }
+  return (
+    <div className="image-pick" data-testid="logo-panel">
+      <div className="image-pick-thumb image-pick-thumb--logo">{logo ? <img src={`/site-assets/${logo}`} alt="Current logo" /> : <span aria-hidden="true">+</span>}</div>
+      <div>
+        <p className="image-pick-label">Logo</p>
+        <p className="fine">{logo ? 'Your site icon (browser tab and bookmarks). Your business name stays in the header.' : 'No logo: your site icon is a letter mark in your brand colour.'}</p>
+        <div className="studio-photo-actions">
+          <label className="btn btn-quiet btn-sm">
+            {state.busy ? 'Uploading…' : logo ? 'Replace logo' : 'Upload logo'}
+            <input type="file" accept="image/*" className="sr-only" onChange={pick} disabled={state.busy} data-testid="logo-file" />
+          </label>
+          {choices.length > 0 && (
+            <button type="button" className="btn btn-quiet btn-sm" aria-expanded={choosing} onClick={() => setChoosing(!choosing)}>
+              Choose an uploaded file
+            </button>
+          )}
+          {logo && (
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => (onLogo(null), setChoosing(false))}>
+              Remove from website
+            </button>
+          )}
+        </div>
+        {choosing && (
+          <div className="studio-thumbs" role="group" aria-label="Uploaded files">
+            {choices.map((a) => (
+              <button key={a.id} type="button" className="studio-thumb" onClick={() => (onLogo(a.id), setChoosing(false))} aria-label="Use this file as the logo">
+                <img src={a.url} alt="" />
+              </button>
+            ))}
+          </div>
+        )}
+        {state.error && (
+          <p className="form-error" role="alert">
+            {state.error}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ---------- look ----------
 function LookEditor({ site, onSite, services, onServices }) {
   const t = site.theme
@@ -1428,10 +1508,14 @@ function LookEditor({ site, onSite, services, onServices }) {
 
 // ---------- photos ----------
 // Each photo says where it is used ("Used on: Home · Hero, your live website, 2 saved versions"): the draft places come
-// from the content being edited (unsaved edits included), the stored copies from the server (GET ?usage=1). Remove is
-// offered only for a photo nothing uses; Hide for one only history uses (kept for restores); Replace swaps it
-// everywhere in the draft (the live website changes only when the owner publishes).
-function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onReload, onReplace, onHidden }) {
+// from the content being edited (unsaved edits included), the stored copies from the server (GET ?usage=1).
+// "Delete uploaded file" (permanent, confirmed) is offered only when neither the draft nor the live website shows the
+// file: the server then also takes it out of saved versions and History, so nothing can bring it back. Hide is for one
+// only history uses (kept for restores); Replace swaps it everywhere in the draft (the live website changes only when
+// the owner publishes).
+// `stamp`: the dashboard's draft stamp (website.updatedAt): a publish or a version restore changes what the live website
+// shows, so usage is read again (otherwise "your live website" would be stale and Delete withheld or offered wrongly).
+function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemoved, onReload, onReplace, onHidden }) {
   const [state, setState] = useState({})
   const [usage, setUsage] = useState(null) // { [id]: usage } | null while loading | { failed }
   const [hidden, setHidden] = useState([])
@@ -1449,7 +1533,7 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
     return () => {
       live = false
     }
-  }, [usageTick, assets.length, saved])
+  }, [usageTick, assets.length, saved, stamp])
   const used = assets.reduce((n, a) => n + (a.size || 0), 0)
   const copies = new Set(Object.values(variants || {}))
   const photos = assets.filter((a) => !copies.has(a.id))
@@ -1459,7 +1543,8 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
     const u = usage && !usage.failed ? usage[a.id] : null
     const known = usage && !usage.failed
     const stored = Boolean(u?.live || u?.versions || u?.history)
-    return { places, u, known, parts: usageText(places, u ? { ...u, draft: saved && u.draft } : null), canDelete: known && saved && !places.length && !u?.draft && !stored && !a.logo, canHide: known && saved && !places.length && !u?.draft && !u?.live && stored }
+    const onSite = places.length > 0 || content.logo === a.id
+    return { places, u, known, stored, parts: usageText(places, u ? { ...u, draft: saved && u.draft } : null), canDelete: known && saved && !onSite && !u?.draft && !u?.live, canHide: known && saved && !onSite && !u?.draft && !u?.live && stored }
   }
   const pick = async (e) => {
     const files = [...(e.target.files || [])]
@@ -1481,12 +1566,16 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
     setState(error ? { error } : {})
   }
   const remove = async (id) => {
-    if (!window.confirm('Delete this photo for good? It isn’t used anywhere on your website, in saved versions or in History.')) return
-    const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'delete', id } })
+    const s = statusOf({ id })
+    const where = s.stored ? usageText([], { ...s.u, draft: false, live: false }).join(' and ') : ''
+    const ask = where ? `Delete this photo for good? It isn’t on your website or in your draft, but ${where} still show it: they will no longer, and restoring them can’t bring it back.` : 'Delete this photo for good? It isn’t used anywhere on your website, in saved versions or in History.'
+    if (!window.confirm(ask)) return
+    const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'destroy', id, confirm: true } })
     if (status === 200) {
       for (const x of data.removed || [id]) onRemoved(x)
-      setState({ note: 'Photo deleted.' })
-    } else setState({ error: data?.error === 'in_use' ? `That photo is still used (${usageText([], data.usage).join(', ') || 'your draft'}), so it was kept.` : 'Couldn’t delete that photo. Please try again.' })
+      // Published once? A copy cached while it was live may still show for a while (the server says how long).
+      setState({ note: `Photo deleted.${data.references?.versions ? ` ${data.storage?.cache?.note || ''}` : ''}`.trim() })
+    } else setState({ error: data?.error === 'live' ? 'That photo is on your live website. Remove it from your website and publish first.' : data?.error === 'in_draft' ? 'That photo is in your draft. Remove it from your website first.' : 'Couldn’t delete that photo. Please try again.' })
     loadUsage()
   }
   const hide = async (id, on) => {
@@ -1571,7 +1660,7 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
               <img src={a.url} alt={`Photo ${i + 1}`} />
               <div className="studio-photo-info">
                 <span className="fine">
-                  {a.logo ? 'Logo · ' : ''}
+                  {content.logo === a.id ? 'Current logo · ' : a.logo ? 'Logo · ' : ''}
                   {variants?.[a.id] ? 'Phone version ready' : 'No phone version'}
                 </span>
                 <span className="fine studio-photo-used" data-testid="photo-usage">
@@ -1584,8 +1673,8 @@ function PhotosPanel({ assets, variants, content, saved, onAdded, onRemoved, onR
                     </button>
                   )}
                   {s.canDelete && (
-                    <button type="button" className="link-btn danger" onClick={() => remove(a.id)} aria-label={`Delete photo ${i + 1}`}>
-                      Delete
+                    <button type="button" className="link-btn danger" onClick={() => remove(a.id)} aria-label={`Delete photo ${i + 1} for good`}>
+                      Delete uploaded file
                     </button>
                   )}
                   {s.canHide && (
