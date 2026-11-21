@@ -2,6 +2,41 @@
 
 _Update at the end of every task. Newest first._
 
+## Release record: logo lifecycle, designer intents, Voice Lab, Retell conversation (2026-11-21) — PRs #98, #99, #100
+
+- **Live:** main `896beee`, deployment `a418d208-7d0f-466b-a16b-8d7e0442626c`. Rollback target before all three:
+  `fbc9d1ce-1fcd-4083-a4f7-c4b48440695c` (main `912a351`); intermediate checkpoints `2d0c984a` (after #98, main
+  `2a2b6d0`) and `9e59a001` (after #99, main `d3c58e3`). No migration (0033 is still the newest); no binding, secret
+  or flag changed; nothing sent, charged, launched or activated. Dependency added: `@elevenlabs/client` 1.37.1
+  (lazy-loaded on the Lab page only).
+- **Release A (#98, website and logo):** `content.logo === null` is "no logo, on purpose" and the current website is
+  authoritative; Remove / Replace / Upload / Choose controls in the Studio and classic editor; permanent delete
+  (`assets { action: 'destroy' }`) refused while live or in the draft, otherwise history invalidated in one batch;
+  AI designer precise operations (remove/restore/replace logo, set headline, remove image, set section text) decided
+  before any model call, with verified results and adversarial tests; a draft WITH a logo designs again.
+- **Release B (#99, Voice Lab):** shared tool runner (server/voice/tools.js) with dry-run; Lab sessions on test
+  businesses in the existing receptionist tables; admin-only routes `/api/platform/voice-lab/*` (404 unless
+  `VOICE_LAB_ENABLED=true`); OpenAI Realtime and ElevenLabs adapters with server-only keys and short-lived session
+  credentials; `/admin/voice-lab` tab; 46 scenarios + SIMULATED benchmark (no audio latency measured anywhere);
+  docs/VOICE_LAB.md, docs/VOICE_PILOT.md.
+- **Release C (#100, Retell):** direct answers (narration filter widened), `check_service_area { zip, place }` with
+  fully-served towns from PUBLISHED live rules only, deterministic memory of place/problem/day, holding line only after
+  700 ms, per-turn timings recorded, hesitant confirmations never book, tuned Retell profile for a TEST agent only
+  (never applied).
+- **Verified:** each PR green in CI; combined main `npm run verify:all` after the last merge (unit 760, Playwright
+  219 passed / 2 skipped at the A+B+C checkpoint; final run on merged main `896beee`: lint clean, unit 760/760,
+  build, Functions compile, Playwright 219 passed / 2 skipped); production after each deploy:
+  all eight customer pages byte-identical (cf-email obfuscation aside), signed-out 401/403 on dashboard, platform and
+  Lab routes, cross-origin writes 403, unsigned Stripe 400, PoolThru chat page loads with its greeting and sends
+  nothing, booking page loads, 0 console errors; a 75 s production log sample captured no requests (so no errors
+  observed, and no traffic either).
+- **Not done (approval / external):** provider accounts and keys (OPENAI_API_KEY, ELEVENLABS_API_KEY/AGENT_ID),
+  VOICE_LAB_ENABLED=true, ElevenLabs agent creation (`scripts/elevenlabs-setup.mjs --apply`), the Retell test agent
+  (`scripts/retell-setup.mjs --tuned --test-agent … --apply`), any phone number or telephony, a real-audio
+  benchmark with a human caller, the first owner-operated voice session. Provider recommendation therefore remains
+  open: the simulated benchmark exercises the engine and guards equally for every provider; only real audio can
+  rank them.
+
 ## Voice Lab tab + simulated voice benchmark (2026-11-21) — feat/voice-lab (on feat/voice-core; nothing switched on)
 
 - `/admin/voice-lab` (src/admin/VoiceLab.jsx, lazy like Control/Review; Control Center tokens, one column, fits 390px):
