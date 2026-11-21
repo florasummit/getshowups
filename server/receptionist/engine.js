@@ -313,6 +313,9 @@ export const TOOLS = [
 ]
 
 const AFFIRM = /\b(yes|yeah|yep|yup|sure|ok|okay|confirm(ed)?|correct|book (it|that)|sounds (good|great)|perfect|please do|do it|go ahead|that works|works for me|let'?s do)\b/i
+// A yes that is not a yes: "okay, let me think about it", "sure, but I need to check with my wife first", "maybe later".
+// The customer's whole latest message decides, not the word the model quoted from it.
+const HESITANT = /\b(think about it|let me think|check with|ask my|talk to my|not sure|maybe later|call (you )?back|get back to you|hold off|not yet|don'?t book|not right now|later|hmm+|maybe)\b/i
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
 const localParts = (ms, tz) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
 export const slotLabel = (ms, tz) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(ms))
@@ -551,7 +554,7 @@ async function runTool(ctx, name, input) {
     const start = s.offered?.[input.slot_id]
     if (!Number.isInteger(start)) return { ok: false, error: 'slot_not_offered', note: 'Only times from find_available_times in this conversation can be booked.' }
     const quote = norm(input.confirmation_quote)
-    if (!quote || !norm(ctx.userText).includes(quote) || !AFFIRM.test(input.confirmation_quote)) {
+    if (!quote || !norm(ctx.userText).includes(quote) || !AFFIRM.test(input.confirmation_quote) || HESITANT.test(ctx.userText)) {
       return { ok: false, error: 'confirmation_required', note: "The customer's latest message must clearly confirm this exact time. Read it back and ask them to confirm." }
     }
     // Owner rules on top of the platform guards below (never instead of them): excluded services, required intake,

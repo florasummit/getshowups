@@ -366,6 +366,9 @@ test('booking guards: never-offered, unconfirmed, missing details, out of area, 
   await respond(env, customer, await conv(), 'Jamie Rivera, (843) 555-0142, ZIP 90210, pool care')
   script.push(calls(book(slot, 'maybe')), (b) => (assert.equal(lastToolResults(b)[0].error, 'confirmation_required'), say('Shall I?')))
   await respond(env, customer, await conv(), 'maybe')
+  // A yes that is not a yes: the quoted word is affirmative, but the whole message hesitates (never booked).
+  script.push(calls(book(slot, 'okay')), (b) => (assert.equal(lastToolResults(b)[0].error, 'confirmation_required'), say('Take your time.')))
+  await respond(env, customer, await conv(), 'okay, let me think about it and check with my wife first')
   script.push(calls(book(slot, 'yes')), (b) => (assert.equal(lastToolResults(b)[0].error, 'out_of_area'), say('Sorry, we don’t serve 90210.')))
   await respond(env, customer, await conv(), 'yes')
   script.push(calls(details({ zip: '29401' })), say('Updated.'))

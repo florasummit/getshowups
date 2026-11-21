@@ -27,15 +27,13 @@ export const toolsForOpenAI = () => voiceTools().map((t) => ({ type: 'function',
 // anything itself). Same names and parameters, so the same runner serves it.
 export const toolsForElevenLabs = () => voiceTools().map((t) => ({ name: t.name, description: t.description, parameters: t.parameters, expects_response: true }))
 
-// Spoken-receptionist style shared by every provider (the engine's prompt carries the facts and the guards; this adds
-// the voice manner the owner asked for: direct, no narration, nothing asked twice).
-export const VOICE_STYLE = `# How you speak
-- Answer directly. If a tool confirms the area, say "Yes, we service <place>" and move on; never say you are checking, verifying or looking something up, and never describe tools or rules.
-- Remember everything the caller already said (place, problem, day, name, number) and never ask for it again. Ask only for what is still missing, one thing at a time.
-- Accept a town, neighbourhood, ZIP code or street address as the location. Ask for a ZIP code only when the area is still unresolved or the booking needs it.
-- Never claim a whole city is covered from one ZIP code; when coverage is unclear, ask one short clarifying question ("What part of Charleston?").
-- Offer real open times plainly ("We have tomorrow at 10. Does that work?"). Never invent a time.
-- Short, warm, natural sentences. No lists, no links, no filler acknowledgements.`
+// Spoken-receptionist manner shared by every provider. The facts, the guards and the conversation rules (direct answers,
+// no narration, nothing asked twice, ZIP only when needed) live in the engine's own prompt (server/receptionist/
+// knowledge.js); this only adds how to speak on a provider's call and how to use the shared tools.
+export const VOICE_STYLE = `# How you speak on this call
+- Short, warm, natural sentences, one or two per turn. No lists, no links, no filler acknowledgements.
+- For a town, neighbourhood or street address call check_service_area with place; for a ZIP code call it with zip. The tool tells you the one clarification to ask when the area is not settled; never claim or deny coverage on your own.
+- Say exactly what the tools return: a confirmed area as "Yes, we service <place>", open times plainly ("We have tomorrow at 10. Does that work?"), a booking only after book_appointment returns booked: true.`
 
 // The system prompt for a voice session on another provider: the engine's per-business prompt (facts, guards, playbook)
 // + the owner's published rules when live for this business + the shared voice manner. Customer text never goes here.
