@@ -122,7 +122,7 @@ test('connect: a short-lived signed URL for the configured agent, overrides with
   assert.equal(r.expiresAt - before, SIGNED_URL_TTL_MS)
   assert.ok(SIGNED_URL_TTL_MS <= 15 * 60_000, 'expiry is the documented 15 minutes or shorter')
   assert.match(r.overrides.agent.prompt.prompt, /alpha Co/)
-  assert.match(r.overrides.agent.prompt.prompt, /never say you are checking/)
+  assert.match(r.overrides.agent.prompt.prompt, /Yes, we service <place>/)
   assert.equal(r.overrides.agent.firstMessage, 'Thanks for calling alpha Co, how can I help?')
   assert.equal(r.overrides.agent.language, 'en')
   assert.deepEqual(r.clientTools, VOICE_TOOL_NAMES)
