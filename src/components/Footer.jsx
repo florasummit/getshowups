@@ -9,9 +9,7 @@ export default function Footer() {
   return (
     <footer className="site-footer">
       <div className="container footer-cta">
-        <h2>
-          More booked jobs. <em>Less chasing.</em>
-        </h2>
+        <h2>More booked jobs. Less chasing.</h2>
         <GetStarted className="btn btn-primary btn-lg" onClick={() => track('early_access_cta', { location: 'footer' })} />
       </div>
       <div className="container footer-inner">

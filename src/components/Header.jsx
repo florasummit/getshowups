@@ -17,7 +17,8 @@ export default function Header() {
       setScrolled(window.scrollY > 8)
       const y = window.scrollY + 34
       const under = [...document.querySelectorAll('main > section, footer')].find((s) => s.offsetTop <= y && s.offsetTop + s.offsetHeight > y)
-      setDark(Boolean(under && (under.classList.contains('section--dark') || under.tagName === 'FOOTER')))
+      const from = Number(under?.dataset.darkFrom || 0) // a dark section whose first pixels are still light (the stage straddles the hero)
+      setDark(Boolean(under && (under.classList.contains('section--dark') || under.tagName === 'FOOTER') && y >= under.offsetTop + from))
     }
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -60,7 +61,7 @@ export default function Header() {
         <a href="/dashboard" className="header-login">
           Sign in
         </a>
-        <GetStarted className="btn btn-primary btn-sm header-cta" onClick={() => track('early_access_cta', { location: 'header' })} />
+        <GetStarted className="btn btn-ink btn-sm header-cta" onClick={() => track('early_access_cta', { location: 'header' })} />
         <button
           type="button"
           className="menu-toggle"

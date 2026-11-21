@@ -1,7 +1,8 @@
-// Flagship homepage (2026-11-20): the AI conversation simulation (Mode A), the mode switch to the booking demo
-// (Mode B), industry switching from the hero and the industries section, reset, keyboard use, reduced motion, the
-// mobile menu, CTA destinations, the protected logo, and no sideways scroll at every brief width. The page calls no
-// AI, calendar or voice provider; the simulation stores nothing.
+// Flagship homepage (v2, 2026-11-20): the product stage in the first viewport, the AI conversation simulation
+// (Mode A) with its five-stage trace, the mode switch to the booking demo (Mode B), industry switching from the stage
+// and the industries section, reset, keyboard use, reduced motion, the mobile menu, CTA destinations, the protected
+// logo, the typography system, and no sideways scroll at every brief width. The page calls no AI, calendar or voice
+// provider; the simulation stores nothing.
 import { test, expect } from './test.js'
 import { SCENARIOS } from '../../src/content/conversation.js'
 
@@ -23,13 +24,17 @@ test('the logo is the protected brand asset: exact SVG, orange and wordmark in h
   }
 })
 
-test('first viewport: headline, a real conversation excerpt, one primary and one secondary CTA that work @mobile', async ({ page }) => {
+test('first viewport: headline, the product stage already on screen, one primary and one secondary CTA that work @mobile', async ({ page }) => {
   const hero = page.locator('.hero')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('More booked jobs. Less chasing.')
-  await expect(hero.getByText('My pool is green. I’m in Mount Pleasant and need someone Friday.')).toBeVisible()
-  await expect(hero.getByRole('list', { name: 'What the AI understood' })).toContainText('Green pool cleanup')
-  await expect(hero.getByText(/Simulation · Tidewater Pools is an example/)).toBeVisible()
   await expect(hero.getByText('$499/month')).toBeVisible()
+  // The stage (the interactive demo) rises into the first viewport under the hero, before any scrolling.
+  await expect(demo(page).locator('.stage')).toBeInViewport()
+  await expect(demo(page).getByText(/Simulation · Tidewater Pools is an example/)).toBeAttached()
+  await expect(demo(page).locator('.cv-ghost')).toHaveText(/My pool is green. I’m in Mount Pleasant and need someone Friday./)
+  // The trace names the five stages and starts at the inquiry.
+  await expect(demo(page).locator('.cv-node')).toHaveText([/Inquiry/, /Understanding/, /Qualification/, /Action/, /Booking/])
+  await expect(demo(page).locator('.cv-node[aria-current="step"]')).toHaveText(/Inquiry/)
   await hero.getByRole('link', { name: 'See it answer a customer' }).click()
   await expect(page).toHaveURL(/#demo$/)
   await expect(demo(page)).toBeInViewport()
@@ -47,16 +52,24 @@ test('AI conversation: pool scenario end to end — facts, checks, replies, book
   await expect(d.getByRole('tab', { name: 'AI conversation' })).toHaveAttribute('aria-selected', 'true')
   await expect(d.getByText(/nothing is sent, booked or stored/)).toBeVisible()
   const pool = SCENARIOS[0]
+  const current = () => d.locator('.cv-node[aria-current="step"]')
+  await expect(current()).toHaveText(/Inquiry/)
   for (const [i, t] of pool.turns.entries()) {
     await expect(d.locator('[data-send]')).toHaveText(i === 0 ? /Send the first message/ : /Send the next message/)
     await expect(d.locator('.cv-preview')).toContainText(t.customer.slice(0, 20))
     await d.locator('[data-send]').click()
     await expect(d.locator('.cv-msg--customer').nth(i)).toHaveText(new RegExp(t.customer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     await expect(d.locator('.cv-msg--ai').nth(i)).toContainText(t.reply.slice(0, 24))
+    // The trace: facts accumulate under Understanding, the owner's rule under Qualification, the next action.
     for (const [, v] of t.recognized) await expect(d.locator('.cv-facts').nth(i)).toContainText(v.replace(/ ✓.*/, ''))
     await expect(d.locator('.cv-check').nth(i)).toHaveText(t.check)
+    await expect(d.locator('.cv-node').nth(2)).toContainText(pool.rulesNote)
+    await expect(d.locator('.cv-node').nth(3)).toContainText(t.action)
+    if (i < pool.turns.length - 1) await expect(current()).toHaveText(/Action/)
   }
   await expect(d.locator('.cv-done')).toHaveText(/Booked on the calendar/)
+  await expect(d.locator('.cv-node.is-done')).toHaveCount(5)
+  await expect(d.locator('.cv-node').nth(4)).toContainText('Booked on the calendar')
   await expect(d.locator('[data-send]')).toBeDisabled()
   // The owner's view afterwards: real dashboard labels, no personal data beyond the fictional example.
   await d.locator('[data-owner]').click()
@@ -72,9 +85,9 @@ test('AI conversation: pool scenario end to end — facts, checks, replies, book
   expect(JSON.stringify(await events(page))).not.toMatch(/Jamie|843|Harbor/)
 })
 
-test('industry switching: hero buttons, the demo tabs and the industries section all change the scenario and reset it @mobile', async ({ page }) => {
+test('industry switching: the stage tabs and the industries section change the scenario and reset it @mobile', async ({ page }) => {
   const d = demo(page)
-  await page.locator('.hero [data-try="hvac"]').click()
+  await d.getByRole('group', { name: 'Business type' }).getByRole('button', { name: /^HVAC/ }).click()
   await expect(d.locator('[data-conversation]')).toHaveAttribute('data-industry', 'hvac')
   await expect(d.locator('.cv-preview')).toContainText('My AC stopped cooling')
   await d.locator('[data-send]').click()
@@ -171,6 +184,9 @@ test('mobile menu: opens, lists every section, closes on a link and on Escape; b
 test('every section and CTA destination; header adapts over dark sections; no sideways scroll at 320–1440 @mobile', async ({ page }) => {
   for (const id of ['problem', 'demo', 'simulation', 'how-it-works', 'teach', 'industries', 'pricing', 'book-demo', 'faq']) await expect(page.locator(`#${id}`)).toBeAttached()
   for (const [href] of [['/dashboard'], ['/privacy'], ['#book-demo']]) await expect(page.locator(`a[href="${href}"]`).first()).toBeAttached()
+  // The stage straddles the hero: the section's first pixels are still white, so the header stays light there.
+  await page.locator('#demo').evaluate((e) => window.scrollTo(0, e.offsetTop + 20))
+  await expect(page.locator('.site-header')).not.toHaveClass(/is-dark/)
   await page.locator('#demo').evaluate((e) => window.scrollTo(0, e.offsetTop + 200))
   await expect(page.locator('.site-header')).toHaveClass(/is-dark/)
   await page.evaluate(() => window.scrollTo(0, 0))
@@ -184,8 +200,28 @@ test('every section and CTA destination; header adapts over dark sections; no si
 
 test('honest claims: pilot and upcoming are labelled; no invented metrics, testimonials or live-feature promises', async ({ page }) => {
   const text = await page.evaluate(() => document.body.innerText)
-  expect(text).toMatch(/In pilot with founding customers/)
+  expect(text).toMatch(/In pilot with founding customers/i) // the status chip is set in small caps
   expect(text).toMatch(/Roofing\s*Upcoming/i)
   for (const bad of [/\d+% (more|fewer|increase)/i, /customers? (love|trust) us/i, /testimonial/i, /guarantee/i, /(start|get|try|with) (your |a )?free trial/i, /instant SMS/i, /missed[- ]call text/i]) expect(text).not.toMatch(bad)
   expect(text).toMatch(/Text messaging, email reminders and ad management are coming soon/)
+})
+
+test('typography: Inter and Space Grotesk only, both self-hosted; no serif or italic display type anywhere', async ({ page }) => {
+  await page.waitForFunction(() => document.fonts.status === 'loaded')
+  const fonts = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family).filter((v, i, a) => a.indexOf(v) === i).sort())
+  expect(fonts).toEqual(['Inter', 'Space Grotesk'])
+  const styles = await page.evaluate(() =>
+    [...document.querySelectorAll('h1, h2, h3, .eyebrow, .btn')].map((e) => {
+      const c = getComputedStyle(e)
+      return { tag: e.tagName, family: c.fontFamily.split(',')[0].replace(/"/g, ''), style: c.fontStyle }
+    }),
+  )
+  for (const s of styles) {
+    expect(['Inter', 'Space Grotesk'], JSON.stringify(s)).toContain(s.family)
+    expect(s.style, JSON.stringify(s)).toBe('normal')
+  }
+  const external = []
+  page.on('request', (r) => !/127\.0\.0\.1|localhost/.test(r.url()) && external.push(r.url()))
+  await page.reload({ waitUntil: 'networkidle' })
+  expect(external).toEqual([])
 })

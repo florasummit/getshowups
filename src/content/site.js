@@ -26,7 +26,7 @@ export const enrollmentClosed = {
 }
 
 export const hero = {
-  eyebrow: 'AI booking for pool, HVAC and roofing businesses',
+  eyebrow: 'AI receptionist and booking for pool, HVAC and roofing businesses',
   sub: 'Your customers write in. GetShowUps understands the request, checks it against your area and your rules, asks only for what’s missing, and books a real open time on your calendar.',
 }
 
