@@ -3131,3 +3131,564 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .ta > *, .ta-section > *, .ta .ui-group > * { min-width: 0; }
 .ta .field select, .ta .field input, .ta .field textarea { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .ta .link-btn { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+
+/* ============ Platform design system (2026-11-21): the signed-in product uses the marketing site's identity ============ */
+/* Scope: the dashboard / setup / admin shell (.app) and the platform's own sign-in and gate screens (.center-page that
+   is not the customer booking page). Inside this scope the warm neutral scale becomes the site's cool scale, surfaces
+   go white with hairlines, the primary action is black (orange stays for focus, the current step, and dark surfaces),
+   and type, radii and spacing match src/index.css. The customer booking page (/book/:id, .booking), the public chat
+   page (.rcp) and customer websites are untouched: they keep the global tokens. Nothing here changes behaviour. */
+.app,
+.center-page:not(.booking) {
+  --ink-50: #f7f7f9;
+  --ink-100: #eeeef2;
+  --ink-200: #e3e4e9;
+  --ink-300: #c6c8d0;
+  --border: var(--ink-200);
+  --border-strong: var(--ink-300);
+  --surface-sunken: var(--ink-50);
+  --surface-muted: var(--ink-100);
+  --neutral-bg: var(--ink-100);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgb(10 11 15 / 0.04);
+  --shadow-lg: 0 1px 2px rgb(10 11 15 / 0.05), 0 16px 40px rgb(10 11 15 / 0.08);
+}
+
+.app,
+.app .center-page {
+  background: var(--white);
+}
+
+.center-page:not(.booking) {
+  background: var(--ink-50);
+}
+
+.app .center-page {
+  background: var(--white);
+}
+
+/* ---- shell: top bar, tabs, page title ---- */
+.app > .app-header {
+  height: 64px;
+  padding-block: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.app .header-user {
+  gap: 18px;
+}
+
+.app .header-user .link-btn {
+  padding: 6px 0;
+  color: var(--ink-600);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.app .header-user .link-btn:hover {
+  color: var(--ink-900);
+}
+
+.app .header-email {
+  color: var(--ink-500);
+}
+
+.app .tabs {
+  gap: 0;
+  padding-top: 2px;
+}
+
+.app .tabs a {
+  padding: 12px 12px 10px;
+  font-size: 0.93rem;
+  font-weight: 500;
+  color: var(--ink-500);
+  transition: color 0.15s;
+}
+
+.app .tabs a:first-child {
+  padding-left: 0;
+}
+
+.app .tabs a[aria-current='page'] {
+  border-bottom-color: var(--ink-900);
+  color: var(--ink-900);
+  font-weight: 600;
+}
+
+.app .title--page,
+.app .ui-page-title {
+  font-size: 1.55rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.app .title--page {
+  margin-top: 28px;
+}
+
+.app .ui-page-title--top,
+.app .ui-page-head {
+  margin-top: 28px;
+}
+
+.app .page-head {
+  margin-top: 28px;
+}
+
+.app .page-head .title {
+  font-size: 1.55rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.app .lede,
+.app .ui-page-sub {
+  color: var(--gray-600);
+}
+
+/* ---- type: small labels use the site's label face ---- */
+.app .eyebrow-sm,
+.app .ui-facts dt,
+.app .ar-table thead th,
+.app .money-label,
+.app .journey-title,
+.app .fu-upcoming h3,
+.app .studio-panel h3 {
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+/* ---- surfaces ---- */
+.app .card,
+.app .ui-section {
+  margin-top: 16px;
+  border-radius: var(--radius);
+  background: var(--white);
+}
+
+.app .card-title,
+.app .ui-section-title {
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.app .card--hero {
+  background: var(--c8);
+  border-color: var(--c6);
+  color: var(--on-dark);
+}
+
+.app .card--hero .btn-primary {
+  background: var(--orange-500);
+  color: var(--ink-950);
+}
+
+.center-page:not(.booking) .panel {
+  padding: clamp(24px, 5vw, 36px);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.center-page:not(.booking) .panel > * + * {
+  margin-top: 18px;
+}
+
+.center-page:not(.booking) .panel .title {
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.center-page:not(.booking) .panel .lede {
+  color: var(--gray-600);
+}
+
+/* Grouped figures: one bordered strip with hairline dividers instead of a row of separate tiles. */
+.app .stats,
+.app .fu-stats {
+  gap: 0;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+
+/* Hairlines between cells in both directions, whatever the column count; a ragged last row stays white. */
+.app .stat,
+.app .fu-stat {
+  margin: -1px 0 0 -1px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 16px 18px;
+  background: var(--white);
+}
+
+
+.app .stats-note {
+  margin-top: 10px;
+}
+
+.app [data-ads-results] {
+  margin-top: 28px;
+}
+
+.app [data-ads-results] .card-title,
+.app section[aria-label='Last 30 days'] .ui-section-title {
+  margin-bottom: 0;
+}
+
+.app .fu-stat--attn {
+  background: var(--warn-bg);
+}
+
+.app .stat-value {
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.app .stat-value.stat-value--sm {
+  font-size: 1.3rem;
+}
+
+.app .stat-value.stat-value--text {
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.app .stat-label,
+.app .fu-stat dt {
+  color: var(--ink-500);
+  font-size: 0.82rem;
+}
+
+.app .stats-note {
+  text-align: left;
+}
+
+/* ---- buttons: black primary on white, hairline quiet, red danger; squared corners like the site ---- */
+.app .btn,
+.center-page:not(.booking) .btn {
+  border-radius: 10px;
+}
+
+.app .btn-primary,
+.center-page:not(.booking) .btn-primary {
+  background: var(--ink-950);
+  color: var(--white);
+  box-shadow: none;
+}
+
+.app .btn-primary:hover:not(:disabled),
+.center-page:not(.booking) .btn-primary:hover:not(:disabled) {
+  background: var(--ink-700);
+}
+
+.app .btn-quiet,
+.center-page:not(.booking) .btn-quiet {
+  border-color: var(--ink-300);
+}
+
+.app .btn-quiet:hover:not(:disabled) {
+  border-color: var(--ink-900);
+  background: var(--white);
+}
+
+.app .btn-danger {
+  background: var(--bad-text);
+  color: var(--white);
+}
+
+.app .btn-sm {
+  border-radius: 8px;
+}
+
+/* Text actions read as links: dark, underlined, never orange. */
+.app .link-btn,
+.center-page:not(.booking) .link-btn {
+  color: var(--ink-900);
+  text-decoration: underline;
+  text-decoration-color: var(--ink-300);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.app .link-btn:hover:not(:disabled),
+.center-page:not(.booking) .link-btn:hover:not(:disabled) {
+  text-decoration-color: var(--ink-900);
+}
+
+.app .link-btn[aria-pressed='true'] {
+  text-decoration: none;
+}
+
+.app .link-btn--quiet {
+  color: var(--ink-500);
+}
+
+.app .row--link:hover .row-title {
+  color: var(--ink-900);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.app .ui-hint a,
+.app .fine a,
+.center-page:not(.booking) .fine a {
+  color: var(--ink-900);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-300);
+  text-underline-offset: 3px;
+}
+
+.app .booking-url {
+  color: var(--orange-400);
+}
+
+/* ---- forms ---- */
+.app .field input,
+.app .field select,
+.app .field textarea,
+.app .text-input input,
+.app .text-input textarea,
+.app .search,
+.app .copy-field,
+.app .fu-compose textarea,
+.app .fu-form input,
+.app .fu-form select,
+.app .fu-quiet select,
+.app .service-edit input,
+.app .service-row input,
+.app .value-form input,
+.app .coverage-link input {
+  border-color: var(--ink-300);
+  border-radius: 10px;
+}
+
+.app .field input:focus,
+.app .field select:focus,
+.app .field textarea:focus,
+.app .text-input input:focus,
+.app .text-input textarea:focus {
+  border-color: var(--ink-900);
+}
+
+.app .field > span,
+.app .field legend,
+.app .text-list legend,
+.app .import-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.app .field em,
+.app .ui-hint {
+  color: var(--ink-500);
+}
+
+.app input[type='checkbox'],
+.app input[type='radio'] {
+  accent-color: var(--ink-900);
+}
+
+.app .choice-option,
+.app .day-toggle,
+.app .slot,
+.app .day-chip,
+.app .choice-card {
+  border-radius: 10px;
+}
+
+.app .choice-option:has(input:checked),
+.app .day-toggle[aria-pressed='true'] {
+  border-color: var(--ink-950);
+  background: var(--ink-950);
+}
+
+.app .form-error {
+  background: var(--bad-bg);
+  color: var(--bad-text);
+}
+
+.app .save-bar {
+  background: var(--ink-50);
+  border: 1px solid var(--border);
+}
+
+/* ---- status, tags, notices: semantic colours stay semantic ---- */
+.app .tag,
+.app .chip:not(button) {
+  font-size: 0.74rem;
+}
+
+.app .notice-soft {
+  border-color: color-mix(in srgb, var(--warn-dot) 45%, var(--border));
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.app .notice-bad {
+  border-color: color-mix(in srgb, var(--bad-dot) 45%, var(--border));
+  background: var(--bad-bg);
+  color: var(--bad-text);
+}
+
+.app .notice {
+  border-radius: var(--radius);
+}
+
+.app .notice-info {
+  background: var(--ink-50);
+}
+
+.app .status--pending {
+  color: var(--warn-text);
+}
+
+/* Segmented controls and filter chips: squared, quiet. */
+.app .segmented {
+  border: 0;
+  border-radius: 10px;
+  background: var(--ink-100);
+}
+
+.app .segmented button {
+  border-radius: 8px;
+}
+
+.app .segmented--wrap {
+  border-radius: 10px;
+}
+
+.app .fchip,
+.app .suggest {
+  border-radius: 8px;
+}
+
+.app .fchip[aria-pressed='true'] {
+  background: var(--ink-950);
+  border-color: var(--ink-950);
+}
+
+.app .seg {
+  border-radius: 10px;
+}
+
+.app .seg button {
+  border-radius: 8px;
+}
+
+.app .seg button.seg-on {
+  background: var(--ink-950);
+}
+
+/* Follow-ups: outbound messages and the open row in the brand's dark, not indigo. */
+.app .fu-row.is-open {
+  background: var(--ink-50);
+  box-shadow: inset 3px 0 0 var(--ink-900);
+}
+
+.app .fu-msg--out .fu-bubble {
+  background: var(--ink-900);
+}
+
+.app .fu-stage--replied {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.app .fu-notices {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.app .fu-inbox,
+.app .ui-detail,
+.app .design-card,
+.app .ad-preview,
+.app .confirm,
+.app .plan-box,
+.app .record {
+  border-radius: var(--radius);
+}
+
+/* Setup progress: done = black, current = orange (the same "current step" signal as the site's demo). */
+.center-page:not(.booking) .steps-bar .steps-bar-dot {
+  border-color: var(--ink-300);
+}
+
+/* Lists and rows */
+.app .row {
+  border-top-color: var(--border);
+}
+
+.app .ui-attention-list li,
+.app .ui-list-row {
+  border-top-color: var(--border);
+}
+
+/* Teach Your AI step chips and save bar */
+.app .ta-steps a {
+  border-radius: 8px;
+  color: var(--ink-600);
+}
+
+.app .ta-steps a:hover {
+  border-color: var(--ink-900);
+  color: var(--ink-900);
+}
+
+.app .ta-savebar {
+  border-radius: var(--radius);
+  box-shadow: 0 -4px 16px rgb(10 11 15 / 0.05);
+}
+
+/* Website Studio: the editor's selection colour stays a tool highlight, but the shell matches the product. */
+.app .studio-bar,
+.app .studio-stage,
+.app .studio-menu,
+.app .studio-pop {
+  border-radius: 10px;
+}
+
+/* Admin: the invite action is the page's one primary; search matches the field style. */
+.app .search {
+  min-height: 42px;
+}
+
+@media (max-width: 640px) {
+  .app > .app-header {
+    height: 56px;
+  }
+
+  .app .stats,
+  .app .fu-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app .stats--5,
+  .app .stats--3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app .title--page,
+  .app .ui-page-title {
+    font-size: 1.35rem;
+  }
+}

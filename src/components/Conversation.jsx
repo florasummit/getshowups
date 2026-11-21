@@ -81,10 +81,7 @@ export default function Conversation({ onSwitchMode }) {
             </button>
           ))}
         </div>
-        <p className="cv-sim" role="note">
-          <span className="cv-sim-dot" aria-hidden="true" />
-          Simulation · {scenario.business} is an example · nothing is sent, booked or stored
-        </p>
+        <p className="cv-sim">{scenario.business} is an example business</p>
       </div>
 
       <div className="cv-panes">
@@ -138,6 +135,7 @@ export default function Conversation({ onSwitchMode }) {
             <div ref={endRef} />
           </div>
           <div className="cv-compose">
+            {sent === 0 && <p className="cv-hint">You’re the customer. Send the message and watch what the AI does.</p>}
             <button type="button" className="btn btn-primary" onClick={send} disabled={!next} aria-busy={phase === 'thinking' || undefined} ref={live} data-send>
               {sent === 0 ? 'Send the first message' : next ? 'Send the next message' : 'Conversation complete'}
               {next && <Icon name="arrow" size={16} />}
@@ -174,7 +172,17 @@ export default function Conversation({ onSwitchMode }) {
                         ))}
                       {s.id === 'qualification' && <p>{answered.length ? scenario.rulesNote : s.body}</p>}
                       {s.id === 'action' && <p>{answered.length ? answered[answered.length - 1].action : s.body}</p>}
-                      {s.id === 'booking' && (done ? <p className="cv-node-booked">{done.label}</p> : <p>{s.body}</p>)}
+                      {s.id === 'booking' &&
+                        (done ? (
+                          <>
+                            <p className="cv-node-booked">{done.label}</p>
+                            <p className="cv-node-owner">
+                              <span>On your dashboard</span> {ownerView(turns[turns.length - 1].done)[0]} · {ownerView(turns[turns.length - 1].done)[1]}
+                            </p>
+                          </>
+                        ) : (
+                          <p>{s.body}</p>
+                        ))}
                     </div>
                   </li>
                 )

@@ -2,6 +2,37 @@
 
 _Update at the end of every task. Newest first._
 
+## Product-wide polish: one brand for the site and the signed-in app (2026-11-21) — feat/product-polish (frontend only)
+
+- Shared design system, incrementally: src/app.css gained a "Platform design system" block scoped to the dashboard /
+  setup / admin shell (.app) and the platform's own sign-in and gate screens (.center-page that is not the customer
+  booking page). Inside that scope the warm neutral scale becomes the site's cool scale, surfaces are white with
+  hairlines, cards/inputs/buttons use the site's 10–12 px radii, the primary action is black (orange stays for focus,
+  the current step and dark surfaces), text actions are dark underlined links (no orange link text), small labels use
+  Space Grotesk, grouped figures are one bordered strip (no tile rows), semantic status colours unchanged (ok / warn /
+  bad / info / test-mode purple kept), Follow-ups' indigo bubbles and open row now use the brand dark. Customer-facing
+  surfaces are untouched by design: the customer booking page (/book/:id) renders pixel-identically before/after
+  (checked at 1440 and 390), the public chat page (.rcp) and customer websites (server-rendered) keep the global tokens.
+  No component logic, API, permission, validation or persistence change.
+- Homepage refinements on the v2 foundation: full-width two-line headline; one row beneath it (what it does on the
+  left; one dominant black primary + a text-link "See it answer a customer" with the price line subordinate on the
+  right); the stage directly under. Demo entry state lighter: the simulation label sits once in the stage bar, the
+  trade row says only which example business is shown, a one-line "You're the customer…" hint sits beside the first
+  Send, and the Booking stage of the trace now ends with "On your dashboard: Booked · …" (the business outcome).
+- Three screenshot critique passes at 1440/1024/768/390/320 (homepage) and 1440/390 (sign-in, setup, overview,
+  appointments, settings, website, receptionist, follow-ups, Teach Your AI, Ads, admin, Control Center, booking page)
+  in the scratchpad (v2/app/before|pass1|pass2|pass3, v2/shots/pp1|pp3). Fixed along the way: ragged stats rows showing
+  filler cells, admin text-valued stat inflating, setup body grey under a white header, sign-in primary keeping the
+  orange glow, four-line headline at 1440.
+- Measured (Playwright; Lighthouse/axe not installed): homepage unchanged in weight (7 requests, 0 external hosts,
+  script 274 KB, fonts 69 KB), 0 console errors on every app screen, 0 sideways scroll, computed AA contrast on the
+  homepage 0 failures on visible text.
+- Tests: flagship.spec.js updated (one primary button in the hero, secondary is a text link; simulation label in the
+  stage bar); every other spec unchanged.
+- Not changed (needs a behavioural release, documented for follow-up): the dashboard's 880 px column and tab bar are
+  styled, not re-architected (no sidebar); Control Center keeps its own link colour; the Website Studio editor keeps its
+  indigo selection outline (a tool highlight over customer sites).
+
 ## Marketing website v2: Cinematic Intelligence (2026-11-20) — feat/site-v2 (frontend only; marketing site, no app/backend change)
 
 - The editorial direction released earlier today (Fraunces serif, italic orange line, warm-white "notebook" strip)
