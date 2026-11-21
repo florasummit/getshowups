@@ -753,7 +753,8 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     return { ok: true, reply, status: conv.status, limited: true }
   }
 
-  const ctx = { env, customer, conv, now, userText: text, knowledge: k, channel, after: [], committed: false, rules }
+  // A Voice Lab conversation started in dry-run (conv.state.lab.dryRun) stays dry on every path that answers it.
+  const ctx = { env, customer, conv, now, userText: text, knowledge: k, channel, after: [], committed: false, rules, dryRun: Boolean(opts.dryRun ?? conv.state?.lab?.dryRun) }
   const transcript = conv.transcript
   transcript.push({ role: 'user', content: text })
   // Event rows are written off the critical path (never awaited one by one between the model and its tools) and

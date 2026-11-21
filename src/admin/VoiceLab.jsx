@@ -8,18 +8,24 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Badge, Empty, Facts, LoadError, Loading, PageHead, Section } from './control/ui.jsx'
 import { ago, mins } from './control/lib.js'
-import { createRetellAdapter, RETELL_NOTE } from '../voice/retell.js'
 import './control.css'
 import './voice-lab.css'
 
 // Every adapter module present in this build (Vite resolves the glob at build time; a missing module is simply absent).
-const ADAPTERS = import.meta.glob(['../voice/*.js', '!../voice/retell.js', '!../voice/adapter.js'])
+const ADAPTERS = import.meta.glob(['../voice/*.js', '!../voice/adapter.js'])
 const PROVIDERS = [
   ['retell', 'Retell', 'Production browser voice: Retell does speech, the engine is its custom LLM.'],
   ['openai', 'OpenAI Realtime', 'Speech + model at OpenAI; every business tool runs on our server.'],
   ['elevenlabs', 'ElevenLabs', 'Conversational AI agent; client tools forwarded to our server.'],
 ]
-const FACTORY = { openai: 'createOpenAIAdapter', elevenlabs: 'createElevenLabsAdapter' }
+// What a session costs and where it is capped, said before Start (every provider bills per minute; none of it is
+// measured here). Sessions start only on Start, one at a time, ≤ 15 minutes, inside the daily minute budget.
+const COST = {
+  retell: 'Billable: Retell charges the GetShowUps Retell account per minute of call (the same agent customers use).',
+  openai: 'Billable: OpenAI charges per audio token on the GetShowUps OpenAI account (estimate shown after the session).',
+  elevenlabs: 'Billable: ElevenLabs charges per minute on the GetShowUps ElevenLabs account (estimate shown after the session).',
+}
+const FACTORY = { retell: 'createRetellAdapter', openai: 'createOpenAIAdapter', elevenlabs: 'createElevenLabsAdapter' }
 const REASON = {
   retell_not_configured: 'not configured (RETELL_API_KEY, RETELL_AGENT_ID, RETELL_WS_SECRET)',
   openai_not_configured: 'not configured (OPENAI_API_KEY)',
@@ -30,6 +36,10 @@ const START_ERRORS = {
   invalid_provider: 'Unknown provider.',
   not_test_business: 'That business is not marked as a test business.',
   lab_daily_limit: 'The Lab’s daily minute budget is used up for today.',
+  lab_busy: 'Another Lab call is still open. Stop it first (an abandoned one ages out after 15 minutes).',
+  reconnect_limit: 'This session reconnected too many times. Start a new one.',
+  voice_billing: 'The Retell account refused the call (billing).',
+  voice_unreachable: 'Retell could not be reached.',
   receptionist_unavailable: 'The receptionist tables are not applied yet (migration 0026).',
   rate_limited: 'Too many sessions started. Wait a few minutes.',
   mic: 'We couldn’t use your microphone. Allow microphone access in your browser and try again.',
@@ -40,9 +50,8 @@ const START_ERRORS = {
 const CONNECTION = { idle: ['neutral', 'Not connected'], connecting: ['info', 'Connecting'], listening: ['ok', 'Listening'], speaking: ['ok', 'Speaking'], ended: ['neutral', 'Ended'], error: ['bad', 'Error'] }
 const OUTCOME = { booked: 'Booked', coverage_request: 'Service-area request', callback: 'Callback requested', callback_urgent: 'Urgent callback requested', message: 'Message left', out_of_area: 'Outside the area', info: 'Questions answered', error: 'Error', handoff: 'Hand-off' }
 
-const adapterAvailable = (p) => p === 'retell' || Boolean(ADAPTERS[`../voice/${p}.js`])
+const adapterAvailable = (p) => Boolean(ADAPTERS[`../voice/${p}.js`])
 async function loadAdapter(p) {
-  if (p === 'retell') return createRetellAdapter()
   const loader = ADAPTERS[`../voice/${p}.js`]
   if (!loader) return null
   const mod = await loader()
@@ -159,12 +168,7 @@ export default function VoiceLab() {
     sessionRef.current = null
     linesRef.current = []
     metricsRef.current = {}
-    update(() => ({ phase: 'starting', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null, connectionReason: null, retellOpened: null }))
-    if (provider === 'retell') {
-      const adapter = createRetellAdapter()
-      const r = await adapter.start({ customer: business, onEvent: (ev) => ev.type === 'status' && update(() => ({ connection: ev.state, connectionReason: ev.reason || null })) })
-      return update(() => ({ phase: r.ok ? 'done' : 'error', error: r.ok ? null : START_ERRORS[r.error] || r.error, retellOpened: r.ok ? r.url : null }))
-    }
+    update(() => ({ phase: 'starting', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null, connectionReason: null }))
     if (!adapterAvailable(provider)) return update(() => ({ phase: 'error', error: START_ERRORS.adapter_unavailable }))
     // Microphone first, inside the click: a blocked microphone is reported before any session or provider call exists.
     try {
@@ -266,7 +270,9 @@ export default function VoiceLab() {
                   <span>A confirmed booking in this call creates a REAL appointment on {biz?.name || 'the test business'}’s calendar and sends its confirmation. Test businesses only; messages still obey the launch gate.</span>
                 </div>
               )}
-              {provider === 'retell' && <p className="cc-status-line">{RETELL_NOTE} The Talk button on that page appears only for businesses released in RECEPTIONIST_VOICE_BUSINESSES.</p>}
+              <p className="cc-status-line" data-cost-note={provider}>
+                {COST[provider]} Limits: one Lab call at a time, 15 minutes per session, {status.limits.dailyMinutes} minutes per day across the Lab. Stop ends the call at once.
+              </p>
             </div>
             <div className="cc-actions">
               {live ? (
@@ -275,7 +281,7 @@ export default function VoiceLab() {
                 </button>
               ) : (
                 <button type="button" className="btn btn-primary btn-sm" onClick={start} disabled={Boolean(blocker)} data-lab-start>
-                  {provider === 'retell' ? 'Open browser voice test' : 'Start conversation'}
+                  Start conversation
                 </button>
               )}
               {blocker && !live && (
@@ -289,15 +295,10 @@ export default function VoiceLab() {
                 {session.error}
               </p>
             )}
-            {session.retellOpened && (
-              <p className="cc-status-line" role="status">
-                Opened {session.retellOpened} in a new tab. {RETELL_NOTE}
-              </p>
-            )}
           </div>
         </Section>
 
-        {(live || session.phase === 'done') && !session.retellOpened && (
+        {(live || session.phase === 'done') && (
           <Section title={session.phase === 'done' ? 'Session summary' : 'Live call'} id="vl-live" data-lab-live={session.phase}>
             <div className="cc-section-body">
               <div className="cc-actions">

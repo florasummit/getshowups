@@ -183,11 +183,12 @@ test('route: admin + same-origin + Lab on + provider configured + a Lab session 
   assert.equal(bad.status, 502)
   assert.equal(bad.json().error, 'openai_unavailable')
   openaiStatus = 200
-  // A session on another provider or an ended one is refused
-  const el = await startLabSession({ ...env, ELEVENLABS_API_KEY: 'el_'.padEnd(30, 'x'), ELEVENLABS_AGENT_ID: 'agent_1' }, admin, { customer: 'alpha', provider: 'elevenlabs' })
-  assert.equal((await call(openaiApi, '/api/platform/voice-lab/openai', { cookie: staff, body: { customer: 'alpha', id: el.session.id, token: el.session.token } })).json().error, 'wrong_provider')
+  // An ended session is refused; one Lab call at a time, so the ElevenLabs session can start only after this one ended.
+  assert.equal((await startLabSession({ ...env, ELEVENLABS_API_KEY: 'el_'.padEnd(30, 'x'), ELEVENLABS_AGENT_ID: 'agent_1' }, admin, { customer: 'alpha', provider: 'elevenlabs' })).error, 'lab_busy')
   await endLabSession(env, await loadLabSession(env, 'alpha', start.session.id, start.session.token), {})
   assert.equal((await call(openaiApi, '/api/platform/voice-lab/openai', { cookie: staff, body })).json().error, 'conversation_ended')
+  const el = await startLabSession({ ...env, ELEVENLABS_API_KEY: 'el_'.padEnd(30, 'x'), ELEVENLABS_AGENT_ID: 'agent_1' }, admin, { customer: 'alpha', provider: 'elevenlabs' })
+  assert.equal((await call(openaiApi, '/api/platform/voice-lab/openai', { cookie: staff, body: { customer: 'alpha', id: el.session.id, token: el.session.token } })).json().error, 'wrong_provider')
   const audits = db.sql.prepare("SELECT details FROM admin_audit WHERE action = 'voice_lab.openai_connect'").all()
   assert.equal(audits.length, 2)
   assert.ok(audits.every((a) => !a.details.includes(EPHEMERAL)))

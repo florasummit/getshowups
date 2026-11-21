@@ -85,3 +85,32 @@ test('admin: an unconfigured provider cannot start a session server-side either 
   expect([403, 409]).toContain(real.status())
   expect((await (await page.request.get('/api/platform/voice-lab/status')).json()).sessions).toEqual([])
 })
+
+test('one click creates the Voice Lab test business; the Lab offers it; the sales record stays uncreated here and the public sales chat stays closed @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/admin')
+  const panel = page.locator('[data-sales-setup]')
+  // Desktop and phone runs share one server: whichever runs first creates the record; the other finds it created. Only the
+  // Lab record here: the sales record makes the admin its owner, and other admin tests rely on this admin having no
+  // business (its creation is covered in test/sales-business.test.js).
+  for (const kind of ['lab']) {
+    const row = panel.locator(`[data-sales-kind="${kind}"]`)
+    if ((await row.getAttribute('data-sales-state')) === 'missing') await panel.locator(`[data-sales-create="${kind}"]`).click()
+    await expect(row).toHaveAttribute('data-sales-state', 'calendar')
+  }
+  await expect(panel.locator('[data-sales-create="lab"]')).toHaveCount(0)
+  await expect(panel.locator('[data-sales-kind="sales"]')).toHaveAttribute('data-sales-state', 'missing')
+  // The Lab lists the test business, not the real sales record; the public sales chat is still closed (no calendar).
+  await page.goto('/admin/voice-lab')
+  await expect(page.locator('[data-lab-business] option[value="getshowups-lab"]')).toHaveCount(1)
+  const offered = await page.locator('[data-lab-business] option').evaluateAll((o) => o.map((x) => x.value))
+  expect(offered).toContain('getshowups-lab')
+  expect(offered).not.toContain('getshowups')
+  await expect(page.locator('[data-cost-note]')).toContainText('Billable')
+  expect((await (await page.request.get('/api/enrollment')).json()).salesChat).toBe(false)
+  expect((await page.request.get('/api/receptionist/getshowups')).status()).toBe(404)
+  const overview = await (await page.request.get('/api/platform/overview')).json()
+  expect(overview.customers.find((c) => c.id === 'getshowups-lab')?.testBusiness).toBe(true)
+  expect(overview.customers.find((c) => c.id === 'getshowups')).toBe(undefined)
+})

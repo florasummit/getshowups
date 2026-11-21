@@ -15,12 +15,20 @@ import { emailRef } from '../auditlog.js'
 import { PROVIDERS, labEnabled, labDailyMinutes, providerStatus, estimateMicros } from './providers.js'
 
 export const LAB_SESSION_MAX_MS = 15 * 60 * 1000
+const TOOL_KINDS = new Set(['save_customer_details', 'check_service_area', 'request_coverage', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
 
 // Minutes of Lab calls started today (UTC), from receptionist_calls rows of Lab conversations.
 export async function labMinutesToday(env, now = Date.now()) {
   const day = now - (now % 86_400_000)
   const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(COALESCE(ended_at, ?2) - created_at), 0) AS ms FROM receptionist_calls WHERE provider IN ('openai', 'elevenlabs', 'retell-lab') AND created_at >= ?1").bind(day, now).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
+}
+
+// One Lab call at a time across the platform: an un-ended Lab call younger than the session ceiling blocks a new one
+// (Stop ends it; an abandoned one ages out after LAB_SESSION_MAX_MS).
+export async function labBusy(env, now = Date.now()) {
+  const r = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM receptionist_calls WHERE provider IN ('openai', 'elevenlabs', 'retell-lab') AND ended_at IS NULL AND created_at > ?1").bind(now - LAB_SESSION_MAX_MS).first()
+  return Number(r?.n || 0) > 0
 }
 
 // → { ok, session } | { ok: false, error, httpStatus }. `admin` = { email } from requirePlatformAdmin.
@@ -35,6 +43,7 @@ export async function startLabSession(env, admin, { customer: customerId, provid
   const t = await testStatus(env, customerId)
   if (!t.test || t.unreadable) return { ok: false, httpStatus: 403, error: 'not_test_business' }
   if ((await labMinutesToday(env, now)) >= labDailyMinutes(env)) return { ok: false, httpStatus: 429, error: 'lab_daily_limit' }
+  if (await labBusy(env, now)) return { ok: false, httpStatus: 409, error: 'lab_busy' }
   const customer = customerFromRow(row)
   const conv = await startConversation(env, customer, 'voice', now)
   const callId = `lab_${randomToken(12)}`
@@ -53,7 +62,9 @@ export async function loadLabSession(env, customerId, id, token) {
   const row = await getCustomer(env.ONBOARDING_DB, customerId)
   if (!row) return null
   const customer = customerFromRow(row)
-  const conv = await loadConversation(env, customer, id, token)
+  // The token is always checked here: loadConversation skips the check for an undefined token (server-internal
+  // callers), so a request body that leaves it out must not load someone else's session.
+  const conv = await loadConversation(env, customer, id, String(token ?? ''))
   if (!conv || !conv.state?.lab) return null
   return { customer, conv }
 }
@@ -70,6 +81,13 @@ export async function endLabSession(env, { customer, conv }, { metrics = {}, out
   lab.endedAt = now
   lab.estimatedMicros = estimateMicros(lab.provider, seconds)
   if (typeof outcome === 'string' && /^[a-z_]{1,32}$/.test(outcome)) lab.outcome = outcome
+  // Retell runs the engine on our server (no browser tool events): read what the tools did from the engine's own
+  // receptionist_events for this conversation, so the Lab summary is the same for every provider.
+  if (!conv.state.tools?.length) {
+    const { results } = await env.ONBOARDING_DB.prepare('SELECT kind, ok, detail, at FROM receptionist_events WHERE conversation_id = ?1 AND customer = ?2 ORDER BY id').bind(conv.id, customer.id).all()
+    const tools = results.filter((e) => TOOL_KINDS.has(e.kind)).map((e) => ({ name: e.kind, ok: e.ok === 1, at: e.at, ...(String(e.detail || '').endsWith('_simulated') ? { simulated: true } : {}) }))
+    if (tools.length) conv.state.tools = tools.slice(-60)
+  }
   await env.ONBOARDING_DB.prepare('UPDATE receptionist_calls SET ended_at = ?3 WHERE call_id = ?1 AND customer = ?2').bind(lab.callId, customer.id, now).run()
   await endConversation(env, customer, conv, now)
   return { ok: true, summary: labSummary(conv) }
