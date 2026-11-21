@@ -38,7 +38,15 @@ export function providerStatus(env) {
 // Provider agents fill these in with the source URL; the Lab never presents them as measured spend.
 export const COST_ESTIMATES = {
   retell: { perMinuteMicros: null, source: null, asOf: null },
-  openai: { perMinuteMicros: null, source: null, asOf: null },
+  // gpt-realtime (standard tier, per 1M tokens, 2026-11-21): audio input $32, cached audio/text input $0.40, text
+  // input $4, audio output $64. Audio tokens: 1 per 100 ms of caller audio, 1 per 50 ms of assistant audio
+  // (developers.openai.com/api/docs/guides/realtime-costs). ESTIMATE for a typical turn-based minute: ~30 s caller
+  // speech (300 input audio tokens, $0.0096) + ~30 s assistant speech (600 output audio tokens, $0.0384), the
+  // assistant's audio re-sent once uncached as input (600 tokens, $0.0192), ~4 responses/min re-billing ~4k tokens
+  // of cached context (instructions + history, $0.0064) ≈ $0.074/min + a one-time ~$0.012 for the first,
+  // uncached instructions → rounded up to $0.08/min. Longer calls cost more per minute (the whole history is
+  // re-billed per response); never presented as measured spend.
+  openai: { perMinuteMicros: 80_000, source: 'https://developers.openai.com/api/docs/pricing', asOf: '2026-11-21', model: 'gpt-realtime', estimate: true },
   elevenlabs: { perMinuteMicros: null, source: null, asOf: null },
 }
 
