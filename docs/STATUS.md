@@ -2,6 +2,28 @@
 
 _Update at the end of every task. Newest first._
 
+## Dashboard → Receptionist: honest channel statuses (2026-11-22) — fix/receptionist-status (no migration)
+
+- Root cause of the misleading page: the "Browser voice" tile mapped the server's `voiceStatus: 'testing'` (the
+  business's ACTIVE provider is Retell and the business is not on the Retell release list RECEPTIONIST_VOICE_BUSINESSES)
+  to "In testing, not available yet", which reads as a product still in testing; the voice integrations are
+  production-capable (#117), the state is a per-business release switch. The headline said "Working" without saying
+  which channel; "Phone calls: Not connected" implied the owner could connect one (no line can exist yet); "Team
+  notifications: Test mode" gave no reason.
+- Fix (src/dashboard/Receptionist.jsx channelTiles): every tile = state + reason + next step from the capability facts
+  the API already returns (chat = model configured; voiceStatus available | testing | not_configured, resolved
+  server-side from the business's active provider; staffEmail = MESSAGES_LIVE gate; phoneLine false). Browser voice:
+  Active (voice really answers customers) · "Not turned on yet" (reason: released business by business; admins viewing
+  the page also see the release list / console next step; owners never see a provider name) · "Not available"
+  (provider not configured). Headline: "Answering on website chat" / "Answering on chat and browser voice" / "Not
+  answering" / "Off". Phone calls: "Not available yet". Team notifications: test mode + why. The customer chat page's
+  two "in testing" lines say "isn't available for this business yet". Provider controls stay admin-only (unchanged).
+- Regression: test/e2e/dashboard-receptionist.spec.js (owner not released vs released, traced to the API; no provider
+  name/control for owners; every dashboard tab by click both ways, direct links, back, tablet width; desktop + phone).
+  e2e: RECEPTIONIST_VOICE_BUSINESSES now lists the mobile voice business so one business shows Active.
+- Production facts: RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical → those two show Active; getshowups
+  shows "Not turned on yet" (Retell, not on the list) until it is added or its provider is switched/promoted.
+
 ## Promote the staged provider to 100% + Admin Console layout (2026-11-22) — feat/global-promotion (no migration)
 
 - Production before this work: global default ElevenLabs version 1 (staged), all 6 businesses pinned to Retell, 0

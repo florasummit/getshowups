@@ -32,7 +32,7 @@ const VOICE_ERRORS = {
   conversation_ended: 'This conversation has ended. Start a new one to talk.',
   mic: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
   noMic: 'No microphone was found. Connect one, or keep typing.',
-  voice_not_available: 'Voice is in testing and not available yet. You can keep typing.',
+  voice_not_available: 'Talking by voice isn’t available for this business yet. You can keep typing.',
   dropped: 'The call dropped. You can talk again or keep typing.',
   start: 'Couldn’t start talking. Try again or keep typing.',
   voice_busy: 'All voice lines are busy right now. Try again in a minute, or keep typing.',
@@ -479,7 +479,7 @@ export default function ChatPage({ id }) {
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
                 <a href={`/book/${id}`}>Book online</a>
               </p>
-              {test ? <p className="chat-legal" data-test-session>Admin test session: voice runs on the candidate provider you chose, in dry run (nothing is booked, nobody is messaged).</p> : info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice is in testing and not available yet.</p>}
+              {test ? <p className="chat-legal" data-test-session>Admin test session: voice runs on the candidate provider you chose, in dry run (nothing is booked, nobody is messaged).</p> : info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice isn’t available for this business yet.</p>}
             </>
           )}
           <p className="chat-legal">

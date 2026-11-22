@@ -31,9 +31,9 @@ test('voice: microphone blocked → told how to allow it, no call is created, ty
   await expect(page.getByLabel('Your message')).toBeEnabled()
 })
 
-test('voice gate: voice not released for this business → no talk button, the page says voice is in testing; chat works @mobile', async ({ page }) => {
+test('voice gate: voice not released for this business → no talk button, the page says voice isn’t available for this business; chat works @mobile', async ({ page }) => {
   const voiceCalls = await setup(page, 'NotAllowedError', 'testing')
-  await expect(page.getByText('Talking by voice is in testing and not available yet.')).toBeVisible()
+  await expect(page.getByText('Talking by voice isn’t available for this business yet.')).toBeVisible()
   await expect(page.getByRole('button', { name: /Talk instead/ })).toHaveCount(0)
   await expect(page.getByLabel('Your message')).toBeEnabled()
   expect(voiceCalls).toEqual([])

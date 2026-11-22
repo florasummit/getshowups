@@ -2928,6 +2928,7 @@ body.studio-full-open { overflow: hidden; }
 .ui-tile { display: grid; gap: 6px; align-content: start; justify-items: start; padding: var(--s-4); }
 .ui-tile + .ui-tile { border-left: 1px solid var(--border); }
 .ui-tile-label { color: var(--text-muted); font-size: var(--fs-sm); font-weight: 600; }
+.ui-tile-hint { color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .ui-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ui-tile + .ui-tile { border-left: 0; }
