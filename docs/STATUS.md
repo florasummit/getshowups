@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Operational launch sprint, step 4: Admin → Growth (Measure | Simulate | Decide) (2026-11-21) — feat/admin-growth (no migration)
+
+- **Measure** (server/growth.js, GET /api/platform/growth): the admin overview's own queries, each figure labelled
+  live / test / estimated / unavailable with its sample and the 30-day range (leads, qualified, prospects,
+  consultations booked/attended, paying customers and MRR live-only, conversion rates, synced ad spend, CAC
+  unavailable until spend and closes coincide, retention). Test businesses, test leads, internal addresses excluded.
+- **Simulate** (server/growth-model.js, pure; src/admin/Growth.jsx): straight-line funnel with spend, churn and
+  months; baseline vs scenario, new customers, new and total MRR vs existing, cost per customer, payback,
+  sensitivity; prefilled from measured data only above minimum samples (10 leads / 8 qualified / 5 booked / 5
+  attended), otherwise labelled assumptions. Price is modeling only: never touches Stripe (e2e asserts no billing
+  request). Labelled scenario with limitations, never a forecast.
+- **Decide**: deterministic rules with minimum samples along the funnel; too few leads → a no-spend volume
+  experiment; the first stage under its threshold → one concrete experiment with modeled upside, cost, effort and
+  evidence strength; never recommends spend, never acts.
+- Platform metrics keep their operational figures; the commercial sales line links to Growth. Sign-in may return to
+  /admin/growth and /admin/voice-lab. Customer dashboards unchanged.
+
 ## Operational launch sprint, step 1: Business Review in plain language + reconciliation scopes (2026-11-21) — feat/operational-readiness (no migration)
 
 - **Business Review → "What this means for operating"**: the same capabilities grouped as Broken right now / Works

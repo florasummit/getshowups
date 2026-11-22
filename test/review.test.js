@@ -238,6 +238,8 @@ test('conversation providers: planned providers appear as "Not built" capabiliti
 
 test('sign-in can return to /admin/review (allowlisted); other admin paths still fall back', () => {
   assert.equal(safeNext('/admin/review'), '/admin/review')
+  assert.equal(safeNext('/admin/growth'), '/admin/growth')
+  assert.equal(safeNext('/admin/voice-lab'), '/admin/voice-lab')
   assert.equal(safeNext('/admin/other'), '/dashboard')
   assert.equal(safeNext('/admin/review/../x'), '/dashboard')
 })
