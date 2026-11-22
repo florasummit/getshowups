@@ -71,7 +71,8 @@ test('owner: browses, previews (one at a time), picks a voice, personality and p
   await expect(after.getByRole('radio', { name: 'A little slower' })).toHaveAttribute('aria-checked', 'true')
   // Stored server-side with the version; a save carrying an old version is refused (409), nothing overwritten.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
-  expect([me.voice.voiceId, me.voice.voiceName, me.voice.personality, me.voice.pace, me.voice.version]).toEqual(['11labs-Adrian', 'Adrian', 'calm', 'slower', 2]) // the seed's rollout pin is version 1
+  expect([me.voice.voiceId, me.voice.voiceName, me.voice.personality, me.voice.pace]).toEqual(['11labs-Adrian', 'Adrian', 'calm', 'slower'])
+  expect(me.voice.version).toBeGreaterThanOrEqual(2) // the seed's rollout pin is version 1; a concurrent global promotion/rollback (another spec) may bump it further
   const origin = new URL(page.url()).origin
   const stale = await page.request.post('/api/dashboard/receptionist', { data: { action: 'voice', personality: 'upbeat', version: 0 }, headers: { Origin: origin } })
   expect(stale.status()).toBe(409)
