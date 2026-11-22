@@ -37,8 +37,13 @@ _Update at the end of every task. Newest first._
   between businesses; charges attributed to the right session, errors as codes, business filter never touches another
   business, audited, owners/anonymous refused; provider ids recorded once; comparison numbers; balances only where an
   API exists; status route). 822 unit pass; browser suite unchanged.
-- Not changed: provider configuration (ElevenLabs staged, six businesses on Retell), no call was started, no
-  customer-facing setting. Nothing is monitored continuously; every provider read is an admin's click.
+- Not changed by this release: no provider setting, no call started, no customer-facing setting. Nothing is monitored
+  continuously; every provider read is an admin's click. NOTE (post-release check of the records, 2026-11-22): the
+  provider configuration itself changed BEFORE this release by the founder's own console actions, audited
+  `receptionist.global_provider_switched` (22:11 UTC, ElevenLabs → OpenAI, mode all, version 2) and
+  `receptionist.global_provider_promoted` (22:13 UTC, version 3): all six businesses, PoolThru included, moved from
+  Retell to OpenAI Realtime and follow the default. "ElevenLabs staged, six businesses on Retell" is no longer the
+  state; Retell is the previous provider the console can roll back to.
 - Next decision (human): whether to fetch the verified charges now (one click; reads Retell/ElevenLabs records for the
   last 30 days' sessions) and whether the default test ceiling (30 min per test business per day) and the provider
   ceilings (600 min/day OpenAI and ElevenLabs; Retell uncapped) are the numbers you want; a Retell cap needs
