@@ -14,7 +14,10 @@
 //     meta?:   { primaryTexts: string[1..5] (≤500), headlines: string[1..5] (≤40), description?: ≤60,
 //                callToAction: 'GET_QUOTE'|'BOOK_NOW'|'LEARN_MORE'|'CONTACT_US',
 //                imageCreativeIds: string[], videoCreativeIds: string[], destination: 'instant_form'|'website',
-//                formQuestions: ('FULL_NAME'|'PHONE'|'EMAIL'|'ZIP')[] }
+//                formQuestions: ('FULL_NAME'|'PHONE'|'EMAIL'|'ZIP')[],
+//                placements?: ('facebook'|'instagram')[] (omitted = Meta's automatic placements),
+//                audience?: { ageMin: 18..65, ageMax?: ageMin..65 } (omitted = 18+),
+//                endDate?: 'YYYY-MM-DD' (the ad set's end time; the owner sees daily × days as the most it can spend) }
 //   }
 //
 // Text limits: Google responsive search ads use 30-character headlines (3–15), 90-character descriptions
@@ -29,6 +32,8 @@ export const LIMITS = {
 
 const CTA = ['GET_QUOTE', 'BOOK_NOW', 'LEARN_MORE', 'CONTACT_US']
 const FORM_FIELDS = ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP']
+export const META_PLACEMENTS = ['facebook', 'instagram'] // Meta targeting publisher_platforms (Marketing API targeting spec)
+const YMD = /^\d{4}-\d{2}-\d{2}$/
 const ZIP_RE = /^\d{5}$/
 
 // Claims the AI may not invent. A phrase is allowed only when the owner listed it in approvedClaims.
@@ -143,7 +148,22 @@ export function validateSpec(input, { approvedClaims = [], ceilingDailyCents = I
     const fields = m.formQuestions || ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP']
     if (m.destination === 'instant_form' && (!fields.length || fields.some((f) => !FORM_FIELDS.includes(f)))) errors.push('meta.formQuestions: invalid')
     if (m.destination === 'website') spec.finalUrl = s.finalUrl
+    // Placements: a subset of the supported platforms, deduplicated; omitted (or both) = automatic placements.
+    const placements = Array.isArray(m.placements) ? [...new Set(m.placements)] : null
+    if (placements && (!placements.length || placements.some((p) => !META_PLACEMENTS.includes(p)))) errors.push(`meta.placements: one or more of ${META_PLACEMENTS.join(', ')}`)
+    // Audience: an age range inside Meta's 18–65 bounds.
+    const aud = m.audience && typeof m.audience === 'object' ? m.audience : null
+    const ageMin = aud?.ageMin == null ? null : Number(aud.ageMin)
+    const ageMax = aud?.ageMax == null ? null : Number(aud.ageMax)
+    if (ageMin != null && !(Number.isInteger(ageMin) && ageMin >= 18 && ageMin <= 65)) errors.push('meta.audience.ageMin: 18–65')
+    if (ageMax != null && !(Number.isInteger(ageMax) && ageMax >= (ageMin ?? 18) && ageMax <= 65)) errors.push('meta.audience.ageMax: between the minimum age and 65')
+    // End date: a calendar day; the owner's "most it can spend" is daily × days to that date.
+    const endDate = m.endDate == null || m.endDate === '' ? null : String(m.endDate)
+    if (endDate && (!YMD.test(endDate) || Number.isNaN(Date.parse(`${endDate}T00:00:00Z`))) ) errors.push('meta.endDate: YYYY-MM-DD')
     spec.meta = {
+      ...(placements && placements.length && placements.length < META_PLACEMENTS.length ? { placements } : {}),
+      ...(ageMin != null || ageMax != null ? { audience: { ...(ageMin != null ? { ageMin } : {}), ...(ageMax != null ? { ageMax } : {}) } } : {}),
+      ...(endDate ? { endDate } : {}),
       primaryTexts: (m.primaryTexts || []).map(clean),
       headlines: (m.headlines || []).map(clean),
       ...(m.description != null ? { description: clean(m.description) } : {}),

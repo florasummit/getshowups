@@ -273,7 +273,15 @@ registerCapability({
   journey: 'advertising',
   external: 'Meta',
   dependsOn: ['platform.tokens', 'ads.safety_stop'],
-  state: (env) => (metaConfigured(env) ? { mode: 'sandbox', note: 'Dry runs only' } : { mode: 'disabled', note: 'Meta app not configured' }),
+  description: 'Lead ads on Facebook/Instagram: draft, preview, review, dry run; created PAUSED; read back and compared; paused/resumed; leads by webhook.',
+  blockers: ['Meta app with Business verification and App Review (ads_management, leads_retrieval, pages_* permissions) — external, founder'],
+  state: (env) =>
+    metaConfigured(env)
+      ? liveLaunchEnabled(env)
+        ? { mode: 'live', note: 'Connected owners can create paused campaigns and start them (approved budget, subscription)' }
+        : { mode: 'sandbox', note: 'Connect, draft, preview, review and dry run; creating a paused campaign needs ADS_LIVE_LAUNCH', approval: 'ADS_LIVE_LAUNCH=true (creating paused campaigns) and, separately, each owner’s Start' }
+      : { mode: 'disabled', note: 'Meta app not configured: owners see “not available yet”; drafts and previews still work', approval: 'META_APP_ID + META_APP_SECRET (+ META_WEBHOOK_VERIFY_TOKEN) from a Meta app with Business verification and App Review', needs: 'configuration' },
+  verify: seen('Meta campaign read back', 7, "SELECT max(at) AS at FROM ad_actions WHERE kind = 'verify' AND status = 'applied' AND campaign_id IN (SELECT id FROM ad_campaigns WHERE platform = 'meta')"),
 })
 registerCapability({
   id: 'ads.safety_stop',

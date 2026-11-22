@@ -21,6 +21,11 @@
 //   - adimages response shape images.{name}.hash; leadgen_forms fields; adcreatives lead-ad
 //     call_to_action.value.lead_gen_form_id; leadgen_forms needs a Page access token.
 //   - Video upload (advideos) is not implemented: video-only Meta specs are refused.
+//   - targeting.publisher_platforms (facebook | instagram), age_min / age_max and the ad set's end_time are documented
+//     targeting / ad set fields (marketing-api/audiences/reference/advanced-targeting, ad-set reference); their exact
+//     acceptance with our other fields is verified only against a test ad account.
+// Verification (verifyCampaign): the created objects are read back (campaign, ad set, ad) and compared with the
+// approved draft: status, objective, daily budget, ZIPs, placements, age range, optimization goal, ad present. Read-only.
 import { siteOrigin } from '../auth.js'
 import { getCreative, getCreativeAsset } from './creative.js'
 import { failure, getConnection, loadToken, markReconnect } from './connections.js'
@@ -57,6 +62,8 @@ export function mapError(httpStatus, body) {
   const code = Number(e.code)
   const sub = Number(e.error_subcode)
   if (code === 190 || code === 102) return failure('reconnect_required', { httpStatus, reconnect: true })
+  // Object gone or never existed ("Unsupported get request. Object with ID ... does not exist", code 100 subcode 33).
+  if (code === 100 && (sub === 33 || /does not exist/i.test(String(e.message || '')))) return { ...failure('not_found', { httpStatus }), notFound: true }
   if ([4, 17, 32, 613].includes(code) || (code >= 80000 && code <= 80014)) return failure('rate_limited', { httpStatus, retryable: true })
   if (code === 10 || (code >= 200 && code <= 299)) return failure(code === 10 ? 'app_not_approved' : 'permission_denied', { httpStatus })
   if (code === 1487225 || sub === 1487225 || /creative|policy/i.test(String(e.error_user_title || ''))) return failure('creative_rejected', { httpStatus })
@@ -180,7 +187,13 @@ export function buildPayloads(env, campaign, { adAccountId, pageId, ids = {} }) 
       destination_type: 'ON_AD',
       bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
       promoted_object: { page_id: pageId },
-      targeting: { geo_locations: { zips: s.geo.zips.map((z) => ({ key: `US:${z}` })) }, age_min: 18 }, // zips format UNVERIFIED
+      targeting: {
+        geo_locations: { zips: s.geo.zips.map((z) => ({ key: `US:${z}` })) }, // zips format UNVERIFIED
+        age_min: s.meta.audience?.ageMin ?? 18,
+        ...(s.meta.audience?.ageMax ? { age_max: s.meta.audience.ageMax } : {}),
+        ...(s.meta.placements?.length ? { publisher_platforms: s.meta.placements } : {}),
+      },
+      ...(s.meta.endDate ? { end_time: `${s.meta.endDate}T23:59:59Z` } : {}),
       status: 'PAUSED',
     },
     leadForm: {
@@ -298,6 +311,59 @@ export async function launchCampaign(env, customerId, campaign, { dryRun = true 
 }
 
 const idsOf = (row) => (typeof row?.platform_ids === 'string' ? JSON.parse(row.platform_ids || '{}') : row?.platformIds || {})
+
+// Reads a created campaign back from Meta and compares it with the approved draft. Read-only. Returns
+// { ok, found, remote: { status: 'ENABLED'|'PAUSED'|'REMOVED', dailyBudgetCents, zips, placements, ageMin, ageMax,
+// objective, adStatus }, checks: [{ name, ok }] }. A missing campaign is found: false (not an error): the owner
+// deleted it in Ads Manager. Statuses are normalized to the shared vocabulary used for Google (campaigns.js reconcile).
+const normStatus = (s) => (s === 'ACTIVE' ? 'ENABLED' : s === 'PAUSED' ? 'PAUSED' : ['DELETED', 'ARCHIVED'].includes(s) ? 'REMOVED' : s || null)
+export async function verifyCampaign(env, customerId, row) {
+  const ids = idsOf(row)
+  if (!ids.campaignId) return failure('not_launched')
+  const spec = typeof row.spec === 'string' ? JSON.parse(row.spec) : row.spec
+  return withToken(env, customerId, async (token) => {
+    const camp = await graph(env, 'GET', `/${ids.campaignId}`, { fields: 'id,name,status,objective,effective_status' }, { token })
+    if (!camp.ok) return camp.notFound ? { ok: true, found: false, remote: null, checks: [{ name: 'campaign exists on Meta', ok: false }] } : camp
+    const [adset, ad] = await Promise.all([
+      ids.adsetId ? graph(env, 'GET', `/${ids.adsetId}`, { fields: 'id,status,daily_budget,targeting,optimization_goal,end_time' }, { token }) : Promise.resolve({ ok: true, data: null }),
+      ids.adId ? graph(env, 'GET', `/${ids.adId}`, { fields: 'id,status' }, { token }) : Promise.resolve({ ok: true, data: null }),
+    ])
+    if (!adset.ok && !adset.notFound) return adset
+    if (!ad.ok && !ad.notFound) return ad
+    const set = adset.ok ? adset.data : null
+    const t = set?.targeting || {}
+    const m = spec.meta || {}
+    const remote = {
+      status: normStatus(camp.data.status),
+      objective: camp.data.objective || null,
+      dailyBudgetCents: set && set.daily_budget != null ? Number(set.daily_budget) : null,
+      zips: (t.geo_locations?.zips || []).map((z) => String(z.key || '').replace(/^US:/, '')),
+      placements: Array.isArray(t.publisher_platforms) ? t.publisher_platforms : null,
+      ageMin: t.age_min ?? null,
+      ageMax: t.age_max ?? null,
+      optimizationGoal: set?.optimization_goal || null,
+      endTime: set?.end_time || null,
+      adStatus: ad.ok && ad.data ? normStatus(ad.data.status) : null,
+    }
+    const ours = { status: row.status === 'active' ? 'ENABLED' : 'PAUSED' }
+    const sameSet = (a, b) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i])
+    const checks = [
+      { name: 'campaign exists on Meta', ok: true },
+      { name: 'campaign status', ok: remote.status === ours.status },
+      { name: 'objective is leads', ok: remote.objective === 'OUTCOME_LEADS' },
+      { name: 'ad set exists', ok: Boolean(set) },
+      { name: 'daily budget', ok: remote.dailyBudgetCents === spec.dailyBudgetCents },
+      { name: 'ZIP codes', ok: sameSet(remote.zips, spec.geo?.zips || []) },
+      { name: 'placements', ok: m.placements?.length ? sameSet(remote.placements || [], m.placements) : !remote.placements || remote.placements.length === 0 || sameSet(remote.placements, ['facebook', 'instagram']) },
+      { name: 'age range', ok: (remote.ageMin ?? 18) === (m.audience?.ageMin ?? 18) && (remote.ageMax ?? null) === (m.audience?.ageMax ?? null) },
+      { name: 'optimized for leads', ok: remote.optimizationGoal === 'LEAD_GENERATION' },
+      { name: 'end date', ok: m.endDate ? String(remote.endTime || '').startsWith(m.endDate) : true },
+      { name: 'ad exists', ok: Boolean(ad.ok && ad.data) },
+      { name: 'ad not running while the campaign is paused', ok: !(ours.status === 'PAUSED' && remote.adStatus === 'ENABLED' && remote.status === 'ENABLED') },
+    ]
+    return { ok: true, found: true, remote, checks }
+  })
+}
 
 // PAUSED stops delivery at the campaign. ACTIVE turns on ad, ad set, then campaign (all were PAUSED).
 export async function setStatus(env, customerId, row, status) {

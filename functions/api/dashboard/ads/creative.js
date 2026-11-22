@@ -1,11 +1,12 @@
 // /api/dashboard/ads/creative
 //   GET ?id=<creative id>  the asset bytes (this business only)
 //   POST { action: 'image', prompt, size? } | { action: 'video', prompt, imageId } | { action: 'approve'|'reject', id }
+//        | { action: 'from_asset', assetId }  (one of this business's own website photos becomes a creative; no AI)
 // Generation is quota- and cost-capped per business per month (server/ads/creative.js).
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
-import { generateImage, startVideo, setCreativeDecision, getCreativeAsset } from '../../../../server/ads/creative.js'
+import { generateImage, startVideo, setCreativeDecision, getCreativeAsset, addCreativeFromAsset } from '../../../../server/ads/creative.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
@@ -33,9 +34,10 @@ export async function onRequestPost({ request, env }) {
   if (body?.action === 'image') r = await generateImage(env, id, { prompt: body.prompt, size: body.size || '1024x1024' })
   else if (body?.action === 'video') r = await startVideo(env, id, { prompt: body.prompt, imageCreativeId: body.imageId })
   else if (body?.action === 'approve' || body?.action === 'reject') r = (await setCreativeDecision(env.ONBOARDING_DB, id, body.id, body.action === 'approve' ? 'approved' : 'rejected')) ? { ok: true } : { ok: false, error: 'not_found' }
+  else if (body?.action === 'from_asset') r = await addCreativeFromAsset(env, id, body.assetId)
   else return json(400, { error: 'invalid_request' })
   if (!r.ok) {
-    const status = r.error === 'not_configured' ? 503 : r.error?.startsWith('quota_') ? 429 : r.error === 'not_found' ? 404 : r.retryable ? 503 : 400
+    const status = r.error === 'not_configured' ? 503 : r.error?.startsWith('quota_') || r.error === 'too_many_creatives' ? 429 : r.error === 'not_found' ? 404 : r.retryable ? 503 : 400
     return json(status, { error: r.error })
   }
   return json(r.creative ? 201 : 200, r.creative ? { creative: r.creative } : { ok: true })

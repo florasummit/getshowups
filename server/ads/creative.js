@@ -10,6 +10,28 @@
 //          NOT verified against a live account; keep VIDEO_PROVIDER_VERIFIED unset until it is.
 // Tests use CREATIVE_API_MOCK_ORIGIN (loopback only) — never set in production.
 import { randomToken } from '../google-oauth.js'
+import { readAsset, sniffImage } from '../assets.js'
+
+// An owner's own website photo becomes an ad creative (no AI, no cost): the bytes stay in website_assets
+// (storage_key 'asset:<id>'); it still needs the owner's explicit approval before an ad can use it.
+export const MAX_CREATIVES = 40
+export async function addCreativeFromAsset(env, customer, assetId, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const found = await readAsset(db, String(assetId || ''), customer)
+  if (!found || found.asset.customer !== customer) return { ok: false, error: 'not_found' }
+  const mime = sniffImage(found.asset.bytes)
+  if (!mime) return { ok: false, error: 'invalid_image' }
+  const n = await db.prepare("SELECT count(*) AS n FROM ad_creatives WHERE customer = ?1 AND status <> 'rejected'").bind(customer).first()
+  if ((n?.n ?? 0) >= MAX_CREATIVES) return { ok: false, error: 'too_many_creatives' }
+  const existing = await db.prepare('SELECT id, status FROM ad_creatives WHERE customer = ?1 AND storage_key = ?2').bind(customer, `asset:${found.asset.id}`).first()
+  if (existing) return { ok: true, creative: { id: existing.id, kind: 'image', status: existing.status, prompt: 'Your website photo', createdAt: now }, existed: true }
+  const id = randomToken(12)
+  await db
+    .prepare("INSERT INTO ad_creatives (id, customer, kind, provider, status, prompt, storage_key, mime, cost_cents, created_at, updated_at) VALUES (?1, ?2, 'image', 'website_asset', 'ready', 'Your website photo', ?3, ?4, 0, ?5, ?5)")
+    .bind(id, customer, `asset:${found.asset.id}`, mime, now)
+    .run()
+  return { ok: true, creative: { id, kind: 'image', status: 'ready', prompt: 'Your website photo', createdAt: now } }
+}
 
 export const QUOTA = { imagesPerMonth: 24, videosPerMonth: 4, aiCostCentsPerMonth: 2000 } // $20/month cap
 export const VIDEO_SECONDS = 10
@@ -176,6 +198,10 @@ export async function getCreative(db, customer, id) {
 export async function getCreativeAsset(env, customer, id) {
   const c = await getCreative(env.ONBOARDING_DB, customer, id)
   if (!c?.storage_key || !['ready', 'approved'].includes(c.status)) return null
+  if (c.storage_key.startsWith('asset:')) {
+    const found = await readAsset(env.ONBOARDING_DB, c.storage_key.slice('asset:'.length), customer)
+    return found && found.asset.customer === customer ? { bytes: found.asset.bytes, mime: c.mime, kind: c.kind } : null
+  }
   const obj = await env.AD_ASSETS?.get(c.storage_key)
   if (!obj) return null
   return { bytes: new Uint8Array(await obj.arrayBuffer()), mime: c.mime, kind: c.kind }

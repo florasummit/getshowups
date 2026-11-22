@@ -46,7 +46,22 @@ const ERRORS = {
   invalid_budget: 'Enter a daily budget in dollars.',
   invalid_status: 'Only a created campaign (running or paused) can change its budget.',
   not_launched: 'Create the campaign on Google first.',
+  too_many_creatives: 'You have as many images as this account can hold. Reject some you don’t need.',
+  invalid_image: 'That photo can’t be used as an ad image.',
+  creative_unavailable: 'One of the images isn’t approved any more. Choose an approved image.',
+  unsupported_destination: 'Only lead ads with an instant form can be created right now.',
+  app_not_approved: 'Meta hasn’t approved GetShowUps’ app for this yet.',
+  account_disabled: 'Meta reports this ad account as disabled. Check it in Ads Manager.',
+  creative_rejected: 'Meta rejected the ad’s image or text. Change it and try again.',
+  invalid_request: 'Meta didn’t accept the campaign as drafted. Check the fields and try again.',
 }
+const PLATFORM_NAME = { google: 'Google', meta: 'Meta' }
+const META_CTA_LABEL = { GET_QUOTE: 'Get quote', BOOK_NOW: 'Book now', LEARN_MORE: 'Learn more', CONTACT_US: 'Contact us' }
+const META_FORM_LABEL = { FULL_NAME: 'Full name', PHONE: 'Phone', EMAIL: 'Email', ZIP: 'ZIP code' }
+const META_PLACEMENT_LABEL = { facebook: 'Facebook', instagram: 'Instagram' }
+// Meta's charging rule, in plain words (Meta Business Help Center: daily budgets are an average; up to 25% more on
+// some days, never more than 7× the daily budget in a calendar week).
+const CHARGING_META = 'Meta may spend up to 25% more than the daily budget on a busy day, but never more than 7 times the daily budget in a calendar week.'
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
 
 // What the owner sees after coming back from Google or Meta sign-in (?ads= / ?ads_error= on the URL).
@@ -507,7 +522,9 @@ function Connections({ connections, capabilities, running = 0, onChange }) {
           )}
         </div>
         {!available ? (
-          <span className="fine">Coming soon</span>
+          <span className="fine" data-platform-unavailable={platform}>
+            {platform === 'meta' ? 'Not available yet: GetShowUps’ Facebook app is still being set up with Meta. You can draft and preview Facebook & Instagram ads now; connecting your Page and ad account comes when Meta approves the app.' : 'Coming soon'}
+          </span>
         ) : (
           attention && (
             <a className="btn btn-primary" href={start}>
@@ -524,7 +541,7 @@ function Connections({ connections, capabilities, running = 0, onChange }) {
       <p className="fine">GetShowUps uses your Google Ads access only to create, change and report on the campaigns you approve here.</p>
       <ul className="rows">
         {row('google', 'Google Ads')}
-        {(capabilities.meta || connections.meta) && row('meta', 'Facebook & Instagram')}
+        {row('meta', 'Facebook & Instagram')}
       </ul>
     </section>
   )
@@ -550,11 +567,215 @@ function GooglePreview({ spec }) {
 
 function MetaPreview({ spec }) {
   const m = spec.meta || {}
+  const img = (m.imageCreativeIds || [])[0]
   return (
-    <div className="ad-preview" aria-label="Ad preview">
-      <p className="fine">Sponsored</p>
+    <div className="ad-preview ad-preview--meta" aria-label="Ad preview" data-meta-preview>
+      <p className="fine">Sponsored · {(m.placements || ['facebook', 'instagram']).map((p) => META_PLACEMENT_LABEL[p]).join(' and ')}</p>
       <p>{(m.primaryTexts || [])[0]}</p>
+      {img ? <img className="ad-preview-img" src={`/api/dashboard/ads/creative?id=${img}`} alt="" loading="lazy" /> : <p className="ad-preview-noimg">No image chosen yet</p>}
       <p className="ad-preview-title">{(m.headlines || [])[0]}</p>
+      {m.description && <p className="fine">{m.description}</p>}
+      <p className="ad-preview-cta">{META_CTA_LABEL[m.callToAction] || 'Learn more'}</p>
+    </div>
+  )
+}
+
+// Days from today to an end date (inclusive), for "the most it can spend"; null without a valid date.
+const daysUntil = (ymd) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return null
+  const end = Date.parse(`${ymd}T23:59:59Z`)
+  if (Number.isNaN(end)) return null
+  return Math.max(0, Math.ceil((end - Date.now()) / 86400000))
+}
+
+// The Meta lead-ads editor: everything Meta will be asked to create, in the order the owner thinks about it, then the
+// review summary the approval covers. Images: approved creatives (AI-generated, or the owner's own website photos
+// turned into creatives with one click) — an ad can only use approved ones (the server refuses otherwise).
+function MetaEditor({ spec, m, set, setM, budget, server, busy, photos = [], creatives = [], onCreativesChange }) {
+  const [pick, setPick] = useState('')
+  const [note, setNote] = useState(null)
+  const placements = m.placements?.length ? m.placements : ['facebook', 'instagram']
+  const togglePlacement = (p) => {
+    const next = placements.includes(p) ? placements.filter((x) => x !== p) : [...placements, p]
+    if (!next.length) return
+    setM(next.length === 2 ? { placements: undefined } : { placements: next })
+  }
+  const questions = m.formQuestions || ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP']
+  const toggleQuestion = (q) => {
+    const next = questions.includes(q) ? questions.filter((x) => x !== q) : [...questions, q]
+    if (!next.length) return
+    setM({ formQuestions: ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP'].filter((x) => next.includes(x)) })
+  }
+  const images = creatives.filter((c) => c.kind === 'image' && ['ready', 'approved'].includes(c.status))
+  const chosen = m.imageCreativeIds || []
+  const toggleImage = (id) => setM({ imageCreativeIds: chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id] })
+  const useWebsitePhoto = async () => {
+    if (!pick) return
+    setNote({ busy: true })
+    const { status, data } = await api('/api/dashboard/ads/creative', { method: 'POST', body: { action: 'from_asset', assetId: pick } })
+    if (status === 201 || status === 200) {
+      setNote({ text: 'Added. Approve it below, then tick it for this ad.' })
+      onCreativesChange?.()
+    } else setNote({ error: errorText(data?.error) })
+  }
+  const decide = async (id, action) => {
+    await api('/api/dashboard/ads/creative', { method: 'POST', body: { action, id } })
+    onCreativesChange?.()
+  }
+  const days = daysUntil(m.endDate)
+  const total = days != null ? spec.dailyBudgetCents * Math.max(1, days) : null
+  const L = { primaryText: 500, headline: 40, description: 60, textsMax: 5 }
+  return (
+    <div className="campaign-groups" data-meta-editor>
+      <section className="meta-step">
+        <h4>Goal</h4>
+        <p className="fine">Leads: people who tap the ad fill in a short form on Facebook or Instagram (no website visit needed). Each form becomes a lead in your Appointments tab.</p>
+      </section>
+      <section className="meta-step">
+        <h4>Where and who</h4>
+        <p className="fine" data-meta-where>
+          People in {plural((spec.geo?.zips || []).length, 'ZIP code')} from your business details{(spec.geo?.zips || []).length ? ` (${spec.geo.zips.slice(0, 6).join(', ')}${spec.geo.zips.length > 6 ? ', …' : ''})` : ''}. Change your area in step 1, then draft again.
+        </p>
+        <fieldset className="choices" disabled={busy}>
+          <legend>Show on</legend>
+          {['facebook', 'instagram'].map((p) => (
+            <label key={p} className="check">
+              <input type="checkbox" checked={placements.includes(p)} onChange={() => togglePlacement(p)} data-meta-placement={p} />
+              <span>{META_PLACEMENT_LABEL[p]}</span>
+            </label>
+          ))}
+          <span className="fine">Both = Meta chooses the placements automatically.</span>
+        </fieldset>
+        <div className="field-row">
+          <label className="field">
+            <span>Youngest</span>
+            <input type="number" min="18" max="65" value={m.audience?.ageMin ?? 18} onChange={(e) => setM({ audience: { ...(m.audience || {}), ageMin: Number(e.target.value) } })} data-meta-age-min />
+          </label>
+          <label className="field">
+            <span>Oldest <em>(blank = no limit)</em></span>
+            <input type="number" min="18" max="65" value={m.audience?.ageMax ?? ''} onChange={(e) => setM({ audience: { ...(m.audience || {}), ageMax: e.target.value === '' ? undefined : Number(e.target.value) } })} data-meta-age-max />
+          </label>
+        </div>
+        {(server['meta.audience.ageMin'] || server['meta.audience.ageMax'] || server['meta.placements']) && <p className="field-error">{server['meta.audience.ageMin'] || server['meta.audience.ageMax'] || server['meta.placements']}</p>}
+      </section>
+      <section className="meta-step">
+        <h4>The ad</h4>
+        <TextList legend="Main text" noun="Main text" items={m.primaryTexts || ['']} max={L.primaryText} min={1} maxItems={L.textsMax} field="meta.primaryTexts" server={server} disabled={busy} multiline onChange={(primaryTexts) => setM({ primaryTexts })} />
+        <TextList legend="Headlines" noun="Headline" items={m.headlines || ['']} max={L.headline} min={1} maxItems={L.textsMax} field="meta.headlines" server={server} disabled={busy} onChange={(headlines) => setM({ headlines })} />
+        <label className="field">
+          <span>Description <em>(optional, up to {L.description} characters)</em></span>
+          <input value={m.description || ''} maxLength={L.description} onChange={(e) => setM({ description: e.target.value || undefined })} />
+          {server['meta.description[0]'] && <span className="field-error">{server['meta.description[0]']}</span>}
+        </label>
+        <label className="field">
+          <span>Button</span>
+          <select value={m.callToAction || 'GET_QUOTE'} onChange={(e) => setM({ callToAction: e.target.value })} data-meta-cta>
+            {Object.entries(META_CTA_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <fieldset className="choices" disabled={busy}>
+          <legend>Form asks for</legend>
+          {Object.entries(META_FORM_LABEL).map(([k, v]) => (
+            <label key={k} className="check">
+              <input type="checkbox" checked={questions.includes(k)} onChange={() => toggleQuestion(k)} data-meta-question={k} />
+              <span>{v}</span>
+            </label>
+          ))}
+        </fieldset>
+      </section>
+      <section className="meta-step" data-meta-images>
+        <h4>Image</h4>
+        {images.length === 0 && photos.length === 0 && <p className="fine">No images yet. Upload a photo in the Website tab (your own photos only), then use it here.</p>}
+        {images.length > 0 && (
+          <ul className="creative-pick">
+            {images.map((c) => (
+              <li key={c.id} className={chosen.includes(c.id) ? 'creative-pick--on' : ''}>
+                <img src={`/api/dashboard/ads/creative?id=${c.id}`} alt={c.prompt} loading="lazy" />
+                {c.status === 'approved' ? (
+                  <label className="check">
+                    <input type="checkbox" checked={chosen.includes(c.id)} onChange={() => toggleImage(c.id)} data-meta-image={c.id} />
+                    <span>Use in this ad</span>
+                  </label>
+                ) : (
+                  <div className="card-actions">
+                    <button type="button" className="btn btn-sm btn-quiet" onClick={() => decide(c.id, 'approve')} data-approve-creative={c.id}>
+                      Approve
+                    </button>
+                    <button type="button" className="link-btn" onClick={() => decide(c.id, 'reject')}>
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {photos.length > 0 && (
+          <div className="field-row">
+            <label className="field">
+              <span>Use a photo from your website</span>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} data-meta-photo-pick>
+                <option value="">Choose a photo…</option>
+                {photos.map((p, i) => (
+                  <option key={p.id} value={p.id}>
+                    Website photo {i + 1}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className="btn btn-quiet" disabled={!pick || note?.busy} onClick={useWebsitePhoto} data-meta-photo-add>
+              {note?.busy ? 'Adding…' : 'Add as ad image'}
+            </button>
+          </div>
+        )}
+        {note?.text && <p className="fine" role="status">{note.text}</p>}
+        {note?.error && <p className="form-error" role="alert">{note.error}</p>}
+        {server['meta'] && <p className="field-error">{server['meta']}</p>}
+      </section>
+      <section className="meta-step">
+        <h4>Budget</h4>
+        <div className="field-row">
+          <label className="field">
+            <span>Daily budget ($)</span>
+            <input type="number" min="5" step="1" value={spec.dailyBudgetCents / 100} onChange={(e) => set({ dailyBudgetCents: toCents(e.target.value) })} />
+            {budget && <span className="fine">Up to {money(budget.dailyCeilingCents)}/day under your approved budget.</span>}
+          </label>
+          <label className="field">
+            <span>Stop on <em>(optional)</em></span>
+            <input type="date" value={m.endDate || ''} onChange={(e) => setM({ endDate: e.target.value || undefined })} data-meta-end-date />
+            {server['meta.endDate'] && <span className="field-error">{server['meta.endDate']}</span>}
+          </label>
+        </div>
+        <p className="fine" data-meta-total>
+          {total != null ? `Most it can spend before it stops: about ${money(total)} (${plural(Math.max(1, days), 'day')} × ${money(spec.dailyBudgetCents)}).` : 'No end date: it runs within your approved monthly budget until you pause it.'}
+        </p>
+      </section>
+      <section className="meta-step" data-meta-review>
+        <h4>Review</h4>
+        <dl className="kv">
+          {[
+            ['Platform', `Facebook & Instagram (${placements.map((p) => META_PLACEMENT_LABEL[p]).join(' + ')})`],
+            ['Goal', 'Leads through an instant form'],
+            ['Where', plural((spec.geo?.zips || []).length, 'ZIP code')],
+            ['Ages', `${m.audience?.ageMin ?? 18}${m.audience?.ageMax ? `–${m.audience.ageMax}` : '+'}`],
+            ['Daily budget', money(spec.dailyBudgetCents)],
+            ['Stops', m.endDate ? `${m.endDate} (about ${money(total)} in total)` : 'when you pause it'],
+            ['Images', plural(chosen.filter((id) => images.some((c) => c.id === id && c.status === 'approved')).length, 'approved image')],
+            ['Form', questions.map((q) => META_FORM_LABEL[q]).join(', ')],
+            ['Button', META_CTA_LABEL[m.callToAction] || '—'],
+            ['When you approve', 'It is created on Meta paused. Nothing shows or spends until you press Start, within your approved budget.'],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
     </div>
   )
 }
@@ -655,27 +876,28 @@ function BudgetSummary({ dailyCents, budget }) {
 // Google's charging rule, in plain words: the daily budget is an average, not a hard daily cap.
 const CHARGING = 'Google may spend up to twice the average on a busy day, but never charges more than about 30 days of the average in a month.'
 
-function Verification({ v }) {
+function Verification({ v, platform = 'Google' }) {
   if (!v) return null
-  if (v.error) return <p className="fine" data-verification="unknown">Couldn’t check this campaign on Google yet. We’ll try again automatically.</p>
+  if (v.error) return <p className="fine" data-verification="unknown">Couldn’t check this campaign on {platform} yet. We’ll try again automatically.</p>
   return v.ok ? (
     <p className="conn-status conn-status--ok" data-verification="ok">
       <span className="conn-icon" aria-hidden="true">
         ✓
       </span>
-      Checked on Google: budget, area, keywords and ad match
+      Checked on {platform}: {platform === 'Meta' ? 'status, budget, area, placements, ages and ad match' : 'budget, area, keywords and ad match'}
     </p>
   ) : (
     <p className="conn-status conn-status--warn" data-verification="differs">
       <span className="conn-icon" aria-hidden="true">
         !
       </span>
-      Google shows a difference: {v.failed.join(', ')}
+      {platform} shows a difference: {v.failed.join(', ')}
     </p>
   )
 }
 
-function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
+function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos = [], creatives = [] }) {
+  const platformName = PLATFORM_NAME[c.platform] || c.platform
   const [saved, setSaved] = useState(c.spec)
   const [spec, setSpec] = useState(c.spec)
   const [state, setState] = useState({})
@@ -706,9 +928,9 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
   }
   const NOTES = {
     validate: 'Check passed. Nothing was created and nothing was spent.',
-    approve: 'Approved. Next: create it on Google (it starts paused).',
-    launch: sandbox ? 'Created on Google, paused. It’s a test account, so it never shows and nothing is charged.' : 'Created on Google, paused. Nothing runs until you press Start.',
-    launch_differs: 'Created on Google, paused, but Google shows a difference. See below.',
+    approve: `Approved. Next: create it on ${platformName} (it starts paused).`,
+    launch: sandbox ? 'Created on Google, paused. It’s a test account, so it never shows and nothing is charged.' : `Created on ${platformName}, paused. Nothing runs until you press Start.`,
+    launch_differs: `Created on ${platformName}, paused, but ${platformName} shows a difference. See below.`,
     resume: sandbox ? 'Started on the test account. It never shows and nothing is charged.' : 'Started.',
     pause: 'Paused.',
     budget: 'Daily budget changed.',
@@ -766,8 +988,8 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
         </p>
       )}
       <BudgetSummary dailyCents={spec.dailyBudgetCents} budget={budget} />
-      <p className="fine">{CHARGING}</p>
-      {c.launched && <Verification v={c.verification} />}
+      <p className="fine">{c.platform === 'meta' ? CHARGING_META : CHARGING}</p>
+      {c.launched && <Verification v={c.verification} platform={platformName} />}
       {c.lastError && (
         <p className="form-error" role="alert">
           {errorText(c.lastError)}
@@ -803,23 +1025,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
           </details>
         </div>
       )}
-      {editable && c.platform === 'meta' && (
-        <details className="campaign-edit">
-          <summary>Edit ad</summary>
-          <label className="field">
-            <span>Main text</span>
-            <textarea rows={3} value={(m.primaryTexts || []).join('\n')} onChange={(e) => setM({ primaryTexts: lines(e.target.value) })} />
-          </label>
-          <label className="field">
-            <span>Headline <em>(up to 40 characters)</em></span>
-            <input value={(m.headlines || [])[0] || ''} onChange={(e) => setM({ headlines: [e.target.value] })} />
-          </label>
-          <label className="field">
-            <span>Daily budget ($)</span>
-            <input type="number" min="5" step="1" value={spec.dailyBudgetCents / 100} onChange={(e) => set({ dailyBudgetCents: toCents(e.target.value) })} />
-          </label>
-        </details>
-      )}
+      {editable && c.platform === 'meta' && <MetaEditor spec={spec} m={m} set={set} setM={setM} budget={budget} server={server} busy={busy} photos={photos} creatives={creatives} onCreativesChange={onChange} />}
 
       {editable && dirty && (
         <div className="save-bar" role="group" aria-label="Unsaved changes">
@@ -880,13 +1086,13 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
       {confirm === 'launch' || confirm === 'approve_create' ? (
         <div className="confirm" role="group" aria-label="Confirm create">
           <p>
-            {confirm === 'approve_create' ? 'Approve this ad and create it on Google? ' : 'Create this campaign on Google? '}
+            {confirm === 'approve_create' ? `Approve this ad and create it on ${platformName}? ` : `Create this campaign on ${platformName}? `}
             It starts <strong>paused</strong>; nothing runs until you press Start.
             {sandbox && ' Test account: it never shows and nothing is charged.'}
           </p>
           <div className="card-actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => (confirm === 'approve_create' ? approveAndCreate() : act('launch', { confirm: true }))}>
-              {confirm === 'approve_create' ? 'Confirm: approve and create (paused)' : 'Confirm: create on Google (paused)'}
+              {confirm === 'approve_create' ? 'Confirm: approve and create (paused)' : `Confirm: create on ${platformName} (paused)`}
             </button>
             <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
               Cancel
@@ -895,7 +1101,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
         </div>
       ) : confirm === 'remove' ? (
         <div className="confirm" role="group" aria-label="Confirm remove">
-          <p>Remove this draft? It disappears from this list. Nothing on Google changes.</p>
+          <p>Remove this draft? It disappears from this list. Nothing on {platformName} changes.</p>
           <div className="card-actions">
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => act('remove')}>
               Confirm: remove draft
@@ -947,18 +1153,18 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null }) {
           </div>
           <ul className="action-help fine">
             {dirty && editable && <li>Save your changes first.</li>}
-            {!c.launched && <li>Check: Google reviews the ad. Nothing is created or charged.</li>}
+            {!c.launched && <li>{c.platform === 'meta' ? 'Check: builds exactly what Meta would receive, without sending it. Nothing is created or charged.' : 'Check: Google reviews the ad. Nothing is created or charged.'}</li>}
             {['draft', 'error'].includes(c.status) && !c.launched && (
               <li>
                 {!budget
                   ? 'Approve your monthly ad budget (step 4) to approve this campaign.'
                   : canServe
-                    ? 'Approve and create: puts this exact ad on Google, paused. Nothing runs until you press Start.'
-                    : 'Approve: locks in this version. Connect your ad account to create it on Google.'}
+                    ? `Approve and create: puts this exact ad on ${platformName}, paused. Nothing runs until you press Start.`
+                    : `Approve: locks in this version. Connect your ad account to create it on ${platformName}.`}
               </li>
             )}
             {c.status === 'approved' && !c.launched && (
-              <li>{canServe ? 'Create: puts it on Google, paused. Nothing runs until you press Start.' : ERRORS.live_launch_disabled}</li>
+              <li>{canServe ? `Create: puts it on ${platformName}, paused. Nothing runs until you press Start.` : ERRORS.live_launch_disabled}</li>
             )}
             {c.launched && c.status === 'paused' && <li>{sandbox ? 'Start: runs on the test account. It never shows and nothing is charged.' : 'Start: the ad can show and spend, within your approved budget.'}</li>}
           </ul>
@@ -1149,7 +1355,7 @@ export default function Ads() {
       {d.campaigns.length > 0 && (
         <section aria-label="Campaigns" className="stack">
           {d.campaigns.map((c) => (
-            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budget={d.budget} onChange={load} hold={d.hold} />
+            <CampaignEditor key={c.id} c={c} capabilities={d.capabilities} budget={d.budget} onChange={load} hold={d.hold} photos={d.photos || []} creatives={d.creatives || []} />
           ))}
         </section>
       )}

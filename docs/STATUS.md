@@ -2,6 +2,29 @@
 
 _Update at the end of every task. Newest first._
 
+## Operational launch sprint, step 3: Meta ads for controlled testing (2026-11-21) — feat/meta-ads-testing (no migration)
+
+- On the existing Ads architecture (same drafts, approvals, budget ceiling, holds, attribution): the Meta spec gains
+  placements (facebook / instagram; both = automatic), an age range (18–65) and an optional stop date (ad set
+  end_time; the owner sees "most it can spend" = daily × days). Payloads carry publisher_platforms / age_min /
+  age_max / end_time.
+- **Read-back verification for Meta** (server/ads/meta.js verifyCampaign): campaign, ad set and ad are read back and
+  compared with the approved draft (status, objective, daily budget, ZIPs, placements, ages, optimization goal, end
+  date, ad present); runs right after creation (campaigns.launch now verifies for every adapter that can) and daily
+  (verifyLaunched); a deleted campaign reconciles to "removed"; a provider failure is a failure, never "removed".
+- **Owner photos as creatives**: POST /api/dashboard/ads/creative { action: 'from_asset', assetId } turns one of the
+  business's own website photos (never a logo, never another business's) into an ad image (storage_key asset:<id>,
+  no AI, no cost); still needs the owner's explicit approval; the Ads tab lists the photos (ids only).
+- **Meta editor in the Ads tab**: goal (leads, instant form), where (ZIPs) and who (placements, ages), the ad (texts,
+  description, button, form questions), image (approved creatives or a website photo), budget (daily + stop date +
+  total), preview with image and button, and a review list the approval covers; "Check (no spend)" builds the exact
+  payloads without any Meta call. Wording is platform-aware (no more "Google" on Meta cards). The connection row says
+  honestly that Meta isn't connectable yet and why.
+- Business Review: ads.meta describes the workflow, names the external blocker (Meta app + Business verification +
+  App Review) and the switches. docs/META_ADS.md = readiness report + the founder's external steps + the smallest test.
+- Production: nothing changes for owners until META_APP_ID/SECRET exist (approval); creating a paused campaign also
+  needs ADS_LIVE_LAUNCH=true (approval); starting one is a separate owner action. No spend anywhere.
+
 ## Voice Lab usable by the owner + one-click sales records (2026-11-21) — feat/voice-lab-usable (no migration)
 
 - **LIVE 2026-11-21**: PR #103 merged pinned (head 8d9087b) → main 48ea7c7 → production deployment
