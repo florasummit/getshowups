@@ -9,8 +9,12 @@ _Update at the end of every task. Newest first._
   --agent-id` now configures an existing agent in place (model/temperature/voice/language kept; our tools, overrides,
   auth, events, ceiling set; name untouched; never a second agent; agent_not_found / invalid_agent_id refused);
   `scripts/voice-provision.sh elevenlabs --agent-id <id> --apply` does key check → agent → both secrets.
-- Production: no ElevenLabs key in Keychain or Cloudflare yet (owner action); OpenAI remains the Lab default; nothing
-  customer-facing; PoolThru untouched; PR #114 left open and unchanged.
+- 2026-11-22 connected: key `getshowups-elevenlabs-api-key-v2` (Conversational AI read+write), agent
+  agent_8901m80mefhme349tzxvbeh9hrjd configured in place (7 tools, overrides, auth, {{greeting}} first message), secrets
+  ELEVENLABS_API_KEY/ELEVENLABS_AGENT_ID set (effective on the next deployment = this PR's merge). Live session verified
+  from the server module (signed URL → WebSocket → greeting spoken). Fixes found live: ElevenLabs refuses a first_message
+  override (greeting is now a dynamic variable) and tool parameters without a description (422). OpenAI remains the Lab
+  default; nothing customer-facing; PoolThru untouched. PR #114 released separately (main f89f4fd).
 ## Receptionist location policy: ZIP only when needed (2026-11-22) — fix/receptionist-zip-policy (no migration; PR for approval)
 
 - Prompt (server/receptionist/knowledge.js): "answer first, location only when needed, a town is fine, one ask, a

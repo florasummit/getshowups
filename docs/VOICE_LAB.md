@@ -271,6 +271,15 @@ from Keychain and then sets both Pages secrets: `scripts/voice-provision.sh elev
 The agent id is in the dashboard URL (Agents → the agent) or its settings. Do not use the "Eleven Realtime" models for
 this agent (they failed to publish with HTTP 500 on 2026-11-22); any other model works, the Lab reads its answers.
 
+Done 2026-11-22: key `getshowups-elevenlabs-api-key-v2` (Keychain account getshowups-elevenlabs; needs Conversational AI
+read AND write: the Lab mints a signed session URL, which is convai_write), agent agent_8901m80mefhme349tzxvbeh9hrjd
+configured in place, secrets ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID set on the Pages project (live on the next
+deployment). Verified live: signed URL minted, session opened with our prompt override, greeting spoken.
+Greeting: ElevenLabs refuses a first_message OVERRIDE on a published agent even with the Security flag on (close 1008
+"not allowed by config"), so the agent's first message is the dynamic variable `{{greeting}}` and the session route sends
+`dynamic_variables.greeting` (the business's greeting, never empty); without it ElevenLabs refuses the session rather than
+speaking a placeholder. Every tool parameter needs a description (422 otherwise).
+
 Manual steps (the only ones GetShowUps cannot do): create an API key with Conversational AI permissions in ElevenLabs,
 store it once with `security add-generic-password -a getshowups -s getshowups-elevenlabs-api-key -w`, run the
 provision script with the agent id, then deploy (merged PR). The Lab then shows ElevenLabs "Configured"; OpenAI stays
