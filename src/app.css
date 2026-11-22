@@ -4108,3 +4108,9 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .growth .row-main, .growth .row-title, .growth .row-sub, .growth dd { min-width: 0; overflow-wrap: anywhere; }
 .growth .row { flex-wrap: wrap; }
 @media (max-width: 560px) { .growth .sim-table { font-size: 0.85rem; } .growth .sim-table th, .growth .sim-table td { padding: 6px 4px; } }
+
+/* Domain setup: root-domain guidance and checklist states */
+.domain-apex { margin: 10px 0; }
+.domain-apex summary { cursor: pointer; }
+.domain-steps { padding-left: 1.2em; display: grid; gap: 6px; }
+.wj-check .is-info { opacity: 0.85; }

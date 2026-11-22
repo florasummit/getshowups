@@ -62,8 +62,12 @@ export const PAGE_TYPES = [
   ['service-area', 'Service area'],
   ['contact', 'Contact'],
   ['faq', 'Questions'],
-  ['privacy', 'Privacy'],
+  ['privacy', 'Privacy Policy'],
+  ['terms', 'Terms of Service'],
 ]
+// Legal page slugs: /privacy and /terms on every business website and connected domain (server/site-render-v2.js puts
+// them in the footer, never in the main navigation; the middleware also forwards old addresses like /privacy-policy).
+export const LEGAL_PAGES = { privacy: { navLabel: 'Privacy', title: 'Privacy Policy' }, terms: { navLabel: 'Terms', title: 'Terms of Service' } }
 const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/g, '') || 'page'
 export function uniqueSlug(base, site) {
   const taken = new Set(site.pages.map((p) => p.slug))
@@ -79,7 +83,7 @@ export function pageTemplate(kind, biz, site, { service } = {}) {
     ids.add(s.id)
     return s
   }
-  const label = { about: 'About', services: 'Services', 'service-area': 'Service area', contact: 'Contact', faq: 'Questions', privacy: 'Privacy' }[kind] || service?.name || 'Page'
+  const label = { about: 'About', services: 'Services', 'service-area': 'Service area', contact: 'Contact', faq: 'Questions', privacy: 'Privacy', terms: 'Terms' }[kind] || service?.name || 'Page'
   const slug = uniqueSlug(kind === 'service' ? service?.name || 'service' : kind, site)
   const page = (sections, seo = {}) => ({ slug, navLabel: label.slice(0, 24), seoTitle: seo.title || `${label} | ${biz.name}`.slice(0, 70), seoDescription: (seo.description || '').slice(0, 160), sections })
   switch (kind) {
@@ -96,7 +100,11 @@ export function pageTemplate(kind, biz, site, { service } = {}) {
     case 'faq':
       return page([sec('faq'), sec('cta')])
     case 'privacy':
-      return page([sec('text', { heading: 'Privacy', body: privacyText(biz) })], { title: `Privacy | ${biz.name}`, description: `How ${biz.name} uses the details you share on this website.` })
+      // A legal page (legal: true): the owner's own words, kept word for word (no marketing filters), shown in the
+      // footer, never rewritten or dropped by the AI designer, published only after the owner's explicit review.
+      return { ...page([sec('text', { heading: 'Privacy Policy', body: privacyText(biz) })], { title: `Privacy Policy | ${biz.name}`, description: `How ${biz.name} uses the details you share on this website.` }), legal: true, source: { kind: 'starter', at: Date.now() } }
+    case 'terms':
+      return { ...page(termsSections(biz, sec), { title: `Terms of Service | ${biz.name}`, description: `The terms that apply when you book or buy services from ${biz.name}.` }), legal: true, source: { kind: 'starter', at: Date.now() } }
     default:
       return null
   }
@@ -112,6 +120,19 @@ export function privacyText(biz) {
     'This website does not use advertising trackers. It is hosted by GetShowUps, which stores the details you send on our behalf; bookings are added to our calendar.',
     `To see, correct or delete the details we hold about you, contact ${biz.name}.`,
   ].join('\n\n')
+}
+
+// Terms of Service: a structure only. Every body is a prompt in [brackets] the owner replaces with their own terms;
+// nothing here states a price, a guarantee, a refund rule or any obligation on the owner's behalf. Not legal advice.
+export function termsSections(biz, sec) {
+  const t = (heading, body) => sec('text', { heading, body })
+  return [
+    t('Terms of Service', `These terms apply when you book, buy or use services from ${biz.name}. [Replace the bracketed prompts on this page with your own terms before publishing. This page is not legal advice.]`),
+    t('Services', '[Describe what you provide and where, and anything that is not included.]'),
+    t('Bookings and cancellations', '[Say how appointments are booked and confirmed, and how and when a customer can cancel or reschedule.]'),
+    t('Payment', '[Say when and how payment is due, and what happens if a payment is late or missed.]'),
+    t('Contact', `Questions about these terms: contact ${biz.name}.`),
+  ]
 }
 
 // Curated looks (each pairing reads well together).

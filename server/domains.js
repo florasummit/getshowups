@@ -58,17 +58,100 @@ export function normalizeHostname(input) {
 }
 
 // ---------- DNS (read-only, DNS-over-HTTPS) ----------
-async function dnsLookup(env, name, type) {
-  const base = mock(env.DNS_API_MOCK_ORIGIN) ? `${env.DNS_API_MOCK_ORIGIN}/dns-query` : 'https://cloudflare-dns.com/dns-query'
+// DNS over HTTPS (JSON): Cloudflare's resolver (the one we always used) and Google's as a second opinion. The two
+// disagree when a record was changed and one resolver still caches the old answer (seen live on www.poolthru.com,
+// 2026-11-22: Cloudflare kept answering the old Squarespace target for days while Google and the authoritative
+// servers answered ours), or when a provider publishes two conflicting records. Both resolvers are public data.
+const TYPE_CODE = { TXT: 16, CNAME: 5, A: 1, NS: 2 }
+async function resolverLookup(env, resolver, name, type) {
+  const m = mock(env.DNS_API_MOCK_ORIGIN)
+  const base = resolver === 'google' ? (m ? `${m}/resolve` : 'https://dns.google/resolve') : m ? `${m}/dns-query` : 'https://cloudflare-dns.com/dns-query'
   try {
     const res = await fetch(`${base}?name=${encodeURIComponent(name)}&type=${type}`, { headers: { Accept: 'application/dns-json' }, signal: AbortSignal.timeout(TIMEOUT) })
     if (!res.ok) return { ok: false }
     const body = await res.json()
-    const answers = (body.Answer || []).filter((a) => a.type === (type === 'TXT' ? 16 : 5))
+    const answers = (body.Answer || []).filter((a) => a.type === TYPE_CODE[type])
     return { ok: true, values: answers.map((a) => String(a.data).replace(/^"|"$/g, '').replace(/"\s*"/g, '').replace(/\.$/, '').toLowerCase()) }
   } catch {
     return { ok: false }
   }
+}
+// The lookup every check used so far (Cloudflare's resolver); unchanged behaviour for TXT proof and record diagnosis.
+const dnsLookup = (env, name, type) => resolverLookup(env, 'cloudflare', name, type)
+// Both resolvers at once. → { cloudflare, google, any(value), all(value), split(value) }
+export async function dnsViews(env, name, type) {
+  const [cloudflare, google] = await Promise.all([resolverLookup(env, 'cloudflare', name, type), resolverLookup(env, 'google', name, type)])
+  const has = (r, v) => Boolean(r.ok && r.values.includes(v))
+  return { cloudflare, google, any: (v) => has(cloudflare, v) || has(google, v), all: (v) => has(cloudflare, v) && has(google, v), split: (v) => has(cloudflare, v) !== has(google, v) && cloudflare.ok && google.ok }
+}
+
+// Where the zone's nameservers are, so instructions can name the DNS provider (public data; only well-known hosts).
+const NS_PROVIDERS = [
+  ['squarespace', 'Squarespace Domains', /googledomains\.com$|squarespacedns\.com$|(^|\.)squarespace\.com$/],
+  ['cloudflare', 'Cloudflare', /ns\.cloudflare\.com$/],
+  ['godaddy', 'GoDaddy', /domaincontrol\.com$/],
+  ['namecheap', 'Namecheap', /registrar-servers\.com$/],
+  ['wix', 'Wix', /wixdns\.net$/],
+  ['google_cloud', 'Google Cloud DNS', /googledomains\.com$|google\.com$/],
+  ['route53', 'Amazon Route 53', /awsdns/],
+  ['hover', 'Hover', /hover\.com$/],
+  ['ionos', 'IONOS', /ui-dns\./],
+  ['bluehost', 'Bluehost', /bluehost\.com$/],
+  ['hostgator', 'HostGator', /hostgator\.com$/],
+]
+export function nsProviderOf(nameservers = []) {
+  for (const ns of nameservers) {
+    const hit = NS_PROVIDERS.find(([, , re]) => re.test(String(ns).toLowerCase()))
+    if (hit) return { id: hit[0], name: hit[1] }
+  }
+  return nameservers.length ? { id: 'other', name: null } : null
+}
+export async function zoneProvider(env, hostname) {
+  const ns = await dnsLookup(env, zoneOf(hostname), 'NS')
+  return ns.ok ? nsProviderOf(ns.values) : null
+}
+
+// Root (apex) domain of a www hostname: where it points and whether it forwards to the canonical www address. The apex
+// is never attached here (apex CNAME/ALIAS and HTTPS forwarding depend on the DNS provider); this only tells the owner,
+// honestly, what visitors who type the bare domain get. Read-only; nothing stored; two resolvers + one HTTPS request.
+//   state: 'forwards' (https://apex/… → https://www…, path kept; keepsQuery says whether ?… survives)
+//          'forwards_http' (only plain http forwards; https fails: no certificate at the forwarding service)
+//          'points_here' (CNAME/ALIAS to our target: hosting would need the apex attached too; not supported yet)
+//          'other' (serves something else) · 'none' (no records) · 'unreachable' (lookup failed)
+export const APEX_PROBE_PATH = '/.well-known/getshowups-apex'
+export async function apexStatus(env, hostname, { fetchFn = globalThis.fetch } = {}) {
+  if (!hostname.startsWith('www.')) return null
+  const apex = hostname.slice(4)
+  const canonical = `https://${hostname}`
+  const [a, cname] = await Promise.all([dnsViews(env, apex, 'A'), dnsViews(env, apex, 'CNAME')])
+  const records = { a: [...new Set([...(a.cloudflare.values || []), ...(a.google.values || [])])], cname: [...new Set([...(cname.cloudflare.values || []), ...(cname.google.values || [])])] }
+  if (!a.cloudflare.ok && !a.google.ok) return { apex, canonical, state: 'unreachable', records, keepsPath: null, keepsQuery: null }
+  if (records.cname.includes(cnameTarget(env))) return { apex, canonical, state: 'points_here', records, keepsPath: null, keepsQuery: null }
+  if (!records.a.length && !records.cname.length) return { apex, canonical, state: 'none', records, keepsPath: null, keepsQuery: null }
+  const m = mock(env.DNS_API_MOCK_ORIGIN)
+  const probe = async (scheme) => {
+    try {
+      const url = m ? `${m}/__apex/${scheme}/${apex}${APEX_PROBE_PATH}?gsu=1` : `${scheme}://${apex}${APEX_PROBE_PATH}?gsu=1`
+      const res = await fetchFn(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) })
+      const loc = res.headers.get('location') || ''
+      if (![301, 302, 307, 308].includes(res.status) || !loc) return { ok: true, forwards: false, status: res.status }
+      let to
+      try {
+        to = new URL(loc, `${scheme}://${apex}/`)
+      } catch {
+        return { ok: true, forwards: false, status: res.status }
+      }
+      const toCanonical = to.origin === canonical
+      return { ok: true, forwards: toCanonical, permanent: res.status === 301 || res.status === 308, keepsPath: toCanonical && to.pathname === APEX_PROBE_PATH, keepsQuery: toCanonical && to.searchParams.get('gsu') === '1', target: to.origin }
+    } catch {
+      return { ok: false }
+    }
+  }
+  const https = await probe('https')
+  if (https.ok && https.forwards) return { apex, canonical, state: 'forwards', permanent: https.permanent, keepsPath: https.keepsPath, keepsQuery: https.keepsQuery, records }
+  const http = await probe('http')
+  if (http.ok && http.forwards) return { apex, canonical, state: 'forwards_http', permanent: http.permanent, keepsPath: http.keepsPath, keepsQuery: http.keepsQuery, records }
+  return { apex, canonical, state: 'other', target: https.target || http.target || null, records, keepsPath: null, keepsQuery: null }
 }
 
 // Which website platform a hostname's CNAME currently points at, so the owner is told to CHANGE that existing record
@@ -150,6 +233,7 @@ const view = (env, r) =>
     connectedAt: r.connected_at,
     checkedAt: r.checked_at,
     url: r.status === 'connected' ? `https://${r.hostname}` : null,
+    apexName: r.hostname.startsWith('www.') ? r.hostname.slice(4) : null,
   }
 
 export async function domainFor(env, customerId) {
@@ -261,8 +345,10 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
     await set(db, hostname, { attached_at: now, status: 'securing', detail: 'waiting_for_cname' }, now)
   }
 
-  const cname = await dnsLookup(env, hostname, 'CNAME')
-  const pointed = cname.ok && cname.values.includes(cnameTarget(env))
+  const views = await dnsViews(env, hostname, 'CNAME')
+  const target = cnameTarget(env)
+  const pointed = views.any(target)
+  const split = pointed && views.split(target) // one public resolver still answers the old record
   const p = providerConfigured(env) ? await providerStatus(env, hostname) : { ok: false }
   const active = p.ok && p.status === 'active'
   if (p.ok && ['blocked', 'error'].includes(p.status)) {
@@ -273,7 +359,7 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
   // (when reachable from our servers) an HTTPS request returns this business's site check.
   const certified = p.ok && p.validation === 'active' && p.verification === 'active'
   if (pointed && active && ((await probe(hostname, r.verify_token)) || certified)) {
-    await set(db, hostname, { status: 'connected', detail: null, connected_at: r.connected_at || now }, now)
+    await set(db, hostname, { status: 'connected', detail: split ? 'dns_inconsistent' : null, connected_at: r.connected_at || now }, now)
     return 'connected'
   }
   // Was connected, now isn't: say so (the site keeps serving wherever DNS still reaches us).
@@ -281,8 +367,8 @@ export async function checkDomain(env, hostname, { now = Date.now(), probe = pro
     await set(db, hostname, { status: 'needs_attention', detail: pointed ? 'certificate_pending' : 'dns_changed' }, now)
     return 'needs_attention'
   }
-  // Not pointed yet: same doubled-Host mistake for the CNAME?
-  let detail = pointed ? 'certificate_pending' : 'waiting_for_cname'
+  // Not pointed yet: same doubled-Host mistake for the CNAME? Pointed at one resolver only: the change is propagating.
+  let detail = pointed ? (split ? 'propagating' : 'certificate_pending') : 'waiting_for_cname'
   if (!pointed) {
     for (const name of doubledNames(hostname, hostname)) {
       const d = await dnsLookup(env, name, 'CNAME')

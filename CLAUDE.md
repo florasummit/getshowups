@@ -370,8 +370,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   only on pages that use them, and showHours is stored only when true, so existing sites stay byte-identical.
 - Legal pages (page.legal: privacy policy, terms): text sections only, escaped and length-limited but NOT run through
   the marketing-claims / invented-number filters (owner decision 2026-11-17: legal wording must be kept exactly).
-  Only set by import (word for word, provenance source {imported, url}) or the starter (source starter); AI output can
-  never set it and redesigns keep legal pages unchanged (keepLegalPages). An incomplete or over-long crawled policy is
+  Set by import (word for word, provenance source {imported, url}), the starter (source starter) or the owner in the
+  Studio ("Add a page" → Privacy Policy / Terms of Service, src/dashboard/site-templates.js, source starter); AI output
+  can never set it and redesigns keep legal pages unchanged (keepLegalPages). /privacy and /terms; old addresses forward. An incomplete or over-long crawled policy is
   refused, never shortened. Publishing a draft with a legal page needs legalReviewed: true every time.
 - Static export (server/site-export.js, GET /api/dashboard/website/export?format=static): the PUBLISHED site as a .zip
   for the owner's own hosting; same renderer; this business's images only; forms left out; booking/chat absolute links.
@@ -383,6 +384,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   regenerate the .json) + test/e2e/site-layout.spec.js (desktop/phone: no sideways scroll, headline + booking button on
   the first screen, no clipped headings). A golden diff = "this PR changes live customer sites": only update it
   (UPDATE_RENDER_GOLDEN=1) when intended, and say so in the PR.
+- Domain checks ask TWO public resolvers (Cloudflare + Google, server/domains.js dnsViews): a split answer is
+  `propagating` (securing) or `dns_inconsistent` (connected), never "waiting"; the bare domain of a www hostname is
+  checked read-only (apexStatus: forwards / forwards_http / other / none / points_here, keepsPath/keepsQuery) and the
+  DNS provider named from the zone's nameservers; nothing of it is stored. GetShowUps never changes a customer's DNS.
 - Domain records are shown with the provider-relative Host (`host`, e.g. `_getshowups.www`; providers append the zone) and
   the full `name`; checks report record_doubled / cname_doubled / wrong_value instead of an indefinite "waiting". A record
   at a doubled name is never accepted as proof.

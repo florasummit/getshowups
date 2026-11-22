@@ -54,9 +54,37 @@ All four journeys share one draft, editor, renderer, publishing flow, version hi
 | Side-by-side version comparison | **Missing**: restore of earlier versions exists |
 | Managed AI credits / paid allowances | **Missing** (design only); no paid usage activated |
 | DNS automation via provider APIs | **Missing**: manual records with mistake detection (doubled host, wrong value) |
-| Import of the business's own privacy policy page | **Missing**: the site links to the GetShowUps privacy page |
+| Legal pages (Privacy Policy, Terms of Service) | Imported word for word, or created in the Studio from "Add a page" (2026-11-22); owner-edited in place; footer links; kept through AI redesigns; published only after the owner's explicit review |
 | Images in R2 instead of D1 | **Missing**: required before scale (below) |
 | Cloudflare for SaaS custom hostnames | **Missing**: required beyond the Pages domain cap (below) |
+
+## Legal pages (2026-11-22)
+
+Pages → "+ Add a page…" → **Privacy Policy** or **Terms of Service** (src/dashboard/site-templates.js). Both are legal
+pages (`page.legal: true`, `source: { kind: 'starter' }`): text sections only, the owner's words kept as written (no
+marketing-claims or invented-number filter), shown as footer links (never in the navigation), at `/privacy` and
+`/terms` on the GetShowUps address (`/p/<id>/terms`) and on the connected domain; old addresses
+(`/privacy-policy`, `/privacy-notice`, `/terms-of-service`, `/terms-and-conditions`, `/terms-of-use`) forward to them
+(functions/_middleware.js OLD_ADDRESS_ALIASES). The privacy starter describes only what the website does (form,
+booking, hosting; no trackers); the terms starter is a skeleton of bracketed prompts, never an obligation, price or
+guarantee on the owner's behalf. The AI designer cannot mark a page legal (server/site-spec.js) and every redesign
+carries legal pages over unchanged (`keepLegalPages`); AI drafting of legal text, if ever offered, stays a draft.
+Publishing a draft with a legal page needs the owner's explicit review checkbox every time (`legalReviewed`). Drafts
+are private until published; a business without a terms page gets no terms link; without a privacy page the footer
+links GetShowUps' own policy. Tests: test/legal-pages.test.js, test/e2e/studio-editor.spec.js.
+
+## Own domain: www and the bare domain (2026-11-22)
+
+The canonical address is `https://www.<domain>`; only www is attached to hosting. The setup screen shows one
+checklist (website published · www connected · https active · bare domain forwards · redirect verified · fully live)
+built from our records plus live public DNS, never stored: two public resolvers (Cloudflare, Google) are asked for
+www (a split answer is named "DNS change found, spreading" or, once connected, "one resolver still old", never
+"waiting"); the zone's nameservers name the DNS provider; the bare domain is checked (A/CNAME at both resolvers and
+one HTTPS request with manual redirects) and reported as forwards / forwards over http only / points elsewhere /
+nothing / points here, with whether the path and the query string survive. Provider-specific forwarding steps
+(Squarespace Domains incl. its locked "Squarespace defaults", Cloudflare, GoDaddy, Namecheap, Wix, Google Cloud DNS)
+and the records that must never be deleted (MX, TXT/SPF/DKIM/DMARC, verifications). "Check now" is always available.
+GetShowUps never changes a customer's DNS. Tests: test/website.test.js (propagation, apex states, providers).
 
 ## Hosting cost and scaling (Cloudflare prices as published on 2026-11-15)
 

@@ -2,6 +2,26 @@
 
 _Update at the end of every task. Newest first._
 
+## Website Studio legal pages + complete domain setup (2026-11-22) — feat/legal-pages-domain-setup (no migration; PR for approval)
+
+- **PoolThru findings (read-only):** the "broken Privacy Policy link" is not on our site. Authoritative DNS (Google
+  Cloud DNS at Squarespace Domains) has www → getshowups.pages.dev, but Cloudflare's public resolver still answers the
+  old `ext-sq.squarespace.com` (TTL ≈ 3.5 h, re-learned repeatedly), so visitors on that resolver get the OLD
+  Squarespace site, whose footer links /privacy-policy and whose unknown paths answer a 301 loop (server: Squarespace).
+  On GetShowUps hosting (resolved directly to Cloudflare), / , /privacy and /privacy-policy → /privacy all answer 200;
+  PoolThru's imported privacy page exists; there is no terms page. Our domain checks used only Cloudflare's resolver,
+  which is why the dashboard said "Waiting for your DNS change" for days while the site worked elsewhere (row now
+  `connected` since 02:30 UTC). The bare domain poolthru.com points at Squarespace's A records and Squarespace forwards
+  it to https://www.poolthru.com (301, path kept, query string dropped).
+- Studio: "Add a page" offers Privacy Policy and Terms of Service as legal pages (text only, kept as written, footer
+  links, kept through redesigns, explicit review before publish); old addresses for terms forward.
+- Domains: two-resolver checks with `propagating` / `dns_inconsistent` details; root-domain state (forwards / http
+  only / other / none / points here; path + query kept?); DNS provider from nameservers; provider-specific forwarding
+  steps; six-line checklist; Check now always available. Nothing stored beyond the existing row; DNS never changed.
+- Owner actions for PoolThru: in Squarespace Domains → DNS make sure only ONE www record exists (disconnect the old
+  Squarespace site from the domain so its default www record disappears), keep MX/TXT; the forwarding for poolthru.com
+  already works but drops ?utm/gclid (Squarespace forwarding); optionally add a Terms page in the Studio.
+
 ## Business account types + PoolThru internal live (2026-11-22) — feat/business-accounts (MIGRATION 0034, needs approval)
 
 - docs/ACCOUNT_TYPES.md. New table business_accounts (0034): classification (internal_live | sandbox | customer),
