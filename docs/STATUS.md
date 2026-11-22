@@ -35,6 +35,9 @@ _Update at the end of every task. Newest first._
   desktop + phone, measuring the rendered column width and sideways scroll.
 - e2e seed: every seeded business is now a rollout pin on Retell (defaults v1 staged ElevenLabs + v2 rollback; rows on
   Retell); behaviour is Retell everywhere as before, and the promotion spec has pins to release.
+- CI note: PR #120's first verify run failed only on the known studio-editor mobile flake (Add a section options 11 ≠ 2
+  after the legal-page switch; the retry inherits the first attempt's state); 234 passed; local gate green. Re-run by a
+  docs-only push (the token cannot re-run CI). Still open: make that spec's page switch + publish step idempotent.
 - Production: default unchanged by the deployment (ElevenLabs v1, 6 pins). Still needed before a promotion: a finished
   ElevenLabs test session on the production path (/chat/<test business>?test=elevenlabs by a signed-in admin), then
   Promote to 100% → acknowledge → type `elevenlabs` → confirm.
