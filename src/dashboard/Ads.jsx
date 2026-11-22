@@ -419,6 +419,106 @@ const CONN = {
 }
 const connState = (c) => (!c ? 'none' : c.status === 'reconnect_required' ? 'reconnect_required' : c.status === 'connected' ? 'connected' : 'needs_account')
 
+// Meta: the ad account AND the Page the lead form and ads belong to. One of each is chosen automatically when the
+// sign-in reaches exactly one; otherwise the owner picks here (the server validates against Meta's lists).
+function MetaAccounts({ c, onChange }) {
+  const [list, setList] = useState(null)
+  const [attempt, setAttempt] = useState(0)
+  const [changing, setChanging] = useState(false)
+  const [pick, setPick] = useState({ adAccountId: '', pageId: '' })
+  const [state, setState] = useState({})
+  const changed = useRef(onChange)
+  useEffect(() => {
+    changed.current = onChange
+  }, [onChange])
+  useEffect(() => {
+    if (c.status === 'connected' && !changing) return
+    api('/api/ads/meta/accounts').then(({ status, data }) => {
+      const l = status === 200 ? data : { error: data?.error }
+      setList(l)
+      if (!l.error) setPick({ adAccountId: l.selected?.adAccountId || (l.adAccounts.filter((a) => a.active).length === 1 ? l.adAccounts.find((a) => a.active).id : ''), pageId: l.selected?.pageId || (l.pages.length === 1 ? l.pages[0].id : '') })
+    })
+  }, [attempt, c.status, changing])
+  const choose = async (e) => {
+    e.preventDefault()
+    setState({ busy: true })
+    const { status, data } = await api('/api/ads/meta/accounts', { method: 'POST', body: pick })
+    if (status === 200) {
+      setState({})
+      setChanging(false)
+      changed.current()
+    } else setState({ error: errorText(data.error) })
+  }
+  if (c.status === 'connected' && !changing) {
+    return (
+      <div className="stack" data-meta-account>
+        <p className="account-selected">
+          <strong>{c.accountName || 'Meta ad account'}</strong>
+          {c.pageName && <span className="fine"> · Page: {c.pageName}</span>}
+          {c.sandboxAccount && (
+            <span className="badge badge--test" data-meta-sandbox title="Sandbox ad account: API-only, ads never show and nothing is charged.">
+              Sandbox account · no spend
+            </span>
+          )}
+        </p>
+        <button type="button" className="link-btn" onClick={() => setChanging(true)}>
+          Change account or Page
+        </button>
+      </div>
+    )
+  }
+  if (!list) return <p className="fine" aria-busy="true">Finding your ad accounts and Pages…</p>
+  if (list.error)
+    return (
+      <p className="form-error" role="alert">
+        {errorText(list.error)}{' '}
+        <button type="button" className="link-btn" onClick={() => setAttempt((n) => n + 1)}>
+          Try again
+        </button>
+      </p>
+    )
+  const active = list.adAccounts.filter((a) => a.active)
+  return (
+    <form className="stack" onSubmit={choose} aria-label="Choose a Meta ad account and Page" data-meta-picker>
+      <label className="field">
+        <span>Ad account</span>
+        <select value={pick.adAccountId} onChange={(e) => setPick((p) => ({ ...p, adAccountId: e.target.value }))} data-meta-pick-account>
+          <option value="">Choose…</option>
+          {active.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name || a.id} ({a.currency})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Facebook Page (the ads and the lead form belong to it)</span>
+        <select value={pick.pageId} onChange={(e) => setPick((p) => ({ ...p, pageId: e.target.value }))} data-meta-pick-page>
+          <option value="">Choose…</option>
+          {list.pages.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name || p.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!active.length && <p className="fine">Your Meta sign-in reaches no active ad account. Create one in Ads Manager, then reconnect.</p>}
+      {!list.pages.length && <p className="fine">Your Meta sign-in reaches no Facebook Page. Lead ads need a Page; create one, then reconnect.</p>}
+      {state.error && <p className="form-error" role="alert">{state.error}</p>}
+      <div className="card-actions">
+        <button type="submit" className="btn btn-primary" disabled={state.busy || !pick.adAccountId || !pick.pageId}>
+          Use this account and Page
+        </button>
+        {changing && (
+          <button type="button" className="link-btn" onClick={() => setChanging(false)}>
+            Cancel
+          </button>
+        )}
+      </div>
+    </form>
+  )
+}
+
 // Disconnect: GetShowUps stops managing and reporting. Campaigns in Google Ads stay there; if any run, the owner
 // chooses to pause them first or leave them running (never implied to have stopped).
 function DisconnectGoogle({ running, onDone, onCancel }) {
@@ -485,7 +585,7 @@ function Connections({ connections, capabilities, running = 0, onChange }) {
           </p>
           {state === 'reconnect_required' && <p className="fine">The sign-in expired. Your campaigns stay as they are.</p>}
           {platform === 'google' && (state === 'connected' || state === 'needs_account') && <GoogleAdsAccount c={c} onChange={onChange} />}
-          {platform === 'meta' && state === 'connected' && c.accountName && <p className="account-selected">{c.accountName}</p>}
+          {platform === 'meta' && (state === 'connected' || state === 'needs_account') && <MetaAccounts c={c} onChange={onChange} />}
           {available && !attention && !(platform === 'google' && disconnecting) && (
             <p className="conn-links">
               <a className="link-btn conn-secondary" href={start}>
@@ -904,9 +1004,11 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
   const [confirm, setConfirm] = useState(null) // 'launch' | 'remove'
   const editable = !c.launched && ['draft', 'approved', 'error'].includes(c.status)
   const dirty = JSON.stringify(spec) !== JSON.stringify(saved)
-  // Google campaigns on a verified Google Ads test account can be created and started without the live
-  // switch (test accounts never serve or spend); the server re-checks with Google before every change.
-  const sandbox = c.platform === 'google' && Boolean(capabilities.sandbox)
+  // Google campaigns on a verified Google Ads test account, and Meta campaigns on a sandbox ad account the operator
+  // listed, can be created and started without the live switch (neither ever serves or spends); the server
+  // re-checks the account before every change.
+  const sandbox = c.platform === 'google' ? Boolean(capabilities.sandbox) : c.platform === 'meta' ? Boolean(capabilities.metaSandbox) : false
+  const sandboxLabel = c.platform === 'meta' ? 'sandbox account' : 'test account'
   const canServe = capabilities.liveLaunch || sandbox
   const g = spec.google || {}
   const m = spec.meta || {}
@@ -929,13 +1031,14 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
   const NOTES = {
     validate: 'Check passed. Nothing was created and nothing was spent.',
     approve: `Approved. Next: create it on ${platformName} (it starts paused).`,
-    launch: sandbox ? 'Created on Google, paused. It’s a test account, so it never shows and nothing is charged.' : `Created on ${platformName}, paused. Nothing runs until you press Start.`,
+    launch: sandbox ? `Created on ${platformName}, paused. It’s a ${sandboxLabel}, so it never shows and nothing is charged.` : `Created on ${platformName}, paused. Nothing runs until you press Start.`,
     launch_differs: `Created on ${platformName}, paused, but ${platformName} shows a difference. See below.`,
-    resume: sandbox ? 'Started on the test account. It never shows and nothing is charged.' : 'Started.',
+    resume: sandbox ? `Started on the ${sandboxLabel}. It never shows and nothing is charged.` : 'Started.',
     pause: 'Paused.',
     budget: 'Daily budget changed.',
     save: 'Saved.',
     remove: 'Removed.',
+    test_lead: 'Meta is creating a test lead on this ad’s form. It arrives through the lead webhook within a minute, marked as a test lead, and never counts in your results.',
   }
   const act = async (action, extra = {}) => {
     if (inflight.current) return
@@ -1063,7 +1166,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
             <input type="number" min="1" step="1" value={daily} onChange={(e) => setDaily(e.target.value)} />
           </label>
           <button type="submit" className="btn btn-quiet" disabled={busy || !canServe || toCents(daily) === c.dailyBudgetCents}>
-            Change daily budget{sandbox ? ' (test account)' : ''}
+            Change daily budget{sandbox ? ` (${sandboxLabel})` : ''}
           </button>
         </form>
       )}
@@ -1088,11 +1191,23 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
           <p>
             {confirm === 'approve_create' ? `Approve this ad and create it on ${platformName}? ` : `Create this campaign on ${platformName}? `}
             It starts <strong>paused</strong>; nothing runs until you press Start.
-            {sandbox && ' Test account: it never shows and nothing is charged.'}
+            {sandbox && (c.platform === 'meta' ? ' Sandbox ad account: it never shows and nothing is charged.' : ' Test account: it never shows and nothing is charged.')}
           </p>
           <div className="card-actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => (confirm === 'approve_create' ? approveAndCreate() : act('launch', { confirm: true }))}>
               {confirm === 'approve_create' ? 'Confirm: approve and create (paused)' : `Confirm: create on ${platformName} (paused)`}
+            </button>
+            <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : confirm === 'test_lead' ? (
+        <div className="confirm" role="group" aria-label="Confirm test lead">
+          <p>Ask Meta to create a test lead on this ad’s form? It arrives through the lead webhook as a test lead (never counted in your results). Meta keeps one test lead per form; an earlier one is replaced. Nothing runs and nothing is charged.</p>
+          <div className="card-actions">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act('test_lead', { confirm: true })} data-meta-test-lead-confirm>
+              Confirm: send a test lead
             </button>
             <button type="button" className="link-btn" onClick={() => setConfirm(null)}>
               Cancel
@@ -1122,17 +1237,22 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
             {['draft', 'error'].includes(c.status) && !c.launched && (
               // One step when creating is possible (connected account); otherwise approve now, create later.
               <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => (canServe ? setConfirm('approve_create') : act('approve'))}>
-                {state.busy === 'approve' ? 'Approving…' : canServe ? `Approve and create (paused)${sandbox ? ' · test account' : ''}` : 'Approve'}
+                {state.busy === 'approve' ? 'Approving…' : canServe ? `Approve and create (paused)${sandbox ? ` · ${sandboxLabel}` : ''}` : 'Approve'}
               </button>
             )}
             {c.status === 'approved' && !c.launched && (
               <button type="button" className="btn btn-primary" disabled={busy || dirty || !canServe} onClick={() => setConfirm('launch')}>
-                Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ' · test account' : ''}
+                Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ` · ${sandboxLabel}` : ''}
               </button>
             )}
             {c.launched && c.status === 'paused' && (
               <button type="button" className="btn btn-primary" disabled={busy || !canServe} onClick={() => act('resume')}>
-                {sandbox ? 'Start ads (test account, no spend)' : 'Start ads'}
+                {sandbox ? `Start ads (${sandboxLabel}, no spend)` : 'Start ads'}
+              </button>
+            )}
+            {c.launched && c.platform === 'meta' && ['paused', 'active'].includes(c.status) && (
+              <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => setConfirm('test_lead')} data-meta-test-lead>
+                Send a test lead
               </button>
             )}
             {c.status === 'active' && (
@@ -1166,7 +1286,8 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
             {c.status === 'approved' && !c.launched && (
               <li>{canServe ? `Create: puts it on ${platformName}, paused. Nothing runs until you press Start.` : ERRORS.live_launch_disabled}</li>
             )}
-            {c.launched && c.status === 'paused' && <li>{sandbox ? 'Start: runs on the test account. It never shows and nothing is charged.' : 'Start: the ad can show and spend, within your approved budget.'}</li>}
+            {c.launched && c.status === 'paused' && <li>{sandbox ? `Start: runs on the ${sandboxLabel}. It never shows and nothing is charged.` : 'Start: the ad can show and spend, within your approved budget.'}</li>}
+            {c.launched && c.platform === 'meta' && <li>Send a test lead: Meta puts a test entry on this ad’s form and sends it to GetShowUps like a real lead, so you can see it arrive, marked as a test. Nothing runs and nothing is charged.</li>}
           </ul>
         </>
       )}
@@ -1293,7 +1414,7 @@ export default function Ads() {
       {!d.capabilities.liveLaunch && (
         <p className="mode-note" data-testing-mode>
           <span className="badge badge--test">Test mode</span>
-          <span>Only Google Ads test accounts. Test campaigns never show ads, and nothing is ever charged.</span>
+          <span>Only Google Ads test accounts and Meta sandbox ad accounts. Test campaigns never show ads, and nothing is ever charged.</span>
         </p>
       )}
       {d.hold && (

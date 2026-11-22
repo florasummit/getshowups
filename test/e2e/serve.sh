@@ -88,6 +88,9 @@ d1 "
   INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
     ('$E2E_ADS_CUSTOMER', 'Pool service', '[\"Weekly pool cleaning\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
   INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-ads-budget', '$E2E_ADS_CUSTOMER', 30000, 'owner@e2e-ads.example', $NOW);
+  -- One of the business's own website photos (a 1×1 PNG), already approved as a Meta ad image (no AI, no cost).
+  INSERT INTO website_assets (id, customer, content_type, bytes, size, created_at) VALUES ('e2ead5000000000000000000000ad5e2', '$E2E_ADS_CUSTOMER', 'image/png', X'89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c49444154789c63f8cfc0000003010100c9fe92ef0000000049454e44ae426082', 69, $NOW);
+  INSERT INTO ad_creatives (id, customer, kind, provider, status, prompt, storage_key, mime, created_at, updated_at) VALUES ('e2e-ads-img', '$E2E_ADS_CUSTOMER', 'image', 'website_asset', 'approved', 'Your website photo', 'asset:e2ead5000000000000000000000ad5e2', 'image/png', $NOW, $NOW);
   INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_ADS_CUSTOMER', 1, 'admin@e2e.example', $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_IMPORT_CUSTOMER', 'E2E Import Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
@@ -307,4 +310,9 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN" \
   --binding AI_STUDIO_BUSINESSES="$E2E_TEACH_CUSTOMER,$E2E_TEACH_M_CUSTOMER" \
   --binding RECEPTIONIST_VOICE_BUSINESSES="$E2E_VOICE_M_CUSTOMER" \
+  --binding META_APP_ID="$E2E_META_APP_ID" \
+  --binding META_APP_SECRET="$E2E_META_APP_SECRET" \
+  --binding META_WEBHOOK_VERIFY_TOKEN="$E2E_META_VERIFY_TOKEN" \
+  --binding META_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
+  --binding META_SANDBOX_AD_ACCOUNTS=act_111 \
   --binding VOICE_LAB_ENABLED=true

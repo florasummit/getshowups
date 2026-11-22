@@ -259,6 +259,84 @@ const send = (res, status, body) => {
   res.end(body === undefined ? '' : JSON.stringify(body))
 }
 
+// ---------- Meta Marketing API stand-in (META_API_MOCK_ORIGIN, test only; MOCK DATA) ----------
+// The Graph API shapes server/ads/meta.js relies on: OAuth code → short-lived token → long-lived exchange, ONE sandbox
+// ad account + ONE Page (auto-selected), object creation (everything the app sends is kept and read back as Meta
+// would return it), status changes, empty insights (no spend), and the Lead Ads Testing API: POST /{form}/test_leads
+// creates a lead and this stand-in DELIVERS it to the app's webhook signed with the app secret, like Meta does.
+const META_SECRET = process.env.E2E_META_APP_SECRET || ''
+const META_SHORT = 'EAAmock-short-lived-not-a-secret'
+const META_LONG = 'EAAmock-long-lived-not-a-secret'
+const META_PAGE_TOKEN = 'PAGEmock-not-a-secret'
+const META_ACCOUNTS = [{ id: 'act_111', name: 'MOCK Meta sandbox ad account', currency: 'USD', account_status: 1 }]
+const META_PAGES = [{ id: '222', name: 'MOCK Pools Page' }]
+const metaState = { seq: 500, objects: {}, leads: {}, testLeads: {} }
+async function deliverMetaLead(leadgenId, pageId, formId) {
+  const body = JSON.stringify({ object: 'page', entry: [{ id: pageId, time: Date.now(), changes: [{ field: 'leadgen', value: { leadgen_id: leadgenId, page_id: pageId, form_id: formId, created_time: Math.floor(Date.now() / 1000) } }] }] })
+  const sig = `sha256=${createHmac('sha256', META_SECRET).update(body).digest('hex')}`
+  try {
+    const r = await fetch(`${APP}/api/ads/meta/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sig }, body })
+    events.push({ type: 'meta.webhook', leadgenId, status: r.status, body: await r.json().catch(() => null) })
+  } catch (e) {
+    events.push({ type: 'meta.webhook', leadgenId, error: String(e?.message || e).slice(0, 80) })
+  }
+}
+function metaRoute(method, path, params) {
+  const m = metaState
+  if (method === 'GET' && path === '/oauth/access_token') {
+    if (params.grant_type === 'fb_exchange_token') return [params.fb_exchange_token === META_SHORT || params.fb_exchange_token === META_LONG, { access_token: META_LONG, token_type: 'bearer', expires_in: 5183944 }]
+    return [params.code === 'meta-ok', { access_token: META_SHORT, expires_in: 3600 }]
+  }
+  if (params.access_token !== META_LONG && params.access_token !== META_PAGE_TOKEN) return [false, { error: { code: 190, message: 'mock: invalid token' } }]
+  if (method === 'GET' && path === '/me/adaccounts') return [true, { data: META_ACCOUNTS }]
+  if (method === 'GET' && path === '/me/accounts') return [true, { data: META_PAGES }]
+  const list = /^\/([\w]+)\/(campaigns|adsets|ads)$/.exec(path)
+  if (method === 'GET' && list) return [true, { data: Object.values(m.objects).filter((o) => o.edge === list[2] && o.parent === list[1]) }]
+  const create = /^\/(act_\d+|\d+)\/(campaigns|adsets|ads|adcreatives|adimages|leadgen_forms)$/.exec(path)
+  if (method === 'POST' && create) {
+    const edge = create[2]
+    if (edge === 'adimages') return [true, { images: { 'upload.png': { hash: `hash${++m.seq}` } } }]
+    const id = String(++m.seq)
+    m.objects[id] = { id, edge, parent: edge === 'adsets' ? params.campaign_id : edge === 'ads' ? params.adset_id : create[1], ...params }
+    return [true, { id }]
+  }
+  if (method === 'GET' && /^\/\d+\/test_leads$/.test(path)) return [true, { data: Object.values(m.testLeads).filter((l) => l.form_id === path.split('/')[1]).map((l) => ({ id: l.id })) }]
+  if (method === 'POST' && /^\/\d+\/test_leads$/.test(path)) {
+    const formId = path.split('/')[1]
+    if (Object.values(m.testLeads).some((l) => l.form_id === formId)) return [false, { error: { code: 100, message: 'mock: a test lead already exists for this form' } }]
+    const id = String(++m.seq)
+    m.testLeads[id] = { id, form_id: formId }
+    m.leads[id] = { id, form_id: formId, created_time: new Date().toISOString(), field_data: params.field_data }
+    setTimeout(() => deliverMetaLead(id, META_PAGES[0].id, formId), 50)
+    return [true, { id }]
+  }
+  if (method === 'DELETE' && /^\/\d+$/.test(path)) {
+    const id = path.slice(1)
+    const had = m.testLeads[id] || m.objects[id]
+    delete m.testLeads[id]
+    delete m.leads[id]
+    delete m.objects[id]
+    return [had, had ? { success: true } : { error: { code: 100 } }]
+  }
+  if (method === 'GET' && /^\/\d+$/.test(path) && m.leads[path.slice(1)]) return [true, m.leads[path.slice(1)]]
+  if (method === 'GET' && /^\/\d+$/.test(path) && params.fields === 'access_token') return [true, { access_token: META_PAGE_TOKEN, id: path.slice(1) }]
+  if (method === 'GET' && /^\/\d+$/.test(path) && params.fields) {
+    const o = m.objects[path.slice(1)]
+    if (!o) return [false, { error: { code: 100, error_subcode: 33, message: 'Unsupported get request. Object with ID does not exist' } }]
+    const out = { id: o.id }
+    for (const f of String(params.fields).split(',')) if (o[f] !== undefined) out[f] = o[f]
+    return [true, out]
+  }
+  if (method === 'POST' && /^\/\d+$/.test(path)) {
+    const o = m.objects[path.slice(1)]
+    if (!o) return [false, { error: { code: 100 } }]
+    Object.assign(o, params)
+    return [true, { success: true }]
+  }
+  if (method === 'GET' && /^\/\d+\/insights$/.test(path)) return [true, { data: [] }]
+  return [false, { error: { code: 803, message: 'mock: unknown edge' } }]
+}
+
 createServer(async (req, res) => {
   let raw = ''
   for await (const chunk of req) raw += chunk
@@ -266,6 +344,18 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/__health') return send(res, 200, { ok: true })
   if (url.pathname === '/__events') return send(res, 200, events)
+  if (/^\/v\d{1,3}\.0\//.test(url.pathname)) {
+    const params = req.method === 'POST' ? Object.fromEntries(new URLSearchParams(raw)) : Object.fromEntries(url.searchParams)
+    for (const [k, v] of Object.entries(params)) {
+      if (/^[[{]/.test(v)) {
+        try {
+          params[k] = JSON.parse(v)
+        } catch {}
+      }
+    }
+    const [ok, body] = metaRoute(req.method, url.pathname.replace(/^\/v\d{1,3}\.0/, ''), params)
+    return send(res, ok ? 200 : 400, body)
+  }
   // Workers AI stand-in (AI_API_MOCK_ORIGIN): deterministic website copy built from the facts it is given.
   // The about text deliberately contains an unapproved claim, so the app's filter must drop it.
   // Twilio stand-in (TWILIO_API_MOCK_ORIGIN): accepts texts and records them for the tests (/__events).

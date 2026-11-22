@@ -253,6 +253,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. With Stripe configured, LIVE launch/resume also needs an active subscription;
   sandbox (verified Google Ads test account) does not, so never-billed pilots (PoolThru) can test.
+- Meta (Facebook/Instagram) lead ads (server/ads/meta.js, docs/META_ADS.md; 2026-11-22): everything created PAUSED;
+  long-lived tokens re-exchanged by cron when < 14 days from expiry (expired → reconnect_required, never silent);
+  META_SANDBOX_AD_ACCOUNTS lists Meta's API-only sandbox ad accounts (no API flag exists): a business on one may
+  create/start/change without ADS_LIVE_LAUNCH, labelled "Sandbox account · no spend"; Meta's test-lead API
+  (POST /{form}/test_leads, "Send a test lead") delivers a lead through the signed webhook, matched by
+  platform_ids.testLeadIds, marked test data (test_marks), attributed to the campaign, never counted; leads enter the
+  follow-ups engine with source meta_lead_form; verifyLaunched reads back Meta campaigns daily too. The browser suite
+  runs the whole flow against the Graph stand-in in test/e2e/mock-google.mjs; nothing is verified against Meta's real
+  API until the app exists (approval items in docs/META_ADS.md). Never claim otherwise.
 - Ads holds (server/ads/holds.js; owner decision 2026-11-14): a business on hold gets every running campaign paused
   on its platform immediately and read back from Google; launch/Start are refused (`ads_on_hold`) while it lasts.
   Holds are derived, never stored: admin suspension (customers.status), and for BILLED businesses only (self-serve

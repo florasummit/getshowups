@@ -6,10 +6,11 @@
 //   { action: 'pause' | 'resume', id } pause any time; resume as launch, within the approved budget
 //   { action: 'budget', id, dailyCents } change a launched campaign's daily budget (within the approved ceiling)
 //   { action: 'remove', id }          remove a draft that was never launched
+//   { action: 'test_lead', id, confirm } Meta only: ask Meta to create a test lead on the created campaign's form (arrives via the webhook as test data)
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
-import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction, confirmPausedExternally } from '../../../../server/ads/campaigns.js'
+import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction, confirmPausedExternally, requestTestLead } from '../../../../server/ads/campaigns.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 
 const STATUS = { test_account_required: 409, invalid_budget: 400, invalid_status: 409, not_found: 404, live_launch_disabled: 409, approval_required: 409, budget_approval_required: 409, exceeds_approved_budget: 409, monthly_budget_reached: 409, not_editable: 409, not_launched: 409, needs_account: 409, profile_required: 409, too_many_campaigns: 409, creative_not_approved: 409, subscription_required: 402 }
@@ -50,6 +51,10 @@ export async function onRequestPost({ request, env }) {
         break
       case 'budget':
         r = await setCampaignBudget(env, customer, body.id, body.dailyCents, actor)
+        break
+      case 'test_lead':
+        if (body.confirm !== true) return json(400, { error: 'confirmation_required' })
+        r = await requestTestLead(env, customer, body.id, actor)
         break
       case 'remove': {
         const row = await env.ONBOARDING_DB.prepare("UPDATE ad_campaigns SET status = 'removed', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND platform_campaign_id IS NULL AND status IN ('draft','approved','error') RETURNING id").bind(String(body.id), customer.id, Date.now()).first()

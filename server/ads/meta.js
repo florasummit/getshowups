@@ -28,7 +28,7 @@
 // approved draft: status, objective, daily budget, ZIPs, placements, age range, optimization goal, ad present. Read-only.
 import { siteOrigin } from '../auth.js'
 import { getCreative, getCreativeAsset } from './creative.js'
-import { failure, getConnection, loadToken, markReconnect } from './connections.js'
+import { failure, getConnection, loadToken, markReconnect, saveToken } from './connections.js'
 
 export const META_API_VERSION = 'v27.0'
 // pages_manage_metadata is needed to subscribe a Page to leadgen webhooks (lead-ads retrieving guide).
@@ -83,15 +83,15 @@ async function graph(env, method, path, params = {}, { token } = {}) {
     for (const [k, v] of Object.entries(all)) {
       if (v === undefined) continue
       const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-      if (method === 'GET') url.searchParams.set(k, s)
-      else body.set(k, s)
+      if (method === 'POST') body.set(k, s)
+      else url.searchParams.set(k, s) // GET and DELETE carry their parameters on the URL
     }
     let res
     try {
       res = await fetch(url, {
         method,
-        headers: method === 'GET' ? {} : { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: method === 'GET' ? undefined : body,
+        headers: method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {},
+        body: method === 'POST' ? body : undefined,
         signal: AbortSignal.timeout(8000),
       })
     } catch {
@@ -131,6 +131,97 @@ export async function exchangeCode(env, code) {
   if (!long.ok || typeof long.data.access_token !== 'string') return long.ok ? failure('invalid_request') : long
   const ttl = Number(long.data.expires_in) > 0 ? Number(long.data.expires_in) * 1000 : 60 * 24 * 3600 * 1000
   return { ok: true, accessToken: long.data.access_token, expiresAt: Date.now() + ttl }
+}
+
+// Long-lived user tokens last about 60 days and have no refresh token: a still-valid token is exchanged
+// (fb_exchange_token) for a new one, which replaces it (facebook-login/guides/access-tokens/get-long-lived: "You can
+// not use an expired token to request a long-lived token"; the new token is a different string). Refreshed when
+// under REFRESH_WITHIN_MS of expiry; an expired or refused token marks the connection reconnect_required, so the
+// owner reconnects from the Ads tab. Never logs or returns a token.
+export const REFRESH_WITHIN_MS = 14 * 24 * 3600 * 1000
+export async function refreshToken(env, customerId, now = Date.now()) {
+  const t = await loadToken(env, 'meta', customerId)
+  if (!t?.accessToken) return { ok: false, error: 'not_connected' }
+  if (t.expiresAt && t.expiresAt <= now) {
+    await markReconnect(env, customerId, 'meta').catch(() => {})
+    return failure('reconnect_required', { reconnect: true })
+  }
+  if (t.expiresAt && t.expiresAt - now > REFRESH_WITHIN_MS) return { ok: true, skipped: true, expiresAt: t.expiresAt }
+  const r = await graph(env, 'GET', '/oauth/access_token', { grant_type: 'fb_exchange_token', client_id: env.META_APP_ID, client_secret: env.META_APP_SECRET, fb_exchange_token: t.accessToken })
+  if (!r.ok || typeof r.data.access_token !== 'string') {
+    if (!r.ok && r.reconnect) await markReconnect(env, customerId, 'meta').catch(() => {})
+    return r.ok ? failure('invalid_request') : r
+  }
+  const ttl = Number(r.data.expires_in) > 0 ? Number(r.data.expires_in) * 1000 : 60 * 24 * 3600 * 1000
+  const expiresAt = now + ttl
+  await saveToken(env, 'meta', customerId, { accessToken: r.data.access_token, expiresAt, refreshedAt: now })
+  return { ok: true, refreshed: true, expiresAt }
+}
+
+// Cron: refresh the connected businesses' tokens that are due (bounded per run). Counts only.
+export async function refreshMetaTokens(env, { now = Date.now(), limit = 20 } = {}) {
+  const out = { checked: 0, refreshed: 0, reconnect: 0, failed: 0 }
+  if (!metaConfigured(env)) return out
+  const { results } = await env.ONBOARDING_DB.prepare("SELECT customer FROM ad_connections WHERE platform = 'meta' AND status IN ('connected', 'needs_account') ORDER BY updated_at LIMIT ?1").bind(limit).all()
+  for (const row of results || []) {
+    out.checked += 1
+    const r = await refreshToken(env, row.customer, now).catch(() => failure('transient'))
+    if (r.ok && r.refreshed) out.refreshed += 1
+    else if (!r.ok && r.reconnect) out.reconnect += 1
+    else if (!r.ok && r.error !== 'not_connected') out.failed += 1
+  }
+  return out
+}
+
+// Sandbox ad accounts (Marketing API "sandbox mode": one per app, API-only, never delivers, never charges). Meta
+// exposes no field that marks one, so the operator lists the ids explicitly: META_SANDBOX_AD_ACCOUNTS=act_1,act_2.
+// A business connected to a listed account may create (paused), start and change campaigns there without the live
+// switch, like a Google Ads test account; anything else needs ADS_LIVE_LAUNCH.
+export const sandboxAdAccounts = (env) =>
+  String(env?.META_SANDBOX_AD_ACCOUNTS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^act_\d{1,30}$/.test(s))
+export const isSandboxAdAccount = (env, accountId) => Boolean(accountId) && sandboxAdAccounts(env).includes(String(accountId).startsWith('act_') ? String(accountId) : `act_${accountId}`)
+export async function isSandboxAccount(env, customerId) {
+  const conn = await getConnection(env, customerId, 'meta')
+  return conn?.status === 'connected' && isSandboxAdAccount(env, conn.account_id)
+}
+
+// Meta's official test-lead workflow (lead-ads/testing-troubleshooting): POST /{form_id}/test_leads creates a lead
+// with dummy (or given) field data for that form; Meta delivers it to the leadgen webhook exactly like a real lead,
+// "organic", not associated with any ad, one per form at a time (an existing one must be deleted first). Needs the
+// app live with leads_retrieval (the tool refuses apps in development mode). The lead's id is remembered on the
+// campaign (platform_ids.testLeadIds) so the webhook marks the resulting GetShowUps lead as test data.
+const TEST_LEAD_FIELDS = (zip) => [
+  { name: 'full_name', values: ['Meta Test Lead'] },
+  { name: 'email', values: ['meta-test-lead@getshowups.com'] },
+  { name: 'phone_number', values: ['+18435550199'] },
+  ...(zip ? [{ name: 'zip_code', values: [zip] }] : []),
+]
+export async function createTestLead(env, customerId, row, { zip = '' } = {}) {
+  const ids = idsOf(row)
+  if (!ids.formId) return failure('not_launched')
+  const conn = await getConnection(env, customerId, 'meta')
+  const pageId = conn?.extra?.pageId
+  if (conn?.status !== 'connected' || !pageId) return failure('needs_account')
+  return withToken(env, customerId, async (token) => {
+    const pageTok = await graph(env, 'GET', `/${pageId}`, { fields: 'access_token' }, { token })
+    if (!pageTok.ok) return pageTok
+    const pt = pageTok.data.access_token || token
+    // One test lead per form: remove the previous one first (best effort; a refusal is reported, never hidden).
+    const existing = await graph(env, 'GET', `/${ids.formId}/test_leads`, { fields: 'id', limit: 5 }, { token: pt })
+    let removed = 0
+    for (const o of existing.ok ? existing.data.data || [] : []) {
+      const del = await graph(env, 'DELETE', `/${o.id}`, {}, { token: pt })
+      if (del.ok) removed += 1
+    }
+    const r = await graph(env, 'POST', `/${ids.formId}/test_leads`, { field_data: TEST_LEAD_FIELDS(/^\d{5}$/.test(zip) ? zip : '') }, { token: pt })
+    if (!r.ok) return r
+    const leadgenId = String(r.data.id || '')
+    if (!/^\d{1,30}$/.test(leadgenId)) return failure('invalid_request')
+    return { ok: true, leadgenId, removed }
+  })
 }
 
 // Loads this business's token; failure reconnect_required when missing/expired (marks the connection).

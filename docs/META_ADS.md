@@ -1,9 +1,44 @@
 # Meta (Facebook / Instagram) ads: readiness, controlled testing, activation path
 
-Status 2026-11-21: **built and tested against a mocked Graph API; not connectable in production** because GetShowUps
-has no Meta app configured (`META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` are not set). Owners can
-draft, preview, review and dry-run a Facebook & Instagram lead-ads campaign today; connecting a Page and ad account,
-creating the (paused) campaign and starting it come after the steps below. Nothing here spends money by itself.
+Status 2026-11-22: **the whole sandbox-to-launch workflow is built and exercised end to end against a deterministic
+Graph API stand-in (unit tests + a browser test), and nothing of it has run against Meta's real API yet**, because
+GetShowUps has no Meta app configured in production (`META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` are
+not set). Owners can draft, preview, review and dry-run a Facebook & Instagram lead-ads campaign today; connecting a
+Page and ad account, creating the (paused) campaign, receiving Meta's test lead and starting it come after the steps
+below. Nothing here spends money by itself.
+
+## Added 2026-11-22 (PR after #126): connection upkeep, sandbox accounts, Meta's test-lead workflow, lead hand-off
+
+- **Token refresh** (`refreshToken` / cron `refreshMetaTokens`): Meta long-lived user tokens last ~60 days and have no
+  refresh token; a still-valid token is re-exchanged (`fb_exchange_token`) when under 14 days from expiry and the new
+  token replaces it. An expired or refused token marks the connection `reconnect_required` (Reconnect in the Ads tab).
+- **Account and Page picker** in the Ads tab (`MetaAccounts`): when the sign-in reaches several ad accounts or Pages
+  the owner chooses one of each (validated server-side against Meta's lists); one of each is chosen automatically.
+- **Sandbox ad accounts** (`META_SANDBOX_AD_ACCOUNTS=act_…`): Meta's API-only sandbox accounts never deliver or charge
+  but Meta exposes no flag, so the operator lists them. A business connected to a listed account may create (paused),
+  start and change campaigns without `ADS_LIVE_LAUNCH`, labelled "Sandbox account · no spend" everywhere (the same
+  rule as Google Ads test accounts; re-read from the connection before every change). Any other account needs the
+  live switch, the owner's budget approval and (billed accounts) a subscription.
+- **Meta's official test-lead workflow** ("Send a test lead" on a created campaign → `POST /{form_id}/test_leads`,
+  lead-ads testing guide): Meta creates a lead on the campaign's instant form with our test field data (an existing
+  test lead is removed first: Meta keeps one per form) and delivers it to our webhook like a real lead; test leads are
+  organic (no ad). The id is kept on the campaign (`platform_ids.testLeadIds`) so the webhook marks the resulting lead
+  as test data (`test_marks`) and attributes it to the campaign; test leads never count in results. Meta refuses the
+  API for apps in development mode and without `leads_retrieval`.
+- **Lead hand-off**: a Meta lead enters the same pipeline as every other lead with source `meta_lead_form`
+  (follow-ups engine, booking link, outcomes, show-ups); attribution ties lead → booking → show-up → campaign in the
+  one funnel. Simulated metrics never mix with spend: the dry run creates nothing, sandbox insights report no spend.
+- **Daily read-back** (`verifyLaunched`) now covers Meta campaigns too (it was Google-only): status, budget, targeting
+  and ad are compared with the approved draft every day and Ads Manager changes reconcile our record.
+- **Browser test** (`test/e2e/ads.spec.js` "Meta sandbox"): connect through the real start/callback routes with the
+  stand-in, automatic selection + sandbox badge, server-side selection validation, approve and create (paused) with
+  read-back, a test lead delivered to the webhook signed with the app secret and marked as test data, Start on the
+  sandbox, Pause, no sideways scroll from 320px, tenant isolation. The stand-in is `test/e2e/mock-google.mjs`
+  (`META_API_MOCK_ORIGIN`, loopback only).
+
+**Verified against Meta's real API: nothing yet.** Every shape above follows the documentation read on 2026-11-09
+and 2026-11-22 (Graph v27.0 per the live doc pages; the changelog index still lists v26.0 as newest: set
+`META_API_VERSION` if Meta rejects v27.0). The first real run happens after the founder's steps below.
 
 ## What exists (server/ads/meta.js, spec.js, campaigns.js; src/dashboard/Ads.jsx)
 
@@ -43,6 +78,24 @@ website-conversion campaigns (pixel), Advantage+ campaigns, A/B tests.
    Manager by the business that advertises (GetShowUps never stores card data).
 
 Then, for a real paused campaign: `ADS_LIVE_LAUNCH=true` (approval), the owner's budget approval and their Start.
+For a controlled first run WITHOUT the live switch: create the app's sandbox ad account (Marketing API → Tools in the
+app dashboard; one per app, API-only) and list it in `META_SANDBOX_AD_ACCOUNTS` (approval): the business connected to it
+can create, test-lead and start there with nothing delivered or charged.
+
+## Exact next action to begin a controlled real campaign
+
+1. Create the Meta app (Facebook Login + Marketing API, redirect `https://getshowups.com/api/ads/meta/callback`) and
+   set `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` on the Pages project (approval). Subscribe the app
+   to the Page `leadgen` field with the webhook URL above (the handshake answers with the verify token).
+2. Create the app's sandbox ad account and set `META_SANDBOX_AD_ACCOUNTS=act_<id>` (approval). Keep
+   `ADS_LIVE_LAUNCH` off.
+3. In the Ads tab of a test business (ADS_BUSINESSES): Connect → choose the sandbox account + a Page → draft → Approve
+   and create (paused) · sandbox account → read-back "Checked on Meta" → Send a test lead → the lead arrives marked
+   as a test → Start (sandbox, no spend) → Pause. Compare with the app dashboard. (The test-lead API needs the app
+   out of development mode; until then this step is skipped.)
+4. Business verification + App Review for the scopes in `META_SCOPES` (external, Meta's timeline).
+5. Only then, with a separate approval: `ADS_LIVE_LAUNCH=true`, a real ad account, a small daily budget with a stop
+   date, the owner's budget approval, Approve and create (paused), read-back, and the owner's explicit Start.
 
 ## The smallest test, in order
 

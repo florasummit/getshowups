@@ -3,7 +3,7 @@
 // Live launch stays disabled (ADS_LIVE_LAUNCH unset), so nothing can be created or spent.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
-import { returnFromGoogle, useSession } from './helpers.js'
+import { returnFromGoogle, returnFromMeta, useSession } from './helpers.js'
 
 // No retries: these tests are one stateful sequence on a database seeded once per run. A retry re-runs
 // the file from the top against the already-changed records (e.g. "Draft my plan" has become "Draft
@@ -114,7 +114,7 @@ test('connect Google Ads: a Google Ads TEST account is connected and clearly lab
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
   // Not connected: status in words, Connect is the one primary action.
   await expect(accounts.locator('[data-conn-status][data-platform="google"]')).toHaveText('○Not connected')
-  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveClass(/btn-primary/)
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true }).first()).toHaveClass(/btn-primary/) // Google first; Meta offers Connect too
   await expect(accounts.getByRole('link', { name: 'Reconnect' })).toHaveCount(0)
   await accounts.getByRole('link', { name: 'Connect' }).first().click()
   await page.waitForURL(/\/dashboard/)
@@ -450,11 +450,11 @@ test('Google Ads: disconnect is confirmed and honest; a sign-in without an Ads a
   await expect(status).toHaveText('○Not connected')
   await expect(accounts.locator('[data-disconnected]')).toContainText('To remove GetShowUps’ access completely')
   await expect(accounts.locator('[data-disconnected]').getByRole('link', { name: 'Google Account’s connections' })).toHaveAttribute('href', 'https://myaccount.google.com/connections')
-  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveClass(/btn-primary/)
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true }).first()).toHaveClass(/btn-primary/) // Google first; Meta offers Connect too
 
   // A Google sign-in with no Ads account: clear next steps and a way to check again (test mode wording).
   await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-none:owner@e2e.example')
-  await accounts.getByRole('link', { name: 'Connect', exact: true }).click()
+  await accounts.getByRole('link', { name: 'Connect', exact: true }).first().click()
   await page.waitForURL('**/dashboard/ads')
   await expect(accounts.locator('[data-no-accounts="sandbox"]')).toContainText('No Google Ads test accounts found')
   await expect(accounts.getByRole('button', { name: 'Check again' })).toBeVisible()
@@ -467,14 +467,14 @@ test('Google Ads: disconnect is confirmed and honest; a sign-in without an Ads a
   await expect(status).toHaveText('✓Connected')
 })
 
-test('Facebook & Instagram: honest “not available yet”; a Meta draft is edited (placements, ages, end date, images), previewed, reviewed and checked without any Meta call @mobile', async ({ page, context }, testInfo) => {
+test('Facebook & Instagram: a Meta draft is edited (placements, ages, end date, images), previewed, reviewed and checked without any Meta call @mobile', async ({ page, context }, testInfo) => {
   // Each project gets its own business (the desktop tests above count this business's campaigns).
   await useSession(context, testInfo.project.name === 'mobile' ? fixtures.E2E_HOME_SESSION_TOKEN : fixtures.E2E_ADS_SESSION_TOKEN)
   await page.goto('/dashboard/ads')
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
-  // The connection row says why Meta can't be connected here (no Meta app in this environment), in plain words.
+  // Meta is configured in this environment (mock app): the row offers Connect; nothing is connected yet.
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
-  await expect(accounts.locator('[data-platform-unavailable="meta"]')).toContainText('Not available yet')
+  await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', /none|connected/)
   // A Meta draft (what "Draft my plan" produces when the plan includes Meta), saved from the page itself.
   const saved = await page.evaluate(async () => {
     const spec = { version: 1, platform: 'meta', name: 'E2E lead ads', dailyBudgetCents: 900, geo: { zips: ['29403'] }, meta: { primaryTexts: ['Pool looking green? Book a visit.'], headlines: ['Book a pool visit'], callToAction: 'GET_QUOTE', destination: 'instant_form', imageCreativeIds: ['e2e-img-placeholder'], videoCreativeIds: [], formQuestions: ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP'] } }
@@ -508,4 +508,91 @@ test('Facebook & Instagram: honest “not available yet”; a Meta draft is edit
   await expect(card.getByText('Approve the image this ad uses first.')).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
+  // Tidy: this draft is removed so the sandbox test below starts from one Meta draft of its own.
+  await card.getByRole('button', { name: 'Remove draft' }).click()
+  await card.getByRole('button', { name: 'Confirm: remove draft' }).click()
+})
+
+test('Meta sandbox: connect (mock Meta app), the one ad account + Page are chosen automatically and labelled as a sandbox, a lead-ads campaign is approved and created PAUSED and read back, Meta’s test lead arrives through the signed webhook as test data attributed to the campaign, Start runs on the sandbox only, Pause; another business sees none of it (mock API)', async ({ page, context, browser }) => {
+  // MOCK DATA throughout: a local Graph API stand-in. Nothing reaches Meta or spends.
+  await useSession(context, fixtures.E2E_ADS_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  await expect(page.locator('[data-testing-mode]')).toContainText('Meta sandbox ad accounts')
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  const metaRow = accounts.locator('li.conn-row', { has: page.locator('[data-platform="meta"]') })
+  // 1) Connect: the real start route runs (state cookie, scopes incl. leads_retrieval), the stand-in exchanges the code
+  //    for a long-lived token; exactly one active ad account and one Page → chosen automatically.
+  await returnFromMeta(page, '**/api/ads/meta/start', '/api/ads/meta/callback', 'meta-ok')
+  await metaRow.getByRole('link', { name: 'Connect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(page.getByRole('status').filter({ hasText: 'Facebook & Instagram is connected.' })).toBeVisible()
+  await expect(metaRow.locator('[data-conn-status]')).toHaveAttribute('data-conn-status', 'connected')
+  await expect(metaRow.locator('[data-meta-account]')).toContainText('MOCK Meta sandbox ad account')
+  await expect(metaRow.locator('[data-meta-account]')).toContainText('Page: MOCK Pools Page')
+  await expect(metaRow.locator('[data-meta-sandbox]')).toBeVisible()
+  const me = await (await page.request.get('/api/dashboard/ads')).json()
+  expect(me.connections.meta).toMatchObject({ accountId: 'act_111', pageId: '222', sandboxAccount: true, status: 'connected' })
+  expect(me.capabilities).toMatchObject({ meta: true, liveLaunch: false, metaSandbox: true })
+  // Server-side: the selection is validated against Meta's lists whatever the browser sends.
+  const choose = (adAccountId, pageId) => page.evaluate(async (b) => (await fetch('/api/ads/meta/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })).status, { adAccountId, pageId })
+  expect(await choose('act_999', '222')).toBe(400)
+  expect(await choose('act_111', '999')).toBe(400)
+  expect(await choose('act_111', '222')).toBe(200)
+
+  // 2) A Meta draft with the business's own approved website photo as its image.
+  const saved = await page.evaluate(async () => {
+    const spec = { version: 1, platform: 'meta', name: 'E2E sandbox lead ads', dailyBudgetCents: 900, geo: { zips: ['29403'] }, meta: { primaryTexts: ['Pool looking green? Book a visit.'], headlines: ['Book a pool visit'], callToAction: 'GET_QUOTE', destination: 'instant_form', imageCreativeIds: ['e2e-ads-img'], videoCreativeIds: [], formQuestions: ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP'] } }
+    const r = await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', spec }) })
+    return r.status
+  })
+  expect(saved).toBe(200)
+  await page.reload()
+  const c = page.getByRole('article', { name: 'Facebook & Instagram campaign' }).first()
+  // 3) Approve and create (paused) on the sandbox account, after a confirmation that says so; read back from "Meta".
+  await c.getByRole('button', { name: 'Approve and create (paused) · sandbox account' }).click()
+  await expect(c.getByRole('group', { name: 'Confirm create' })).toContainText('Sandbox ad account: it never shows and nothing is charged.')
+  await c.getByRole('button', { name: 'Confirm: approve and create (paused)' }).click()
+  await expect(c.locator('[data-verification="ok"]')).toContainText('Checked on Meta')
+  await expect(c.locator('.chip')).toHaveText('Paused')
+  const campaignId = (await (await page.request.get('/api/dashboard/ads')).json()).campaigns.find((x) => x.platform === 'meta' && x.launched).id
+  expect(campaignId).toBeTruthy()
+  // A second create for the same campaign is refused (nothing duplicated on Meta).
+  const again = await page.evaluate(async (id) => (await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'launch', id, confirm: true }) })).status, campaignId)
+  expect(again).toBeGreaterThanOrEqual(400)
+
+  // 4) Meta's test lead: asked for from the card, created by the stand-in on the campaign's form and DELIVERED to our
+  //    webhook signed with the app secret; it becomes a lead marked as test data, attributed to this campaign.
+  await c.locator('[data-meta-test-lead]').click()
+  await expect(c.getByRole('group', { name: 'Confirm test lead' })).toContainText('never counted in your results')
+  await c.locator('[data-meta-test-lead-confirm]').click()
+  await expect(c.getByText('Meta is creating a test lead on this ad’s form.')).toBeVisible()
+  await expect
+    .poll(async () => {
+      const events = await (await page.request.get(`http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}/__events`)).json()
+      return events.filter((e) => e.type === 'meta.webhook').map((e) => [e.status, e.body?.processed, e.body?.test])
+    })
+    .toEqual([[200, 1, 1]])
+  // Results exclude test records: no lead is counted from the test delivery.
+  const results = page.getByRole('region', { name: 'Ad results' })
+  await expect(results).toBeVisible()
+
+  // 5) Start on the sandbox account (no spend), then Pause; the budget control names the sandbox.
+  await c.getByRole('button', { name: 'Start ads (sandbox account, no spend)' }).click()
+  await expect(c.locator('.chip')).toHaveText('Running')
+  await c.getByRole('button', { name: 'Pause' }).click()
+  await expect(c.locator('.chip')).toHaveText('Paused')
+  await expect(c.getByRole('button', { name: 'Change daily budget (sandbox account)' })).toBeVisible()
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `overflow at ${width}px`).toBeLessThanOrEqual(0)
+  }
+
+  // 6) Tenant isolation: another Ads business sees no Meta connection, campaign or lead of this one.
+  const other = await browser.newContext()
+  await useSession(other, fixtures.E2E_SESSION_TOKEN)
+  const theirs = await (await other.request.get('/api/dashboard/ads')).json()
+  expect(theirs.campaigns.map((x) => x.id)).not.toContain(campaignId)
+  expect(theirs.connections.meta ?? null).toBeNull()
+  expect(JSON.stringify(theirs)).not.toContain('act_111')
+  await other.close()
 })

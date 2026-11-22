@@ -69,6 +69,8 @@ export async function onRequestPost({ request, env }) {
       holds: await adsStep('holds', () => enforceAdsHolds(env)),
       metrics: await adsStep('metrics', () => syncMetrics(env)),
       verify: await adsStep('verify', () => verifyLaunched(env)),
+      // Meta long-lived tokens (~60 days) are renewed by re-exchange while still valid; expired → reconnect_required.
+      metaTokens: await adsStep('meta tokens', async () => (await import('../../../server/ads/meta.js')).refreshMetaTokens(env)),
       clickIds: await adsStep('click ids', () => purgeClickIds(env)),
       conversions: await adsStep('conversions', async () => uploadConversions(env, await import('../../../server/ads/google.js'))),
       // Google Ads Developer Policies restrict unattended ("headless") changes: unless ADS_AUTOMATION_ENABLED is

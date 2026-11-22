@@ -2,6 +2,33 @@
 
 _Update at the end of every task. Newest first._
 
+## Meta Ads sandbox-to-launch workflow (2026-11-22) — feat/meta-ads-sandbox (no migration)
+
+- Already built before this task (PR feat/meta-ads-testing, 2026-11-21, mocked): Meta OAuth with state cookie and
+  long-lived exchange, ad account + Page auto-selection, encrypted token storage, the Meta spec/editor/preview/review,
+  dry run, PAUSED-only creation (idempotent, partial failures keep ids), read-back verification, Start/Pause/budget,
+  insights, the signed + idempotent lead webhook with per-Page routing and attribution, tenant-isolation tests.
+- Newly completed (docs/META_ADS.md "Added 2026-11-22"): token refresh by re-exchange (cron `metaTokens`; expired →
+  reconnect_required); the Ads tab's Meta account + Page picker; sandbox ad accounts (`META_SANDBOX_AD_ACCOUNTS`;
+  "Sandbox account · no spend"; create/start/change without the live switch, like Google test accounts); Meta's
+  official test-lead API from the card ("Send a test lead" → `POST /{form}/test_leads`, delivered through the webhook,
+  matched by `platform_ids.testLeadIds`, marked test data, attributed to the campaign, never counted); Meta leads
+  enter the follow-ups engine with source `meta_lead_form`; `verifyLaunched` reads back Meta campaigns daily (it was
+  Google-only); the browser suite now has a deterministic Graph stand-in (OAuth, accounts, objects, read-back, status,
+  insights, test leads delivered to the app's webhook signed with the app secret) and a full Meta sandbox test.
+- Verified: unit (token refresh due/not due/expired/refused + cron counts; sandbox account start/refusal; daily
+  verification + reconcile for Meta; test lead creation/replacement/refusals + webhook marks test + attribution;
+  existing OAuth, launch, read-back, errors, webhook replay/isolation tests) and the browser test above. Against
+  Meta's REAL API: nothing (no app exists); documented as such in docs/META_ADS.md with the exact external steps.
+- Meta API facts re-checked 2026-11-22: live doc pages show Graph v27.0 as latest while the changelog index lists
+  v26.0 (keep v27.0, `META_API_VERSION` overrides); test leads are organic, one per form, no API flag (hence our id
+  matching); long-lived tokens re-exchange while valid, an expired token cannot; sandbox accounts have no API flag.
+- Production: nothing changes for owners (Meta stays "Not available yet" until the app secrets exist); no Google
+  campaign, voice setting or customer-facing setting touched; no spend anywhere.
+- Next (human): docs/META_ADS.md "Exact next action": create the Meta app + set the three secrets, create the app's
+  sandbox ad account + set `META_SANDBOX_AD_ACCOUNTS`, run the sandbox flow on a test business, then Business
+  verification + App Review; `ADS_LIVE_LAUNCH` and a real campaign only with a separate approval.
+
 ## Voice cost controls and provider comparison (2026-11-22) — feat/voice-cost-controls (no migration)
 
 - Usage so far (production records, 2026-11-22, every kind of session): ElevenLabs 6 sessions / 3.2 min (2 Lab,

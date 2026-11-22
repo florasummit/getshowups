@@ -9,6 +9,7 @@ import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { json, timingSafeEqual } from '../../../../server/google-oauth.js'
 import { customerFromRow } from '../../../../server/auth.js'
 import { createLead, validateLead } from '../../../../server/booking.js'
+import { markTest } from '../../../../server/testdata.js'
 import { fetchLead, metaConfigured } from '../../../../server/ads/meta.js'
 
 const enc = new TextEncoder()
@@ -82,21 +83,31 @@ async function ingest(env, change, now) {
     await mark('failed')
     return 'failed'
   }
-  const created = await createLead(env, customer, lead, now)
   const adId = fetched.adId || (NUM.test(String(v.ad_id ?? '')) ? String(v.ad_id) : null)
   const formId = fetched.formId || (NUM.test(String(v.form_id ?? '')) ? String(v.form_id) : null)
+  // Attribution: the ad that produced the lead → our campaign. A test lead (Meta's test-lead API, requested from the
+  // Ads tab: organic, no ad) is matched by the id we were given when we asked for it, and the form it came from.
   const campaign = adId
     ? await db
         .prepare("SELECT id FROM ad_campaigns WHERE customer = ?1 AND platform = 'meta' AND json_extract(platform_ids, '$.adId') = ?2 LIMIT 1")
         .bind(customer.id, adId)
         .first()
     : null
+  const testOf = await db
+    .prepare("SELECT id FROM ad_campaigns WHERE customer = ?1 AND platform = 'meta' AND EXISTS (SELECT 1 FROM json_each(json_extract(platform_ids, '$.testLeadIds')) t WHERE t.value = ?2) LIMIT 1")
+    .bind(customer.id, leadgenId)
+    .first()
+    .catch(() => null)
+  const isTest = Boolean(testOf)
+  // The lead enters the same pipeline as every other lead (follow-ups, booking link, outcomes) with its source.
+  const created = await createLead(env, customer, { ...lead, source: 'meta_lead_form' }, now)
+  if (isTest) await markTest(db, customer.id, created.id, true, 'system:meta_test_lead', now).catch(() => {})
   await db
     .prepare("INSERT OR IGNORE INTO lead_attribution (lead_id, customer, source, campaign_id, details, created_at) VALUES (?1, ?2, 'meta_lead_form', ?3, ?4, ?5)")
-    .bind(created.id, customer.id, campaign?.id ?? null, JSON.stringify({ leadgenId, adId, formId }), now)
+    .bind(created.id, customer.id, campaign?.id ?? testOf?.id ?? null, JSON.stringify({ leadgenId, adId, formId, ...(isTest ? { test: true } : {}) }), now)
     .run()
   await mark('created', created.id)
-  return 'created'
+  return isTest ? 'created_test' : 'created'
 }
 
 export async function onRequestPost({ request, env }) {
@@ -125,5 +136,5 @@ export async function onRequestPost({ request, env }) {
       }
     }
   }
-  return json(200, { ok: true, processed: results.filter((r) => r === 'created').length })
+  return json(200, { ok: true, processed: results.filter((r) => r === 'created' || r === 'created_test').length, test: results.filter((r) => r === 'created_test').length })
 }

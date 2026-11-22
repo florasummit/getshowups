@@ -39,7 +39,7 @@ export const LIMITS = {
   stuckMs: 10 * MIN,
   answerWithinMs: 30 * MIN, //  a reply to an inbound text may go out in quiet hours within this window
 }
-export const SOURCES = ['website_form', 'booking_page', 'sms', 'chat', 'google_ads', 'gbp', 'call', 'other']
+export const SOURCES = ['website_form', 'booking_page', 'sms', 'chat', 'google_ads', 'meta_lead_form', 'gbp', 'call', 'other']
 
 const newId = () => randomToken(12)
 const ok = (v = {}) => ({ ok: true, ...v })
