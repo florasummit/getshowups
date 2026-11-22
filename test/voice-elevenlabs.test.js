@@ -12,7 +12,7 @@ import { getCustomer } from '../server/customers.js'
 import { COST_ESTIMATES, estimateMicros, providerStatus } from '../server/voice/providers.js'
 import { VOICE_TOOL_NAMES } from '../server/voice/tools.js'
 import { startLabSession, loadLabSession, endLabSession, cleanMetrics } from '../server/voice/sessions.js'
-import { connectElevenLabs, fetchSignedUrl, elevenlabsBase, elevenlabsOverrides, SIGNED_URL_TTL_MS, MAX_CONNECTS_PER_SESSION } from '../server/voice/elevenlabs.js'
+import { connectElevenLabs, fetchSignedUrl, elevenlabsBase, elevenlabsOverrides, elevenlabsDynamicVariables, SIGNED_URL_TTL_MS, MAX_CONNECTS_PER_SESSION } from '../server/voice/elevenlabs.js'
 import * as connectApi from '../functions/api/platform/voice-lab/elevenlabs.js'
 import { createTurnMetrics, ADAPTER_STATES } from '../src/voice/adapter.js'
 import { createElevenLabsAdapter, MAX_RECONNECTS } from '../src/voice/elevenlabs.js'
@@ -123,11 +123,12 @@ test('connect: a short-lived signed URL for the configured agent, overrides with
   assert.ok(SIGNED_URL_TTL_MS <= 15 * 60_000, 'expiry is the documented 15 minutes or shorter')
   assert.match(r.overrides.agent.prompt.prompt, /alpha Co/)
   assert.match(r.overrides.agent.prompt.prompt, /Yes, we service <place>/)
-  assert.equal(r.overrides.agent.firstMessage, 'Thanks for calling alpha Co, how can I help?')
+  assert.equal(r.overrides.agent.firstMessage, undefined, 'no first_message override: ElevenLabs refuses it on a published agent')
+  assert.equal(r.dynamicVariables.greeting, 'Thanks for calling alpha Co, how can I help?', 'the greeting is the {{greeting}} dynamic variable')
   assert.equal(r.overrides.agent.language, 'en')
   assert.deepEqual(r.clientTools, VOICE_TOOL_NAMES)
   assert.equal(r.clientTools.length, 7)
-  assert.deepEqual(r.dynamicVariables, { business_name: 'alpha Co', dry_run: true, channel: 'voice_lab' })
+  assert.deepEqual(r.dynamicVariables, { business_name: 'alpha Co', dry_run: true, channel: 'voice_lab', greeting: 'Thanks for calling alpha Co, how can I help?' })
   assert.deepEqual([r.connection, r.connectionsLeft], [1, MAX_CONNECTS_PER_SESSION - 1])
   const text = JSON.stringify(r)
   for (const sec of SECRETS) assert.ok(!text.includes(sec))
@@ -138,7 +139,8 @@ test('connect: a short-lived signed URL for the configured agent, overrides with
   assert.equal(el.length, 1)
   assert.ok(!el[0][0].includes(EL_KEY))
   // The SDK shape is what elevenlabsOverrides builds; the greeting comes from the business's receptionist settings.
-  assert.deepEqual(elevenlabsOverrides({ instructions: 'X', greeting: 'Hi' }), { agent: { prompt: { prompt: 'X' }, firstMessage: 'Hi', language: 'en' } })
+  assert.deepEqual(elevenlabsOverrides({ instructions: 'X', greeting: 'Hi' }), { agent: { prompt: { prompt: 'X' }, language: 'en' } })
+  assert.equal(elevenlabsDynamicVariables({ name: 'Beta Co' }, { dryRun: true }, '').greeting, 'Thanks for calling Beta Co, how can I help?', 'never an empty greeting (the agent would wait for the caller)')
   assert.equal(customer.id, 'alpha')
 })
 
@@ -279,6 +281,8 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.equal(agent.conversation_config.conversation.max_duration_seconds, 900)
   assert.equal(agent.conversation_config.tts.voice_id, 'voice_abc123')
   assert.match(agent.conversation_config.agent.prompt.prompt, /placeholder/i)
+  assert.equal(agent.conversation_config.agent.first_message, '{{greeting}}', 'the greeting is a dynamic variable, never overridden')
+  assert.equal(agent.conversation_config.agent.dynamic_variables.dynamic_variable_placeholders.greeting, 'This line is not set up yet.')
   assert.ok(!/alpha Co|Charleston/.test(JSON.stringify(agent)), 'no business facts live on the ElevenLabs side')
   // Second run: everything exists → PATCH only, same shapes.
   const updated = await setupElevenLabsAgent({ ...opts, apply: true })

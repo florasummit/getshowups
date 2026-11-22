@@ -36,7 +36,12 @@ const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d{2,5}$/
 // What the agent says if a conversation ever starts WITHOUT our override (e.g. someone opens it in the dashboard):
 // no business facts live on the ElevenLabs side, so it must not pretend to be anyone.
 export const PLACEHOLDER_PROMPT = 'You are a placeholder. This agent is only used by GetShowUps with a per-conversation system prompt supplied by its server. If you are reading this text, that prompt was not supplied: say "This line is not set up yet" once, do not answer questions, do not call tools, and end the conversation.'
-export const PLACEHOLDER_FIRST_MESSAGE = 'This line is not set up yet.'
+// The first message is a dynamic variable: ElevenLabs refuses a first_message OVERRIDE on a published agent even with
+// the flag on (verified 2026-11-22), while dynamic variables need no permission. Our session route sends
+// dynamic_variables.greeting (server/voice/elevenlabs.js); a session without it is refused by ElevenLabs, so the agent
+// can never greet with the placeholder.
+export const PLACEHOLDER_FIRST_MESSAGE = '{{greeting}}'
+export const PLACEHOLDER_GREETING = 'This line is not set up yet.'
 // Server events the browser adapter relies on (conversation_config.conversation.client_events; some are off by default).
 export const CLIENT_EVENTS = ['conversation_initiation_metadata', 'ping', 'audio', 'interruption', 'user_transcript', 'agent_response', 'agent_response_correction', 'client_tool_call', 'agent_tool_response', 'vad_score']
 
@@ -61,6 +66,7 @@ export const agentBody = ({ name, hostname, toolIds, voiceId, llm, keep = null }
   conversation_config: {
     agent: {
       first_message: PLACEHOLDER_FIRST_MESSAGE,
+      dynamic_variables: { dynamic_variable_placeholders: { greeting: PLACEHOLDER_GREETING } },
       language: keep?.language || 'en',
       prompt: { ...(keep?.prompt || {}), prompt: PLACEHOLDER_PROMPT, tool_ids: toolIds, ...(llm ? { llm } : {}) },
     },
