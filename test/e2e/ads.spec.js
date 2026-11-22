@@ -466,3 +466,46 @@ test('Google Ads: disconnect is confirmed and honest; a sign-in without an Ads a
   await page.waitForURL('**/dashboard/ads')
   await expect(status).toHaveText('✓Connected')
 })
+
+test('Facebook & Instagram: honest “not available yet”; a Meta draft is edited (placements, ages, end date, images), previewed, reviewed and checked without any Meta call @mobile', async ({ page, context }, testInfo) => {
+  // Each project gets its own business (the desktop tests above count this business's campaigns).
+  await useSession(context, testInfo.project.name === 'mobile' ? fixtures.E2E_HOME_SESSION_TOKEN : fixtures.E2E_ADS_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
+  // The connection row says why Meta can't be connected here (no Meta app in this environment), in plain words.
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  await expect(accounts.locator('[data-platform-unavailable="meta"]')).toContainText('Not available yet')
+  // A Meta draft (what "Draft my plan" produces when the plan includes Meta), saved from the page itself.
+  const saved = await page.evaluate(async () => {
+    const spec = { version: 1, platform: 'meta', name: 'E2E lead ads', dailyBudgetCents: 900, geo: { zips: ['29403'] }, meta: { primaryTexts: ['Pool looking green? Book a visit.'], headlines: ['Book a pool visit'], callToAction: 'GET_QUOTE', destination: 'instant_form', imageCreativeIds: ['e2e-img-placeholder'], videoCreativeIds: [], formQuestions: ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP'] } }
+    const r = await fetch('/api/dashboard/ads/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', spec }) })
+    return { status: r.status, body: await r.json() }
+  })
+  expect(saved.status).toBe(200)
+  await page.reload()
+  const card = page.getByRole('article', { name: 'Facebook & Instagram campaign' }).first()
+  await expect(card.locator('[data-meta-preview]')).toContainText('Get quote')
+  await expect(card.locator('[data-meta-editor]')).toBeVisible()
+  await expect(card.locator('[data-meta-where]')).toContainText('1 ZIP code')
+  // Placements: unticking one shows in the preview and the review; ages and an end date update the total.
+  await card.locator('[data-meta-placement="instagram"]').uncheck()
+  await expect(card.locator('[data-meta-preview]')).toContainText('Sponsored · Facebook')
+  await card.locator('[data-meta-age-min]').fill('25')
+  const end = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10)
+  await card.locator('[data-meta-end-date]').fill(end)
+  await expect(card.locator('[data-meta-total]')).toContainText('Most it can spend before it stops')
+  const review = card.locator('[data-meta-review]')
+  await expect(review).toContainText('Facebook & Instagram (Facebook)')
+  await expect(review).toContainText('Ages25+')
+  await expect(review).toContainText('created on Meta paused')
+  await card.getByRole('button', { name: 'Save changes' }).click()
+  await expect(card.getByText('Saved.', { exact: true })).toBeVisible()
+  // Check (no spend): the Meta dry run builds the payloads locally; no network, nothing created.
+  await card.getByRole('button', { name: 'Check (no spend)' }).click()
+  await expect(card.getByText('Check passed. Nothing was created and nothing was spent.')).toBeVisible()
+  // Approval needs an approved image: the placeholder isn't one, and the message says so.
+  await card.getByRole('button', { name: /^Approve/ }).click()
+  await expect(card.getByText('Approve the image this ad uses first.')).toBeVisible()
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})

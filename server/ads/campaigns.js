@@ -281,12 +281,14 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     .bind(id, customer.id, r.platformCampaignId || null, ids, now)
     .run()
   await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'launch', reason: 'Created on the platform, paused' }, now)
-  // Read it straight back from Google (best effort; the daily cron re-checks).
+  // Read it straight back from the platform (best effort; the daily cron re-checks). Both Google and Meta.
   let verification = null
-  if (row.platform === 'google') {
+  if (a.verifyCampaign) {
     const fresh = await getRow(db, customer.id, id)
     const v = await verifyAndRecord(env, fresh, now).catch(() => ({ ok: false, error: 'storage_error' }))
     verification = v.ok ? { ok: v.failed.length === 0, failed: v.failed } : { ok: false, error: v.error }
+  }
+  if (row.platform === 'google') {
     // Conversion reporting (approved feature only): make sure the account has our conversion actions.
     if (conversionsEnabled(env) && a.ensureConversionActions) {
       const c = await a.ensureConversionActions(env, customer.id).catch(() => ({ ok: false, error: 'transient' }))
@@ -368,10 +370,12 @@ export async function verifyAndRecord(env, row, now = Date.now()) {
   const a = await adapter(row.platform)
   if (!a?.verifyCampaign) return { ok: false, error: 'platform_unavailable' }
   const r = await a.verifyCampaign(env, row.customer, row)
+  const platformName = row.platform === 'google' ? 'Google' : 'Meta'
   if (!r.ok) {
-    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'verify', status: 'failed', reason: `Couldn't read the campaign from Google (${r.error})`, details: { error: r.error } }, now)
+    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'verify', status: 'failed', reason: `Couldn't read the campaign from ${platformName} (${r.error})`, details: { error: r.error } }, now)
     return r
   }
+  const read = r.google || r.remote || null
   const failed = r.checks.filter((c) => !c.ok).map((c) => c.name)
   await logAction(
     db,
@@ -381,22 +385,22 @@ export async function verifyAndRecord(env, row, now = Date.now()) {
       actor: 'system',
       kind: 'verify',
       status: failed.length ? 'failed' : 'applied',
-      reason: failed.length ? `Checked on Google: ${failed.length} difference(s): ${failed.join(', ')}` : `Checked on Google: all ${r.checks.length} checks match`,
-      details: { failed, google: r.google },
+      reason: failed.length ? `Checked on ${platformName}: ${failed.length} difference(s): ${failed.join(', ')}` : `Checked on ${platformName}: all ${r.checks.length} checks match`,
+      details: { failed, [row.platform === 'google' ? 'google' : 'remote']: read },
     },
     now,
   )
-  // Reconcile: Google is the source of truth for whether the campaign runs.
-  const g = r.google?.status
+  // Reconcile: the platform is the source of truth for whether the campaign runs.
+  const g = read?.status
   const next = !r.found || g === 'REMOVED' ? 'error' : g === 'ENABLED' ? 'active' : g === 'PAUSED' ? 'paused' : null
   if (next && next !== row.status && ['paused', 'active'].includes(row.status)) {
     await db
       .prepare('UPDATE ad_campaigns SET status = ?3, last_error = ?4, updated_at = ?5 WHERE id = ?1 AND customer = ?2')
       .bind(row.id, row.customer, next, next === 'error' ? 'removed_on_google' : null, now)
       .run()
-    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'reconcile', reason: `Google Ads shows this campaign as ${next === 'error' ? 'removed' : g.toLowerCase()}; updated to match` }, now)
+    await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'reconcile', reason: `${platformName} shows this campaign as ${next === 'error' ? 'removed' : g.toLowerCase()}; updated to match` }, now)
   }
-  return { ok: true, failed, google: r.google }
+  return { ok: true, failed, google: r.google, remote: read }
 }
 
 // Cron: re-check created campaigns at most once a day each (oldest first).

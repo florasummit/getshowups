@@ -8,6 +8,7 @@ import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 import { internalEmails } from '../../../../server/testdata.js'
+import { listAssets } from '../../../../server/assets.js'
 
 export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -27,6 +28,8 @@ export async function onRequestGet({ request, env }) {
       db.prepare('SELECT platform, account_id, account_name, currency, status, extra FROM ad_connections WHERE customer = ?1').bind(id).all(),
       db.prepare("SELECT id, kind, status, prompt, error, created_at FROM ad_creatives WHERE customer = ?1 AND status <> 'rejected' ORDER BY created_at DESC LIMIT 24").bind(id).all(),
     ])
+    // The owner's website photos (ids only) so a Meta ad can use one as its image (approved explicitly, never a logo).
+    const photos = await listAssets(db, id).then((list) => list.filter((a) => !a.logo).map((a) => ({ id: a.id }))).catch(() => [])
     const live = await liveFor(env, id) // false for a test business, whatever ADS_LIVE_LAUNCH says
     const hold = await adsHold(env, id)
     const stuck = hold ? await runningOnHold(env, id) : null
@@ -39,6 +42,7 @@ export async function onRequestGet({ request, env }) {
       budget: approval ? { monthlyCents: approval.monthly_cents, dailyCeilingCents: dailyCeilingCents(approval.monthly_cents), remainingDailyCents: remaining, approvedAt: approval.approved_at } : null,
       connections,
       creatives: creatives.results.map((c) => ({ id: c.id, kind: c.kind, status: c.status, prompt: c.prompt, error: c.error, createdAt: c.created_at })),
+      photos,
       quota: { ...QUOTA, used: usage },
       capabilities: {
         ai: Boolean(env.ANTHROPIC_API_KEY),

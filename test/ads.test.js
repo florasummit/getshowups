@@ -200,6 +200,46 @@ test('strategy: sanitizePlan never throws on garbage and defaults to Google', ()
   assert.deepEqual(plan.google.keywords, [{ text: 'script', match: 'PHRASE' }])
 })
 
+test('spec (Meta): placements, age range and end date are validated and normalized; both placements = automatic', () => {
+  const base = { version: 1, platform: 'meta', name: 'M', dailyBudgetCents: 800, geo: { zips: ['29403'] }, meta: { primaryTexts: ['Pool looking green?'], headlines: ['Book a visit'], callToAction: 'GET_QUOTE', destination: 'instant_form', imageCreativeIds: ['img'], videoCreativeIds: [] } }
+  const ok = validateSpec({ ...base, meta: { ...base.meta, placements: ['instagram', 'instagram'], audience: { ageMin: 25, ageMax: 55 }, endDate: '2027-01-31' } })
+  assert.deepEqual(ok[0], [])
+  assert.deepEqual([ok[1].meta.placements, ok[1].meta.audience, ok[1].meta.endDate], [['instagram'], { ageMin: 25, ageMax: 55 }, '2027-01-31'])
+  const auto = validateSpec({ ...base, meta: { ...base.meta, placements: ['facebook', 'instagram'] } })
+  assert.deepEqual([auto[0], auto[1].meta.placements, auto[1].meta.audience, auto[1].meta.endDate], [[], undefined, undefined, undefined])
+  const bad = validateSpec({ ...base, meta: { ...base.meta, placements: ['tiktok'], audience: { ageMin: 12, ageMax: 90 }, endDate: '31/01/2027' } })[0]
+  assert.ok(bad.some((e) => e.startsWith('meta.placements:')) && bad.some((e) => e.startsWith('meta.audience.ageMin:')) && bad.some((e) => e.startsWith('meta.audience.ageMax:')) && bad.some((e) => e.startsWith('meta.endDate:')), bad.join(' | '))
+  assert.ok(validateSpec({ ...base, meta: { ...base.meta, audience: { ageMin: 40, ageMax: 30 } } })[0].some((e) => e.startsWith('meta.audience.ageMax:')))
+})
+
+test('creatives: an owner’s own website photo becomes an ad image (no AI, no cost), needs approval, served back; another business’s photo is refused', async () => {
+  const c = await owner()
+  await call(adsProfile, 'POST', '/x', { cookie: c, body: PROFILE })
+  const { saveAsset } = await import('../server/assets.js')
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137])
+  const [mine, theirs] = [(await saveAsset(db, 'pools', png)), (await saveAsset(db, 'salon', png))].map((r) => (assert.ok(r.ok, JSON.stringify(r)), r.asset))
+  const list = await call(adsIndex, 'GET', '/x', { cookie: c })
+  assert.deepEqual(list.json.photos, [{ id: mine.id }])
+  const added = await call(adsCreative, 'POST', '/x', { cookie: c, body: { action: 'from_asset', assetId: mine.id } })
+  assert.equal(added.status, 201, JSON.stringify(added.json))
+  assert.deepEqual([added.json.creative.status, added.json.creative.kind], ['ready', 'image'])
+  const id = added.json.creative.id
+  assert.equal((await call(adsCreative, 'POST', '/x', { cookie: c, body: { action: 'from_asset', assetId: mine.id } })).json.creative.id, id, 'same photo → same creative')
+  assert.equal((await call(adsCreative, 'POST', '/x', { cookie: c, body: { action: 'from_asset', assetId: theirs.id } })).status, 404)
+  assert.equal((await call(adsCreative, 'POST', '/x', { cookie: c, body: { action: 'from_asset', assetId: 'nope' } })).status, 404)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ai_usage WHERE customer = 'pools'").get().n, 0, 'no AI cost')
+  // The bytes come back for the owner only; an ad can use it only once approved.
+  assert.equal((await call(adsCreative, 'GET', `/x?id=${id}`, { cookie: c })).status, 200)
+  assert.equal((await call(adsCreative, 'GET', `/x?id=${id}`, { cookie: await cookieFor('owner@salon.example') })).status, 404)
+  const spec = { version: 1, platform: 'meta', name: 'Photo ad', dailyBudgetCents: 800, geo: { zips: ['29403'] }, meta: { primaryTexts: ['Pool looking green? Book a visit.'], headlines: ['Book a pool visit'], callToAction: 'GET_QUOTE', destination: 'instant_form', imageCreativeIds: [id], videoCreativeIds: [], formQuestions: ['FULL_NAME', 'PHONE'] } }
+  const saved = await call(adsCampaign, 'POST', '/x', { cookie: c, body: { action: 'save', spec } })
+  assert.deepEqual(saved.json.errors, [])
+  await call(adsBudget, 'POST', '/x', { cookie: c, body: { monthlyCents: 60000, confirm: true } })
+  assert.equal((await call(adsCampaign, 'POST', '/x', { cookie: c, body: { action: 'approve', id: saved.json.id } })).json.error, 'creative_not_approved')
+  assert.equal((await call(adsCreative, 'POST', '/x', { cookie: c, body: { action: 'approve', id } })).status, 200)
+  assert.equal((await call(adsCampaign, 'POST', '/x', { cookie: c, body: { action: 'approve', id: saved.json.id } })).status, 200)
+})
+
 test('spec: budget above the approved ceiling is rejected', () => {
   const spec = { platform: 'google', name: 'x', dailyBudgetCents: 2000, geo: { zips: ['29403'] }, finalUrl: 'https://a.example', google: { keywords: [{ text: 'pool', match: 'PHRASE' }], negativeKeywords: [], headlines: ['A', 'B', 'C'], descriptions: ['d1', 'd2'] } }
   assert.deepEqual(validateSpec(spec, { ceilingDailyCents: 1999 })[0], ['dailyBudgetCents: exceeds the approved budget'])

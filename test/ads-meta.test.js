@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { getConnection, loadToken, saveToken, upsertConnection } from '../server/ads/connections.js'
-import { fetchDailyMetrics, launchCampaign, mapError, metaBase, setDailyBudget, setStatus } from '../server/ads/meta.js'
+import { fetchDailyMetrics, launchCampaign, mapError, metaBase, setDailyBudget, setStatus, verifyCampaign } from '../server/ads/meta.js'
 import * as start from '../functions/api/ads/meta/start.js'
 import * as callback from '../functions/api/ads/meta/callback.js'
 import * as accounts from '../functions/api/ads/meta/accounts.js'
@@ -98,6 +98,19 @@ function fakeMeta() {
     }
     if (method === 'GET' && /^\/\d+$/.test(path) && path.slice(1) in m.leads) return [200, m.leads[path.slice(1)]]
     if (method === 'GET' && /^\/\d+$/.test(path) && params.fields === 'access_token') return [200, { access_token: 'PAGE-token', id: path.slice(1) }]
+    // Read-back of an object we created (fields=...): values as Meta would return them (JSON fields as objects).
+    if (method === 'GET' && /^\/\d+$/.test(path) && m.objects[path.slice(1)] && params.fields) {
+      const o = m.objects[path.slice(1)]
+      const out = { id: o.id }
+      for (const f of String(params.fields).split(',')) {
+        if (o[f] === undefined) continue
+        let v = o[f]
+        if (typeof v === 'string' && /^[[{]/.test(v)) v = JSON.parse(v)
+        out[f] = v
+      }
+      return [200, out]
+    }
+    if (method === 'GET' && /^\/\d+$/.test(path) && !m.objects[path.slice(1)] && params.fields) return [400, { error: { code: 100, error_subcode: 33, message: 'Unsupported get request. Object with ID does not exist' } }]
     if (method === 'POST' && /^\/\d+$/.test(path)) {
       const o = m.objects[path.slice(1)]
       if (!o) return [400, { error: { code: 100 } }]
@@ -318,6 +331,50 @@ test('launch dryRun: builds PAUSED payloads with cents budget, ZIP targeting, NO
   assert.equal(p.leadForm.privacy_policy.url, `${ORIGIN}/privacy`)
   assert.ok(p.campaign.name.startsWith('GSU-cmp1 '))
   assert.ok(!JSON.stringify(r).includes('ACTIVE'))
+})
+
+test('launch dryRun: placements, age range and end date reach the ad set targeting; omitted = automatic placements and 18+', async () => {
+  await connected()
+  const spec = { ...SPEC, meta: { ...SPEC.meta, placements: ['instagram'], audience: { ageMin: 25, ageMax: 60 }, endDate: '2027-03-31' } }
+  const r = await launchCampaign(env, 'pools', { id: 'cmp2', spec })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.payloads.adset.targeting.publisher_platforms, ['instagram'])
+  assert.deepEqual([r.payloads.adset.targeting.age_min, r.payloads.adset.targeting.age_max], [25, 60])
+  assert.equal(r.payloads.adset.end_time, '2027-03-31T23:59:59Z')
+  const d = (await launchCampaign(env, 'pools', CAMPAIGN)).payloads.adset
+  assert.deepEqual([d.targeting.publisher_platforms, d.targeting.age_min, d.targeting.age_max, d.end_time], [undefined, 18, undefined, undefined])
+})
+
+test('verify: a created Meta campaign is read back and compared (all match); a changed budget / started ad set / deleted campaign are reported; read-only', async () => {
+  await connected()
+  approvedImage()
+  const spec = { ...SPEC, meta: { ...SPEC.meta, placements: ['facebook'], audience: { ageMin: 21 } } }
+  const r = await launchCampaign(env, 'pools', { id: 'cmp3', spec }, { dryRun: false })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  const row = { id: 'cmp3', customer: 'pools', platform: 'meta', status: 'paused', spec: JSON.stringify(spec), platform_ids: JSON.stringify(r.platformIds) }
+  calls = []
+  const v = await verifyCampaign(env, 'pools', row)
+  assert.equal(v.ok, true, JSON.stringify(v))
+  assert.equal(v.found, true)
+  assert.deepEqual(v.checks.filter((c) => !c.ok), [], JSON.stringify(v.checks))
+  assert.deepEqual([v.remote.status, v.remote.dailyBudgetCents, v.remote.placements, v.remote.ageMin, v.remote.objective], ['PAUSED', 2500, ['facebook'], 21, 'OUTCOME_LEADS'])
+  assert.equal(writes().length, 0, 'verification never writes')
+  // Someone changed the budget and started the campaign in Ads Manager.
+  Object.assign(meta.objects[r.platformIds.adsetId], { daily_budget: '4000' })
+  Object.assign(meta.objects[r.platformIds.campaignId], { status: 'ACTIVE' })
+  const v2 = await verifyCampaign(env, 'pools', row)
+  assert.deepEqual(v2.checks.filter((c) => !c.ok).map((c) => c.name), ['campaign status', 'daily budget'])
+  assert.equal(v2.remote.status, 'ENABLED')
+  // The campaign was deleted: found false, not an error.
+  delete meta.objects[r.platformIds.campaignId]
+  const v3 = await verifyCampaign(env, 'pools', row)
+  assert.deepEqual([v3.ok, v3.found, v3.checks[0]], [true, false, { name: 'campaign exists on Meta', ok: false }])
+  // Not created yet → not_launched; a provider failure is a failure, never "removed".
+  assert.equal((await verifyCampaign(env, 'pools', { ...row, platform_ids: '{}' })).error, 'not_launched')
+  meta.fail[`GET /${r.platformIds.adsetId}`] = { times: 2, response: [500, { error: { code: 1 } }] } // retried once, still failing
+  meta.objects[r.platformIds.campaignId] = { id: r.platformIds.campaignId, edge: 'campaigns', status: 'PAUSED', objective: 'OUTCOME_LEADS' }
+  const v4 = await verifyCampaign(env, 'pools', row)
+  assert.equal(v4.ok, false)
 })
 
 test('launch: unsupported specs refused before any call', async () => {

@@ -4070,6 +4070,20 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   gap: 4px;
 }
 
+/* Ads: Meta editor */
+.meta-step { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid var(--ink-100); }
+.meta-step h4 { margin: 0; font-size: 0.95rem; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px 18px; border: 0; padding: 0; margin: 0; align-items: center; }
+.choices legend { font-weight: 600; margin-bottom: 6px; }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 12px; align-items: end; }
+.creative-pick { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 12px; }
+.creative-pick li { border: 1px solid var(--ink-100); border-radius: var(--radius-sm); padding: 8px; display: grid; gap: 6px; }
+.creative-pick li.creative-pick--on { border-color: var(--ink-900); }
+.creative-pick img { width: 100%; height: 7rem; object-fit: cover; border-radius: 6px; }
+.ad-preview--meta { max-width: 26rem; }
+.ad-preview-img { display: block; width: 100%; max-height: 14rem; object-fit: cover; border-radius: 8px; margin: 6px 0; }
+.ad-preview-noimg { margin: 6px 0; padding: 18px; text-align: center; border: 1px dashed var(--ink-300); border-radius: 8px; color: var(--ink-500); font-size: 0.85rem; }
+.ad-preview-cta { display: inline-block; margin: 4px 0 0; padding: 6px 12px; border-radius: 6px; background: var(--ink-100); font-weight: 600; font-size: 0.85rem; }
 /* Business Review: plain-language map */
 .review .seg--sm { display: flex; flex-wrap: wrap; border-radius: 20px; margin-bottom: 0.75rem; }
 .review .seg--sm button { font-size: 0.85rem; padding: 0.35rem 0.7rem; }
