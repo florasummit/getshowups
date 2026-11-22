@@ -212,11 +212,21 @@ for E in "$E2E_VOICE_CUSTOMER:$E2E_VOICE_SESSION_TOKEN" "$E2E_VOICE_M_CUSTOMER:$
   INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$VC', '(843) 555-0188', 'Pool service', 'Pool care.', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280/month\"}]', '[\"Charleston\"]', $NOW);
   INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VC', 1, 'ai_first', 'Hi! Thanks for calling Voice Pools.', $NOW);"
 done
+VS=$E2E_VOICE_SWITCH_CUSTOMER
 d1 "$VOICE_SQL
   INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_VOICE_ADMIN_EMAIL', '$E2E_VOICE_CUSTOMER', $NOW);
-  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_VOICE_ADMIN_SESSION_TOKEN")', '$E2E_VOICE_ADMIN_EMAIL', $NOW, $FAR);"
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_VOICE_ADMIN_SESSION_TOKEN")', '$E2E_VOICE_ADMIN_EMAIL', $NOW, $FAR);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$VS', 'Switch Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@switch.example', '$VS', $NOW);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$VS', '(843) 555-0177', 'Pool service', 'Pool care.', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280/month\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VS', 1, 'ai_first', 'Hi! Thanks for calling Switch Pools.', $NOW);
+  INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$VS', 1, '$E2E_PLATFORM_ADMIN', $NOW);
+  INSERT INTO receptionist_voice_settings (customer, provider, voice_id, voice_name, personality, pace, language, previous, version, updated_by, updated_at) VALUES ('$VS', 'openai', 'cedar', 'Cedar', 'warm', 'normal', 'en', NULL, 1, 'ref:seed', $NOW);
+  INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('conv-$VS-test', '$VS', 'voice', '{\"voice\":{\"provider\":\"retell\",\"startedAt\":$((NOW - 120000)),\"endedAt\":$((NOW - 60000)),\"test\":true,\"metrics\":{\"micLive\":1,\"audioReceived\":1}},\"tools\":[{\"name\":\"find_available_times\",\"ok\":true},{\"name\":\"book_appointment\",\"ok\":true,\"simulated\":true}],\"booked\":{\"simulated\":true}}', '[]', $((NOW - 120000)), $((NOW - 60000)));
+  INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES ('call_seed_$VS', '$VS', 'conv-$VS-test', 'retell', $((NOW - 120000)), $((NOW - 60000)));"
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done

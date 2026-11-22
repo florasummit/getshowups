@@ -1128,6 +1128,10 @@
   margin-top: 2px;
 }
 
+/* Audit entries: action names (receptionist.provider_switch_blocked) and ids have no spaces; wrap them on phones. */
+.row-title--wrap {
+  overflow-wrap: anywhere;
+}
 .row-title .tag {
   margin-left: 8px;
 }
@@ -4135,6 +4139,9 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .rx-provider-table thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
 .rx-provider-switch { display: grid; gap: var(--s-3); margin-top: var(--s-3); }
 .rx-check ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.rx-confirm { display: grid; gap: var(--s-2); }
+.rx-confirm p { margin: 0; }
+.rx-confirm-business code { font-size: var(--fs-sm); }
 @media (max-width: 640px) {
   .rx-provider-table thead { display: none; }
   .rx-provider-table tr { display: grid; gap: 4px; padding: var(--s-2) 0; border-top: 1px solid var(--surface-muted); }

@@ -167,6 +167,22 @@ proves the integration, not a human's listening experience; a human microphone t
   and audits `receptionist.provider_switched` / `_switch_blocked` / `_rolled_back` (admin_audit + audit_log). A
   blocked switch changes nothing. Calls in progress stay on the provider that created them (the route only affects
   new calls). Live telephone switching does not exist and is not claimed.
+- **Admin Console entry point (`/admin/voice-providers`, 2026-11-22)**: the dashboard control needs the admin to be a
+  member of the business (one business per member email), so the console carries the same control for ANY business.
+  `GET /api/platform/voice-provider` lists businesses (name, id, test mark, receptionist on/off, provider; deleted ones
+  excluded); `?customer=<id>` answers the business facts, the stored configuration, `providerOverview` (the same
+  states, evidence and blockers the dashboard shows) and the voice-session history (`voiceSessionHistory`: provider,
+  kind admin test | Lab | customer, timing, the adapter's audio evidence, tool outcomes, outcome code, cost estimate,
+  whether it counts as evidence; codes only, never a transcript or a customer's details); `&catalog=<provider>` the
+  replacement-voice list. `POST { action: check | switch | rollback, customer, … }` calls `checkProviderSwitch` /
+  `switchProvider` / `rollbackProvider` unchanged (readiness, blockers, `confirm`, version, one write, audit, rollback)
+  and, for switch and rollback, requires the business id typed back (`confirmCustomer` = `customer`, else 400
+  `confirm_customer_mismatch` before anything is checked or audited). Platform admins only (`requirePlatformAdmin`,
+  same-origin writes, `voiceProviderAdmin` rate limit); business membership is neither required nor consulted; the
+  dashboard's tenant authorization is unchanged. The UI (src/admin/VoiceProviders.jsx) names the selected business
+  (name, id, Test / Live badge) on the page and again in the typed confirmation; `ProviderControl`
+  (src/dashboard/ProviderControl.jsx) is the one component behind both places. Test now links to
+  `/chat/<id>?test=<provider>` (test businesses only, as before).
 
 ## Location policy (2026-11-22)
 

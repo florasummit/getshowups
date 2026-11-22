@@ -1,0 +1,14 @@
+/* /admin/voice-providers: the selected business, provider states and the session history table. */
+.vp-selected { display: grid; gap: var(--s-3); margin-top: var(--s-3); padding: var(--s-3) var(--s-4); border: 1px solid var(--surface-muted); border-radius: var(--radius-sm); }
+.vp-selected-name { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.vp-selected-name code { font-size: var(--fs-sm); }
+.vp-states { list-style: none; margin: 0 0 var(--s-3); padding: 0; display: grid; gap: var(--s-2); }
+.vp-states li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.vp-history { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.vp-history th, .vp-history td { text-align: left; padding: var(--s-2) var(--s-2) var(--s-2) 0; border-top: 1px solid var(--surface-muted); vertical-align: top; }
+.vp-history thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
+@media (max-width: 760px) {
+  .vp-history thead { display: none; }
+  .vp-history tr { display: grid; gap: 4px; padding: var(--s-2) 0; border-top: 1px solid var(--surface-muted); }
+  .vp-history th, .vp-history td { border: 0; padding: 0; }
+}

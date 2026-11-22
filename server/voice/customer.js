@@ -195,6 +195,54 @@ export async function endCustomerVoiceSession(env, { customer, conv }, { metrics
 }
 const summary = (v) => ({ provider: v.provider, startedAt: v.startedAt, endedAt: v.endedAt || null, test: Boolean(v.test), metrics: v.metrics || {}, estimatedMicros: v.estimatedMicros ?? null, outcome: v.outcome || null })
 
+// The voice sessions of ONE business, newest first, as the admin console's test history: provider, kind (admin test
+// on the customer path | Lab | customer), timing, the adapter's audio evidence, whether the availability and booking
+// tools succeeded, the outcome code, the cost estimate, and whether the session counts as activation evidence.
+// Codes, counts and times only: no transcript, no customer details, no model internals.
+export async function voiceSessionHistory(env, customerId, { limit = 20, now = Date.now() } = {}) {
+  let rows = []
+  try {
+    const r = await env.ONBOARDING_DB.prepare("SELECT id, state, outcome, created_at FROM receptionist_conversations WHERE customer = ?1 AND (json_extract(state, '$.voice.provider') IS NOT NULL OR json_extract(state, '$.lab.provider') IS NOT NULL) ORDER BY created_at DESC LIMIT ?2").bind(customerId, Math.min(Math.max(1, limit | 0), 50)).all()
+    rows = r.results || []
+  } catch {
+    rows = []
+  }
+  const out = []
+  for (const row of rows) {
+    let s
+    try {
+      s = JSON.parse(row.state || '{}')
+    } catch {
+      continue
+    }
+    const v = s.voice?.provider ? s.voice : s.lab?.provider ? s.lab : null
+    if (!v) continue
+    const m = v.metrics || {}
+    const tools = s.tools || []
+    const availability = tools.some((t) => t.name === 'find_available_times' && t.ok)
+    const booking = tools.some((t) => t.name === 'book_appointment' && t.ok)
+    const audio = m.micLive === 1 && m.audioReceived === 1
+    const endedAt = v.endedAt || null
+    out.push({
+      id: row.id,
+      provider: v.provider,
+      kind: s.lab?.provider ? 'lab' : v.test ? 'test' : 'customer',
+      dryRun: s.lab?.provider ? s.lab.dryRun !== false : Boolean(v.test),
+      startedAt: v.startedAt || row.created_at,
+      endedAt,
+      inProgress: !endedAt && now - (v.startedAt || row.created_at) < VOICE_SESSION_MAX_MS,
+      audio: { micLive: m.micLive === 1, audioReceived: m.audioReceived === 1 },
+      tools: { availability, booking, count: tools.length },
+      outcome: v.outcome || row.outcome || null,
+      booked: Boolean(s.booked),
+      simulated: Boolean(s.booked?.simulated),
+      estimatedMicros: v.estimatedMicros ?? null,
+      evidence: Boolean(endedAt) && audio && availability && booking && now - endedAt <= 30 * 864e5,
+    })
+  }
+  return out
+}
+
 // Evidence that a provider works for THIS business, from finished sessions of the last 30 days (customer-path tests
 // and Lab sessions): audio both ways (the adapter's own measurement) and the booking tools run through our server.
 // → { ok, sessions, audio, tools, lastAt, missing: [] }
