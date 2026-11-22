@@ -28,7 +28,7 @@ export async function onRequestPost({ request, env }) {
   if (!s) return json(404, { error: 'not_found' })
   if (body.action === 'transcript') return json(200, await appendVoiceTranscript(env, s.customer, s.conv, body.lines))
   if (body.action === 'end') {
-    const r = await endLabSession(env, s, { metrics: body.metrics, outcome: body.outcome })
+    const r = await endLabSession(env, s, { metrics: body.metrics, outcome: body.outcome, disconnect: body.disconnect })
     await audit(env, admin.email, 'voice_lab.session_ended', s.customer.id, { provider: s.conv.state.lab.provider, outcome: r.summary.outcome, booked: r.summary.booked, simulated: r.summary.simulated })
     return json(200, r)
   }

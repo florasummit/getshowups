@@ -220,7 +220,10 @@ export function overrideKind(s, origin) {
 // customers; Lab sessions do not count) in the last 30 days: finished sessions with audio both ways, the availability
 // and booking tools both succeeding through our server (a simulated booking on a test business counts), and a clean
 // end. Performed on a designated test business, it stands for the provider; it never stands for a business's own test.
-const FAIL_OUTCOMES = new Set(['connect_failed', 'reconnect_failed', 'connection_lost', 'disconnected', 'microphone', 'no_microphone'])
+// Outcome codes of a session whose connection failed (src/voice/elevenlabs.js disconnectInfo and src/voice/openai.js);
+// a session carrying a disconnect record did not end cleanly whatever its outcome says.
+const FAIL_OUTCOMES = new Set(['connect_failed', 'reconnect_failed', 'connection_lost', 'disconnected', 'microphone', 'no_microphone', 'connect_timeout', 'provider_refused', 'closed_before_start', 'socket_closed', 'socket_error', 'payload_too_large', 'provider_error', 'provider_closed', 'page_closed', 'rate_limited', 'sdp_failed'])
+const connectionFailed = (v) => FAIL_OUTCOMES.has(v.outcome) || Boolean(v.disconnect)
 export async function providerVerification(env, provider, now = Date.now()) {
   let rows = []
   try {
@@ -249,13 +252,14 @@ export async function providerVerification(env, provider, now = Date.now()) {
     const audio = m.micLive === 1 && m.audioReceived === 1
     const availability = tools.some((t) => t.name === 'find_available_times' && t.ok)
     const booking = tools.some((t) => t.name === 'book_appointment' && t.ok)
-    const clean = !FAIL_OUTCOMES.has(v.outcome)
+    const clean = !connectionFailed(v)
     // The newest finished session, as a record the console can explain (what it showed, what it did not, why): codes
-    // and counts only. Rows come newest first.
+    // and counts only. Rows come newest first. A connection failure carries the adapter's disconnect record (phase,
+    // code, WebSocket close code, the provider's reason text).
     if (!out.latest) {
       const names = tools.map((t) => t.name)
       const path = !clean ? 'connection' : !audio ? 'audio' : !names.length ? 'no_tools' : !availability ? (names.includes('check_service_area') || names.includes('request_coverage') ? 'area' : 'no_availability') : !booking ? 'no_booking' : 'ok'
-      out.latest = { id: row.id, customer: row.customer, startedAt: v.startedAt || null, endedAt: v.endedAt, durationSeconds: m.durationSeconds ?? (v.startedAt ? Math.round((v.endedAt - v.startedAt) / 1000) : null), test: Boolean(v.test), audio, availability, booking, cleanEnd: clean, outcome: v.outcome || null, tools: tools.map((t) => ({ name: t.name, ok: t.ok !== false })), failures: [], path }
+      out.latest = { id: row.id, customer: row.customer, startedAt: v.startedAt || null, endedAt: v.endedAt, durationSeconds: m.durationSeconds ?? (v.startedAt ? Math.round((v.endedAt - v.startedAt) / 1000) : null), test: Boolean(v.test), audio, availability, booking, cleanEnd: clean, outcome: v.outcome || null, disconnect: v.disconnect || null, tools: tools.map((t) => ({ name: t.name, ok: t.ok !== false })), failures: [], path }
     }
     // One session must show all of it at once (not audio in one and tools in another).
     if (audio && availability && booking && clean) {
@@ -581,7 +585,7 @@ export async function globalRolloutStatus(env, current, now = Date.now()) {
     seen.add(row.customer)
     if (v.endedAt) out.finished += 1
     else if (now - (v.startedAt || 0) < VOICE_SESSION_MAX_MS) out.inProgress += 1
-    if (FAIL_OUTCOMES.has(v.outcome)) out.connectionFailures += 1
+    if (connectionFailed(v)) out.connectionFailures += 1
     const tools = s.tools || []
     out.toolFailures += tools.filter((t) => !t.ok).length
     out.bookingFailures += tools.filter((t) => t.name === 'book_appointment' && !t.ok).length

@@ -203,7 +203,7 @@ test('the console learns the test business and the verification of the current d
   db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('partial', 'tb-off', 'voice', ?, '[]', ?, ?)").run(JSON.stringify({ voice: { provider: 'elevenlabs', startedAt: t - 9000, endedAt: t, test: true, metrics: { micLive: 1, audioReceived: 0 } }, tools: [{ name: 'find_available_times', ok: true }] }), t - 9000, t)
   o = await globalOverview(env)
   assert.deepEqual([o.verification.ok, o.verification.finished, o.verification.missing], [false, 1, ['audio', 'tools', 'booking', 'clean_end']])
-  assert.deepEqual(o.verification.latest, { id: 'partial', customer: 'tb-off', startedAt: t - 9000, endedAt: t, durationSeconds: 9, test: true, audio: false, availability: true, booking: false, cleanEnd: true, outcome: null, tools: [{ name: 'find_available_times', ok: true }], failures: [], path: 'audio' })
+  assert.deepEqual(o.verification.latest, { id: 'partial', customer: 'tb-off', startedAt: t - 9000, endedAt: t, durationSeconds: 9, test: true, audio: false, availability: true, booking: false, cleanEnd: true, outcome: null, disconnect: null, tools: [{ name: 'find_available_times', ok: true }], failures: [], path: 'audio' })
   // The production shape of 2026-11-22: audio both ways, a clean end, but the service-area path (check_service_area →
   // request_coverage failed zip_missing) and never the booking tools → not verified, path 'area' with the failure code.
   const t2 = Date.now() - 20_000

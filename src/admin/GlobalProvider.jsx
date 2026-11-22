@@ -12,7 +12,7 @@ import { api } from '../lib/api.js'
 import { Badge, Facts, Section } from './control/ui.jsx'
 import { when } from './control/lib.js'
 import { BLOCKER } from '../dashboard/provider-control.js'
-import { LAST_TEST, nextAction, ROLLOUT_STATE, rolloutState } from './rollout-state.js'
+import { disconnectText, LAST_TEST, nextAction, PHASE, ROLLOUT_STATE, rolloutState } from './rollout-state.js'
 
 const MODE = { all: 'activated for all businesses', staged: 'staged rollout', rollback: 'rollback' }
 const KIND = { inherited: 'follows the default', pin: 'still on the previous provider', override: 'business-specific settings' }
@@ -234,6 +234,7 @@ export default function GlobalProvider({ global, businesses = [], reload }) {
               <p className="fine" data-global-last-test={last.path}>
                 Last test ({businessName(last.customer)}, {last.durationSeconds ?? '?'} s, {when(last.endedAt)}): audio both ways {last.audio ? '✓' : '✗'} · availability lookup {last.availability ? '✓' : '✗'} · booking {last.booking ? '✓' : '✗'} · ended cleanly {last.cleanEnd ? '✓' : '✗'}. Not verified because {LAST_TEST[last.path] || last.path}
                 {last.failures.length ? ` Failed tool: ${last.failures.map((f) => `${f.tool} (${f.code})`).join(', ')}.` : ''}
+                {last.disconnect ? ` ${disconnectText(last.disconnect)}` : last.path === 'connection' ? ` Outcome code: ${last.outcome || 'none'} (no disconnect record: the session ended before this release recorded one).` : ''}
               </p>
             )}
             {global.ready && !open && (
@@ -474,6 +475,7 @@ export default function GlobalProvider({ global, businesses = [], reload }) {
                   ['By provider', Object.entries(global.counts.byProvider || {}).map(([p, n]) => `${nameOf(p)} ${n}`).join(' · ') || '—'],
                   ['Verification record', v ? (v.ok ? `${v.finished} finished production-path session(s) on ${v.businesses.join(', ')}, last ${when(v.lastAt)}` : `${v.finished} finished, ${v.sessions} started; missing: ${v.missing.join(', ')}`) : 'unavailable'],
                   last ? ['Last session tools', last.tools.length ? last.tools.map((x) => `${x.name} ${x.ok ? '✓' : '✗'}`).join(', ') : 'none'] : null,
+                  last ? ['Last session ending', `outcome ${last.outcome || 'none'}${last.disconnect ? ` · ${last.disconnect.code} ${PHASE[last.disconnect.phase] || last.disconnect.phase} · WebSocket close ${last.disconnect.closeCode ?? 'none'} · ${last.disconnect.reason ? `“${last.disconnect.reason}”` : 'no reason text'}` : ' · no disconnect record'}`] : null,
                   ['Test business', t?.business ? `${t.business.name} (${t.business.id})${t.business.zips ? `, service area ${t.business.zips} ZIP(s), say ${t.business.zip}` : ', no service-area list'}${t.business.receptionist ? '' : ', receptionist off for customers'}` : NO_TEST[t?.reason] || 'none'],
                   r && !monitorShown ? ['Rollout status', `${nameOf(r.provider)} since ${when(r.since)}: ${r.sessions == null ? 'no session records' : `${r.sessions} sessions, ${num(r.connectionFailures)} connection failures, ${num(r.bookingFailures)} booking failures`}`] : null,
                 ]}

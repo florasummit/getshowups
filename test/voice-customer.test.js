@@ -10,9 +10,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
-import { providerEvidence, customerVoiceStatus, businessMinutesToday, MAX_CONNECTS } from '../server/voice/customer.js'
+import { providerEvidence, customerVoiceStatus, businessMinutesToday, providerMinutesToday, voiceSessionHistory, MAX_CONNECTS, VOICE_SESSION_MAX_MS } from '../server/voice/customer.js'
 import { checkProviderSwitch, getVoiceSettings, providerOverview, rollbackProvider, switchProvider } from '../server/voice/settings.js'
-import { labMinutesToday } from '../server/voice/sessions.js'
+import { providerVerification } from '../server/voice/global.js'
+import { labMinutesToday, cleanDisconnect } from '../server/voice/sessions.js'
 import * as voiceApi from '../functions/api/receptionist/[customer]/voice.js'
 import * as connectApi from '../functions/api/receptionist/[customer]/voice-connect.js'
 import * as toolApi from '../functions/api/receptionist/[customer]/voice-tool.js'
@@ -354,4 +355,53 @@ test('readiness is evidence-based and activation follows it: OpenAI is “needs 
   assert.equal((await start('alpha')).json().provider, 'retell')
   const actions = db.sql.prepare("SELECT action FROM admin_audit WHERE customer = 'alpha' ORDER BY id").all().map((a) => a.action)
   assert.deepEqual(actions, ['receptionist.provider_switched', 'receptionist.provider_rolled_back'])
+})
+
+// Production 2026-11-22 (gsu-stripe-test-pools): ElevenLabs test calls ended 3–5 s after the signed URL as "The call
+// dropped" with nothing recorded about why, a retry replaced the record, two attempts never ended and were counting
+// toward the daily minutes "until now".
+test('a dropped call is diagnosable from the records and never eats the day: the end carries the adapter’s disconnect record (sanitized; garbage dropped), the console history and the provider verification show a connection failure with its close code, a retry on the same conversation keeps the earlier attempt, and a call row never ended counts at most the session ceiling toward the daily minutes', async () => {
+  await seed('alpha')
+  markTest('alpha')
+  const staff = await session('staff@getshowups.com')
+  const s = (await start('alpha', { test: { provider: 'elevenlabs' } }, staff)).json()
+  assert.equal(s.provider, 'elevenlabs')
+  // The browser's end after the provider closed the socket during the handshake (SDK SessionConnectionError, 1008).
+  const end = await sess('alpha', s, { action: 'end', metrics: { micLive: 0, audioReceived: 0, turns: 0 }, outcome: 'provider_refused', disconnect: { phase: 'start', code: 'provider_refused', closeCode: 1008, reason: "Override for field 'first_message' is not allowed by config\u0000\n<b>", extra: 'dropped' } })
+  assert.equal(end.status, 200)
+  const record = { phase: 'start', code: 'provider_refused', closeCode: 1008, reason: "Override for field 'first_message' is not allowed by config <b>" }
+  assert.deepEqual([end.json().voice.outcome, end.json().voice.disconnect], ['provider_refused', record])
+  const hist = await voiceSessionHistory(env, 'alpha')
+  assert.deepEqual([hist[0].id, hist[0].outcome, hist[0].disconnect, hist[0].evidence], [s.conversationId, 'provider_refused', record, false])
+  const ver = await providerVerification(env, 'elevenlabs')
+  assert.deepEqual([ver.ok, ver.latest.path, ver.latest.cleanEnd, ver.latest.outcome, ver.latest.disconnect, ver.missing.includes('clean_end')], [false, 'connection', false, 'provider_refused', record, true])
+  // Talk again on the same conversation: the earlier attempt stays in the record (history entry #1), the new attempt
+  // is the session; garbage in a disconnect record is never stored (no valid code → no record).
+  const s2 = (await start('alpha', { conversationId: s.conversationId, token: s.token, test: { provider: 'elevenlabs' } }, staff)).json()
+  assert.deepEqual([s2.conversationId, s2.token], [s.conversationId, s.token], 'a session resumed on the conversation returns ITS token (production 2026-11-22: it returned none, the page lost its credential, the retry could never be ended)')
+  assert.deepEqual(state(s.conversationId).voiceHistory.map((h) => [h.outcome, h.disconnect.closeCode]), [['provider_refused', 1008]])
+  const bad = (await sess('alpha', s2, { action: 'end', metrics: {}, outcome: 'socket_closed', disconnect: { phase: 'nope', code: 'Bad Code!', closeCode: '1006' } })).json().voice
+  assert.deepEqual([bad.outcome, bad.disconnect], ['socket_closed', null])
+  assert.deepEqual((await sess('alpha', s2, { action: 'end', metrics: {}, outcome: 'x', disconnect: { code: 'late' } })).json().already, true, 'an end is recorded once')
+  assert.deepEqual((await voiceSessionHistory(env, 'alpha')).slice(0, 2).map((h) => [h.id, h.kind, h.outcome, h.disconnect?.closeCode ?? null, h.tools.count]), [[s.conversationId, 'test', 'socket_closed', null, 0], [`${s.conversationId}#1`, 'test', 'provider_refused', 1008, 0]])
+  const ver2 = await providerVerification(env, 'elevenlabs')
+  assert.deepEqual([ver2.latest.path, ver2.latest.outcome, ver2.latest.disconnect, ver2.finished], ['connection', 'socket_closed', null, 1], 'the newest attempt is the latest; a failure outcome without a record still counts as a connection failure')
+  // A valid record with an unknown phase lands on "start"; close codes outside 1000–4999 are dropped.
+  assert.deepEqual(cleanDisconnect({ phase: 'later', code: 'provider_closed', closeCode: 5000, reason: 7 }), { phase: 'start', code: 'provider_closed', closeCode: null, reason: null })
+  assert.equal(cleanDisconnect({ reason: 'no code' }), null)
+  // Minutes: rows never ended count at most the 15-minute ceiling (the whole day's budget otherwise goes to one
+  // abandoned call), on every sum: per business, per provider, the Lab.
+  const now = Date.now()
+  const day = now - (now % 864e5)
+  const created = Math.max(day, now - 3 * 3600_000)
+  const ran = Math.min(now - created, VOICE_SESSION_MAX_MS)
+  const before = [await businessMinutesToday(env, 'alpha', now), await providerMinutesToday(env, 'elevenlabs', now), await labMinutesToday(env, now)]
+  db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES ('web_dangling', 'alpha', 'convx', 'elevenlabs', ?), ('lab_dangling', 'alpha', 'convy', 'elevenlabs', ?)").run(created, created)
+  const after = [await businessMinutesToday(env, 'alpha', now), await providerMinutesToday(env, 'elevenlabs', now), await labMinutesToday(env, now)]
+  const added = after.map((m, i) => m - before[i])
+  const cap = Math.ceil(ran / 60_000) + 1
+  assert.ok(added.every((m) => m <= cap * 2), `at most two capped rows: ${added} ≤ ${cap * 2}`)
+  assert.ok(added[2] <= cap, `the Lab sum counts its own row only, capped: ${added[2]} ≤ ${cap}`)
+  if (ran === VOICE_SESSION_MAX_MS) assert.ok(added[0] >= 29 && added[0] <= 31 && added[2] >= 14 && added[2] <= 16, `15 min per row, never 180: ${added}`)
+  assert.ok((await businessMinutesToday(env, 'alpha', now)) < 120, 'the business can still start a test today')
 })
