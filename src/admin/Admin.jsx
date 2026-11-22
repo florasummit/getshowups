@@ -1149,7 +1149,7 @@ function CreateBusiness({ onCreated }) {
       <p className="fine">Complimentary accounts for GetShowUps’ own use: never a Stripe checkout. A sandbox is a test business (out of metrics, test providers only). An internal live business has real customers and counts in operations, never in paying customers or MRR.</p>
       <form className="form" onSubmit={submit}>
         <label className="field">
-          <span>Business name</span>
+          <span>Name of the new business</span>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required maxLength={80} data-create-name />
         </label>
         <label className="field">
