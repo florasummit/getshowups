@@ -14,6 +14,7 @@ const ERRORS = {
 }
 const SKIP = { robots: 'not allowed by the site', page_limit: 'over the page limit', duplicate: 'same as another page', too_large: 'too large', not_a_page: 'not a web page', unreachable: 'couldn’t load' }
 const FLAG = {
+  client_rendered: () => 'This website builds its pages in the visitor’s browser, so we could only read its title and description. Add your services, prices and other details below.',
   empty_page: (f) => `${f.path} has no text we could read (it may be a form or app).`,
   placeholder_title: (f) => `${f.path} has a placeholder title (“${f.title}”).`,
   price_conflict: (f) => `Different prices appear for “${f.name}”: ${f.prices.join(', ')}.`,
