@@ -244,9 +244,12 @@ test('admin suspends and reactivates an account (audited); booking page pauses m
   // Billing reconciliation (Stripe stand-in, read-only): run on demand; the result is shown and recorded.
   const rec = page.locator('.card', { has: page.getByRole('heading', { name: 'Billing reconciliation' }) })
   await rec.getByRole('button', { name: 'Run now' }).click()
-  await expect(rec.locator('[data-reconcile="clean"], [data-reconcile="issues"]')).toBeVisible()
+  await expect(rec.locator('[data-reconcile="clean"], [data-reconcile="issues"], [data-reconcile="leftovers"]')).toBeVisible()
   const last = (await (await page.request.get('/api/platform/reconcile')).json()).last
   expect(last.checked.records).toBeGreaterThan(0)
+  // Every difference is classified; differences for test businesses or unknown ids are shown as leftovers, not alarms.
+  expect(last.list.every((i) => ['real', 'test_business', 'unknown_record'].includes(i.scope))).toBe(true)
+  if (last.issues && last.real === 0) await expect(rec.locator('[data-reconcile="leftovers"]')).toContainText('No differences for real businesses')
   expect(Object.keys(last.byType).every((t) => !['billing_after_deletion', 'stripe_only'].includes(t))).toBe(true)
 })
 

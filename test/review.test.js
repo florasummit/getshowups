@@ -279,7 +279,15 @@ test('accuracy: test-business activity is never evidence; "never triggered" is n
   await env.GOOGLE_TOKENS.put('google:beta', '{}')
   r = await platformReview(env, now)
   const titles = r.incidents.filter((i) => i.kind === 'check_problem').map((i) => `${i.capability}: ${i.detail}`)
-  assert.ok(titles.some((t) => /^billing\.reconcile: 2 difference\(s\) between Stripe and our records \(stripe only 1, payment not recorded 1\)/.test(t)), titles.join(' | '))
+  assert.ok(titles.some((t) => /^billing\.reconcile: 2 difference\(s\) between Stripe and our records for real businesses \(stripe only 1, payment not recorded 1\)/.test(t)), titles.join(' | '))
+  // A run that classified every difference as a test business or an id that doesn't exist here is not a problem: the
+  // evidence says so and no incident is raised (the Stripe test-mode leftovers of 2026-11-21).
+  await recordEvent(db, { type: 'billing.reconciliation', actor: 'system:reconcile', capability: 'billing.reconcile', outcome: 'info', details: { issues: 4, real: 0, byType: { stripe_only: 1, payment_not_recorded: 3 }, byScope: { unknown_record: 4 } }, at: now + 1 })
+  const r2 = await platformReview(env, now + 1)
+  assert.equal(r2.incidents.some((i) => i.capability === 'billing.reconcile'), false)
+  assert.match(r2.capabilities.find((c) => c.id === 'billing.reconcile').verification.evidence, /^No differences for real businesses; 4 for test or unknown records \(sandbox leftovers: stripe only 1, payment not recorded 3\)/)
+  await recordEvent(db, { type: 'billing.reconciliation', actor: 'system:reconcile', capability: 'billing.reconcile', outcome: 'info', details: { issues: 3, real: 1, byType: { stripe_only: 1, payment_not_recorded: 2 }, byScope: { unknown_record: 2, real: 1 } }, at: now + 2 })
+  assert.match((await platformReview(env, now + 2)).capabilities.find((c) => c.id === 'billing.reconcile').verification.evidence, /^1 difference\(s\) between Stripe and our records for real businesses/)
   assert.ok(titles.some((t) => /^platform\.tokens: 1 Calendar credential stored for a business that doesn't exist \(ghost-business\); 1 in use/.test(t)), titles.join(' | '))
   assert.equal(r.capabilities.find((c) => c.id === 'platform.tokens').health, 'failing')
   // Founder console: evidence is a founder sign-in.
@@ -314,4 +322,41 @@ test('orphaned credentials are found across KV list pages (1,000 keys per page)'
   const t = r.capabilities.find((c) => c.id === 'platform.tokens')
   assert.equal(t.verification.problem, true)
   assert.match(t.verification.evidence, /^1 Calendar credential stored for a business that doesn't exist \(zz-orphan\); 1500 in use$/)
+})
+
+test('plain-language map: every capability lands in exactly one group with a next step; tiers list their blockers; setup links are same-site', async () => {
+  const r = await platformReview(env, Date.now())
+  const { groups, groupLabels, tiers } = r.plain
+  const all = Object.values(groups).flat()
+  assert.equal(all.length, r.capabilities.length)
+  assert.equal(new Set(all).size, all.length, 'one group per capability')
+  assert.deepEqual(Object.keys(groupLabels), ['broken', 'works', 'testable', 'configuration', 'approval', 'not_built'])
+  const cap = (id) => r.capabilities.find((c) => c.id === id)
+  // Derived from status + health + state, never from labels: Stripe in test mode → testable; GHL switched off → a
+  // decision; Twilio missing → configuration; lead routing → not built; the database → works.
+  assert.equal(cap('billing.stripe').group, 'testable')
+  assert.equal(cap('crm.ghl').group, 'approval')
+  assert.equal(cap('messaging.sms').group, 'configuration')
+  assert.equal(cap('lead.qualify').group, 'not_built')
+  assert.equal(cap('platform.database').group, 'works')
+  for (const c of r.capabilities) {
+    assert.ok(Object.keys(tiers).includes(c.tier), c.id)
+    assert.ok(c.group === 'works' ? c.nextStep === null : typeof c.nextStep === 'string' && c.nextStep.length > 10, c.id)
+    if (c.action) assert.match(c.action.href, /^\/(admin|dashboard)/)
+  }
+  // Tiers: optional/later never block; operate lists exactly its capabilities that are not working or testable.
+  assert.equal(tiers.optional.ready, null)
+  assert.equal(tiers.later.ready, null)
+  const operateBlockers = r.capabilities.filter((c) => c.tier === 'operate' && !['works', 'testable'].includes(c.group)).map((c) => c.id)
+  assert.deepEqual(tiers.operate.blockers, operateBlockers)
+  assert.equal(tiers.operate.ready, operateBlockers.length === 0)
+  assert.ok(tiers.payments.capabilities.includes('billing.stripe') && tiers.advertising.capabilities.includes('ads.meta') && tiers.operate.capabilities.includes('calendar.google'))
+  // The registry refuses an unknown tier and an off-site action link.
+  assert.throws(() => registerCapability({ id: 'x.tier', name: 'x', journey: 'lead', state: () => ({ mode: 'live' }), tier: 'urgent' }), /unknown tier/)
+  assert.throws(() => registerCapability({ id: 'x.action', name: 'x', journey: 'lead', state: () => ({ mode: 'live' }), action: { label: 'x', href: 'https://evil.example' } }), /same-site/)
+  // A broken capability: an open failure puts it in "broken" whatever its status.
+  await recordEvent(db, { type: 'booking.create', actor: 'system', capability: 'calendar.google', outcome: 'failure', customer: 'alpha', resource: { type: 'appointment', id: 'ap9' }, details: { code: 'calendar_unreachable' }, at: Date.now() })
+  const r2 = await platformReview(env, Date.now())
+  assert.equal(r2.capabilities.find((c) => c.id === 'calendar.google').group, 'broken')
+  assert.ok(r2.plain.tiers.operate.blockers.includes('calendar.google'))
 })

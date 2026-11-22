@@ -625,11 +625,13 @@ function Reconciliation() {
         <p className="empty">Not available.</p>
       ) : (
         <>
-          <p className={last?.issues ? 'form-error' : 'fine'} role="status" data-reconcile={last ? (last.issues ? 'issues' : 'clean') : 'never'}>
+          <p className={last?.issues && (last.real === undefined || last.real > 0) ? 'form-error' : 'fine'} role="status" data-reconcile={last ? (last.issues ? (last.real === 0 ? 'leftovers' : 'issues') : 'clean') : 'never'}>
             {!last
               ? 'Not run yet (it runs daily).'
               : last.issues
-                ? `${last.issues} difference${last.issues === 1 ? '' : 's'} between Stripe and our records (checked ${date(last.at)}).`
+                ? last.real === 0
+                  ? `No differences for real businesses. ${last.issues} difference${last.issues === 1 ? '' : 's'} for test businesses or ids that don’t exist here (Stripe ${last.checked?.live ? 'live' : 'test'}-mode leftovers from sandbox checks; nothing to fix, no money involved). Checked ${date(last.at)}.`
+                  : `${last.real ?? last.issues} difference${(last.real ?? last.issues) === 1 ? '' : 's'} between Stripe and our records for real businesses${last.real !== undefined && last.issues > last.real ? ` (+ ${last.issues - last.real} for test or unknown records)` : ''} (checked ${date(last.at)}).`
                 : `Stripe and our records match: ${last.checked.subscriptions} subscriptions, ${last.checked.invoices} paid invoices in ${last.checked.windowDays} days (checked ${date(last.at)}).`}
           </p>
           {last?.list?.length > 0 && (
@@ -639,7 +641,8 @@ function Reconciliation() {
                   <div className="row-main">
                     <p className="row-title">{r.labels[i.type] || i.type}</p>
                     <p className="row-sub">
-                      {i.customer || 'unknown business'} · {i.subscription || i.invoice}
+                      {i.customer || 'unknown business'}
+                      {i.scope === 'unknown_record' ? ' (no such record here: sandbox leftover)' : i.scope === 'test_business' ? ' (test business)' : ''} · {i.subscription || i.invoice}
                       {i.ours !== undefined ? ` · ours ${String(i.ours)}` : ''}
                       {i.stripe !== undefined ? ` · Stripe ${String(i.stripe)}` : ''}
                     </p>

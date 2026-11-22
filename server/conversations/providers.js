@@ -46,6 +46,7 @@ export const listConversationProviders = () => [...providers.values()].map(({ id
 
 registerCapability({
   id: 'conversations.control',
+  tier: 'later',
   name: 'One automation per conversation (control lock)',
   journey: 'lead',
   description: 'A provider must hold control before acting; a person taking over always wins.',

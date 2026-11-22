@@ -17,6 +17,8 @@
 //   business: async (env, customerId) => ({ status: 'ok' | 'attention' | 'off', summary: 'Connected' }),
 //        // optional: how this capability stands for one business (no personal data)
 //   blockers: ['Google Cloud project at Test access'],  // optional: external blockers, plain words
+//   tier: 'operate',                     // TIERS: what it is needed for (default 'optional')
+//   action: { label: 'Connect in Settings', href: '/dashboard/settings' },  // optional: the existing setup screen
 // })
 
 export const JOURNEY = [
@@ -33,6 +35,19 @@ export const JOURNEY = [
   { id: 'platform', label: 'Platform' },
 ]
 export const MODES = ['live', 'sandbox', 'disabled', 'missing', 'unknown']
+// What the capability is needed for (the founder's operating classification, shown in Business Review):
+//   operate      needed to run GetShowUps and PoolThru day to day
+//   payments     needed before accepting live payments
+//   advertising  needed before live advertising
+//   optional     an enhancement; nothing waits on it
+//   later        not needed now
+export const TIERS = {
+  operate: 'Needed to operate now',
+  payments: 'Needed before live payments',
+  advertising: 'Needed before live advertising',
+  optional: 'Optional enhancement',
+  later: 'Not needed now',
+}
 const ID_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/
 
 const capabilities = new Map()
@@ -42,7 +57,9 @@ export function registerCapability(def) {
   if (!def.name) throw new Error(`capability ${def.id}: name required`)
   if (!JOURNEY.some((j) => j.id === def.journey)) throw new Error(`capability ${def.id}: unknown journey step ${def.journey}`)
   if (typeof def.state !== 'function') throw new Error(`capability ${def.id}: state(env) required`)
-  capabilities.set(def.id, { dependsOn: [], blockers: [], description: '', external: null, ...def })
+  if (def.tier !== undefined && !TIERS[def.tier]) throw new Error(`capability ${def.id}: unknown tier ${def.tier}`)
+  if (def.action !== undefined && !(def.action && typeof def.action.label === 'string' && /^\/[a-z0-9/?=&#._-]*$/i.test(def.action.href || ''))) throw new Error(`capability ${def.id}: action needs label + a same-site href`)
+  capabilities.set(def.id, { dependsOn: [], blockers: [], description: '', external: null, tier: 'optional', action: null, ...def })
   return def.id
 }
 
