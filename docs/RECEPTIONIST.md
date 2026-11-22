@@ -184,6 +184,35 @@ proves the integration, not a human's listening experience; a human microphone t
   (src/dashboard/ProviderControl.jsx) is the one component behind both places. Test now links to
   `/chat/<id>?test=<provider>` (test businesses only, as before).
 
+## Global default provider (2026-11-22, migration 0036)
+
+The provider a business's customer-facing browser voice uses is resolved as **explicit business override → global
+default → Retell** (`server/voice/style.js getVoiceSettings`, one read: settings row + inherit flag + newest
+`receptionist_voice_defaults` version). Storage: `receptionist_voice_defaults` (append-only history of the platform
+default: version, provider, previous, mode all | staged | rollback, the businesses the version pinned and the rows it
+moved; NO row = Retell, backward compatible) and `receptionist_voice_inherit` (presence = this business's settings row
+exists only because the owner chose a voice/personality/pace, so it FOLLOWS the default; a settings row without it is an
+explicit override, which is what every admin switch writes; a business without any row follows too). Owner saves never
+change inheritance; `switchProvider` makes an override; `rollbackProvider` returns to following only if the business
+followed before and the default still is that provider.
+
+**One action for every business that follows the default** (`server/voice/global.js`, console section "Global voice
+provider", `POST /api/platform/voice-provider` actions `global_check` | `global_switch` | `global_rollback`, platform
+admins only, provider id typed back as `confirmProvider`, global version carried, 409 stale): the checklist runs the
+platform checks (configured, customer path, not switched off, a real change, ≤ 200 businesses) and then EVERY inherited
+business through `checkProviderSwitch` on the new provider (eligible, booking ready, a voice chosen on this provider
+valid or no voice, VERIFIED by a finished test session on that business). Mode `all` is refused while any business is
+blocked; mode `staged` switches the verified ones (their settings row, if any, moves to the new provider), PINS the
+blocked ones to the provider they have today (an explicit override, listed by name with blockers, audited
+`receptionist.provider_pinned`) and leaves explicit overrides untouched; businesses created later follow the new
+default. The UI reports exactly those counts; it never claims the switch applied to everyone. Sessions in progress stay
+on the provider they started with (pinned per session). Global rollback (`receptionist.global_provider_rolled_back`)
+inserts a new version with the previous provider, un-pins the businesses the rolled-back version pinned (if unchanged
+since), moves rows it moved back (if unchanged, or if no voice was chosen on the new provider meanwhile; a business
+whose owner chose a voice on the new provider is kept there as an override and reported), and cannot itself be rolled
+back. Production (2026-11-22): no defaults row, so the default is Retell until a platform admin selects and confirms
+another provider in the console.
+
 ## Location policy (2026-11-22)
 
 The receptionist answers questions about services, prices, hours and how soon it can usually come without asking

@@ -2,6 +2,22 @@
 
 _Update at the end of every task. Newest first._
 
+## Global default AI voice provider (2026-11-22) — feat/global-voice-provider (migration 0036)
+
+- Resolution: explicit business override → global default (receptionist_voice_defaults; no row = Retell) → Retell.
+  receptionist_voice_inherit marks settings rows that only hold owner preferences (they follow the default).
+- Console section "Global voice provider": current default, who follows it, who overrides; choose → Review all
+  businesses (platform checks + every inherited business through its own checklist, blockers by name) → all at once
+  (only with nobody blocked) or staged rollout (unverified businesses pinned to today's provider, by name) → provider
+  id typed → Change; global rollback likewise. Audited (global_provider_switched / _blocked / _rolled_back,
+  provider_pinned). Sessions in progress stay pinned; overrides untouched.
+- Production: migration 0036 applied; no defaults row → Retell stays the default until the founder confirms another
+  provider in the console. Tests: test/voice-global.test.js (sequence Retell → OpenAI → ElevenLabs → Retell, inherit,
+  overrides, pins, "all" refused, rollback incl. kept businesses, sessions pinned, concurrent isolation, route auth +
+  typed provider), existing voice tests updated for the resolution; e2e voice-providers.spec global section.
+- CI note: the first verify run of PR #119 failed only on the known studio-editor flake (click timeout at 90 s, retry sees
+  the first attempt's state); the local gate passed 235/235. Still open: make that spec's publish step idempotent.
+
 ## Admin Console: voice-provider management for any business (2026-11-22) — feat/admin-voice-providers (no migration)
 
 - Why: the provider control lived only in the business dashboard, and an admin can be a member of one business

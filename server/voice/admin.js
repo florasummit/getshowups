@@ -11,7 +11,7 @@ import { CUSTOMER_RE } from '../invites.js'
 import { isTestBusinessSql, testStatus } from '../testbusiness.js'
 import { voiceSessionHistory } from './customer.js'
 import { getVoiceSettings, providerOverview, voiceSettingsReady } from './settings.js'
-import { PERSONALITIES, PACES, PROVIDER_CAPABILITIES } from './style.js'
+import { PERSONALITIES, PACES, PROVIDER_CAPABILITIES, resolveVoiceSettings } from './style.js'
 
 export const HISTORY_LIMIT = 20
 
@@ -22,7 +22,9 @@ export async function listVoiceBusinesses(env, limit = 200) {
     .prepare(
       `SELECT c.id, c.name, c.status, ${isTestBusinessSql('c.id')} AS is_test,
               (SELECT enabled FROM receptionist_settings rs WHERE rs.customer = c.id) AS receptionist,
-              (SELECT provider FROM receptionist_voice_settings v WHERE v.customer = c.id) AS provider
+              (SELECT provider FROM receptionist_voice_settings v WHERE v.customer = c.id) AS provider,
+              (SELECT 1 FROM receptionist_voice_inherit i WHERE i.customer = c.id) AS inherit,
+              (SELECT provider FROM receptionist_voice_defaults ORDER BY version DESC LIMIT 1) AS global_provider
          FROM customers c
         WHERE NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.customer = c.id)
         ORDER BY c.name COLLATE NOCASE
@@ -30,9 +32,13 @@ export async function listVoiceBusinesses(env, limit = 200) {
     )
     .bind(Math.min(Math.max(1, limit | 0), 500))
     .all()
-    // Before a table exists (0016 deletions, 0026 receptionist, 0035 voice): the plain list, every business on today's defaults.
-    .catch(async () => ({ results: (await db.prepare('SELECT id, name, status, 0 AS is_test, NULL AS receptionist, NULL AS provider FROM customers ORDER BY name COLLATE NOCASE LIMIT ?1').bind(limit).all()).results }))
-  return results.map((r) => ({ id: r.id, name: r.name, status: r.status || 'active', test: Number(r.is_test) === 1, receptionist: Number(r.receptionist) === 1, provider: r.provider || 'retell', providerName: PROVIDER_CAPABILITIES[r.provider || 'retell']?.name || r.provider }))
+    // Before a table exists (0016 deletions, 0026 receptionist, 0035/0036 voice): the plain list, every business on today's defaults.
+    .catch(async () => ({ results: (await db.prepare('SELECT id, name, status, 0 AS is_test, NULL AS receptionist, NULL AS provider, NULL AS inherit, NULL AS global_provider FROM customers ORDER BY name COLLATE NOCASE LIMIT ?1').bind(limit).all()).results }))
+  return results.map((r) => {
+    // Same resolution as getVoiceSettings: override (row without inherit) → global default → retell.
+    const s = resolveVoiceSettings({ row_customer: r.provider ? r.id : null, provider: r.provider, inherit: r.inherit, global_provider: r.global_provider, version: 1 })
+    return { id: r.id, name: r.name, status: r.status || 'active', test: Number(r.is_test) === 1, receptionist: Number(r.receptionist) === 1, provider: s.provider, providerName: PROVIDER_CAPABILITIES[s.provider]?.name || s.provider, inherited: s.inherited }
+  })
 }
 
 // The business an admin selected, as the server's customer object (what every voice function expects).
@@ -63,7 +69,7 @@ export async function adminVoiceView(env, customer, now = Date.now()) {
     business: { id: customer.id, name: customer.name, status: customer.status, test: Boolean(t.test), testUnreadable: Boolean(t.unreadable), receptionist: Number(rs?.enabled) === 1, hoursConfirmed: Boolean(customer.hoursConfirmed) },
     ready,
     // The configuration as stored (admins see the provider; the voice/personality/pace are what the owner chose).
-    voice: { provider: prefs.provider, providerName: PROVIDER_CAPABILITIES[prefs.provider]?.name || prefs.provider, voiceId: prefs.voiceId, voiceName: prefs.voiceName, personality: PERSONALITIES[prefs.personality]?.name || prefs.personality, pace: PACES[prefs.pace]?.name || prefs.pace, version: prefs.version, updatedAt: prefs.updatedAt ?? null },
+    voice: { provider: prefs.provider, providerName: PROVIDER_CAPABILITIES[prefs.provider]?.name || prefs.provider, inherited: prefs.inherited, defaultProvider: prefs.defaultProvider, defaultProviderName: PROVIDER_CAPABILITIES[prefs.defaultProvider]?.name || prefs.defaultProvider, voiceId: prefs.voiceId, voiceName: prefs.voiceName, personality: PERSONALITIES[prefs.personality]?.name || prefs.personality, pace: PACES[prefs.pace]?.name || prefs.pace, version: prefs.version, updatedAt: prefs.updatedAt ?? null },
     providers: { ...overview, version: prefs.version, previous: prefs.previous ? { provider: prefs.previous.provider, voiceName: prefs.previous.voiceName || null, at: prefs.previous.at } : null },
     history,
   }

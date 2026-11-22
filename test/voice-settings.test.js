@@ -184,7 +184,7 @@ test('owner preferences: a voice from the active provider’s catalog, a persona
   await seed('alpha')
   await seed('beta')
   const alpha = await cust('alpha')
-  assert.deepEqual(await getVoiceSettings(db, 'alpha'), { provider: 'retell', voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null }, 'no row = today’s configuration')
+  assert.deepEqual(await getVoiceSettings(db, 'alpha'), { provider: 'retell', voiceProvider: 'retell', inherited: true, defaultProvider: 'retell', defaultVersion: 0, voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null }, 'no row = today’s configuration (follows the global default, retell)')
   assert.equal((await saveVoicePreferences(env, alpha, { voiceId: 'nope nope', version: 0 }, 'owner@alpha.example')).error, 'invalid_voice_id')
   assert.equal((await saveVoicePreferences(env, alpha, { voiceId: 'cjVigY5qzO86Huf0OWal', version: 0 }, 'owner@alpha.example')).error, 'voice_unknown', 'an ElevenLabs voice cannot be chosen while Retell is active')
   assert.equal((await saveVoicePreferences(env, alpha, { personality: 'sassy', version: 0 }, 'owner@alpha.example')).error, 'invalid_personality')
@@ -198,7 +198,7 @@ test('owner preferences: a voice from the active provider’s catalog, a persona
   assert.deepEqual([a.ok, b.ok].sort(), [false, true])
   assert.equal((a.ok ? b : a).error, 'stale')
   assert.equal((await getVoiceSettings(db, 'alpha')).version, 2)
-  assert.deepEqual(await getVoiceSettings(db, 'beta'), { provider: 'retell', voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null }, 'tenant isolation')
+  assert.deepEqual(await getVoiceSettings(db, 'beta'), { provider: 'retell', voiceProvider: 'retell', inherited: true, defaultProvider: 'retell', defaultVersion: 0, voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null }, 'tenant isolation')
   // Back to the standard voice.
   const back = await saveVoicePreferences(env, alpha, { voiceId: '', version: 2 }, 'owner@alpha.example')
   assert.deepEqual([back.settings.voiceId, back.settings.voiceName, back.settings.personality], [null, null, a.ok ? 'warm' : 'upbeat'])
@@ -208,6 +208,7 @@ test('owner preferences: a voice from the active provider’s catalog, a persona
   assert.deepEqual(view.personalities.map((p) => p.id), Object.keys(PERSONALITIES))
   // Pace is refused where the provider does not support it (a business on OpenAI, seeded as such).
   db.sql.prepare("UPDATE receptionist_voice_settings SET provider = 'openai', voice_id = NULL, voice_name = NULL WHERE customer = 'alpha'").run()
+  db.sql.prepare("DELETE FROM receptionist_voice_inherit WHERE customer = 'alpha'").run() // an admin override, not the owner's inherited row
   const cur = await getVoiceSettings(db, 'alpha')
   assert.equal((await saveVoicePreferences(env, alpha, { pace: 'faster', version: cur.version }, 'owner@alpha.example')).error, 'pace_unsupported')
   assert.equal(ownerView(cur, env).capabilities.pace, false)
@@ -360,7 +361,9 @@ test('how the preference reaches each provider: a business with no row makes the
   assert.deepEqual(e1.overrides.tts, { voiceId: 'cjVigY5qzO86Huf0OWal' })
   const elConv2 = { id: el.id, state: { lab: { provider: 'elevenlabs', dryRun: true, settings: {} } } }
   assert.equal((await connectElevenLabs(env, { customer: alpha, conv: elConv2 })).overrides.tts, undefined)
+  // An admin switch = the row's provider + no inherit row (an explicit override; the owner's save above kept inheriting).
   db.sql.prepare("UPDATE receptionist_voice_settings SET provider = 'elevenlabs', voice_id = 'EXAVITQu4vr4xnSDxMaL', voice_name = 'Sarah', pace = 'faster' WHERE customer = 'alpha'").run()
+  db.sql.prepare("DELETE FROM receptionist_voice_inherit WHERE customer = 'alpha'").run()
   const elConv3 = { id: el.id, state: { lab: { provider: 'elevenlabs', dryRun: true, settings: {} } } }
   assert.deepEqual((await connectElevenLabs(env, { customer: alpha, conv: elConv3 })).overrides.tts, { voiceId: 'EXAVITQu4vr4xnSDxMaL', speed: 1.1 })
   // The prompt: personality block for a preset, none for 'standard' (existing prompts byte-identical).

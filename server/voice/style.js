@@ -31,15 +31,38 @@ export const personalityPrompt = (p) => PERSONALITIES[p]?.prompt || ''
 // Provider-specific pace value, or null when the provider does not support pace (never sent).
 export const paceFor = (provider, pace) => (PROVIDER_CAPABILITIES[provider]?.pace && PACES[pace] ? PACES[pace][provider] : null)
 
-export const VOICE_DEFAULTS = Object.freeze({ provider: DEFAULT_PROVIDER, voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null })
-export const voiceFromRow = (r) => (r ? { provider: r.provider, voiceId: r.voice_id || null, voiceName: r.voice_name || null, personality: r.personality || 'standard', pace: r.pace || 'normal', language: r.language || 'en', previous: r.previous ? JSON.parse(r.previous) : null, version: Number(r.version) || 0, updatedAt: Number(r.updated_at) || null } : { ...VOICE_DEFAULTS })
+// The effective settings of a business. `provider` is the provider customer-facing voice uses, resolved as
+//   explicit business override (a settings row without an inherit row) → global default (receptionist_voice_defaults,
+//   newest version) → retell;
+// `inherited` says which; `voiceProvider` is the provider the stored voice belongs to (the row's own provider; equal to
+// `provider` whenever the configuration is consistent); `defaultProvider` / `defaultVersion` describe the global default.
+export const VOICE_DEFAULTS = Object.freeze({ provider: DEFAULT_PROVIDER, voiceProvider: DEFAULT_PROVIDER, inherited: true, defaultProvider: DEFAULT_PROVIDER, defaultVersion: 0, voiceId: null, voiceName: null, personality: 'standard', pace: 'normal', language: 'en', previous: null, version: 0, updatedAt: null })
+export const voiceFromRow = (r) => (r ? { provider: r.provider, voiceProvider: r.provider, inherited: false, defaultProvider: DEFAULT_PROVIDER, defaultVersion: 0, voiceId: r.voice_id || null, voiceName: r.voice_name || null, personality: r.personality || 'standard', pace: r.pace || 'normal', language: r.language || 'en', previous: r.previous ? JSON.parse(r.previous) : null, version: Number(r.version) || 0, updatedAt: Number(r.updated_at) || null } : { ...VOICE_DEFAULTS })
 
-// Fails soft: before migration 0035 (or on a storage error) every business has the defaults, nothing breaks.
+// One read resolves everything (settings row, inherit flag, current global default).
+const RESOLVE_SQL = `SELECT s.customer AS row_customer, s.provider, s.voice_id, s.voice_name, s.personality, s.pace, s.language, s.previous, s.version, s.updated_at,
+  (SELECT 1 FROM receptionist_voice_inherit i WHERE i.customer = x.c) AS inherit,
+  (SELECT provider FROM receptionist_voice_defaults ORDER BY version DESC LIMIT 1) AS global_provider,
+  (SELECT version FROM receptionist_voice_defaults ORDER BY version DESC LIMIT 1) AS global_version
+  FROM (SELECT ?1 AS c) x LEFT JOIN receptionist_voice_settings s ON s.customer = x.c`
+export function resolveVoiceSettings(r) {
+  const global = { provider: PROVIDER_IDS.includes(r?.global_provider) ? r.global_provider : DEFAULT_PROVIDER, version: Number(r?.global_version) || 0 }
+  const row = r?.row_customer ? voiceFromRow(r) : null
+  const inherited = !row || Number(r.inherit) === 1
+  return { ...(row || VOICE_DEFAULTS), provider: inherited ? global.provider : row.provider, voiceProvider: row ? row.provider : global.provider, inherited, defaultProvider: global.provider, defaultVersion: global.version }
+}
+
+// Fails soft: before migration 0036 the settings row alone decides (as before); before 0035 (or on a storage error)
+// every business has the defaults, nothing breaks.
 export async function getVoiceSettings(db, customerId) {
   try {
-    return voiceFromRow(await db.prepare('SELECT * FROM receptionist_voice_settings WHERE customer = ?1').bind(customerId).first())
+    return resolveVoiceSettings(await db.prepare(RESOLVE_SQL).bind(customerId).first())
   } catch {
-    return { ...VOICE_DEFAULTS }
+    try {
+      return voiceFromRow(await db.prepare('SELECT * FROM receptionist_voice_settings WHERE customer = ?1').bind(customerId).first())
+    } catch {
+      return { ...VOICE_DEFAULTS }
+    }
   }
 }
 
@@ -49,17 +72,19 @@ export async function getVoiceSettings(db, customerId) {
 //   elevenlabs → { voiceId?, speed? } (conversation_config_override.tts)   openai → { voice? }
 export function sessionVoiceFor(provider, s) {
   if (!s || s.provider !== provider) return null
+  // A stored voice applies only on the provider it was chosen from (never substituted on another one).
+  const voiceOk = Boolean(s.voiceId) && (s.voiceProvider || s.provider) === provider
   const out = {}
   if (provider === 'retell') {
-    if (s.voiceId) out.voice_id = s.voiceId
+    if (voiceOk) out.voice_id = s.voiceId
     const sp = paceFor('retell', s.pace)
     if (sp && sp !== 1) out.voice_speed = sp
   } else if (provider === 'elevenlabs') {
-    if (s.voiceId) out.voiceId = s.voiceId
+    if (voiceOk) out.voiceId = s.voiceId
     const sp = paceFor('elevenlabs', s.pace)
     if (sp && sp !== 1) out.speed = sp
   } else if (provider === 'openai') {
-    if (s.voiceId) out.voice = s.voiceId
+    if (voiceOk) out.voice = s.voiceId
   }
   return Object.keys(out).length ? out : null
 }
