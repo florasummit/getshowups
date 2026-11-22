@@ -38,6 +38,7 @@
 //   NOT verified without credentials: a real conversation (no ELEVENLABS_API_KEY / ELEVENLABS_AGENT_ID exist in
 //   production today), so request/response shapes are from the docs and the SDK source only.
 import { elevenlabsConfigured } from './providers.js'
+import { getVoiceSettings, sessionVoiceFor } from './style.js'
 import { voiceInstructions, toolsForElevenLabs } from './tools.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d{2,5}$/
@@ -53,7 +54,9 @@ export const MAX_CONNECTS_PER_SESSION = 3
 // The per-conversation overrides in the browser SDK's shape (camelCase; the SDK sends the snake_case wire form):
 // OUR system prompt and OUR greeting, English. No key, token, email or id goes here; the prompt is the engine's
 // per-business prompt (facts + guards + voice manner), which never contains secrets.
-export const elevenlabsOverrides = ({ instructions }) => ({ agent: { prompt: { prompt: String(instructions || '') }, language: 'en' } })
+// tts: { voiceId?, speed? } → the agent's tts.voice_id / tts.speed overrides (enabled on the agent by
+// scripts/elevenlabs-setup.mjs); absent → the agent's own voice.
+export const elevenlabsOverrides = ({ instructions, tts = null }) => ({ agent: { prompt: { prompt: String(instructions || '') }, language: 'en' }, ...(tts && (tts.voiceId || tts.speed) ? { tts: { ...(tts.voiceId ? { voiceId: tts.voiceId } : {}), ...(tts.speed ? { speed: tts.speed } : {}) } } : {}) })
 
 // Dynamic variables ({{business_name}} etc. in the agent's dashboard prompt, if anyone types one there): public,
 // non-personal facts only.
@@ -105,7 +108,7 @@ export async function connectElevenLabs(env, { customer, conv }, now = Date.now(
     ok: true,
     signedUrl: signed.signedUrl,
     expiresAt: now + SIGNED_URL_TTL_MS,
-    overrides: elevenlabsOverrides(v),
+    overrides: elevenlabsOverrides({ ...v, tts: lab.settings?.voice ? { voiceId: lab.settings.voice } : sessionVoiceFor('elevenlabs', await getVoiceSettings(env.ONBOARDING_DB, customer.id)) }),
     dynamicVariables: elevenlabsDynamicVariables(customer, lab, v.greeting),
     clientTools: elevenlabsClientToolNames(),
     connection: lab.elevenlabs.connects,

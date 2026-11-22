@@ -232,7 +232,7 @@ export default function VoiceLab() {
     } catch (err) {
       return update(() => ({ phase: 'error', error: START_ERRORS[err?.name === 'NotFoundError' ? 'no_mic' : 'mic'] }))
     }
-    const settings = provider === 'openai' && voice ? { voice } : {}
+    const settings = voice ? { voice } : {} // a candidate voice from the provider's catalog (validated by the server)
     const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'start', provider, customer: business, dryRun, settings } })
     if (code !== 200) return update(() => ({ phase: 'error', error: START_ERRORS[code === 429 ? 'rate_limited' : data?.error] || `Couldn’t start (${data?.error || code}).` }))
     const s = data.session
@@ -315,14 +315,14 @@ export default function VoiceLab() {
                   ))}
                 </select>
               </label>
-              {provider === 'openai' && status.settings?.openai?.voices && (
+              {status.settings?.[provider]?.voices?.length > 0 && (
                 <label className="field">
-                  <span>Voice (OpenAI)</span>
+                  <span>Voice ({status.readiness?.find((r) => r.id === provider)?.name || provider})</span>
                   <select data-lab-voice value={voice} onChange={(e) => setVoice(e.target.value)} disabled={live}>
-                    <option value="">Default</option>
-                    {status.settings.openai.voices.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    <option value="">Default (the business’s own setting if it has one)</option>
+                    {status.settings[provider].voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
                       </option>
                     ))}
                   </select>

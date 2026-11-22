@@ -229,6 +229,31 @@ function adsRoute(path, raw, auth = '') {
   return [200, { results: [{ resourceName: u.resourceName }] }]
 }
 
+// Retell stand-in: the voice catalog (shape of GET /list-voices), web calls (never connected in e2e) and preview
+// samples (a short silent WAV; previews are the provider's own public samples in production).
+const RETELL_VOICES = [
+  { voice_id: 'retell-Cimo', voice_name: 'Cimo', provider: 'elevenlabs', gender: 'male', accent: 'American', age: 'Middle Aged' },
+  { voice_id: '11labs-Adrian', voice_name: 'Adrian', provider: 'elevenlabs', gender: 'male', accent: 'American', age: 'Young' },
+  { voice_id: '11labs-Myra', voice_name: 'Myra', provider: 'elevenlabs', gender: 'female', accent: 'American', age: 'Young' },
+  { voice_id: 'cartesia-Cleo', voice_name: 'Cleo', provider: 'cartesia', gender: 'female', accent: 'British', age: 'Middle Aged' },
+]
+const silentWav = () => {
+  const samples = 8000 // 0.5 s at 16 kHz, 16-bit mono
+  const buf = Buffer.alloc(44 + samples * 2)
+  buf.write('RIFF', 0)
+  buf.writeUInt32LE(36 + samples * 2, 4)
+  buf.write('WAVEfmt ', 8)
+  buf.writeUInt32LE(16, 16)
+  buf.writeUInt16LE(1, 20)
+  buf.writeUInt16LE(1, 22)
+  buf.writeUInt32LE(16000, 24)
+  buf.writeUInt32LE(32000, 28)
+  buf.writeUInt16LE(2, 32)
+  buf.writeUInt16LE(16, 34)
+  buf.write('data', 36)
+  buf.writeUInt32LE(samples * 2, 40)
+  return buf
+}
 const send = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(body === undefined ? '' : JSON.stringify(body))
@@ -345,6 +370,13 @@ createServer(async (req, res) => {
     return res.end(ev('message_start', { message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } }) + ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }) + ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } }) + ev('content_block_stop', { index: 0 }) + ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 900 } }) + ev('message_stop', {}))
   }
   // Own-key AI providers (AI_API_MOCK_ORIGIN): key check only; a key containing BAD is refused.
+  if (url.pathname === '/list-voices') return send(res, 200, RETELL_VOICES.map((v) => ({ ...v, preview_audio_url: `http://127.0.0.1:${PORT}/retell-preview/${v.voice_id}.wav` })))
+  if (url.pathname.startsWith('/retell-preview/')) {
+    const wav = silentWav()
+    res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wav.length, 'Access-Control-Allow-Origin': '*' })
+    return res.end(wav)
+  }
+  if (url.pathname === '/v3/create-web-call' && req.method === 'POST') return send(res, 201, { call_id: `call_e2e${Date.now()}`, access_token: 'e2e_web_access_token', transport: 'gateway', ice_servers: [] })
   if (url.pathname === '/anthropic/v1/models' || url.pathname === '/openai/v1/models') {
     const auth = req.headers['x-api-key'] || String(req.headers.authorization || '')
     if (auth.includes('BAD')) return send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid' } })

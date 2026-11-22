@@ -198,7 +198,23 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER"; do
+# Receptionist voice seeds: one business per browser project, receptionist on.
+for E in "$E2E_VOICE_CUSTOMER:$E2E_VOICE_SESSION_TOKEN" "$E2E_VOICE_M_CUSTOMER:$E2E_VOICE_M_SESSION_TOKEN"; do
+  VC=${E%%:*}
+  VT=${E#*:}
+  d1 "
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$VC', 'Voice Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$VC.example', '$VC', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$VT")', 'owner@$VC.example', $NOW, $FAR);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$VC', '(843) 555-0188', 'Pool service', 'Pool care.', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280/month\"}]', '[\"Charleston\"]', $NOW);
+  INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VC', 1, 'ai_first', 'Hi! Thanks for calling Voice Pools.', $NOW);"
+done
+# One business per member email (customer_users.email is the key): the voice admin belongs to the desktop business.
+d1 "INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_VOICE_ADMIN_EMAIL', '$E2E_VOICE_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_VOICE_ADMIN_SESSION_TOKEN")', '$E2E_VOICE_ADMIN_EMAIL', $NOW, $FAR);"
+
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
@@ -252,7 +268,11 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding AI_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding RECEPTIONIST_ANTHROPIC_API_KEY=sk-ant-e2e-fake-key-not-a-secret \
   --binding ACCOUNT_DELETION_ENABLED=true \
-  --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN" \
+  --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN,$E2E_VOICE_ADMIN_EMAIL" \
+  --binding RETELL_API_KEY=retell_e2e_fake_key_not_a_secret_0123456789 \
+  --binding RETELL_AGENT_ID=agent_e2efake000001 \
+  --binding RETELL_WS_SECRET=e2e_ws_secret_not_a_secret_0123456789abcdef \
+  --binding RETELL_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000 \
   --binding TWILIO_AUTH_TOKEN="$E2E_TWILIO_AUTH_TOKEN" \
   --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \

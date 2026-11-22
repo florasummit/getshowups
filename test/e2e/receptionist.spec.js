@@ -23,13 +23,13 @@ test('receptionist journey: real times, honest hand-off to a recorded callback, 
   const channels = page.getByRole('list', { name: 'Channels' })
   await expect(channels.getByRole('listitem').filter({ hasText: 'Phone calls' })).toContainText('Not connected')
   await expect(channels.getByRole('listitem').filter({ hasText: 'Website chat' })).toContainText('Off')
-  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled() // nothing changed yet
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled() // nothing changed yet
   await page.getByRole('switch', { name: /Answer customers with the AI receptionist/ }).check()
   await page.getByLabel('Greeting').fill('Hi! Ask me about pool care or I can find you a time.')
   await page.getByLabel('Notes for the receptionist').fill('We do not service hot tubs.')
   await page.getByText('Phone calls (not connected)').click()
   await expect(page.getByRole('radio', { name: 'AI answers' })).toBeDisabled()
-  await page.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toBeVisible()
   await expect(channels.getByRole('listitem').filter({ hasText: 'Website chat' })).toContainText('Active')
   await expect(page.locator('section[aria-label="Needs attention"]').getByText('All caught up')).toBeVisible()

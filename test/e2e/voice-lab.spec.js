@@ -1,13 +1,13 @@
-// Voice Lab (/admin/voice-lab) on local workerd with VOICE_LAB_ENABLED=true and NO provider configured (as in
-// production today): the page says so honestly, nothing can be started, non-admins get neither the tab nor the API,
-// and the layout fits a phone. No provider, no microphone, no session is created.
+// Voice Lab (/admin/voice-lab) on local workerd with VOICE_LAB_ENABLED=true, Retell configured against the mock
+// (voice catalog only; no session is ever started here) and OpenAI / ElevenLabs NOT configured: the page says so
+// honestly, nothing can be started for those, non-admins get neither the tab nor the API, and the layout fits a phone.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 
 const noSideScroll = async (page) => expect(await page.evaluate(() => document.documentElement.scrollWidth - Math.min(window.innerWidth, screen.width))).toBeLessThanOrEqual(0)
 
-test('admin: provider statuses are honest (none configured), start is disabled with the reason, test businesses only, dry-run warning, sessions empty @mobile', async ({ page, context }) => {
+test('admin: provider statuses are honest (Retell configured, the others not), start is disabled with the reason, candidate voices per provider, test businesses only, dry-run warning, sessions empty @mobile', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin')
   await page.getByRole('link', { name: 'Voice Lab' }).click()
@@ -15,9 +15,13 @@ test('admin: provider statuses are honest (none configured), start is disabled w
   await expect(page.getByRole('heading', { level: 1, name: 'Voice Lab' })).toBeVisible()
   const root = page.locator('[data-voice-lab]')
   await expect(root).toHaveAttribute('data-voice-lab', 'idle')
-  // Every provider: not configured, with the reason in words, straight from /api/platform/voice-lab/status.
+  // OpenAI and ElevenLabs: not configured, with the reason in words, straight from /api/platform/voice-lab/status;
+  // Retell (faked) is configured.
   const status = await (await page.request.get('/api/platform/voice-lab/status')).json()
-  for (const id of ['retell', 'openai', 'elevenlabs']) {
+  expect(status.providers.retell.configured).toBe(true)
+  await expect(page.locator('[data-provider="retell"]')).toHaveAttribute('data-configured', 'true')
+  await expect(page.locator('[data-provider="retell"]')).toContainText('Configured')
+  for (const id of ['openai', 'elevenlabs']) {
     expect(status.providers[id].configured).toBe(false)
     const card = page.locator(`[data-provider="${id}"]`)
     await expect(card).toHaveAttribute('data-configured', 'false')
@@ -26,7 +30,9 @@ test('admin: provider statuses are honest (none configured), start is disabled w
   }
   expect(JSON.stringify(status)).not.toMatch(/sk-|whsec|Bearer/)
   // Readiness panel for the selected provider: the owner's questions, answered from configuration; blockers named.
-  for (const id of ['retell', 'openai', 'elevenlabs']) {
+  await page.locator('[data-provider="retell"]').click()
+  await expect(page.locator('[data-readiness="retell"]')).toHaveAttribute('data-ready', 'yes')
+  for (const id of ['openai', 'elevenlabs']) {
     await page.locator(`[data-provider="${id}"]`).click()
     const ready = page.locator(`[data-readiness="${id}"]`)
     await expect(ready).toHaveAttribute('data-ready', 'no')
@@ -34,13 +40,17 @@ test('admin: provider statuses are honest (none configured), start is disabled w
     await expect(ready).toContainText('Smallest authorized test')
     await expect(ready).toContainText('Blocked: Not configured')
   }
-  // OpenAI offers a per-session voice (allowlisted on the server); the others take their voice from the agent.
+  // A candidate voice per provider from its catalog (OpenAI: the documented list; Retell: the provider's list, read
+  // through our server; ElevenLabs: nothing until it is configured).
   await page.locator('[data-provider="openai"]').click()
   await expect(page.locator('[data-lab-voice] option')).toHaveCount(status.settings.openai.voices.length + 1)
   await page.locator('[data-provider="retell"]').click()
+  expect(status.settings.retell.voices.map((v) => v.name)).toEqual(['Cimo', 'Adrian', 'Myra', 'Cleo'])
+  await expect(page.locator('[data-lab-voice] option')).toHaveCount(status.settings.retell.voices.length + 1)
+  await page.locator('[data-provider="elevenlabs"]').click()
   await expect(page.locator('[data-lab-voice]')).toHaveCount(0)
   // Start is disabled for an unconfigured provider, whichever is selected, and says why.
-  for (const id of ['openai', 'elevenlabs', 'retell']) {
+  for (const id of ['openai', 'elevenlabs']) {
     await page.locator(`[data-provider="${id}"]`).click()
     await expect(page.locator('[data-lab-start]')).toBeDisabled()
     await expect(page.locator('[data-lab-blocker]')).toContainText('Unavailable: not configured')
