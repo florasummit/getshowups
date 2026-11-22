@@ -20,6 +20,11 @@
 //      token usage from response.done. Numbers only; sent with action 'end'.
 //   7. Recovery: ICE failure / disconnect / channel closed → re-mint and reconnect (fresh session, same config,
 //      no second greeting), at most 2 times, then the session is ended with code connection_lost.
+//   8. Audio, both ways, is proven rather than assumed: the remote track is attached to an <audio> element the
+//      adapter creates itself when none is injected (2026-11-22: the Lab injected none, so the call was silent) and
+//      played; a blocked autoplay is reported (audio_blocked) and resumeAudio() retries it from a click. Level meters
+//      on the microphone and on the remote stream report 'mic: live' / 'audio: received' in status events, and a
+//      microphone that stays silent for MIC_SILENT_MS after connecting is reported (mic_silent, not fatal).
 // Nothing of the conversation is logged to the console. Dependencies are injectable for tests (no real WebRTC in node).
 import { api as defaultApi } from '../lib/api.js'
 import { emitter, summarizeMetrics } from './adapter.js'
@@ -28,6 +33,9 @@ export const OPENAI_CALLS_URL = 'https://api.openai.com/v1/realtime/calls'
 export const OPENAI_DATA_CHANNEL = 'oai-events'
 export const MAX_RECONNECTS = 2
 const DISCONNECT_GRACE_MS = 3000
+export const MIC_SILENT_MS = 8000
+const LEVEL_INTERVAL_MS = 250
+const LEVEL_THRESHOLD = 0.01 // RMS of the time-domain signal (0–1); silence from a working microphone is ≈0.001
 const TRANSCRIPT_FLUSH_MS = 1500
 // Any of these after the caller stopped speaking = the model has started answering.
 const FIRST_RESPONSE_EVENTS = ['output_audio_buffer.started', 'response.output_audio.delta', 'response.output_audio_transcript.delta', 'response.output_text.delta']
@@ -49,7 +57,10 @@ export function createOpenAIAdapter(deps = {}) {
   const now = deps.now || (() => (globalThis.performance || Date).now())
   const setT = deps.setTimeout || ((...a) => globalThis.setTimeout(...a))
   const clearT = deps.clearTimeout || ((...a) => globalThis.clearTimeout(...a))
-  const audioEl = deps.audio || null
+  const injectedAudio = deps.audio || null
+  const doc = deps.document || globalThis.document || null
+  const AudioCtx = deps.AudioContext || globalThis.AudioContext || globalThis.webkitAudioContext || null
+  const MediaStreamCtor = deps.MediaStream || globalThis.MediaStream || null
 
   let state = 'idle'
   let emit = () => {}
@@ -70,10 +81,93 @@ export function createOpenAIAdapter(deps = {}) {
   const pending = []
   let flushTimer = null
   const metrics = { firstResponseMs: undefined, responseTimes: [], interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, inputTokens: 0, outputTokens: 0, audioSeconds: 0 }
+  // Audio diagnostics (what the status events carry besides the state): mic 'unknown' | 'live' | 'silent',
+  // audio 'none' | 'playing' | 'received' | 'blocked'. Reported on every transition, never per level sample.
+  const diag = { mic: 'unknown', audio: 'none' }
+  let player = injectedAudio
+  let remoteStream = null
+  const meters = []
+  let micTimer = null
 
   const setState = (s, extra = {}) => {
     state = s
-    emit('status', { state: s, ...extra })
+    emit('status', { state: s, mic: diag.mic, audio: diag.audio, ...extra })
+  }
+  const setDiag = (patch) => {
+    const changed = Object.entries(patch).some(([k, v]) => diag[k] !== v)
+    Object.assign(diag, patch)
+    if (changed) emit('status', { state, mic: diag.mic, audio: diag.audio })
+  }
+
+  // The element that plays the receptionist: injected (tests) or created here, hidden, autoplay, inline.
+  const ensurePlayer = () => {
+    if (player) return player
+    if (!doc?.createElement) return null
+    const el = doc.createElement('audio')
+    el.autoplay = true
+    el.setAttribute('playsinline', '')
+    el.setAttribute('data-voice-lab-audio', 'openai')
+    if (el.style) el.style.display = 'none'
+    doc.body?.appendChild?.(el)
+    player = el
+    return el
+  }
+  const playRemote = () => {
+    const el = ensurePlayer()
+    if (!el) return
+    let p
+    try {
+      p = el.play?.()
+    } catch (err) {
+      p = Promise.reject(err)
+    }
+    if (p && typeof p.then === 'function') {
+      p.then(
+        () => setDiag({ audio: diag.audio === 'received' ? 'received' : 'playing' }),
+        () => {
+          setDiag({ audio: 'blocked' })
+          emit('error', { code: 'audio_blocked', fatal: false })
+        },
+      )
+    }
+  }
+  // A level meter on a stream: calls onLevel(rms) every LEVEL_INTERVAL_MS. Null when Web Audio is unavailable.
+  const meter = (stream, onLevel) => {
+    if (!AudioCtx || !stream) return null
+    let ctx
+    try {
+      ctx = new AudioCtx()
+      const an = ctx.createAnalyser()
+      an.fftSize = 512
+      ctx.createMediaStreamSource(stream).connect(an)
+      const buf = new Uint8Array(an.fftSize)
+      const id = setT(function tick() {
+        an.getByteTimeDomainData(buf)
+        let sum = 0
+        for (const v of buf) {
+          const d = (v - 128) / 128
+          sum += d * d
+        }
+        onLevel(Math.sqrt(sum / buf.length))
+        m.id = setT(tick, LEVEL_INTERVAL_MS)
+      }, LEVEL_INTERVAL_MS)
+      const m = { id, stop: () => { clearT(m.id); ctx.close?.()?.catch?.(() => {}) } }
+      meters.push(m)
+      if (ctx.state === 'suspended') ctx.resume?.()?.catch?.(() => {})
+      return m
+    } catch {
+      try {
+        ctx?.close?.()
+      } catch {
+        /* nothing to close */
+      }
+      return null
+    }
+  }
+  const stopMeters = () => {
+    for (const m of meters.splice(0)) m.stop()
+    if (micTimer) clearT(micTimer)
+    micTimer = null
   }
   const snapshot = () => summarizeMetrics(metrics)
   const send = (obj) => {
@@ -175,6 +269,7 @@ export function createOpenAIAdapter(deps = {}) {
   }
 
   const teardown = () => {
+    stopMeters()
     if (connectedAt != null) {
       metrics.audioSeconds += (now() - connectedAt) / 1000
       connectedAt = null
@@ -226,6 +321,7 @@ export function createOpenAIAdapter(deps = {}) {
   // One connection: mint → mic → peer connection → data channel → SDP exchange. Resolves once the answer is applied;
   // 'connected' is emitted when the data channel opens and the session config has been (re)sent.
   const connect = async () => {
+    ensurePlayer() // created inside the Start click's gesture, before any await: autoplay policies allow it
     const r = await apiFn('/api/platform/voice-lab/openai', { method: 'POST', body: { customer: session.customer, id: session.id, token: session.token } })
     if (r.status !== 200 || typeof r.data?.clientSecret !== 'string') throw codeError(r.data?.error || 'connect_failed')
     const { clientSecret, expiresAt, sessionConfig, greeting } = r.data
@@ -239,9 +335,18 @@ export function createOpenAIAdapter(deps = {}) {
     const cur = new PeerConnection()
     pc = cur
     cur.ontrack = (e) => {
-      if (!audioEl) return
-      audioEl.srcObject = e.streams?.[0] || null
-      audioEl.play?.()?.catch?.(() => {})
+      const stream = e.streams?.[0] || (MediaStreamCtor && e.track ? new MediaStreamCtor([e.track]) : null)
+      remoteStream = stream
+      const el = ensurePlayer()
+      if (!el) {
+        emit('error', { code: 'audio_unavailable', fatal: false })
+        return
+      }
+      el.srcObject = stream
+      playRemote()
+      meter(stream, (level) => {
+        if (level >= LEVEL_THRESHOLD && diag.audio !== 'received') setDiag({ audio: 'received' })
+      })
     }
     for (const track of mic.getAudioTracks()) cur.addTrack(track, mic)
     const channel = cur.createDataChannel(OPENAI_DATA_CHANNEL)
@@ -259,6 +364,20 @@ export function createOpenAIAdapter(deps = {}) {
       }
       connectedAt = now()
       setState('connected', { attempt: metrics.reconnects })
+      // Microphone level: proof that the caller's audio exists before it ever reaches the provider.
+      if (!meters.some((x) => x.mic)) {
+        const m = meter(mic, (level) => {
+          if (level >= LEVEL_THRESHOLD && diag.mic !== 'live') setDiag({ mic: 'live' })
+        })
+        if (m) m.mic = true
+        if (micTimer) clearT(micTimer)
+        micTimer = setT(() => {
+          if (diag.mic !== 'live' && !stopping && !finished) {
+            setDiag({ mic: 'silent' })
+            emit('error', { code: 'mic_silent', fatal: false })
+          }
+        }, MIC_SILENT_MS)
+      }
     }
     channel.onclose = () => {
       if (pc === cur && !stopping) reconnect('channel_closed')
@@ -311,7 +430,15 @@ export function createOpenAIAdapter(deps = {}) {
     get state() {
       return state
     },
+    get diagnostics() {
+      return { ...diag, remoteStream: Boolean(remoteStream) }
+    },
     metrics: snapshot,
+    // From a click: retries playback after the browser blocked autoplay (audio_blocked) and resumes the meters.
+    resumeAudio() {
+      playRemote()
+      return diag.audio
+    },
     async start({ customer, id, token, onEvent } = {}) {
       if (state !== 'idle') throw codeError('already_started')
       if (!customer || !id || !token) throw codeError('invalid_session')

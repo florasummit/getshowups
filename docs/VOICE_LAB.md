@@ -228,6 +228,26 @@ the Lab records real token usage from `response.done` when available.
 | `OPENAI_REALTIME_VOICE` | One of the built-in voices, default `marin`; anything else falls back. |
 | `OPENAI_TRANSCRIBE_MODEL` | Caller transcription model, default `gpt-4o-mini-transcribe`. |
 
+### Audio, proven (fix of 2026-11-22)
+
+Two defects made the first real session silent: the Lab's event handler expected an object while every adapter emits
+`(name, payload)` (so the page ignored status, transcript and errors), and the adapter attached the remote track only
+to an injected `<audio>` element the Lab never passed (so nothing was ever played). Now the adapter creates its own
+hidden element inside the Start click, plays the remote stream, reports a blocked autoplay (`audio_blocked`, "Enable
+sound" button → `resumeAudio()`), measures the microphone and the remote stream with Web Audio level meters and shows
+"Mic: live / no sound detected" and "AI audio: received / none yet / blocked" in the live call; a microphone silent for
+8 s is reported (`mic_silent`, the call continues). Runtime errors are shown in plain words (microphone blocked,
+connection refused, credential rejected or expired, connection lost, provider error code); never a credential.
+
+Evidence (2026-11-22, real gpt-realtime session through the actual adapter in Chromium with a fake microphone
+playing a synthesized caller; our server pieces in node, Google mocked, dry run): greeting spoken; caller heard and
+transcribed; two interruptions detected and answered; first reply 165 ms after the caller stopped (median 173 ms);
+independent level meter on the remote stream: peak 0.22, 170 of 420 samples above the silence threshold; 42 s of
+audio, 11.5k input / 1.1k output tokens; no adapter or console errors; no key in any output. What automation cannot
+prove: that YOUR speakers play it. Manual test: Admin → Voice Lab → OpenAI → test business → Start (allow the
+microphone) → the badges must read "Mic: live" and "AI audio: received" within a few seconds and you must hear the
+greeting; talk over it to interrupt; the transcript shows both sides.
+
 ### Adapter interface (`src/voice/adapter.js`)
 
 `createOpenAIAdapter()` → `{ start({ customer, id, token, onEvent }), stop({ outcome }), state, metrics() }`.
