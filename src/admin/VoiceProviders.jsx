@@ -9,6 +9,7 @@ import { Badge, Empty, Facts, LoadError, Loading, PageHead, Section } from './co
 import { when, mins } from './control/lib.js'
 import ProviderControl from '../dashboard/ProviderControl.jsx'
 import { consoleOps, STATE } from '../dashboard/provider-control.js'
+import GlobalProvider from './GlobalProvider.jsx'
 import './control.css'
 import './voice-providers.css'
 
@@ -18,6 +19,7 @@ const fromUrl = () => new URLSearchParams(window.location.search).get('customer'
 
 export default function VoiceProviders() {
   const [list, setList] = useState(null)
+  const [global, setGlobal] = useState(null)
   const [selected, setSelected] = useState(fromUrl)
   const [loaded, setLoaded] = useState(null) // { id, tick, data } for the business last answered by the server
   const [tick, setTick] = useState(0)
@@ -30,7 +32,11 @@ export default function VoiceProviders() {
   }, [])
   useEffect(() => {
     let live = true
-    api('/api/platform/voice-provider').then(({ status, data }) => live && setList(status === 200 ? data.businesses : { error: data?.error || status }))
+    api('/api/platform/voice-provider').then(({ status, data }) => {
+      if (!live) return
+      setList(status === 200 ? data.businesses : { error: data?.error || status })
+      setGlobal(status === 200 ? data.global : { error: data?.error || status })
+    })
     return () => {
       live = false
     }
@@ -63,6 +69,8 @@ export default function VoiceProviders() {
     <div className="cc cc--single" data-voice-providers={b ? b.id : 'none'}>
       <div className="cc-main">
         <PageHead title="Voice providers" lede="Manage the AI receptionist's voice provider for any business: active provider, readiness, test history and blockers; then Test → Review → Activate → Rollback. Every change names the business and is checked, confirmed, audited and reversible." />
+        {global && !global.error && <GlobalProvider global={global} businesses={businesses} reload={reload} />}
+        {global?.error && <LoadError what="the global default" onRetry={reload} />}
         <Section title="Business" id="vp-business" sub="Platform admins only. Nothing on this page changes a business until the Activate or Roll back step is confirmed with the business id.">
           <div className="cc-section-body">
             {list === null && <Loading label="Loading businesses…" />}
@@ -74,7 +82,7 @@ export default function VoiceProviders() {
                   <option value="">Choose a business…</option>
                   {businesses.map((x) => (
                     <option key={x.id} value={x.id}>
-                      {x.name} ({x.id}){x.test ? ' · test' : ''} · {x.providerName}
+                      {x.name} ({x.id}){x.test ? ' · test' : ''} · {x.providerName} ({x.inherited ? 'global default' : 'override'})
                       {x.receptionist ? '' : ' · receptionist off'}
                     </option>
                   ))}
@@ -92,7 +100,7 @@ export default function VoiceProviders() {
                 </h3>
                 <Facts
                   items={[
-                    ['Active provider', view.voice.providerName],
+                    ['Active provider', `${view.voice.providerName} (${view.voice.inherited ? `follows the global default${view.voice.defaultProviderName && view.voice.defaultProviderName !== view.voice.providerName ? `: ${view.voice.defaultProviderName}` : ''}` : 'explicit override for this business'})`],
                     ['Voice', view.voice.voiceName || 'Provider default'],
                     ['Personality', view.voice.personality],
                     ['Pace', view.voice.pace],

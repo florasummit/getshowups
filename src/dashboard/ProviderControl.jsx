@@ -108,7 +108,8 @@ export default function ProviderControl({ providers, reload, ops = dashboardOps,
   return (
     <details className="ui-group ui-group--advanced rx-provider" data-provider-control open={open || undefined}>
       <summary>
-        AI voice provider (admin) <Pill tone="neutral">{current?.name || providers.current}</Pill>
+        AI voice provider (admin) <Pill tone="neutral">{current?.name || providers.current}</Pill>{' '}
+        {providers.inherited !== undefined && <Pill tone="neutral">{providers.inherited ? 'Follows the global default' : 'Explicit override'}</Pill>}
       </summary>
       <p className="ui-hint">
         Owners never see this. Select a provider → Test it on this business (a dry-run session on the customer page) → Review the checklist → Activate → Confirm. A provider is “ready” only after a

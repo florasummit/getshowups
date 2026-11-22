@@ -45,8 +45,10 @@ export function ownerView(s, env) {
 }
 
 // Optimistic write shared by every change: the row is replaced only when `version` is what the writer read.
+// `inherit` (migration 0036): true = this business follows the global default (an inherit row), false = explicit
+// override (no inherit row), undefined = unchanged. Applied after the versioned write (idempotent; ignored before 0036).
 // → { ok, settings } | { ok: false, error: 'stale' }
-async function writeSettings(db, customerId, next, expectedVersion, by, now) {
+async function writeSettings(db, customerId, next, expectedVersion, by, now, { inherit } = {}) {
   const prevJson = next.previous ? JSON.stringify(next.previous) : null
   if (expectedVersion === 0) {
     const r = await db
@@ -61,7 +63,16 @@ async function writeSettings(db, customerId, next, expectedVersion, by, now) {
       .run()
     if (!(r?.meta?.changes > 0)) return { ok: false, error: 'stale' }
   }
+  if (inherit !== undefined) await setInherit(db, customerId, inherit, now)
   return { ok: true, settings: await getVoiceSettings(db, customerId) }
+}
+export async function setInherit(db, customerId, inherit, now = Date.now()) {
+  try {
+    if (inherit) await db.prepare('INSERT OR IGNORE INTO receptionist_voice_inherit (customer, updated_at) VALUES (?1, ?2)').bind(customerId, now).run()
+    else await db.prepare('DELETE FROM receptionist_voice_inherit WHERE customer = ?1').bind(customerId).run()
+  } catch {
+    // before migration 0036 there is no inheritance: the settings row decides, as before
+  }
 }
 
 // Owner: voice (from the ACTIVE provider's catalog), personality, pace. Never the provider.
@@ -93,7 +104,8 @@ export async function saveVoicePreferences(env, customer, { voiceId, personality
       next.voiceName = v.voice.name
     }
   }
-  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(actorEmail), now)
+  // The owner's first row must not turn a business into a provider override: it keeps following the global default.
+  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(actorEmail), now, { inherit: cur.inherited && cur.version === 0 ? true : undefined })
   if (!w.ok) return w
   await recordEvent(db, { type: 'receptionist.voice', actorType: 'owner', actor: actorEmail, customer: customer.id, capability: 'receptionist', resource: { type: 'receptionist_voice', id: customer.id }, outcome: 'success', details: { voice: next.voiceId ? 'chosen' : 'default', personality: next.personality, pace: next.pace }, at: now }).catch(() => {})
   return w
@@ -126,7 +138,7 @@ export async function providerOverview(env, customer, now = Date.now()) {
     const state = id === current.provider ? 'active' : !configured ? 'not_configured' : disabled ? 'disabled' : !cap.customers ? 'no_customer_path' : evidence.ok ? 'ready' : 'needs_test'
     providers.push({ id, name: cap.name, state, configured, enabled: !disabled, browserSessions: cap.customers ? 'customers' : cap.lab ? 'lab_only' : 'none', phone: cap.phone, customerPath: cap.customers, testAvailable: cap.lab && configured && !disabled, testUrl: testable && configured && !disabled ? `/chat/${customer.id}?test=${id}` : null, evidence, pace: cap.pace, previews: cap.previews, blockers })
   }
-  return { current: current.provider, testBusiness: testable, providers }
+  return { current: current.provider, inherited: current.inherited, defaultProvider: current.defaultProvider, testBusiness: testable, providers }
 }
 
 // The switching checklist (nothing changes). Every check answers from configuration and records; blockers block.
@@ -175,9 +187,10 @@ export async function checkProviderSwitch(env, customer, { provider, voiceId = '
     `Personality "${PERSONALITIES[cur.personality]?.name || cur.personality}" is kept (it is provider-independent).`,
     cap.pace ? `Pace "${PACES[cur.pace]?.name || cur.pace}" is kept.` : cur.pace !== 'normal' ? `Pace is not supported on ${cap.name}: it will not apply (setting kept for a rollback).` : 'Pace: normal.',
     'Website chat, bookings, calendar, phone settings, conversation history and the greeting are unaffected.',
+    cur.inherited ? `This business currently follows the global default (${PROVIDER_CAPABILITIES[cur.defaultProvider]?.name || cur.defaultProvider}); after the switch it has an explicit provider of its own and no longer follows global changes.` : 'This business keeps an explicit provider of its own (not the global default).',
     'The previous provider and voice are kept for a one-click rollback.',
   ]
-  return { ok: blockers.length === 0, provider, checks, blockers, consequences, voice, transfer: { personality: true, pace: cap.pace, voice: cur.provider === provider } }
+  return { ok: blockers.length === 0, provider, checks, blockers, consequences, voice, inherited: cur.inherited, transfer: { personality: true, pace: cap.pace, voice: cur.provider === provider } }
 }
 
 // Admin: switch after the checklist passes and the admin confirmed. Atomic (one conditional write), audited either way.
@@ -194,9 +207,10 @@ export async function switchProvider(env, customer, admin, { provider, voiceId =
   }
   if (confirm !== true) return { ok: false, error: 'confirmation_required', check }
   if (Number(version) !== cur.version) return { ok: false, error: 'stale', check, version: cur.version }
-  const next = { ...cur, provider, voiceId: check.voice?.id || null, voiceName: check.voice?.name || null, previous: { provider: cur.provider, voiceId: cur.voiceId, voiceName: cur.voiceName, pace: cur.pace, at: now } }
-  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(admin.email), now)
-  await audit(env, admin.email, 'receptionist.provider_switched', customer.id, { ...detail, outcome: w.ok ? 'success' : w.error }).catch(() => {})
+  const next = { ...cur, provider, voiceId: check.voice?.id || null, voiceName: check.voice?.name || null, previous: { provider: cur.provider, voiceId: cur.voiceId, voiceName: cur.voiceName, pace: cur.pace, inherited: cur.inherited, at: now } }
+  // An explicit switch is an override: the business stops following the global default.
+  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(admin.email), now, { inherit: false })
+  await audit(env, admin.email, 'receptionist.provider_switched', customer.id, { ...detail, inherited: cur.inherited, outcome: w.ok ? 'success' : w.error }).catch(() => {})
   return w.ok ? { ok: true, settings: w.settings, check } : { ...w, check }
 }
 
@@ -211,8 +225,11 @@ export async function rollbackProvider(env, customer, admin, { confirm = false, 
   const p = cur.previous
   if (!PROVIDERS.includes(p.provider)) return { ok: false, error: 'invalid_previous' }
   const next = { ...cur, provider: p.provider, voiceId: p.voiceId || null, voiceName: p.voiceName || null, pace: PACES[p.pace] ? p.pace : cur.pace, previous: null }
-  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(admin.email), now)
-  await audit(env, admin.email, 'receptionist.provider_rolled_back', customer.id, { from: cur.provider, to: p.provider, outcome: w.ok ? 'success' : w.error }).catch(() => {})
+  // Back to following the global default only if that is what the business did AND the default still is that provider
+  // (otherwise a rollback would silently land it on a provider it was never verified on): else an explicit override.
+  const inherit = Boolean(p.inherited) && cur.defaultProvider === p.provider
+  const w = await writeSettings(db, customer.id, next, cur.version, await emailRef(admin.email), now, { inherit })
+  await audit(env, admin.email, 'receptionist.provider_rolled_back', customer.id, { from: cur.provider, to: p.provider, inherited: inherit, outcome: w.ok ? 'success' : w.error }).catch(() => {})
   return w
 }
 

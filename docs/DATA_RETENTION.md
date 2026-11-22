@@ -55,6 +55,7 @@ failed attempts show as "Deletion stuck" in /admin. A deletion is never reported
 | `admin_audit` | Staff actions; emails → refs, free text erased at deletion | Security, accountability | Permanent |
 | `account_deletions` | When, who (ref or staff email), per-step results | Proof of deletion; replay list after a backup restore | Permanent |
 | `test_businesses` | Test flag | Keeps test data out of metrics | With the tombstone |
+| `receptionist_voice_defaults` | Platform-wide default voice provider history (versions; ids of businesses a version pinned) | Platform configuration, not business data | Permanent (business ids only, no personal data) |
 | `stripe_events`, `rate_limits`, `sessions` | Event ids, hashed keys, sign-in sessions (not tied to the business) | Idempotency, abuse prevention | Their own expiry |
 
 ## 5. Processors and backups (what we can and can't control)
@@ -101,7 +102,8 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   reference) is in `ERASED_TABLES`; kept with the appointment otherwise. Receptionist conversations started from an ad
   keep only the campaign parameters and whether a click id was present (never the click id).
 - AI receptionist (migration 0026): `receptionist_conversations` (transcripts incl. what customers typed or said),
-  `receptionist_events`, `receptionist_calls`, `receptionist_settings` and (migration 0027) `receptionist_requests`
+  `receptionist_events`, `receptionist_calls`, `receptionist_settings` and (migration 0027) `receptionist_requests`,
+  (migration 0035) `receptionist_voice_settings` and (migration 0036) `receptionist_voice_inherit`
   (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,
   calls and requests) are purged 365 days after their last update (cron).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)

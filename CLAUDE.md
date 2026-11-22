@@ -472,6 +472,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   the same check/switch/rollback functions for ANY business (platform admins only, membership not needed), plus the
   business id typed back (`confirmCustomer`) before a switch or rollback; the view is facts, readiness and a
   codes-only session history (never transcripts or customer details). ProviderControl.jsx is the one UI for both.
+  Global default provider (migration 0036, server/voice/global.js, console section "Global voice provider"): resolution
+  explicit override (settings row without receptionist_voice_inherit) → global default (receptionist_voice_defaults,
+  newest version; no row = retell) → retell. Owner saves keep a business following the default; admin switches make
+  overrides. A global change checks EVERY inherited business with checkProviderSwitch: mode all refused while any is
+  blocked, mode staged pins the blocked ones to today's provider (override, audited receptionist.provider_pinned) and
+  switches only verified ones; overrides untouched; sessions in progress stay pinned; global rollback undoes exactly
+  what the version did and reports what it kept. Never report a global switch as applied to everyone. Production
+  default stays Retell until the founder selects and confirms another provider in the console.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in
