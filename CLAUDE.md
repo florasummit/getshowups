@@ -164,6 +164,10 @@ server/              Shared backend modules imported by functions/ (bundled by P
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)
   testbusiness.js    Admin-marked test businesses (test_businesses): out of metrics; never live Ads/messaging/Stripe
+  business-accounts.js Account types (0034, docs/ACCOUNT_TYPES.md): internal_live | sandbox | customer; billing
+                     complimentary|stripe, environment production|sandbox, provider_spend allowed|blocked. Complimentary =
+                     hosted, no checkout, no billing hold, lifecycle 'complimentary', never paying/MRR, never auto-resynced;
+                     sandbox sets the test mark. Admin-only route /api/platform/account, audited from→to. PoolThru = internal_live
   domains.js         Own domains: normalize, TXT proof, Pages domains API attach/detach, CNAME + HTTPS check, cron
   onboarding.js      Self-serve signup plan, ordered onboarding steps (derived from data), business profile, readiness
 migrations/          D1 SQL, applied manually to production (see docs/WORKFLOW.md). Additive + idempotent only (a test enforces it)

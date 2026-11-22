@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Business account types + PoolThru internal live (2026-11-22) — feat/business-accounts (MIGRATION 0034, needs approval)
+
+- docs/ACCOUNT_TYPES.md. New table business_accounts (0034): classification (internal_live | sandbox | customer),
+  billing (complimentary | stripe), environment (production | sandbox), provider_spend (allowed | blocked), note,
+  set_by, set_at. No row = paying customer (unchanged behaviour); reads fail soft before the migration.
+- Enforced server-side: hostingStatus active for complimentary; createCheckout refused; owner billing route "not
+  billed, complimentary" (Plan card "Complimentary GetShowUps account"); legacy onboarding path; no billing holds;
+  lifecycle stage `complimentary`, no recovery; reconciliation never auto-resyncs them; metrics never count them as
+  paying/MRR/test subscriptions; provider_spend blocked → public receptionist off + liveFor() false. Sandbox =
+  test_businesses mark set/cleared with the environment.
+- Admin → customer → "Account type" (classification, entitlement, environment, spend, subscription state, estimated
+  provider costs per source, audited history, confirmed reclassification with reason) and Admin → Platform → "Create
+  an internal or sandbox business" (optional owner; never a payment step). /api/platform/account: platform admins
+  only, same-origin, confirm, audited once (admin_audit + audit_log) with from → to. A LIVE Stripe subscription still
+  running blocks a move away from "paying customer" (nothing cancelled automatically).
+- PoolThru (poolthru-llc) production facts read-only: no self_signups row (already exempt by absence), subscriptions
+  `incomplete` with a Stripe test customer and no subscription id (checkout opened, never paid), no modes row, not a
+  test business, domain www.poolthru.com row `securing`, 6 leads / 3 appointments / 5 conversations. Migration in
+  place = one audited classification to internal_live after 0034 + deploy; Stripe records untouched.
+- Owner approvals: apply 0034; merge/deploy; classify PoolThru (console, audited).
+
 ## OpenAI Voice Lab: silent audio fixed (2026-11-22) — fix/openai-voice-lab-audio (no migration; awaiting deploy approval)
 
 - Root causes: (1) src/admin/VoiceLab.jsx handled adapter events as one object while every adapter emits

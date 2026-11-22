@@ -367,3 +367,45 @@ test('Growth: Measure labels every figure; Simulate changes outputs without touc
     }
   }
 })
+
+test('account types: the console creates a sandbox business (test-marked, complimentary) and reclassifies it to internal live with an audited history; owners see a complimentary plan @mobile', async ({ page, context }, testInfo) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/admin')
+  const name = `E2E Sandbox ${testInfo.project.name}`
+  const create = page.locator('[data-create-business]')
+  await create.locator('[data-create-name]').fill(name)
+  await create.locator('[data-create-type]').selectOption('sandbox')
+  await create.locator('[data-create-submit]').click()
+  const created = create.locator('[data-create-result]')
+  await expect(created).toContainText('Created')
+  const id = await created.getAttribute('data-create-result')
+  // The new business is a test business and never a paying customer.
+  const overview = await (await page.request.get('/api/platform/overview')).json()
+  expect(overview.customers.find((c) => c.id === id)).toMatchObject({ testBusiness: true, account: { classification: 'sandbox', billing: 'complimentary', environment: 'sandbox', providerSpend: 'blocked' } })
+  // Customer detail → Account type: classification, entitlement, environment, spend, subscription, costs, history.
+  await page.goto(`/admin?customer=${id}`)
+  const card = page.locator('[data-account-type]')
+  if (!(await card.count())) {
+    await page.goto('/admin')
+    await page.locator('.row--link', { hasText: name }).first().click()
+  }
+  await expect(page.locator('[data-account-type]')).toHaveAttribute('data-account-type', 'sandbox')
+  await expect(page.locator('[data-account-billing]')).toHaveAttribute('data-account-billing', 'complimentary')
+  await expect(page.locator('[data-account-environment]')).toHaveAttribute('data-account-environment', 'sandbox')
+  await expect(page.locator('[data-account-spend]')).toHaveAttribute('data-account-spend', 'blocked')
+  await expect(page.locator('[data-account-costs]')).toContainText('estimates')
+  await expect(page.locator('[data-account-history]')).toContainText('new → sandbox')
+  // Reclassify to internal live: explicit action, confirmed; the test mark is removed and the history grows.
+  await page.locator('[data-account-change] select').first().selectOption('internal_live')
+  await page.locator('[data-account-change] input').fill('e2e: promote to internal live')
+  await page.locator('[data-account-apply]').click()
+  await expect(page.locator('[data-account-type]')).toHaveAttribute('data-account-type', 'internal_live')
+  await expect(page.locator('[data-account-environment]')).toHaveAttribute('data-account-environment', 'production')
+  await expect(page.locator('[data-account-history]')).toContainText('sandbox → internal_live')
+  const after = await (await page.request.get('/api/platform/overview')).json()
+  expect(after.customers.find((c) => c.id === id)).toMatchObject({ testBusiness: false, account: { classification: 'internal_live', billing: 'complimentary' } })
+  // An owner can never change it: the route is admin-only.
+  const asOwner = await page.request.post('/api/platform/account', { data: { action: 'classify', customer: id, classification: 'customer', confirm: true }, headers: { Cookie: `__Host-gsu_session=${fixtures.E2E_SESSION_TOKEN}`, Origin: 'http://127.0.0.1:' + new URL(page.url()).port } })
+  expect([401, 403]).toContain(asOwner.status())
+})

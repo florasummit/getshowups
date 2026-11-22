@@ -212,6 +212,156 @@ function InviteResult({ result }) {
   )
 }
 
+// Business account type (server/business-accounts.js): classification, billing entitlement, operating environment,
+// provider spend, subscription state, estimated provider costs and the audited history of changes. Consequential
+// changes are explicit, confirmed actions; nothing here touches Stripe.
+const CLASS_TONE = { internal_live: 'ok', sandbox: 'neutral', customer: 'info' }
+const usd6 = (micros) => (micros == null ? '—' : `${(micros / 1e6).toFixed(2)}`)
+function AccountType({ id, onChanged }) {
+  const [a, setA] = useState(null)
+  const [target, setTarget] = useState('')
+  const [spend, setSpend] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const load = useCallback(() => api(`/api/platform/account?id=${id}`).then(({ status, data }) => setA(status === 200 ? data : { error: data?.error || status })), [id])
+  useEffect(() => {
+    load()
+  }, [load])
+  if (!a) return null
+  if (a.error) return null
+  const cur = a.account
+  const spec = a.classifications[cur.classification]
+  const apply = async () => {
+    const to = a.classifications[target]
+    if (!to) return
+    if (!window.confirm(`Change this business to "${to.label}"? Billing becomes ${to.billing}, environment ${to.environment}. Nothing in Stripe is changed.`)) return
+    setBusy(true)
+    const { status, data } = await api('/api/platform/account', { method: 'POST', body: { action: 'classify', customer: id, classification: target, ...(spend ? { providerSpend: spend } : {}), note, confirm: true } })
+    setBusy(false)
+    setResult(status === 200 ? { ok: true } : { error: data?.error || status })
+    if (status === 200) {
+      setTarget('')
+      setNote('')
+      load()
+      onChanged()
+    }
+  }
+  return (
+    <section className="card" aria-label="Account type" data-account-type={cur.classification}>
+      <h2 className="card-title">Account type</h2>
+      {!a.ready && <p className="notice-info">Migration 0034 is not applied here: every business counts as a paying customer until it is.</p>}
+      <dl className="kv">
+        <div>
+          <dt>Classification</dt>
+          <dd>
+            <Pill tone={CLASS_TONE[cur.classification] || 'neutral'}>{spec?.label || cur.classification}</Pill> {cur.recorded ? '' : '(default: no record)'}
+            <span className="fine"> {spec?.what}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Billing entitlement</dt>
+          <dd data-account-billing={cur.billing}>{cur.billing === 'complimentary' ? 'Complimentary: no checkout, no subscription needed, never counted as paying, never held or resynced by Stripe reconciliation.' : 'Stripe: normal plan, subscription and entitlements.'}</dd>
+        </div>
+        <div>
+          <dt>Operating environment</dt>
+          <dd data-account-environment={cur.environment}>
+            {cur.environment === 'sandbox' ? 'Sandbox (test business: test Ads accounts only, test recipients only, no live Stripe, out of metrics)' : 'Production'}
+            {a.testMark.test !== (cur.environment === 'sandbox') && <span className="tag tag--bad"> test mark out of step</span>}
+          </dd>
+        </div>
+        <div>
+          <dt>Paid providers for customers</dt>
+          <dd data-account-spend={cur.providerSpend}>{cur.providerSpend === 'allowed' ? 'Allowed (ads live launch, public receptionist chat and voice), tracked below' : 'Blocked: no live ads, no public receptionist chat or voice; admin Voice Lab sessions only'}</dd>
+        </div>
+        <div>
+          <dt>Subscription state</dt>
+          <dd>{a.subscription ? `${a.subscription.status}${a.subscription.planId ? ` · ${a.subscription.planId}` : ''} · Stripe subscription ${a.subscription.stripeSubscription ? 'yes' : 'no'} · Stripe customer ${a.subscription.stripeCustomer ? 'yes' : 'no'} · ${a.subscription.livemode === true ? 'live' : a.subscription.livemode === false ? 'test mode' : 'mode not recorded'}` : 'No billing record'}</dd>
+        </div>
+        <div>
+          <dt>Estimated provider costs ({a.costs.days} days)</dt>
+          <dd data-account-costs>
+            {a.costs.items.map((i) => `${i.label}: ${i.micros == null ? `${i.n} ${i.unit}` : `${usd6(i.micros)} (${i.n} ${i.unit})`}`).join(' · ')} · total {usd6(a.costs.totalMicros)} (estimates, never charged to the business)
+          </dd>
+        </div>
+        {cur.recorded && (
+          <div>
+            <dt>Set</dt>
+            <dd>
+              {date(cur.setAt)} by {cur.setBy}
+              {cur.note ? ` · ${cur.note}` : ''}
+            </dd>
+          </div>
+        )}
+      </dl>
+      <div className="form" data-account-change>
+        <label className="field">
+          <span>Change classification</span>
+          <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy || !a.ready}>
+            <option value="">Keep “{spec?.label}”</option>
+            {Object.entries(a.classifications)
+              .filter(([k]) => k !== cur.classification)
+              .map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v.label}
+                </option>
+              ))}
+          </select>
+        </label>
+        {target && (
+          <>
+            <label className="field">
+              <span>Paid providers for customers</span>
+              <select value={spend} onChange={(e) => setSpend(e.target.value)}>
+                <option value="">Default for this type ({a.classifications[target].providerSpend})</option>
+                <option value="allowed">Allowed</option>
+                <option value="blocked">Blocked</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Reason (kept in the audit history)</span>
+              <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
+            </label>
+            <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={apply} data-account-apply>
+              {busy ? 'Changing…' : `Change to ${a.classifications[target].label}`}
+            </button>
+          </>
+        )}
+        {result?.error && (
+          <p className="form-error" role="alert">
+            {result.error === 'live_subscription_running' ? 'This business has a live Stripe subscription still running. End it in Stripe first; nothing is cancelled automatically.' : result.error === 'migration_required' ? 'Apply migration 0034 first.' : `Not changed (${result.error}).`}
+          </p>
+        )}
+        {result?.ok && (
+          <p className="fine" role="status">
+            Changed and recorded.
+          </p>
+        )}
+      </div>
+      <h3 className="card-subtitle">Classification history</h3>
+      {a.history.length ? (
+        <ul className="rows" data-account-history>
+          {a.history.map((h, i) => (
+            <li key={i} className="row">
+              <div className="row-main">
+                <p className="row-title">
+                  {h.details?.from} → {h.details?.to}
+                </p>
+                <p className="row-sub">
+                  {date(h.at)} · {h.actor}
+                  {h.details?.note ? ` · ${h.details.note}` : ''}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="fine">No classification changes recorded.</p>
+      )}
+    </section>
+  )
+}
+
 function CustomerDetail({ id, onBack, onChanged }) {
   const [d, setD] = useState(null)
   const [health, setHealth] = useState(null)
@@ -307,6 +457,8 @@ function CustomerDetail({ id, onBack, onChanged }) {
           </div>
         </dl>
       </section>
+
+      <AccountType id={d.id} onChanged={onChanged} />
 
       <section className="card">
         <h2 className="card-title">Invitations</h2>
@@ -975,6 +1127,64 @@ const SALES_KINDS = [
   ['sales', 'GetShowUps sales assistant', 'Real business record "getshowups": public chat at /chat/getshowups, leads and consultation calls in the product, "Ask our AI about GetShowUps" on the homepage once its calendar is connected.'],
   ['lab', 'Voice Lab test business', 'Admin-marked TEST business "getshowups-lab" with the same sales configuration, for Voice Lab sessions (dry run; never counted; never customer-facing).'],
 ]
+function CreateBusiness({ onCreated }) {
+  const [form, setForm] = useState({ name: '', classification: 'sandbox', ownerEmail: '', note: '' })
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!window.confirm(`Create "${form.name}" as ${form.classification === 'sandbox' ? 'an admin sandbox (test business, complimentary)' : 'an internal live business (complimentary, production, real customers)'}?`)) return
+    setBusy(true)
+    const { status, data } = await api('/api/platform/account', { method: 'POST', body: { action: 'create', ...form, confirm: true } })
+    setBusy(false)
+    setResult(status === 200 ? { id: data.id } : { error: data?.error || status })
+    if (status === 200) {
+      setForm({ name: '', classification: 'sandbox', ownerEmail: '', note: '' })
+      onCreated?.()
+    }
+  }
+  return (
+    <section className="card" aria-label="Create an internal or sandbox business" data-create-business>
+      <h2 className="card-title">Create an internal or sandbox business</h2>
+      <p className="fine">Complimentary accounts for GetShowUps’ own use: never a Stripe checkout. A sandbox is a test business (out of metrics, test providers only). An internal live business has real customers and counts in operations, never in paying customers or MRR.</p>
+      <form className="form" onSubmit={submit}>
+        <label className="field">
+          <span>Business name</span>
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required maxLength={80} data-create-name />
+        </label>
+        <label className="field">
+          <span>Type</span>
+          <select value={form.classification} onChange={(e) => setForm({ ...form, classification: e.target.value })} data-create-type>
+            <option value="sandbox">Admin sandbox (test)</option>
+            <option value="internal_live">Internal live (real customers)</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Owner email <em>(optional; must not already own a business)</em></span>
+          <input value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} inputMode="email" />
+        </label>
+        <label className="field">
+          <span>Reason</span>
+          <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} maxLength={300} />
+        </label>
+        <button type="submit" className="btn btn-sm btn-primary" disabled={busy || form.name.trim().length < 2} data-create-submit>
+          {busy ? 'Creating…' : 'Create'}
+        </button>
+        {result?.id && (
+          <p className="fine" role="status" data-create-result={result.id}>
+            Created {result.id}.
+          </p>
+        )}
+        {result?.error && (
+          <p className="form-error" role="alert">
+            {result.error === 'owner_has_business' ? 'That email already owns a business.' : result.error === 'migration_required' ? 'Apply migration 0034 first.' : `Couldn’t create it (${result.error}).`}
+          </p>
+        )}
+      </form>
+    </section>
+  )
+}
+
 function SalesSetup() {
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState('')
@@ -1056,6 +1266,7 @@ function Overview({ me }) {
         </button>
       </div>
       <SalesSetup />
+      <CreateBusiness onCreated={load} />
       {inviting && (
         <section className="card enter">
           <h2 className="card-title">Invite a new customer</h2>

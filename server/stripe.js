@@ -3,6 +3,7 @@
 // Configured only when STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are set. No card data is stored;
 // prices live in Stripe (plans reference Stripe Price ids). Nothing here suspends accounts.
 import { queueRecoveryEmail } from './billing-recovery.js'
+import { isComplimentary } from './business-accounts.js'
 import { recordEvent } from './auditlog.js'
 import { enforceAdsHold } from './ads/holds.js'
 import { timingSafeEqual } from './google-oauth.js'
@@ -109,6 +110,7 @@ export async function billingSubscription(env, customerId) {
 const LIVE_SUB = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']
 export async function createCheckout(env, { customer, email, planId, origin }) {
   if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
+  if (await isComplimentary(env, customer.id)) return { ok: false, httpStatus: 403, error: 'complimentary' }
   if (!(await sandboxCheckoutAllowed(env, customer.id, email))) return { ok: false, httpStatus: 403, error: 'billing_not_live' }
   const db = env.ONBOARDING_DB
   const plan = await db.prepare('SELECT * FROM plans WHERE id = ?1 AND active = 1').bind(planId).first()

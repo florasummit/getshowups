@@ -2,6 +2,7 @@
 // device resumes at the right place), the business profile collected during onboarding, and the
 // launch-readiness checklist shown at the end of onboarding and on the dashboard.
 import { unapprovedClaims } from './ads/spec.js'
+import { isComplimentary } from './business-accounts.js'
 import { billingMisconfigured, billingSubscription, listPlans, stripeConfigured, stripeLiveEnabled } from './stripe.js'
 import { websiteSummary } from './website.js'
 import { domainFor } from './domains.js'
@@ -90,7 +91,8 @@ export async function saveProfile(db, customerId, p, now = Date.now()) {
 export async function onboardingSteps(env, customer, { calendar }) {
   const db = env.ONBOARDING_DB
   const signup = customer ? await getSignup(db, customer.id) : null
-  if (!signup) {
+  const complimentary = customer ? await isComplimentary(env, customer.id) : false
+  if (!signup || complimentary) {
     const steps = [
       { id: 'business', done: Boolean(customer) },
       { id: 'calendar', done: calendar },

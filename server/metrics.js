@@ -1,6 +1,7 @@
 // Platform metrics computed from real records only. Anything without data is null, never estimated.
 // Test records (server/testdata.js) are excluded from every count.
 import { RECOVERY_MS } from './lifecycle.js'
+import { accountsMap, accountsReady, stripeBilledSql } from './business-accounts.js'
 import { internalEmails, isTestLead } from './testdata.js'
 import { isTestBusinessSql } from './testbusiness.js'
 import { stripeConfigured, stripeLiveEnabled } from './stripe.js'
@@ -60,6 +61,8 @@ export async function customerRows(env, now = Date.now(), { only = null } = {}) 
 
   const calendars = await connectedCalendars(env, only)
   const deleted = await deletedIds(db)
+  const accounts = (await accountsMap(env)) || new Map()
+  const DEFAULT_ACCOUNT = { classification: 'customer', billing: 'stripe', environment: 'production', providerSpend: 'allowed' }
   const deletedRows = deleted
   const rows = []
   for (const r of results) {
@@ -68,7 +71,7 @@ export async function customerRows(env, now = Date.now(), { only = null } = {}) 
       const job = deleted.get(r.id)
       // A deletion that keeps failing needs a person (e.g. an unreachable ad campaign to confirm, Stripe down for long).
       const stuck = job.status === 'in_progress' && job.last_error && job.attempts >= 3
-      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
+      rows.push({ id: r.id, name: r.name, owners: '', source: r.source, createdVia: r.created_via, appointmentMode: r.appointment_mode, status: r.status, createdAt: r.created_at, onboarding: 'deleted', deleted: true, account: accounts.get(r.id) || DEFAULT_ACCOUNT, pendingInvites: 0, testLeads: 0, lastBooking: null, testBusiness: Boolean(r.is_test), calendarConnected: false, leads30: 0, booked30: 0, website: { live: false, domain: null }, subscription: null, attention: stuck ? ['deletion_stuck'] : [] })
       continue
     }
     const calendar = calendars.has(r.id)
@@ -105,6 +108,7 @@ export async function customerRows(env, now = Date.now(), { only = null } = {}) 
     rows.push({
       id: r.id,
       name: r.name,
+      account: accounts.get(r.id) || DEFAULT_ACCOUNT,
       owners: r.owners || '',
       source: r.source,
       createdVia: r.created_via,
@@ -197,8 +201,10 @@ export async function growth(env, rows, now = Date.now()) {
     since30,
     internal,
   )
+  // Complimentary accounts (server/business-accounts.js) are never paying customers, whatever their Stripe row says.
+  const BILLED = (await accountsReady(db)) ? `AND ${stripeBilledSql('s.customer')}` : ''
   const subs = await one(
-    `SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions s WHERE ${REAL('s.customer')}`,
+    `SELECT count(*) AS any_sub, sum(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN status = 'active' THEN mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN status = 'trialing' THEN 1 ELSE 0 END) AS trialing, max(currency) AS currency FROM subscriptions s WHERE ${REAL('s.customer')} ${BILLED}`,
   )
   const revenue = async (from, to) => {
     const { results } = await db.prepare(`SELECT props FROM events e WHERE type = 'revenue' AND at >= ?1 AND at < ?2 AND ${REAL('e.customer')}`).bind(from, to).all()
@@ -235,7 +241,7 @@ export async function growth(env, rows, now = Date.now()) {
     }
   }
   const liveSubs = billing && live
-    ? await liveOnly(`SELECT sum(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN s.status = 'active' THEN s.mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN s.status = 'trialing' THEN 1 ELSE 0 END) AS trialing FROM subscriptions s ${LIVE_SUB} WHERE ${REAL('s.customer')}`)
+    ? await liveOnly(`SELECT sum(CASE WHEN s.status = 'active' THEN 1 ELSE 0 END) AS paying, sum(CASE WHEN s.status = 'active' THEN s.mrr_cents ELSE 0 END) AS mrr, sum(CASE WHEN s.status = 'trialing' THEN 1 ELSE 0 END) AS trialing FROM subscriptions s ${LIVE_SUB} WHERE ${REAL('s.customer')} ${BILLED}`)
     : {}
   const canceled30 = billing && live
     ? await liveOnly(`SELECT count(DISTINCT e.customer) AS n FROM events e JOIN subscription_modes m ON m.customer = e.customer AND m.livemode = 1 WHERE e.type = 'subscription_canceled' AND e.at >= ?1 AND ${REAL('e.customer')}`, since30)

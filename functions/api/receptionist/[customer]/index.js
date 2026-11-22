@@ -9,13 +9,14 @@ import { getProfile } from '../../../../server/onboarding.js'
 import { hostingStatus, isHosted, liveContent } from '../../../../server/website.js'
 import { connectedHost } from '../../../../server/domains.js'
 import { siteOrigin } from '../../../../server/auth.js'
+import { providerSpendAllowed } from '../../../../server/business-accounts.js'
 
 export async function onRequestGet({ request, env, params }) {
   const rl = await hitByIp(env, 'bookView', request)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const { customer, response } = await bookableCustomer(env, params)
   if (response) return response
-  const on = await receptionistOn(env, customer)
+  const on = (await receptionistOn(env, customer)) && (await providerSpendAllowed(env, customer.id))
   if (!on) return json(200, { enabled: false, name: customer.name })
   const s = await getSettings(env.ONBOARDING_DB, customer.id)
   const profile = await getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)

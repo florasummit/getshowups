@@ -83,6 +83,13 @@ Staff identities are kept for accountability. Limits of its tamper evidence: doc
 4. Privacy policy and FAQ wording (`src/legal/Privacy.jsx`, `src/content/site.js`), not changed yet.
 5. Whether to send the daily audit head hash outside Cloudflare (stronger tamper evidence).
 
+## Business account types (migration 0034)
+
+`business_accounts` holds the classification, billing entitlement, environment and provider-spend setting of a
+business plus the staff admin who set it (`set_by`, a staff address, readable like other admin actors) and a short
+reason. Erased with the business (ERASED_TABLES). The change history lives in the permanent audit log
+(`account.classify` / `account.create`), where addresses are refs.
+
 ## Follow-up conversations (migration 0024)
 
 - `thread_messages` holds conversation text for the owner's inbox. It is never logged, never shown in admin views, and

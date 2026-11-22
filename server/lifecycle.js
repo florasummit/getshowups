@@ -11,6 +11,7 @@ import { adsHold } from './ads/holds.js'
 import { deletionEnabled, deletionStatus, requestDeletion } from './deletion.js'
 import { recordEvent } from './auditlog.js'
 import { testStatus } from './testbusiness.js'
+import { accountOf } from './business-accounts.js'
 
 export const RECOVERY_MS = 90 * 24 * 60 * 60 * 1000
 // The retention schedule after recovery ends: separately approved from deletion itself.
@@ -29,6 +30,7 @@ async function endedAt(db, customerId, sub) {
 
 export async function recoveryFor(env, customerId, now = Date.now()) {
   const db = env.ONBOARDING_DB
+  if ((await accountOf(env, customerId)).billing === 'complimentary') return null
   const sub = await getSubscription(db, customerId)
   if (sub?.status !== 'canceled') return null
   if (!sub.stripeSubscriptionId && !(await billedSignup(db, customerId))) return null
@@ -40,17 +42,20 @@ export async function recoveryFor(env, customerId, now = Date.now()) {
 
 export async function lifecycle(env, customerId, now = Date.now()) {
   const db = env.ONBOARDING_DB
-  const [sub, hosting, hold, recovery, deletion] = await Promise.all([
+  const [sub, hosting, hold, recovery, deletion, account] = await Promise.all([
     getSubscription(db, customerId),
     hostingStatus(db, customerId, now, env),
     adsHold(env, customerId).catch(() => null),
     recoveryFor(env, customerId, now),
     deletionStatus(db, customerId),
+    accountOf(env, customerId),
   ])
   const stage = deletion
     ? deletion.status === 'completed'
       ? 'deleted'
       : 'deleting'
+    : account.billing === 'complimentary'
+      ? 'complimentary'
     : recovery
       ? recovery.expired
         ? 'recovery_ended'
@@ -64,6 +69,7 @@ export async function lifecycle(env, customerId, now = Date.now()) {
             : 'not_billed'
   return {
     stage,
+    account: { classification: account.classification, billing: account.billing, environment: account.environment },
     subscription: sub ? { status: sub.status, currentPeriodEnd: sub.currentPeriodEnd, cancelAtPeriodEnd: sub.cancelAtPeriodEnd } : null,
     hosting,
     adsHold: hold?.reason ?? null,

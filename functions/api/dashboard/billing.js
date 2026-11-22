@@ -9,6 +9,7 @@ import { requireSession, siteOrigin } from '../../../server/auth.js'
 import { billingSubscription, createCheckout, createPortal, getSubscription, listPlans, stripeConfigured } from '../../../server/stripe.js'
 import { getSignup } from '../../../server/onboarding.js'
 import { recoveryFor } from '../../../server/lifecycle.js'
+import { accountOf } from '../../../server/business-accounts.js'
 
 const isBilled = async (db, customerId, sub) => Boolean(sub?.stripeSubscriptionId) || Boolean(await getSignup(db, customerId))
 
@@ -19,9 +20,12 @@ export async function onRequestGet({ request, env }) {
   // Access view: after go-live a test-mode subscription shows as 'sandbox' (subscribe for real; not manageable).
   const sub = await billingSubscription(env, session.customer.id)
   const plans = (await listPlans(env.ONBOARDING_DB)).map(({ id, name, trialDays, entitlements }) => ({ id, name, trialDays, entitlements }))
+  const account = await accountOf(env, session.customer.id)
   return json(200, {
     configured: plans.length > 0,
-    billed: await isBilled(env.ONBOARDING_DB, session.customer.id, sub),
+    // Complimentary (internal live / sandbox): never billed, no plan card, checkout refused server-side too.
+    billed: account.billing === 'complimentary' ? false : await isBilled(env.ONBOARDING_DB, session.customer.id, sub),
+    complimentary: account.billing === 'complimentary',
     plans,
     subscription: sub && { status: sub.status, planId: sub.planId, currentPeriodEnd: sub.currentPeriodEnd, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, manageable: Boolean(sub.stripeCustomerId) && !sub.sandbox },
     recovery: await recoveryFor(env, session.customer.id),

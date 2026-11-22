@@ -123,6 +123,18 @@ function BillingCard({ billing }) {
   const [state, setState] = useState({})
   const sub = billing.subscription
   const live = sub && !['canceled', 'incomplete', 'sandbox'].includes(sub.status)
+  if (billing.complimentary) {
+    return (
+      <section className="card" data-billing="complimentary">
+        <h2 className="card-title">Plan</h2>
+        <p className="status status--ok">
+          <span className="status-dot" aria-hidden="true" />
+          Complimentary GetShowUps account
+        </p>
+        <p className="fine">This business runs on GetShowUps without a subscription. There is nothing to pay here; outside services you choose (ads, your own AI keys) are billed by those providers.</p>
+      </section>
+    )
+  }
   return (
     <section className="card">
       <h2 className="card-title">Plan</h2>

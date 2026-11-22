@@ -5,6 +5,7 @@
 // Runs daily from the cron and on demand from /admin; every run is recorded in the permanent audit log
 // (ids, statuses and amounts only, no personal data).
 import { appendAudit } from './auditlog.js'
+import { accountsMap } from './business-accounts.js'
 import { fetchStripeSubscription, handleEvent, listPaidInvoices, listStripeSubscriptions, monthlyCents, stripeConfigured, stripeLiveEnabled, stripeStatus } from './stripe.js'
 
 const DAY = 86400000
@@ -109,9 +110,14 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
   // Never when Stripe also lists another running/pending subscription for that business (a resubscription whose
   // webhook is still on its way): reported only. The change is stamped with Stripe's own end time, not this run's,
   // so any later real webhook (e.g. that new subscription's) still wins over it.
+  const complimentary = new Set([...((await accountsMap(env)) || new Map()).entries()].filter(([, a]) => a.billing === 'complimentary').map(([id]) => id))
   const applied = []
   for (const i of issues) {
     if (i.type !== 'status_mismatch' || i.stripe !== 'canceled' || !PAID.includes(i.ours) || !i.customer) continue
+    if (complimentary.has(i.customer)) {
+      applied.push({ customer: i.customer, subscription: i.subscription, ok: false, status: null, error: 'complimentary_account' })
+      continue
+    }
     if ((running.get(i.customer) || []).some((id) => id !== i.subscription)) {
       applied.push({ customer: i.customer, subscription: i.subscription, ok: false, status: null, error: 'other_subscription_running' })
       continue
