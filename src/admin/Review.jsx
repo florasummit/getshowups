@@ -22,6 +22,16 @@ const STATUS_HELP = {
 }
 const HEALTH_LABEL = { failing: 'Failing', degraded: 'Quiet lately', healthy: 'Working', unknown: 'No evidence yet', not_applicable: '' }
 const when = (ms) => (ms ? fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
+const TIER_ORDER = ['operate', 'payments', 'advertising', 'optional', 'later']
+const GROUP_ORDER = ['broken', 'works', 'testable', 'configuration', 'approval', 'not_built']
+const GROUP_HELP = {
+  broken: 'Switched on and failing right now. Fix first.',
+  works: 'Live in production and seen working recently.',
+  testable: 'You can use or test these now. Some run in test mode only until you approve going live.',
+  configuration: 'Built. Waiting on credentials, a binding or a migration: setup work, not a decision.',
+  approval: 'Built and switched off. Each needs your explicit decision to turn on.',
+  not_built: 'Not built. Nothing waits on these unless they become needed.',
+}
 const Badge = ({ s }) => (
   <span className={`tag st st--${s}`} data-status={s}>
     {STATUS_LABEL[s] || s}
@@ -103,6 +113,20 @@ function Capability({ c, names }) {
             <dd>{c.approval}</dd>
           </div>
         )}
+        {c.nextStep && (
+          <div>
+            <dt>Next step</dt>
+            <dd>
+              {c.nextStep}
+              {c.action && (
+                <>
+                  {' '}
+                  <a href={c.action.href}>{c.action.label}</a>
+                </>
+              )}
+            </dd>
+          </div>
+        )}
       </dl>
       <CapabilityEvents id={c.id} />
       </details>
@@ -133,6 +157,75 @@ function CapabilityEvents({ id }) {
   )
 }
 
+// The founder's plain-language map: what works, what can be tested, what needs setup, what needs a decision, what is
+// broken, what is optional. Same data as the capability list below (server/ops/review.js groupOf / nextStepOf);
+// nothing is computed in the browser. A tier filter shows what still stands between the founder and each goal.
+function PlainMap({ r, byId }) {
+  const [tier, setTier] = useState('operate')
+  const plain = r.plain
+  if (!plain) return null
+  const t = plain.tiers[tier]
+  const inTier = (id) => tier === 'all' || byId.get(id)?.tier === tier
+  const tierLabel = (id) => plain.tiers[byId.get(id)?.tier]?.label || ''
+  return (
+    <section className="card" aria-labelledby="rv-plain" data-plain-map>
+      <h2 className="card-title" id="rv-plain">
+        What this means for operating
+      </h2>
+      <div className="seg seg--sm" role="tablist" aria-label="What for">
+        {[...TIER_ORDER.map((k) => [k, plain.tiers[k].label]), ['all', 'Everything']].map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tier === k} className={tier === k ? 'seg-on' : ''} onClick={() => setTier(k)} data-tier-tab={k}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {t && (
+        <p className={t.ready ? 'notice-ok' : t.ready === false ? 'notice-warn' : 'fine'} role="status" data-tier-ready={t.ready === null ? 'na' : t.ready ? 'yes' : 'no'}>
+          {t.ready === null
+            ? `${plural(t.capabilities.length, 'capability')} in this tier; nothing waits on them.`
+            : t.ready
+              ? `Nothing in “${t.label.toLowerCase()}” is blocked: every capability needed here works or can be tested now.`
+              : `${plural(t.blockers.length, 'blocker')} for “${t.label.toLowerCase()}”: ${t.blockers.map((id) => byId.get(id)?.name || id).join('; ')}.`}
+        </p>
+      )}
+      {GROUP_ORDER.map((g) => {
+        const ids = (plain.groups[g] || []).filter(inTier)
+        if (!ids.length) return null
+        return (
+          <div key={g} className="plain-group" data-plain-group={g}>
+            <h3 className="journey-title">
+              {plain.groupLabels[g]} <span className="fine">({ids.length})</span>
+            </h3>
+            <p className="fine">{GROUP_HELP[g]}</p>
+            <ul className="rows">
+              {ids.map((id) => {
+                const c = byId.get(id)
+                return (
+                  <li key={id} className="row" data-plain-cap={id}>
+                    <div className="row-main">
+                      <p className="row-title">
+                        {c.name} {tier === 'all' && <span className="fine">· {tierLabel(id)}</span>}
+                      </p>
+                      <p className="row-sub">
+                        {[c.note, c.verification?.evidence, c.nextStep].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    {c.action && (
+                      <a className="btn btn-sm btn-quiet" href={c.action.href} data-plain-action={id}>
+                        {c.action.label}
+                      </a>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
 function Platform({ r, openBusiness }) {
   const names = useMemo(() => Object.fromEntries(r.capabilities.map((c) => [c.id, c.name])), [r])
   const byId = useMemo(() => new Map(r.capabilities.map((c) => [c.id, c])), [r])
@@ -156,6 +249,8 @@ function Platform({ r, openBusiness }) {
           {r.audit ? ` · audit log ${r.audit.ok ? 'intact' : `BROKEN at ${r.audit.brokenAt}`}` : ''} · generated {when(r.generatedAt)}
         </p>
       </section>
+
+      <PlainMap r={r} byId={byId} />
 
       <section className="card" aria-labelledby="rv-incidents">
         <h2 className="card-title" id="rv-incidents">
