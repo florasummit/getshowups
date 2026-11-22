@@ -106,6 +106,39 @@ Published rules reach conversations only for businesses in `AI_RULES_LIVE_BUSINE
 exactly as described above. Rules add a short block to the cached system prompt, one deterministic note per turn (what
 is known, the one thing to ask next) and extra tool guards; they never remove a platform guard.
 
+## Voice management (2026-11-22, migration 0035)
+
+**Principle: customers choose the voice experience; GetShowUps manages the technology.**
+
+- **Owner (Dashboard → Receptionist → "Receptionist voice")**: a voice from the ACTIVE provider's catalog (with the
+  provider's own public preview samples, played one at a time and labelled as samples), a personality preset
+  (Balanced = today's manner, Warm & Friendly, Professional & Polished, Calm & Reassuring, Upbeat & Energetic: fixed
+  prompt wording in `server/voice/style.js`, style only; facts, prices, area, booking guards and tools are untouched)
+  and a speaking pace where the provider supports it (Retell `voice_speed`, ElevenLabs `speed`; OpenAI: control
+  disabled with the reason). Language: English only today (shown, not editable). Owners never see a provider name.
+  Saves carry a `version` (409 `stale`, never a silent overwrite); every save is a `receptionist.voice` event.
+- **Catalog (`server/voice/catalog.js`)**: Retell `GET /list-voices` (gender/accent/age as Retell states them,
+  `preview_audio_url`), ElevenLabs `GET /v2/voices` (labels, `preview_url`), OpenAI = the documented ten voices
+  (no metadata, no samples). Cached in `voice_catalog_cache` for 24 h; a provider failure serves the last list as
+  stale; nothing is inferred from a name; only https sample URLs are offered; a stored voice id must be in the list.
+- **Where it applies**: Retell customer calls and Lab calls send `agent_override.agent.{voice_id, voice_speed}` on
+  `create-web-call` (one shared agent, per-business voice; verified live 2026-11-22: the API accepts the shape; the
+  audible result is confirmed in a joined Lab call). ElevenLabs sessions send `tts.{voice_id, speed}` overrides
+  (enabled on the agent by `scripts/elevenlabs-setup.mjs`). OpenAI sessions take the voice. The Lab lets an admin
+  pick a candidate voice of any provider (validated against the catalog) to test before a switch.
+- **Provider (admin only, `server/voice/settings.js`)**: the business's provider for customer-facing voice is stored
+  in `receptionist_voice_settings.provider` (no row = Retell = today). The control under Receptionist is rendered
+  only for platform admins (server-checked on every action; membership never grants it). Capabilities are stated
+  from the code, never from a Lab session working: Retell = customers' browser voice (the only live path); OpenAI
+  Realtime and ElevenLabs = Voice Lab only ("test only"); NO provider has phone routing (no numbers, routing.js is
+  simulated). Switching runs a checklist (configured, live-capable, business active, phone routing n/a, tools,
+  voice valid or explicitly the provider default — a voice is never substituted silently, booking ready, a finished
+  session on that provider in the last 30 days), shows the consequences, requires `confirm: true` and the current
+  version, writes once (atomic conditional update), keeps the previous provider/voice/pace for a one-click rollback,
+  and audits `receptionist.provider_switched` / `_switch_blocked` / `_rolled_back` (admin_audit + audit_log). A
+  blocked switch changes nothing. Calls in progress stay on the provider that created them (the route only affects
+  new calls). Live telephone switching does not exist and is not claimed.
+
 ## Location policy (2026-11-22)
 
 The receptionist answers questions about services, prices, hours and how soon it can usually come without asking

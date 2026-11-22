@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, phoneText, whenFull } from '../lib/api.js'
 import { Ago, PageHeader, Pill, Section } from './ui.jsx'
+import ReceptionistVoice from './ReceptionistVoice.jsx'
 
 // Owner: the AI receptionist. Order = what an owner needs first: is it working → who needs me → what it booked →
 // what happened in each conversation → settings. Every status is the real one; nothing that isn't connected looks on.
@@ -415,6 +416,8 @@ export default function Receptionist() {
           </>
         )}
       </Section>
+
+      {data.voice && <ReceptionistVoice voice={data.voice} admin={Boolean(data.admin)} providers={data.providers || null} reload={load} />}
 
       <Section title="Settings" label="Receptionist settings">
         <form className="ui-settings" onSubmit={save}>

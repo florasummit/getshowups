@@ -39,7 +39,9 @@ const CALL_TTL_MS = 60 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
-export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null) {
+// `agentOverride`: { voice_id?, voice_speed? } from the business's voice settings (server/voice/style.js sessionVoiceFor),
+// sent as create-web-call agent_override.agent so ONE shared agent speaks with each business's chosen voice.
+export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null, agentOverride = null) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
   if (!voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available' }
   const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now, { attribution })
@@ -50,7 +52,7 @@ export async function startVoiceCall(env, customer, now = Date.now(), existing =
       headers: { Authorization: `Bearer ${env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       // 'latest' = the agent's newest version, draft included (we never publish automatically); override with
       // RETELL_AGENT_VERSION (e.g. 'latest_published' or a version number) once a version is published.
-      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id } }),
+      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id }, ...(agentOverride && typeof agentOverride === 'object' && Object.keys(agentOverride).length ? { agent_override: { agent: agentOverride } } : {}) }),
       signal: AbortSignal.timeout(10_000),
     })
   } catch {

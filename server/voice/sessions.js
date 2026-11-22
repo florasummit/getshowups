@@ -13,6 +13,7 @@ import { testStatus } from '../testbusiness.js'
 import { startConversation, loadConversation, endConversation, receptionistReady } from '../receptionist/engine.js'
 import { emailRef } from '../auditlog.js'
 import { PROVIDERS, labEnabled, labDailyMinutes, labSettings, providerStatus, estimateMicros } from './providers.js'
+import { labVoiceFor } from './settings.js'
 
 export const LAB_SESSION_MAX_MS = 15 * 60 * 1000
 const TOOL_KINDS = new Set(['save_customer_details', 'check_service_area', 'request_coverage', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
@@ -48,7 +49,12 @@ export async function startLabSession(env, admin, { customer: customerId, provid
   const conv = await startConversation(env, customer, 'voice', now)
   const callId = `lab_${randomToken(12)}`
   const by = await emailRef(admin.email)
-  const lab = { provider, dryRun: dryRun !== false, by, startedAt: now, callId, metrics: {}, settings: labSettings(provider, settings) }
+  const chosen = labSettings(provider, settings)
+  if (chosen.voice && provider !== 'openai') {
+    const ok = await labVoiceFor(env, provider, chosen.voice, now)
+    if (!ok) return { ok: false, httpStatus: 400, error: 'voice_unknown' }
+  }
+  const lab = { provider, dryRun: dryRun !== false, by, startedAt: now, callId, metrics: {}, settings: chosen }
   await env.ONBOARDING_DB.batch([
     env.ONBOARDING_DB.prepare('UPDATE receptionist_conversations SET state = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(conv.id, customer.id, JSON.stringify({ lab }), now),
     env.ONBOARDING_DB.prepare('INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES (?1, ?2, ?3, ?4, ?5)').bind(callId, customer.id, conv.id, provider === 'retell' ? 'retell-lab' : provider, now),

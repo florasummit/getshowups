@@ -75,7 +75,7 @@ export const agentBody = ({ name, hostname, toolIds, voiceId, llm, keep = null }
   },
   platform_settings: {
     auth: { enable_auth: true, allowlist: [{ hostname }] },
-    overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true } } },
+    overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true }, tts: { voice_id: true, speed: true } } },
   },
 })
 

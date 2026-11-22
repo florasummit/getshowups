@@ -34,11 +34,12 @@ test('readiness: Lab on + Retell configured → Retell can run now, the others s
   const text = JSON.stringify(providerReadiness({ ...env, OPENAI_API_KEY: SECRET }))
   assert.ok(!text.includes(SECRET) && !text.includes('retell_SECRET') && !text.includes('el_SECRET'))
 })
-test('per-session settings: only an allowlisted OpenAI voice is kept; other providers take none; the minted session carries it', async () => {
+test('per-session settings: only an allowlisted OpenAI voice is kept; other providers keep a well-formed candidate id for the catalog check; the minted session carries it', async () => {
   assert.deepEqual(labSettings('openai', { voice: 'cedar', model: 'gpt-x' }), { voice: 'cedar' })
   assert.deepEqual(labSettings('openai', { voice: 'nope' }), {})
-  assert.deepEqual(labSettings('retell', { voice: 'cedar' }), {})
-  assert.deepEqual(labSettings('elevenlabs', { voice: 'cedar' }), {})
+  // Retell / ElevenLabs: a well-formed candidate voice id is kept here; startLabSession checks it against the catalog.
+  assert.deepEqual(labSettings('retell', { voice: 'retell-Cimo' }), { voice: 'retell-Cimo' })
+  assert.deepEqual(labSettings('elevenlabs', { voice: 'bad id!' }), {})
   assert.ok(OPENAI_VOICES.includes('marin') && OPENAI_VOICES.length === 10)
   const sent = []
   const fakeFetch = async (url, init) => {

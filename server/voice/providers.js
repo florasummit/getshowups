@@ -60,6 +60,8 @@ export const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage',
 export function labSettings(provider, input) {
   const out = {}
   if (provider === 'openai' && input && OPENAI_VOICES.includes(input.voice)) out.voice = input.voice
+  // Retell / ElevenLabs: a candidate voice id (well-formed here; startLabSession checks it is in the provider's catalog).
+  if ((provider === 'retell' || provider === 'elevenlabs') && input && /^[A-Za-z0-9_.:-]{1,120}$/.test(String(input.voice || ''))) out.voice = String(input.voice)
   return out
 }
 

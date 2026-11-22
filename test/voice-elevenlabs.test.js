@@ -274,7 +274,7 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   const agent = writes.at(-1)[1]
   assert.equal(agent.name, AGENT_NAME)
   assert.deepEqual(agent.conversation_config.agent.prompt.tool_ids, created.toolIds)
-  assert.deepEqual(agent.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true } })
+  assert.deepEqual(agent.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true }, tts: { voice_id: true, speed: true } })
   assert.deepEqual(agent.platform_settings.auth, { enable_auth: true, allowlist: [{ hostname: 'getshowups.com' }] })
   assert.ok(agent.conversation_config.conversation.client_events.includes('client_tool_call') && agent.conversation_config.conversation.client_events.includes('user_transcript'))
   assert.deepEqual(agent.conversation_config.conversation.client_events, CLIENT_EVENTS)
@@ -306,7 +306,7 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.deepEqual(patched.conversation_config.agent.prompt.tool_ids, pub.toolIds)
   assert.ok(!patched.conversation_config.agent.prompt.tool_ids.includes('tool_old'), 'our seven tools replace the dashboard list')
   assert.match(patched.conversation_config.agent.prompt.prompt, /placeholder/i)
-  assert.deepEqual(patched.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true } })
+  assert.deepEqual(patched.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true }, tts: { voice_id: true, speed: true } })
   assert.deepEqual(patched.platform_settings.auth, { enable_auth: true, allowlist: [{ hostname: 'getshowups.com' }] })
   assert.deepEqual(patched.conversation_config.conversation.client_events, CLIENT_EVENTS)
   assert.equal((await setupElevenLabsAgent({ ...opts, agentId: 'agent_missing', apply: true })).error, 'agent_not_found')

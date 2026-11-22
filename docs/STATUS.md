@@ -2,6 +2,21 @@
 
 _Update at the end of every task. Newest first._
 
+## Receptionist voice management (2026-11-22) — feat/receptionist-voice (migration 0035; PR for approval)
+
+- Owners: Dashboard → Receptionist → "Receptionist voice": voice from the active provider's catalog (provider samples
+  as previews, one at a time, labelled), personality preset (style only), pace where supported, Save/Cancel, versioned
+  saves. Admins (platform list, server-checked): "AI voice provider" control with honest readiness, a checked +
+  confirmed + audited + reversible switch; OpenAI/ElevenLabs are test only (no customer path) and cannot be activated;
+  no provider has phone routing. docs/RECEPTIONIST.md "Voice management".
+- Facts: customer-facing voice = Retell browser calls only; Retell accepts a per-call voice/pace override
+  (`agent_override.agent`, API accepted live 2026-11-22; audible result to confirm in a joined Lab call);
+  ElevenLabs tts overrides enabled on the agent (setup script); OpenAI voices fixed, no samples, no pace.
+- Existing businesses (no row) are unchanged: same Retell call body, same prompt (Balanced = no personality block).
+- Tests: test/voice-settings.test.js (catalog, cache, validation, owner preferences, concurrency, isolation, routes,
+  admin switch/blockers/rollback/audit, per-provider application, prompt), test/e2e/receptionist-voice.spec.js
+  (owner desktop+phone, admin desktop), voice-lab.spec updated (Retell faked in e2e).
+
 ## ElevenLabs in the Voice Lab: connect the published agent in place (2026-11-22) — feat/elevenlabs-existing-agent (no migration; PR for approval)
 
 - The ElevenLabs path (adapter, signed-URL route, shared tool runner, metrics, cost estimate) already existed; what

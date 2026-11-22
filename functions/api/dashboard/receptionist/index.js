@@ -3,6 +3,12 @@
 //   GET ?id=<conversation> → { conversation: { transcript (what the customer saw/heard), events, outcome, … } }
 //   POST { action: 'settings', enabled, mode, greeting, knowledge, transferPhone } → saved settings
 //   POST { action: 'resolve', requestId } → callback request / message marked done
+//   POST { action: 'voice', voiceId?, personality?, pace?, version } → how the receptionist sounds (owner; the voice
+//        must be in the active provider's catalog; version = optimistic concurrency, 409 stale)
+//   Platform admins only (server-checked; the owner UI never shows these):
+//   POST { action: 'provider_check', provider, voiceId?, useDefaultVoice? } → the switching checklist (nothing changes)
+//   POST { action: 'provider_switch', provider, voiceId?, useDefaultVoice?, confirm: true, version } → switch (atomic, audited)
+//   POST { action: 'provider_rollback', confirm: true, version } → back to the configuration before the last switch
 // Session business only; POST is same-origin and rate-limited.
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
@@ -13,6 +19,7 @@ import { messagesLive } from '../../../../server/email.js'
 import { getSettings, modelConfigured, receptionistReady, receptionistRequestsReady, visibleTranscript } from '../../../../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, LIMITS } from '../../../../server/receptionist/knowledge.js'
 import { voiceStatus } from '../../../../server/receptionist/voice.js'
+import { checkProviderSwitch, getVoiceSettings, isPlatformAdminEmail, ownerView, providerOverview, rollbackProvider, saveVoicePreferences, switchProvider, voiceSettingsReady } from '../../../../server/voice/settings.js'
 
 const MODES = ['ai_first', 'human_first', 'after_hours']
 const clean = (v, max) => String(v ?? '').replace(/\r/g, '').trim().slice(0, max)
@@ -79,8 +86,14 @@ export async function onRequestGet({ request, env }) {
     .prepare("SELECT sum(status = 'booked') AS booked, count(*) AS total FROM receptionist_conversations WHERE customer = ?1 AND turns > 0")
     .bind(customer.id)
     .first()
+  const voicePrefs = await getVoiceSettings(db, customer.id)
+  const admin = isPlatformAdminEmail(env, session.email)
   return json(200, {
     ready: true,
+    // How the receptionist sounds (owner-editable; provider never named). Hidden until migration 0035 is applied.
+    voice: (await voiceSettingsReady(db)) ? ownerView(voicePrefs, env) : null,
+    // Platform admins (server-checked) also get the provider view for the advanced, admin-only control.
+    ...(admin ? { admin: true, providers: { ...(await providerOverview(env, customer)), version: voicePrefs.version, previous: voicePrefs.previous ? { provider: voicePrefs.previous.provider, voiceName: voicePrefs.previous.voiceName || null, at: voicePrefs.previous.at } : null } } : {}),
     capabilities: {
       model: modelConfigured(env), // the AI can answer at all
       chat: modelConfigured(env),
@@ -117,6 +130,26 @@ export async function onRequestPost({ request, env }) {
     if (!(r?.meta?.changes > 0)) return json(404, { error: 'not_found' })
     await recordEvent(db, { type: 'receptionist.request_resolved', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist_request', id: b.requestId }, outcome: 'success' }).catch(() => {})
     return json(200, { ok: true })
+  }
+  if (b?.action === 'voice') {
+    const r = await saveVoicePreferences(env, session.customer, { voiceId: b.voiceId, personality: b.personality, pace: b.pace, version: b.version }, session.email, now)
+    if (!r.ok) return json(r.error === 'stale' ? 409 : r.error === 'not_ready' ? 409 : 400, { error: r.error, ...(r.version !== undefined ? { version: r.version } : {}) })
+    return json(200, { voice: ownerView(r.settings, env) })
+  }
+  if (b?.action === 'provider_check' || b?.action === 'provider_switch' || b?.action === 'provider_rollback') {
+    // Admin-only, checked here on the server (membership of the business never grants it; the owner UI hides it).
+    if (!isPlatformAdminEmail(env, session.email)) return json(403, { error: 'not_platform_admin' })
+    const admin = { email: session.email }
+    const input = { provider: String(b.provider || ''), voiceId: typeof b.voiceId === 'string' ? b.voiceId : '', useDefaultVoice: b.useDefaultVoice === true }
+    if (b.action === 'provider_check') return json(200, { check: await checkProviderSwitch(env, session.customer, input, now) })
+    if (b.action === 'provider_switch') {
+      const r = await switchProvider(env, session.customer, admin, { ...input, confirm: b.confirm === true, version: b.version }, now)
+      if (!r.ok) return json(r.error === 'not_platform_admin' ? 403 : r.error === 'blocked' || r.error === 'confirmation_required' || r.error === 'stale' ? 409 : 400, { error: r.error, check: r.check, ...(r.version !== undefined ? { version: r.version } : {}) })
+      return json(200, { voice: ownerView(r.settings, env), providers: { ...(await providerOverview(env, session.customer, now)), version: r.settings.version, previous: r.settings.previous ? { provider: r.settings.previous.provider, voiceName: r.settings.previous.voiceName || null, at: r.settings.previous.at } : null }, check: r.check })
+    }
+    const r = await rollbackProvider(env, session.customer, admin, { confirm: b.confirm === true, version: b.version }, now)
+    if (!r.ok) return json(r.error === 'not_platform_admin' ? 403 : r.error === 'confirmation_required' || r.error === 'stale' ? 409 : 400, { error: r.error, ...(r.previous ? { previous: r.previous } : {}), ...(r.version !== undefined ? { version: r.version } : {}) })
+    return json(200, { voice: ownerView(r.settings, env), providers: { ...(await providerOverview(env, session.customer, now)), version: r.settings.version, previous: null } })
   }
   if (b?.action !== 'settings') return json(400, { error: 'invalid_request' })
   const mode = MODES.includes(b.mode) ? b.mode : null

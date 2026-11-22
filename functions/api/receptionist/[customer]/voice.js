@@ -8,6 +8,7 @@ import { hit, hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { conversationToken, loadConversation, receptionistOn } from '../../../../server/receptionist/engine.js'
 import { startVoiceCall, voiceAllowedFor, voiceConfigured } from '../../../../server/receptionist/voice.js'
 import { providerSpendAllowed } from '../../../../server/business-accounts.js'
+import { getVoiceSettings, sessionVoiceFor } from '../../../../server/voice/style.js'
 
 export async function onRequestPost({ request, env, params }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
@@ -27,7 +28,11 @@ export async function onRequestPost({ request, env, params }) {
       if (!existing) return json(404, { error: 'conversation_not_found' })
       if (existing.state.endedAt) return json(410, { error: 'conversation_ended' })
     }
-    const r = await startVoiceCall(env, customer, Date.now(), existing, body?.attribution)
+    // The owner's chosen voice and pace (server-side record; the browser sends nothing about it). A business whose
+    // active provider is not Retell has no customer path for it here (admin switching refuses that), so Retell runs
+    // with its defaults rather than failing the customer.
+    const prefs = await getVoiceSettings(env.ONBOARDING_DB, customer.id)
+    const r = await startVoiceCall(env, customer, Date.now(), existing, body?.attribution, sessionVoiceFor('retell', prefs))
     if (!r.ok) return json(502, { error: r.error })
     return json(200, { accessToken: r.accessToken, callId: r.callId, transport: r.transport, iceServers: r.iceServers, conversationId: r.conversationId, token: await conversationToken(env, r.conversationId) })
   } catch (err) {
