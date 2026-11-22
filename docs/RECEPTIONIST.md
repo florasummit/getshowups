@@ -106,6 +106,35 @@ Published rules reach conversations only for businesses in `AI_RULES_LIVE_BUSINE
 exactly as described above. Rules add a short block to the cached system prompt, one deterministic note per turn (what
 is known, the one thing to ask next) and extra tool guards; they never remove a platform guard.
 
+## Customer-facing voice on every provider (2026-11-22, PR #117)
+
+One routing layer, `server/voice/customer.js`, behind the public routes `POST /api/receptionist/:id/voice` (start),
+`voice-connect` (reconnect: OpenAI re-mint / ElevenLabs new signed URL, ≤ 3 per session), `voice-tool` (every tool the
+provider's model calls, run by our server bound to the session's business; dry run for admin tests, real for
+customers) and `voice-session` (transcript batches, end). The provider is decided server-side from
+`receptionist_voice_settings` (no row = Retell); the browser never chooses one. Each session is PINNED to the
+provider it started with (`conv.state.voice.provider`), so an admin switch affects new sessions only. No fallback:
+an active provider that cannot start answers a clear error (`voice_not_configured`, `voice_unavailable`,
+`voice_busy`, `voice_limit`) and the customer keeps typing. Limits: 15 min per session, 3 concurrent sessions per
+business (`RECEPTIONIST_VOICE_CONCURRENT`), 120 min per business per day (`RECEPTIONIST_VOICE_DAILY_MINUTES`),
+600 min per provider per day platform-wide for OpenAI/ElevenLabs (`VOICE_PROVIDER_DAILY_MINUTES`), the public per-IP
+rate limits; `VOICE_PROVIDERS_DISABLED` (comma list) is the emergency off switch per provider. The chat page
+(src/receptionist/ChatPage.jsx) runs Retell's SDK or the shared adapters (src/voice/openai.js, elevenlabs.js) with the
+customer routes; OpenAI's short-lived client secret and ElevenLabs' signed URL are the only credentials the browser sees.
+
+**Admin test sessions on the customer path**: `/chat/<id>?test=<provider>[&voice=<id>]` for a signed-in platform
+admin on an admin-marked TEST business (server-checked; anyone else: 403): the real customer path with that provider,
+dry-run tools, not gated by the Retell release list or the receptionist on/off switch. **Evidence**
+(`providerEvidence`): a finished session (customer-path test or Lab) of the last 30 days on that provider for THIS
+business whose adapter measured audio both ways (`micLive`, `audioReceived`) and whose availability + booking tools
+both succeeded. Readiness states: active · ready (configured, on, evidence complete) · needs_test · not_configured ·
+disabled. Activation (Select → Test now → Review checklist → Activate → Confirm) is refused without evidence.
+
+**Live checks without a browser**: `node scripts/voice-live-check.mjs openai|elevenlabs` runs ONE bounded session
+against the real provider through the same server functions (in-memory D1, Google mocked, keys from Keychain, caller =
+synthesized speech), prints greeting/answers/tools/audio bytes/latency/cost and whether it counts as evidence. It
+proves the integration, not a human's listening experience; a human microphone test is still the final word on quality.
+
 ## Voice management (2026-11-22, migration 0035)
 
 **Principle: customers choose the voice experience; GetShowUps manages the technology.**
@@ -129,9 +158,9 @@ is known, the one thing to ask next) and extra tool guards; they never remove a 
 - **Provider (admin only, `server/voice/settings.js`)**: the business's provider for customer-facing voice is stored
   in `receptionist_voice_settings.provider` (no row = Retell = today). The control under Receptionist is rendered
   only for platform admins (server-checked on every action; membership never grants it). Capabilities are stated
-  from the code, never from a Lab session working: Retell = customers' browser voice (the only live path); OpenAI
-  Realtime and ElevenLabs = Voice Lab only ("test only"); NO provider has phone routing (no numbers, routing.js is
-  simulated). Switching runs a checklist (configured, live-capable, business active, phone routing n/a, tools,
+  from the code AND from evidence: every provider has the customer-facing browser path (PR #117); a provider may be
+  ACTIVATED for a business only with a verified test session on it (see above); NO provider has phone routing (no
+  numbers, routing.js is simulated). Switching runs a checklist (configured, live-capable, business active, phone routing n/a, tools,
   voice valid or explicitly the provider default — a voice is never substituted silently, booking ready, a finished
   session on that provider in the last 30 days), shows the consequences, requires `confirm: true` and the current
   version, writes once (atomic conditional update), keeps the previous provider/voice/pace for a one-click rollback,

@@ -41,6 +41,9 @@ export const RULES = {
   receptionistPerBusiness: { limit: 600, windowSec: 3600 }, // receptionist chat turns per business (flood cap)
   receptionistVoice: { limit: 6, windowSec: 600 }, //  POST /api/receptionist/:id/voice (per IP; each starts a paid call)
   receptionistVoicePerBusiness: { limit: 60, windowSec: 3600 }, // voice calls started per business
+  receptionistVoiceConnect: { limit: 30, windowSec: 600 }, // POST /api/receptionist/:id/voice-connect (per IP; reconnects re-mint)
+  receptionistVoiceTool: { limit: 600, windowSec: 600 }, // POST /api/receptionist/:id/voice-tool (per IP)
+  receptionistVoiceSession: { limit: 300, windowSec: 600 }, // POST /api/receptionist/:id/voice-session (per IP; transcript batches + end)
   receptionistSocket: { limit: 120, windowSec: 600 }, // GET /api/receptionist/llm/:call (per IP, before the call lookup)
   aiRulesWrite: { limit: 240, windowSec: 600 }, //   POST /api/dashboard/ai-rules save/simulate/publish/rollback (per business)
   aiRulesTeach: { limit: 30, windowSec: 3600 }, //   POST /api/dashboard/ai-rules teach (per business; may call the model)

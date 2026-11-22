@@ -23,7 +23,9 @@
 export const ADAPTER_STATES = ['idle', 'connecting', 'connected', 'reconnecting', 'stopping', 'stopped', 'failed']
 export const ADAPTER_EVENTS = ['status', 'transcript', 'tool', 'metrics', 'error']
 
-export const METRIC_KEYS = ['firstResponseMs', 'medianResponseMs', 'p95ResponseMs', 'turns', 'interruptions', 'toolCalls', 'toolFailures', 'reconnects', 'audioSeconds', 'inputTokens', 'outputTokens']
+// micLive / audioReceived (0|1): the caller's microphone produced sound and the agent's audio arrived — measured here,
+// kept by the server as the evidence of audio both ways.
+export const METRIC_KEYS = ['firstResponseMs', 'medianResponseMs', 'p95ResponseMs', 'turns', 'interruptions', 'toolCalls', 'toolFailures', 'reconnects', 'audioSeconds', 'inputTokens', 'outputTokens', 'micLive', 'audioReceived']
 
 // Per-turn response times → the metrics the server keeps (server/voice/sessions.js cleanMetrics drops anything else).
 export function summarizeMetrics(m) {
@@ -41,6 +43,8 @@ export function summarizeMetrics(m) {
     audioSeconds: Number.isFinite(m.audioSeconds) ? m.audioSeconds : undefined,
     inputTokens: m.inputTokens || 0,
     outputTokens: m.outputTokens || 0,
+    micLive: m.micLive ? 1 : 0,
+    audioReceived: m.audioReceived ? 1 : 0,
   }
   return Object.fromEntries(Object.entries(out).filter(([k, v]) => METRIC_KEYS.includes(k) && Number.isFinite(v)).map(([k, v]) => [k, Math.round(v)]))
 }
@@ -71,12 +75,16 @@ export function createTurnMetrics(now = () => Date.now()) {
   let toolCalls = 0
   let toolFailures = 0
   let reconnects = 0
+  let micLive = 0
+  let audioReceived = 0
   return {
     userFinished(at = now()) {
       pendingSince = at
       turns++
+      micLive = 1 // the provider transcribed the caller: the microphone delivered speech
     },
     agentStarted(at = now()) {
+      audioReceived = 1 // the agent's audio started playing
       if (pendingSince == null) return
       responses.push(Math.max(0, at - pendingSince))
       pendingSince = null
@@ -93,7 +101,7 @@ export function createTurnMetrics(now = () => Date.now()) {
     },
     snapshot() {
       const sorted = [...responses].sort((a, b) => a - b)
-      const m = { turns, interruptions, toolCalls, toolFailures, reconnects }
+      const m = { turns, interruptions, toolCalls, toolFailures, reconnects, micLive, audioReceived }
       if (responses.length) {
         m.firstResponseMs = responses[0]
         m.medianResponseMs = quantile(sorted, 0.5)

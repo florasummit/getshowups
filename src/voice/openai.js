@@ -49,8 +49,13 @@ const parse = (data) => {
   }
 }
 
+// Routes: the Lab's by default; the customer chat page passes its own (same body shape: { customer, id, token, … }).
+export const LAB_ROUTES = { connect: '/api/platform/voice-lab/openai', tool: '/api/platform/voice-lab/tool', session: '/api/platform/voice-lab/session' }
+
 export function createOpenAIAdapter(deps = {}) {
   const apiFn = deps.api || defaultApi
+  const routes = { ...LAB_ROUTES, ...(deps.routes || {}) }
+  let initial = null // the start route's own connect payload, used for the first connection only
   const fetchFn = deps.fetch || ((...a) => globalThis.fetch(...a))
   const PeerConnection = deps.RTCPeerConnection || globalThis.RTCPeerConnection
   const getUserMedia = deps.getUserMedia || ((c) => globalThis.navigator.mediaDevices.getUserMedia(c))
@@ -169,7 +174,7 @@ export function createOpenAIAdapter(deps = {}) {
     if (micTimer) clearT(micTimer)
     micTimer = null
   }
-  const snapshot = () => summarizeMetrics(metrics)
+  const snapshot = () => summarizeMetrics({ ...metrics, micLive: diag.mic === 'live', audioReceived: diag.audio === 'received' })
   const send = (obj) => {
     if (!dc || dc.readyState !== 'open') return false
     try {
@@ -194,7 +199,7 @@ export function createOpenAIAdapter(deps = {}) {
     flushTimer = null
     if (!pending.length || !session) return
     const lines = pending.splice(0, pending.length)
-    const r = await apiFn('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'transcript', customer: session.customer, id: session.id, token: session.token, lines } })
+    const r = await apiFn(routes.session, { method: 'POST', body: { action: 'transcript', customer: session.customer, id: session.id, token: session.token, lines } })
     if (r.status !== 200) emit('error', { code: 'transcript_failed', detail: r.data?.error, fatal: false })
   }
 
@@ -212,7 +217,7 @@ export function createOpenAIAdapter(deps = {}) {
       input = {}
     }
     const t0 = now()
-    const r = await apiFn('/api/platform/voice-lab/tool', { method: 'POST', body: { customer: session.customer, id: session.id, token: session.token, name, input, userText: lastUserText } })
+    const r = await apiFn(routes.tool, { method: 'POST', body: { customer: session.customer, id: session.id, token: session.token, name, input, userText: lastUserText } })
     const result = r.status === 200 && r.data?.result && typeof r.data.result === 'object' ? r.data.result : { ok: false, error: r.data?.error || 'tool_failed', note: 'The tool could not run: say so honestly and offer to have someone call back.' }
     const ok = result.ok !== false
     if (!ok) metrics.toolFailures += 1
@@ -241,8 +246,14 @@ export function createOpenAIAdapter(deps = {}) {
       if (!Number.isFinite(metrics.firstResponseMs)) metrics.firstResponseMs = ms
       emit('metrics', snapshot())
     }
-    if (t === 'output_audio_buffer.started') speaking = true
-    if (t === 'output_audio_buffer.stopped' || t === 'output_audio_buffer.cleared') speaking = false
+    if (t === 'output_audio_buffer.started' && !speaking) {
+      speaking = true
+      emit('status', { state, mic: diag.mic, audio: diag.audio, speaking: true })
+    }
+    if ((t === 'output_audio_buffer.stopped' || t === 'output_audio_buffer.cleared') && speaking) {
+      speaking = false
+      emit('status', { state, mic: diag.mic, audio: diag.audio, speaking: false })
+    }
     if (t === 'response.output_audio_transcript.delta' && ev.item_id) parts.set(ev.item_id, (parts.get(ev.item_id) || '') + String(ev.delta || ''))
     if (t === 'response.output_audio_transcript.done' || t === 'response.output_text.done') {
       const text = typeof ev.transcript === 'string' ? ev.transcript : typeof ev.text === 'string' ? ev.text : parts.get(ev.item_id) || ''
@@ -322,7 +333,8 @@ export function createOpenAIAdapter(deps = {}) {
   // 'connected' is emitted when the data channel opens and the session config has been (re)sent.
   const connect = async () => {
     ensurePlayer() // created inside the Start click's gesture, before any await: autoplay policies allow it
-    const r = await apiFn('/api/platform/voice-lab/openai', { method: 'POST', body: { customer: session.customer, id: session.id, token: session.token } })
+    const r = initial ? { status: 200, data: initial } : await apiFn(routes.connect, { method: 'POST', body: { customer: session.customer, id: session.id, token: session.token } })
+    initial = null
     if (r.status !== 200 || typeof r.data?.clientSecret !== 'string') throw codeError(r.data?.error || 'connect_failed')
     const { clientSecret, expiresAt, sessionConfig, greeting } = r.data
     if (!mic) {
@@ -416,7 +428,7 @@ export function createOpenAIAdapter(deps = {}) {
       emit('metrics', m)
       let summary = null
       if (session) {
-        const r = await apiFn('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'end', customer: session.customer, id: session.id, token: session.token, metrics: m, ...(outcome ? { outcome } : {}) } })
+        const r = await apiFn(routes.session, { method: 'POST', body: { action: 'end', customer: session.customer, id: session.id, token: session.token, metrics: m, ...(outcome ? { outcome } : {}) } })
         if (r.status === 200) summary = r.data?.summary || null
         else emit('error', { code: 'end_failed', detail: r.data?.error, fatal: false })
       }
@@ -439,10 +451,13 @@ export function createOpenAIAdapter(deps = {}) {
       playRemote()
       return diag.audio
     },
-    async start({ customer, id, token, onEvent } = {}) {
+    // connect: the start route's payload (clientSecret, expiresAt, sessionConfig, greeting) when the page already has
+    // it; otherwise the connect route is called.
+    async start({ customer, id, token, onEvent, connect: first = null } = {}) {
       if (state !== 'idle') throw codeError('already_started')
       if (!customer || !id || !token) throw codeError('invalid_session')
       session = { customer, id, token }
+      initial = first && typeof first.clientSecret === 'string' ? first : null
       emit = emitter(onEvent)
       setState('connecting')
       try {

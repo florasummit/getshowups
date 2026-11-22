@@ -14,21 +14,24 @@ import { startConversation, loadConversation, endConversation, receptionistReady
 import { emailRef } from '../auditlog.js'
 import { PROVIDERS, labEnabled, labDailyMinutes, labSettings, providerStatus, estimateMicros } from './providers.js'
 import { labVoiceFor } from './settings.js'
+import { TOOL_KINDS_SET } from './tools.js'
 
 export const LAB_SESSION_MAX_MS = 15 * 60 * 1000
-const TOOL_KINDS = new Set(['save_customer_details', 'check_service_area', 'request_coverage', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
+const TOOL_KINDS = TOOL_KINDS_SET
 
 // Minutes of Lab calls started today (UTC), from receptionist_calls rows of Lab conversations.
 export async function labMinutesToday(env, now = Date.now()) {
   const day = now - (now % 86_400_000)
-  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(COALESCE(ended_at, ?2) - created_at), 0) AS ms FROM receptionist_calls WHERE provider IN ('openai', 'elevenlabs', 'retell-lab') AND created_at >= ?1").bind(day, now).first()
+  // Lab rows only: 'lab_…' call ids (Retell Lab calls take Retell's id but keep provider 'retell-lab'); customer
+  // sessions on OpenAI/ElevenLabs ('web_…', server/voice/customer.js) have their own ceilings.
+  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(COALESCE(ended_at, ?2) - created_at), 0) AS ms FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND created_at >= ?1").bind(day, now).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
 
 // One Lab call at a time across the platform: an un-ended Lab call younger than the session ceiling blocks a new one
 // (Stop ends it; an abandoned one ages out after LAB_SESSION_MAX_MS).
 export async function labBusy(env, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM receptionist_calls WHERE provider IN ('openai', 'elevenlabs', 'retell-lab') AND ended_at IS NULL AND created_at > ?1").bind(now - LAB_SESSION_MAX_MS).first()
+  const r = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND ended_at IS NULL AND created_at > ?1").bind(now - LAB_SESSION_MAX_MS).first()
   return Number(r?.n || 0) > 0
 }
 
@@ -77,7 +80,9 @@ export async function loadLabSession(env, customerId, id, token) {
 
 // Metrics the adapter measured in the browser or the server (numbers only; codes only): kept on the conversation and
 // shown in the Lab. Unknown keys are dropped; strings never stored.
-const METRIC_KEYS = ['firstResponseMs', 'medianResponseMs', 'p95ResponseMs', 'turns', 'interruptions', 'toolCalls', 'toolFailures', 'repeatedQuestions', 'reconnects', 'audioSeconds', 'inputTokens', 'outputTokens', 'providerCostMicros']
+// micLive / audioReceived (0|1): the adapter heard the caller's microphone and received the agent's audio — the
+// evidence of audio both ways that production readiness asks for (server/voice/customer.js providerEvidence).
+const METRIC_KEYS = ['firstResponseMs', 'medianResponseMs', 'p95ResponseMs', 'turns', 'interruptions', 'toolCalls', 'toolFailures', 'repeatedQuestions', 'reconnects', 'audioSeconds', 'inputTokens', 'outputTokens', 'providerCostMicros', 'micLive', 'audioReceived']
 export const cleanMetrics = (m) => Object.fromEntries(Object.entries(m && typeof m === 'object' ? m : {}).filter(([k, v]) => METRIC_KEYS.includes(k) && Number.isFinite(v) && v >= 0).map(([k, v]) => [k, Math.round(v)]))
 
 export async function endLabSession(env, { customer, conv }, { metrics = {}, outcome = null } = {}, now = Date.now()) {
@@ -121,6 +126,6 @@ export function labSummary(conv) {
 
 export async function listLabSessions(env, limit = 20) {
   if (!labEnabled(env)) return []
-  const { results } = await env.ONBOARDING_DB.prepare("SELECT c.id, c.customer, c.state, c.status, c.outcome, c.created_at FROM receptionist_conversations c JOIN receptionist_calls k ON k.conversation_id = c.id AND k.customer = c.customer WHERE k.provider IN ('openai', 'elevenlabs', 'retell-lab') ORDER BY c.created_at DESC LIMIT ?1").bind(Math.min(Math.max(1, limit | 0), 100)).all()
+  const { results } = await env.ONBOARDING_DB.prepare("SELECT c.id, c.customer, c.state, c.status, c.outcome, c.created_at FROM receptionist_conversations c JOIN receptionist_calls k ON k.conversation_id = c.id AND k.customer = c.customer WHERE (k.provider = 'retell-lab' OR (k.provider IN ('openai', 'elevenlabs') AND k.call_id LIKE 'lab_%')) ORDER BY c.created_at DESC LIMIT ?1").bind(Math.min(Math.max(1, limit | 0), 100)).all()
   return results.map((r) => labSummary({ ...r, state: JSON.parse(r.state || '{}') })).map((s, i) => ({ ...s, customer: results[i].customer }))
 }

@@ -4,12 +4,14 @@
 export const PROVIDER_IDS = ['retell', 'openai', 'elevenlabs']
 
 // What each provider can do TODAY in this codebase (never inferred from a Lab session working). `customers`: the
-// customer-facing browser voice path exists (functions/api/receptionist/[customer]/voice.js → Retell). `phone`: no
-// provider has a phone line here (routing.js is simulated; no numbers provisioned). `lab`: Voice Lab adapter.
+// customer-facing browser voice path exists (functions/api/receptionist/[customer]/voice.js → server/voice/customer.js:
+// Retell web call, OpenAI Realtime client secret, ElevenLabs signed URL; tools through voice-tool). Whether a provider
+// may be ACTIVATED for a business is a separate, evidence-based question (settings.js checkProviderSwitch). `phone`:
+// no provider has a phone line here (routing.js is simulated; no numbers provisioned). `lab`: Voice Lab adapter.
 export const PROVIDER_CAPABILITIES = {
   retell: { name: 'Retell', customers: true, lab: true, phone: false, pace: true, previews: true, voiceChoice: true, languages: ['en'] },
-  openai: { name: 'OpenAI Realtime', customers: false, lab: true, phone: false, pace: false, previews: false, voiceChoice: true, languages: ['en'] },
-  elevenlabs: { name: 'ElevenLabs', customers: false, lab: true, phone: false, pace: true, previews: true, voiceChoice: true, languages: ['en'] },
+  openai: { name: 'OpenAI Realtime', customers: true, lab: true, phone: false, pace: false, previews: false, voiceChoice: true, languages: ['en'] },
+  elevenlabs: { name: 'ElevenLabs', customers: true, lab: true, phone: false, pace: true, previews: true, voiceChoice: true, languages: ['en'] },
 }
 // Providers a business may be switched TO for customers: a customer-facing path must exist in the code.
 export const LIVE_PROVIDERS = PROVIDER_IDS.filter((p) => PROVIDER_CAPABILITIES[p].customers)

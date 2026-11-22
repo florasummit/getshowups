@@ -41,9 +41,10 @@ const CALL_TTL_MS = 60 * 60 * 1000
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
 // `agentOverride`: { voice_id?, voice_speed? } from the business's voice settings (server/voice/style.js sessionVoiceFor),
 // sent as create-web-call agent_override.agent so ONE shared agent speaks with each business's chosen voice.
-export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null, agentOverride = null) {
+// `test`: an admin test session on a test business (server/voice/customer.js) is not gated by the customer release list.
+export async function startVoiceCall(env, customer, now = Date.now(), existing = null, attribution = null, agentOverride = null, { test = false } = {}) {
   if (!voiceConfigured(env)) return { ok: false, error: 'voice_not_configured' }
-  if (!voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available' }
+  if (!test && !voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available' }
   const conv = existing && !existing.state?.endedAt ? { id: existing.id } : await startConversation(env, customer, 'voice', now, { attribution })
   let res
   try {
