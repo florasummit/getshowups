@@ -461,6 +461,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   VOICE_PROVIDERS_DISABLED off switch), no fallback ever. Activation needs EVIDENCE (providerEvidence: finished session
   with micLive + audioReceived + find_available_times + book_appointment ok, ≤ 30 days); never claim a provider is
   production-ready from credentials alone. scripts/voice-live-check.mjs = bounded real-provider check (keys from Keychain).
+- Dashboard → Receptionist channel tiles (src/dashboard/Receptionist.jsx channelTiles): state + reason + next step from the
+  API's capability facts only (voiceStatus available | testing = Retell not released for this business | not_configured);
+  never a hardcoded "Active"; owners never see a provider name; phone calls are "Not available yet" (no line exists).
 - Receptionist voice (server/voice/style.js + settings.js + catalog.js, migration 0035, docs/RECEPTIONIST.md "Voice
   management"): owners pick a voice from the ACTIVE provider's catalog (validated; provider sample previews; never a
   provider name), a personality preset (fixed prompt wording, style only) and a pace where supported; saves carry a

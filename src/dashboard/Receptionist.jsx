@@ -56,20 +56,33 @@ function activity(e) {
 }
 const channelName = (c) => (c === 'voice' ? 'Browser voice' : 'Chat')
 
-function Channels({ cap, on }) {
-  const tiles = [
-    ['Website chat', !on ? ['neutral', 'Off'] : cap.chat ? ['ok', 'Active'] : ['bad', 'Unavailable']],
-    // Voice is released per business (owner decision 2026-11-19): 'testing' = exists, not available to this business yet.
-    ['Browser voice', cap.voiceStatus === 'testing' ? ['neutral', 'In testing, not available yet'] : !cap.voice ? ['neutral', 'Not set up'] : on ? ['ok', 'Active'] : ['neutral', 'Off']],
-    ['Phone calls', ['neutral', 'Not connected']],
-    ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on'] : ['warn', 'Test mode']],
+// Every tile states the channel's real state, the reason and the next step, from the server's capability facts
+// (functions/api/dashboard/receptionist/index.js: chat = model configured; voiceStatus = the business's ACTIVE voice
+// provider resolved server-side: 'available' | 'testing' (Retell not released for this business, RECEPTIONIST_VOICE_
+// BUSINESSES) | 'not_configured'; staffEmail = the MESSAGES_LIVE gate; no phone line exists). Never a hardcoded state.
+function channelTiles(cap, on, chatUrl, admin) {
+  const voice = !on
+    ? ['neutral', 'Off', 'Turn the receptionist on below; voice follows the same switch as chat.']
+    : cap.voiceStatus === 'available'
+      ? ['ok', 'Active', 'Customers can talk to it by microphone on your chat page; it books the same way as chat.']
+      : cap.voiceStatus === 'testing'
+        ? ['neutral', 'Not turned on yet', `GetShowUps turns browser voice on business by business; this business is not on the list yet. Chat works meanwhile.${admin ? ' Admin: add it to the Retell release list (RECEPTIONIST_VOICE_BUSINESSES) or switch its provider in the Admin Console.' : ''}`]
+        : ['neutral', 'Not available', 'The voice provider is not configured on the platform; chat works meanwhile.']
+  return [
+    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
+    ['Browser voice', voice],
+    ['Phone calls', ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']],
+    ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team is emailed about callback requests and messages.'] : ['warn', 'Test mode', 'Emails go only to GetShowUps test recipients until messaging launch; requests still show on this page.']],
   ]
+}
+function Channels({ cap, on, chatUrl, admin }) {
   return (
     <ul className="ui-tiles" aria-label="Channels">
-      {tiles.map(([label, [tone, text]]) => (
-        <li key={label} className="ui-tile">
+      {channelTiles(cap, on, chatUrl, admin).map(([label, [tone, text, hint]]) => (
+        <li key={label} className="ui-tile" data-channel={label}>
           <span className="ui-tile-label">{label}</span>
           <Pill tone={tone}>{text}</Pill>
+          <span className="ui-tile-hint">{hint}</span>
         </li>
       ))}
     </ul>
@@ -281,7 +294,8 @@ export default function Receptionist() {
     if (status === 200) load()
   }
   const on = saved.enabled
-  const overall = !on ? ['neutral', 'Off'] : cap.chat ? ['ok', 'Working'] : ['bad', 'Not answering']
+  // The headline names what answers today (chat, and voice only where it is really on for this business).
+  const overall = !on ? ['neutral', 'Off'] : !cap.chat ? ['bad', 'Not answering'] : cap.voiceStatus === 'available' ? ['ok', 'Answering on chat and browser voice'] : ['ok', 'Answering on website chat']
   const attention = data.requests.filter((r) => r.status === 'open')
   const done = data.requests.filter((r) => r.status !== 'open')
   const upcoming = data.conversations.filter((c) => c.bookedAt && new Date(c.bookedAt).getTime() > data.loadedAt)
@@ -307,7 +321,7 @@ export default function Receptionist() {
       >
         {on ? 'Answers questions, books real appointments on your calendar, and takes callback requests when someone wants a person.' : 'Turn it on below to answer customers on your website.'}
       </PageHeader>
-      <Channels cap={cap} on={on} />
+      <Channels cap={cap} on={on} chatUrl={data.chatUrl} admin={Boolean(data.admin)} />
 
       <Section title={attention.length ? `Needs attention (${attention.length})` : 'Needs attention'} label="Needs attention" className={attention.length ? 'ui-section--attention' : ''}>
         {attention.length ? (
@@ -462,7 +476,7 @@ export default function Receptionist() {
           </fieldset>
           <details className="ui-group ui-group--advanced rx-phone">
             <summary>
-              Phone calls (not connected) <Pill tone="neutral">Not connected</Pill>
+              Phone calls (not available yet) <Pill tone="neutral">Not available yet</Pill>
             </summary>
             <p className="ui-hint">No phone number is connected yet, so phone calls aren’t answered or transferred and nothing is dialed. These choices are kept for when a line is connected.</p>
             <fieldset className="field" disabled>
