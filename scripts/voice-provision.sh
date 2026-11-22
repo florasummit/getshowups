@@ -8,6 +8,7 @@
 #   security add-generic-password -a getshowups -s getshowups-elevenlabs-api-key -w
 #
 # Usage:  scripts/voice-provision.sh openai|elevenlabs|retell [--apply] [--keychain-service <name>] [--keychain-account <name>]
+#                                     [--agent-id <agent_id>]   (elevenlabs: configure an agent published from the dashboard in place)
 #   Without --apply: reads the key, checks it against the provider (read-only), shows what would be set. Nothing is
 #   written anywhere. With --apply: puts the Pages secret(s) (take effect on the NEXT deployment: merge a PR) and, for
 #   ElevenLabs, creates/updates the Voice Lab agent through its API (scripts/elevenlabs-setup.mjs; never starts a
@@ -21,11 +22,13 @@ shift || true
 APPLY=0
 SERVICE=""
 ACCOUNT=getshowups
+AGENT_ID=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1 ;;
     --keychain-service) SERVICE="$2"; shift ;;
     --keychain-account) ACCOUNT="$2"; shift ;;
+    --agent-id) AGENT_ID="$2"; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -63,7 +66,7 @@ case "$PROVIDER" in
     [ "$S2" = "200" ] || { echo "ElevenLabs key works but the Agents Platform refused (HTTP $S2): the key needs Conversational AI permissions (API key settings → ConvAI read/write)." >&2; exit 4; }
     echo "ElevenLabs: key valid; Agents Platform reachable. Secrets to set: ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID (from the agent setup)."
     echo "Agent setup (dry run):"
-    printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs
+    printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs ${AGENT_ID:+--agent-id "$AGENT_ID"}
     ;;
   retell)
     S=$(status -H "Authorization: Bearer $KEY" -X POST -H 'Content-Type: application/json' -d '{"limit":1}' https://api.retellai.com/v2/list-agents)
@@ -84,7 +87,7 @@ case "$PROVIDER" in
     echo "Set OPENAI_API_KEY on $PROJECT (applies on the next deployment)."
     ;;
   elevenlabs)
-    OUT=$(printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs --apply | tail -1)
+    OUT=$(printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs --apply ${AGENT_ID:+--agent-id "$AGENT_ID"} | tail -1)
     AGENT=$(printf '%s' "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const r=JSON.parse(s);process.stdout.write(r.ok&&r.agentId?r.agentId:'')}catch{}})")
     [ -n "$AGENT" ] || { echo "Agent setup did not return an agent id; nothing set. Output: $OUT" >&2; exit 5; }
     printf '%s' "$KEY" | npx wrangler pages secret put ELEVENLABS_API_KEY --project-name "$PROJECT" >/dev/null

@@ -242,6 +242,13 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
       writes.push(['update_agent', JSON.parse(init.body)])
       return json(200, { agent_id: 'agent_new1234' })
     }
+    // A dashboard-published agent (the owner's "GetShowUps Voice Test": custom LLM, chosen voice).
+    if (u === `${R}/v1/convai/agents/agent_pub1` && (!init.method || init.method === 'GET')) return json(200, { agent_id: 'agent_pub1', name: 'GetShowUps Voice Test', conversation_config: { agent: { language: 'en', first_message: 'Hello from the dashboard', prompt: { prompt: 'dashboard prompt', llm: 'deepseek-flash-4.1', temperature: 0.4, tool_ids: ['tool_old'] } }, tts: { voice_id: 'voice_eric', model_id: 'eleven_turbo_v2_5' }, conversation: { client_events: ['audio'] } } })
+    if (u === `${R}/v1/convai/agents/agent_pub1` && init.method === 'PATCH') {
+      writes.push(['update_published', JSON.parse(init.body)])
+      return json(200, { agent_id: 'agent_pub1' })
+    }
+    if (u === `${R}/v1/convai/agents/agent_missing` && (!init.method || init.method === 'GET')) return json(404, { detail: 'not found' })
     throw new Error(`unexpected ${init.method} ${u}`)
   }
   const lines = []
@@ -278,6 +285,27 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.equal(writes.at(-1)[1].conversation_config.tts, undefined)
   assert.deepEqual(agentBody({ name: 'n', hostname: 'h', toolIds: ['t'], voiceId: '', llm: 'gpt-4o-mini' }).conversation_config.agent.prompt.llm, 'gpt-4o-mini')
   assert.equal(clientToolConfig({ name: 'x', description: 'd', parameters: { type: 'object', properties: { a: { type: 'string', description: 'A' } }, required: ['a'] } }).parameters.properties.a.description, 'A')
+  // An agent published from the dashboard, configured in place by id: its model, temperature, voice and language are
+  // read back and kept; only what the Lab needs is set; its name is not touched; no second agent is ever created.
+  const dryPub = await setupElevenLabsAgent({ ...opts, agentId: 'agent_pub1', apply: false })
+  assert.deepEqual([dryPub.dryRun, dryPub.action, dryPub.agentId, dryPub.keep.prompt.llm, dryPub.keep.tts.voice_id], [true, 'update', 'agent_pub1', 'deepseek-flash-4.1', 'voice_eric'])
+  assert.match(lines.at(-1), /would update "GetShowUps Voice Test" \(agent_pub1, keeping its model deepseek-flash-4.1, voice voice_eric, language en\)/)
+  const before = writes.length
+  const pub = await setupElevenLabsAgent({ ...opts, agentId: 'agent_pub1', apply: true })
+  assert.deepEqual([pub.action, pub.agentId, pub.toolIds.length], ['updated', 'agent_pub1', 7])
+  assert.deepEqual(writes.slice(before).map((w) => w[0]), [...Array(7).fill('update_tool'), 'update_published'])
+  const patched = writes.at(-1)[1]
+  assert.equal(patched.name, undefined, 'the owner’s agent keeps its name')
+  assert.deepEqual([patched.conversation_config.agent.prompt.llm, patched.conversation_config.agent.prompt.temperature, patched.conversation_config.tts, patched.conversation_config.agent.language], ['deepseek-flash-4.1', 0.4, { voice_id: 'voice_eric', model_id: 'eleven_turbo_v2_5' }, 'en'])
+  assert.deepEqual(patched.conversation_config.agent.prompt.tool_ids, pub.toolIds)
+  assert.ok(!patched.conversation_config.agent.prompt.tool_ids.includes('tool_old'), 'our seven tools replace the dashboard list')
+  assert.match(patched.conversation_config.agent.prompt.prompt, /placeholder/i)
+  assert.deepEqual(patched.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true } })
+  assert.deepEqual(patched.platform_settings.auth, { enable_auth: true, allowlist: [{ hostname: 'getshowups.com' }] })
+  assert.deepEqual(patched.conversation_config.conversation.client_events, CLIENT_EVENTS)
+  assert.equal((await setupElevenLabsAgent({ ...opts, agentId: 'agent_missing', apply: true })).error, 'agent_not_found')
+  assert.equal((await setupElevenLabsAgent({ ...opts, agentId: 'bad id!', apply: true })).error, 'invalid_agent_id')
+  assert.equal(agents.length, 1, 'never a second agent')
   agents.push({ agent_id: 'agent_dupe', name: AGENT_NAME })
   assert.equal((await setupElevenLabsAgent({ ...opts, apply: true })).error, 'duplicate_agents')
   agents.pop()

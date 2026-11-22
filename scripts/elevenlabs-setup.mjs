@@ -14,7 +14,11 @@
 //     fields: dashboard edits to them are overwritten on the next --apply);
 //   - it never starts conversations, buys numbers or deletes anything.
 // Usage:  printf '%s\n' "$ELEVENLABS_API_KEY" | node scripts/elevenlabs-setup.mjs [--apply] [--site https://getshowups.com]
-//         [--name "<agent name>"] [--voice <voice_id>] [--llm <model id>]
+//         [--name "<agent name>"] [--voice <voice_id>] [--llm <model id>] [--agent-id <agent_id>]
+// --agent-id: configure an agent that already exists (e.g. one published from the ElevenLabs dashboard) IN PLACE: its
+//         voice, model (LLM), language and TTS settings are read first and kept; only what the Lab needs is set
+//         (our client tools, overrides on, auth on, client events, the 15-minute ceiling, the placeholder prompt).
+//         Never creates a second agent in this mode; a missing id stops with agent_not_found.
 // The printed agent_id goes into the Pages secret ELEVENLABS_AGENT_ID (approval item, like the key).
 // ElevenLabs API (elevenlabs.io/docs/api-reference, read 2026-11-21): header xi-api-key; GET /v1/convai/agents
 // ?search=&page_size=&cursor= → { agents: [{ agent_id, name }], has_more, next_cursor }; POST /v1/convai/agents/create
@@ -47,13 +51,20 @@ export const toolParameters = (schema) => ({
 // One client tool per engine tool; the name stays the engine's (the browser registers handlers under these names).
 export const clientToolConfig = (t) => ({ type: 'client', name: t.name, description: t.description, expects_response: true, response_timeout_secs: 30, parameters: toolParameters(t.parameters) })
 
-export const agentBody = ({ name, hostname, toolIds, voiceId, llm }) => ({
-  name,
+// `keep` = what an existing agent already has (read back before a PATCH) so a dashboard-chosen model, voice and
+// language survive: prompt.llm (+ temperature), tts, language. PATCH replaces nested objects we send, so we send
+// them back merged rather than trusting a partial update.
+export const agentBody = ({ name, hostname, toolIds, voiceId, llm, keep = null }) => ({
+  ...(name ? { name } : {}),
   tags: ['getshowups', 'voice-lab'],
   conversation_config: {
-    agent: { first_message: PLACEHOLDER_FIRST_MESSAGE, language: 'en', prompt: { prompt: PLACEHOLDER_PROMPT, tool_ids: toolIds, ...(llm ? { llm } : {}) } },
+    agent: {
+      first_message: PLACEHOLDER_FIRST_MESSAGE,
+      language: keep?.language || 'en',
+      prompt: { ...(keep?.prompt || {}), prompt: PLACEHOLDER_PROMPT, tool_ids: toolIds, ...(llm ? { llm } : {}) },
+    },
     conversation: { client_events: CLIENT_EVENTS, max_duration_seconds: 900 },
-    ...(voiceId ? { tts: { voice_id: voiceId } } : {}),
+    ...(voiceId ? { tts: { ...(keep?.tts || {}), voice_id: voiceId } } : keep?.tts ? { tts: keep.tts } : {}),
   },
   platform_settings: {
     auth: { enable_auth: true, allowlist: [{ hostname }] },
@@ -61,8 +72,9 @@ export const agentBody = ({ name, hostname, toolIds, voiceId, llm }) => ({
   },
 })
 
-export async function setupElevenLabsAgent({ apiKey, site = 'https://getshowups.com', name = AGENT_NAME, voiceId = '', llm = '', apply = false, base = 'https://api.elevenlabs.io', log = () => {} }) {
+export async function setupElevenLabsAgent({ apiKey, site = 'https://getshowups.com', name = AGENT_NAME, voiceId = '', llm = '', agentId = '', apply = false, base = 'https://api.elevenlabs.io', log = () => {} }) {
   if (!/^[A-Za-z0-9_-]{20,200}$/.test(apiKey || '')) return { ok: false, error: 'elevenlabs_api_key_missing' }
+  if (agentId && !/^[A-Za-z0-9_-]{6,80}$/.test(agentId)) return { ok: false, error: 'invalid_agent_id' }
   if (!/^https:\/\/[a-z0-9.-]+$/.test(site)) return { ok: false, error: 'invalid_site' }
   if (voiceId && !/^[A-Za-z0-9_-]{6,80}$/.test(voiceId)) return { ok: false, error: 'invalid_voice' }
   if (llm && !/^[A-Za-z0-9._:-]{3,80}$/.test(llm)) return { ok: false, error: 'invalid_llm' }
@@ -93,15 +105,29 @@ export async function setupElevenLabsAgent({ apiKey, site = 'https://getshowups.
   const dupes = [...byName.entries()].filter(([, ids]) => ids.length > 1)
   if (dupes.length) return { ok: false, error: 'duplicate_tools', tools: Object.fromEntries(dupes) }
 
-  const agents = await pages(`/v1/convai/agents?search=${encodeURIComponent(name)}`, 'agents')
-  if (agents.error) return { ok: false, error: agents.error }
-  const matches = agents.items.filter((a) => a?.name === name).map((a) => a.agent_id)
-  if (matches.length > 1) return { ok: false, error: 'duplicate_agents', agentIds: matches }
+  // An existing agent by id (dashboard-published): read it, keep its model/voice/language, never create another.
+  let keep = null
+  let matches = []
+  let agentName = name
+  if (agentId) {
+    const g = await api('GET', `/v1/convai/agents/${encodeURIComponent(agentId)}`)
+    if (!g.ok) return { ok: false, error: g.status === 404 ? 'agent_not_found' : g.status === 401 ? 'elevenlabs_auth_failed' : `get_agent_http_${g.status}` }
+    const cc = g.data?.conversation_config || {}
+    const { prompt: _prompt, tool_ids: _tools, tools: _legacy, ...promptRest } = cc.agent?.prompt || {}
+    keep = { prompt: promptRest, tts: cc.tts || null, language: cc.agent?.language || null }
+    matches = [agentId]
+    agentName = typeof g.data?.name === 'string' && g.data.name ? g.data.name : name
+  } else {
+    const agents = await pages(`/v1/convai/agents?search=${encodeURIComponent(name)}`, 'agents')
+    if (agents.error) return { ok: false, error: agents.error }
+    matches = agents.items.filter((a) => a?.name === name).map((a) => a.agent_id)
+    if (matches.length > 1) return { ok: false, error: 'duplicate_agents', agentIds: matches }
+  }
 
   const plan = { tools: wanted.map((w) => ({ name: w.name, action: byName.has(w.name) ? 'update' : 'create' })), agent: matches.length ? 'update' : 'create' }
   if (!apply) {
-    log(`would ${plan.agent} "${name}" for ${hostname} (overrides: prompt/first_message/language; auth on; ${wanted.length} client tools: ${plan.tools.filter((t) => t.action === 'create').length} to create, ${plan.tools.filter((t) => t.action === 'update').length} to update${voiceId ? `; voice ${voiceId}` : ''}${llm ? `; llm ${llm}` : ''})`)
-    return { ok: true, dryRun: true, agentId: matches[0] || null, action: plan.agent, tools: plan.tools }
+    log(`would ${plan.agent} "${agentName}"${agentId ? ` (${agentId}, keeping its model ${keep?.prompt?.llm || 'default'}, voice ${keep?.tts?.voice_id || 'default'}, language ${keep?.language || 'en'})` : ''} for ${hostname} (overrides: prompt/first_message/language; auth on; ${wanted.length} client tools: ${plan.tools.filter((t) => t.action === 'create').length} to create, ${plan.tools.filter((t) => t.action === 'update').length} to update${voiceId ? `; voice ${voiceId}` : ''}${llm ? `; llm ${llm}` : ''})`)
+    return { ok: true, dryRun: true, agentId: matches[0] || null, action: plan.agent, tools: plan.tools, keep }
   }
 
   const toolIds = []
@@ -111,7 +137,7 @@ export async function setupElevenLabsAgent({ apiKey, site = 'https://getshowups.
     if (!r.ok || typeof r.data?.id !== 'string') return { ok: false, error: `${existing ? 'update' : 'create'}_tool_http_${r.status}`, tool: w.name, detail: r.data?.detail }
     toolIds.push(r.data.id)
   }
-  const body = agentBody({ name, hostname, toolIds, voiceId, llm })
+  const body = agentBody({ name: agentId ? null : name, hostname, toolIds, voiceId, llm, keep })
   const r = matches.length ? await api('PATCH', `/v1/convai/agents/${encodeURIComponent(matches[0])}`, body) : await api('POST', '/v1/convai/agents/create', body)
   if (!r.ok || !/^[A-Za-z0-9_-]{6,80}$/.test(r.data?.agent_id || '')) return { ok: false, error: `${matches.length ? 'update' : 'create'}_agent_http_${r.status}`, detail: r.data?.detail }
   log(`${matches.length ? 'updated' : 'created'} ${r.data.agent_id} with ${toolIds.length} client tools → set ELEVENLABS_AGENT_ID=${r.data.agent_id}`)
@@ -125,7 +151,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   for await (const c of process.stdin) chunks.push(c)
   const [apiKey] = Buffer.concat(chunks).toString('utf8').split(/\r?\n/).map((s) => s.trim())
   const mock = process.env.ELEVENLABS_API_MOCK_ORIGIN
-  const r = await setupElevenLabsAgent({ apiKey, site: opt('--site', 'https://getshowups.com'), name: opt('--name', AGENT_NAME), voiceId: opt('--voice', ''), llm: opt('--llm', ''), apply: a.includes('--apply'), base: typeof mock === 'string' && MOCK_RE.test(mock) ? mock : 'https://api.elevenlabs.io', log: (l) => console.log(l) })
+  const r = await setupElevenLabsAgent({ apiKey, site: opt('--site', 'https://getshowups.com'), name: opt('--name', AGENT_NAME), voiceId: opt('--voice', ''), llm: opt('--llm', ''), agentId: opt('--agent-id', ''), apply: a.includes('--apply'), base: typeof mock === 'string' && MOCK_RE.test(mock) ? mock : 'https://api.elevenlabs.io', log: (l) => console.log(l) })
   console.log(JSON.stringify(r))
   process.exit(r.ok ? 0 : 1)
 }

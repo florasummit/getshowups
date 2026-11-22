@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## ElevenLabs in the Voice Lab: connect the published agent in place (2026-11-22) — feat/elevenlabs-existing-agent (no migration; PR for approval)
+
+- The ElevenLabs path (adapter, signed-URL route, shared tool runner, metrics, cost estimate) already existed; what
+  was missing is a credential and a way to use the owner's dashboard-published agent. `scripts/elevenlabs-setup.mjs
+  --agent-id` now configures an existing agent in place (model/temperature/voice/language kept; our tools, overrides,
+  auth, events, ceiling set; name untouched; never a second agent; agent_not_found / invalid_agent_id refused);
+  `scripts/voice-provision.sh elevenlabs --agent-id <id> --apply` does key check → agent → both secrets.
+- Production: no ElevenLabs key in Keychain or Cloudflare yet (owner action); OpenAI remains the Lab default; nothing
+  customer-facing; PoolThru untouched; PR #114 left open and unchanged.
+
 ## Website Studio legal pages + complete domain setup (2026-11-22) — feat/legal-pages-domain-setup (no migration; PR for approval)
 
 - **PoolThru findings (read-only):** the "broken Privacy Policy link" is not on our site. Authoritative DNS (Google

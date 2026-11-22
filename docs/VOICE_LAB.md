@@ -259,6 +259,24 @@ reconnects, audioSeconds, inputTokens, outputTokens }`, `error` `{ code, detail?
 
 ## ElevenLabs (Conversational AI / Agents Platform)
 
+### Connecting an agent published from the ElevenLabs dashboard (2026-11-22)
+
+The owner's agent "GetShowUps Voice Test" (custom LLM, chosen voice) is configured IN PLACE by id, never replaced:
+`scripts/elevenlabs-setup.mjs --agent-id <agent_id>` reads the agent, keeps its model, temperature, voice (tts) and
+language, and sets only what the Lab needs: our seven client tools (replacing the dashboard tool list), the
+prompt/first-message/language overrides (so each conversation runs OUR receptionist prompt), authentication on with the
+getshowups.com allowlist, the client events the browser adapter listens to, a 15-minute ceiling, and the placeholder
+prompt (no business facts live at ElevenLabs). Dry run first; `--apply` writes. One command does all of it with the key
+from Keychain and then sets both Pages secrets: `scripts/voice-provision.sh elevenlabs --agent-id <agent_id> --apply`.
+The agent id is in the dashboard URL (Agents → the agent) or its settings. Do not use the "Eleven Realtime" models for
+this agent (they failed to publish with HTTP 500 on 2026-11-22); any other model works, the Lab reads its answers.
+
+Manual steps (the only ones GetShowUps cannot do): create an API key with Conversational AI permissions in ElevenLabs,
+store it once with `security add-generic-password -a getshowups -s getshowups-elevenlabs-api-key -w`, run the
+provision script with the agent id, then deploy (merged PR). The Lab then shows ElevenLabs "Configured"; OpenAI stays
+the default provider; customer-facing ElevenLabs use does not exist (Lab only).
+
+
 Owner: server/voice/elevenlabs.js · functions/api/platform/voice-lab/elevenlabs.js · src/voice/elevenlabs.js ·
 scripts/elevenlabs-setup.mjs · test/voice-elevenlabs.test.js. Docs read **2026-11-21** at elevenlabs.io/docs.
 
