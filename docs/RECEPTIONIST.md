@@ -124,7 +124,14 @@ customer routes; OpenAI's short-lived client secret and ElevenLabs' signed URL a
 
 **Admin test sessions on the customer path**: `/chat/<id>?test=<provider>[&voice=<id>]` for a signed-in platform
 admin on an admin-marked TEST business (server-checked; anyone else: 403): the real customer path with that provider,
-dry-run tools, not gated by the Retell release list or the receptionist on/off switch. **Evidence**
+dry-run tools, not gated by the Retell release list or the receptionist on/off switch. The chat page opens for that
+test too (2026-11-22, `server/voice/testing.js adminTestAccess`, honoured by `GET /api/receptionist/<id>?test=<p>`):
+a test business normally has its receptionist OFF for customers, which also hides the page ("Chat isn't available");
+for the admin's `?test=` the page renders voice-only (`testOnly`, typed chat stays off, dry run, a way back to the
+console) and for everyone else it stays unavailable with the refusal as a code (`test_not_allowed`,
+`not_test_business`, `voice_not_configured`, `voice_unavailable`, `invalid_provider`), never a change for customers.
+The console opens it without a hand-made URL (**Test <provider>**, `testPageFor`: the first eligible test business =
+admin-marked, active, bookable, receptionist-on first; none → the reason). **Evidence**
 (`providerEvidence`): a finished session (customer-path test or Lab) of the last 30 days on that provider for THIS
 business whose adapter measured audio both ways (`micLive`, `audioReceived`) and whose availability + booking tools
 both succeeded. Readiness states: active · ready (configured, on, evidence complete) · needs_test · not_configured ·
@@ -223,7 +230,9 @@ A staged rollout leaves unverified businesses pinned; `Promote <provider> to 100
   voice, admin test or real customer; Voice Lab sessions never count) on the target in the last 30 days with audio both
   ways, the availability and booking tools succeeding through our server (a simulated booking on a test business
   counts) and a clean end (no connection outcome). Performed on a designated test business
-  (`/chat/<test business>?test=<provider>`), it stands for the provider, never for a business's own test.
+  (`/chat/<test business>?test=<provider>`, opened from the console's **Test <provider>** action), it stands for the
+  provider, never for a business's own test. `globalOverview` carries this record (`verification`) and the test page
+  (`testPage`) so the console can show the state and the one next action without a click.
 - **Business-level compatibility**, automated for every business in scope: the per-business checklist minus the
   evidence (configuration, customer path, switched off, eligibility, the seven tools, a voice chosen on this provider
   valid in its catalog or no voice, booking readiness). A voice chosen on another provider, a missing catalog entry,
