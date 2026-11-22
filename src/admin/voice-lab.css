@@ -103,3 +103,10 @@
     gap: 2px;
   }
 }
+
+/* Provider readiness: the owner's questions, one definition list */
+.vl-readiness { display: grid; gap: 10px; margin: 0; }
+.vl-readiness > div { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 4px 16px; }
+.vl-readiness dt { font-weight: 600; color: var(--cc-ink, inherit); }
+.vl-readiness dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .vl-readiness > div { grid-template-columns: 1fr; } }

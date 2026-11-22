@@ -27,7 +27,7 @@ export async function onRequestPost({ request, env }) {
   if (s.conv.state.lab.provider !== 'openai') return json(409, { error: 'wrong_provider' })
   if (s.conv.state.endedAt || s.conv.state.lab.endedAt) return json(409, { error: 'conversation_ended' })
   const { instructions, greeting } = await voiceInstructions(env, s.customer)
-  const minted = await mintClientSecret(env, { instructions })
+  const minted = await mintClientSecret(env, { instructions, voice: s.conv.state.lab.settings?.voice })
   await audit(env, admin.email, 'voice_lab.openai_connect', s.customer.id, { ok: minted.ok, ...(minted.ok ? { model: minted.model } : { error: minted.error }) })
   if (!minted.ok) return json(minted.error === 'openai_not_configured' ? 404 : 502, { error: minted.error })
   return json(200, { clientSecret: minted.clientSecret, expiresAt: minted.expiresAt, model: minted.model, sessionConfig: minted.sessionConfig, greeting })

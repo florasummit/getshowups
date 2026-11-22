@@ -62,12 +62,44 @@ const ms = (v) => (Number.isFinite(v) ? `${Math.round(v)} ms` : '—')
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 100_000 ? 4 : 2)}`
 const outcomeLabel = (s) => (s.booked ? (s.simulated ? 'Booked (dry run: nothing created)' : 'Booked') : OUTCOME[s.outcome] || s.outcome || 'No outcome recorded')
 
+// The owner's readiness questions for one provider, answered by the server from configuration (never a provider call).
+function Readiness({ r }) {
+  if (!r) return null
+  const yes = (b) => (b ? 'Yes' : 'No')
+  const rows = [
+    ['Integration implemented?', `${yes(r.integration.built)}. ${r.integration.note}`],
+    ['Credentials configured?', r.credentials.configured ? 'Yes.' : `No: ${r.credentials.missing.length ? `${r.credentials.missing.join(', ')} not set` : 'a setting is present but not usable'}. Setting a provider key is a paid-service activation (approval).`],
+    ['Account or billing to set up?', r.account],
+    ['Can a browser voice session run now?', `${yes(r.session.canRun)}. ${r.session.note}`],
+    ['Booking tools safe to use?', r.tools],
+    ['Transcripts and latency recorded?', `${yes(r.records.transcripts && r.records.latency)}: transcript lines, first/median/p95 reply, interruptions and every tool outcome, per session.`],
+    ['What does usage cost?', r.cost.perMinuteMicros ? `About ${(r.cost.perMinuteMicros / 1e6).toFixed(2)} per minute (estimate from the provider’s price list; never measured spend).` : r.cost.note],
+    ['Smallest authorized test', r.smallestTest],
+    ['Voice settings', r.settings],
+  ]
+  return (
+    <Section title={`Readiness: ${r.name}`} id="vl-readiness" sub={r.blockers.length ? `Blocked: ${r.blockers.join('; ')}.` : 'Ready for a test session.'} data-readiness={r.id} data-ready={r.session.canRun ? 'yes' : 'no'}>
+      <div className="cc-section-body">
+        <dl className="cc-kv vl-readiness">
+          {rows.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Section>
+  )
+}
+
 export default function VoiceLab() {
   const [status, setStatus] = useState(null)
   const [reload, setReload] = useState(0)
   const [provider, setProvider] = useState('openai')
   const [business, setBusiness] = useState('')
   const [dryRun, setDryRun] = useState(true)
+  const [voice, setVoice] = useState('')
   const [session, setSession] = useState({ phase: 'idle', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null })
   const [now, setNow] = useState(0)
   const adapterRef = useRef(null)
@@ -178,7 +210,8 @@ export default function VoiceLab() {
     } catch (err) {
       return update(() => ({ phase: 'error', error: START_ERRORS[err?.name === 'NotFoundError' ? 'no_mic' : 'mic'] }))
     }
-    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'start', provider, customer: business, dryRun } })
+    const settings = provider === 'openai' && voice ? { voice } : {}
+    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'start', provider, customer: business, dryRun, settings } })
     if (code !== 200) return update(() => ({ phase: 'error', error: START_ERRORS[code === 429 ? 'rate_limited' : data?.error] || `Couldn’t start (${data?.error || code}).` }))
     const s = data.session
     sessionRef.current = s
@@ -260,6 +293,19 @@ export default function VoiceLab() {
                   ))}
                 </select>
               </label>
+              {provider === 'openai' && status.settings?.openai?.voices && (
+                <label className="field">
+                  <span>Voice (OpenAI)</span>
+                  <select data-lab-voice value={voice} onChange={(e) => setVoice(e.target.value)} disabled={live}>
+                    <option value="">Default</option>
+                    {status.settings.openai.voices.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="check" data-dry-run={dryRun ? 'on' : 'off'}>
                 <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={live} />
                 <span>Dry run: every guard runs, nothing is created (no lead, appointment, request or email).</span>
@@ -297,6 +343,7 @@ export default function VoiceLab() {
             )}
           </div>
         </Section>
+        <Readiness r={(status.readiness || []).find((x) => x.id === provider)} />
 
         {(live || session.phase === 'done') && (
           <Section title={session.phase === 'done' ? 'Session summary' : 'Live call'} id="vl-live" data-lab-live={session.phase}>

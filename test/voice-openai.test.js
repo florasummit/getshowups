@@ -109,6 +109,9 @@ test('session config: our instructions, the seven tools, audio in/out, server VA
   assert.equal(c.audio.input.turn_detection.create_response, true)
   assert.equal(typeof c.audio.input.transcription.model, 'string')
   assert.equal(c.audio.output.voice, 'marin')
+  // A per-session voice: allowlisted names only; anything else falls back to the configured default.
+  assert.equal(openaiSessionConfig(env, 'x', { voice: 'cedar' }).audio.output.voice, 'cedar')
+  assert.equal(openaiSessionConfig(env, 'x', { voice: 'evil; drop' }).audio.output.voice, 'marin')
   assert.equal(openaiVoice({ OPENAI_REALTIME_VOICE: 'cedar' }), 'cedar')
   assert.equal(openaiVoice({ OPENAI_REALTIME_VOICE: 'x"; drop' }), 'marin')
   assert.ok(!JSON.stringify(c).includes(OPENAI_KEY))
