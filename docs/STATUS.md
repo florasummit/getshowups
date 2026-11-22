@@ -2,6 +2,48 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice cost controls and provider comparison (2026-11-22) — feat/voice-cost-controls (no migration)
+
+- Usage so far (production records, 2026-11-22, every kind of session): ElevenLabs 6 sessions / 3.2 min (2 Lab,
+  4 admin tests; one 70 s test with audio both ways, no booking), OpenAI 4 Lab sessions / 3.4 min (80k input tokens,
+  3.2k output tokens measured by the adapter), Retell 4 customer-path rows / 9.7 min + 1 Lab call / 4 min. Estimated
+  cost of all of it: about $0.27 (OpenAI) + $0.24 (ElevenLabs) at the public per-minute prices; Retell is not
+  estimated. No verified charge exists yet: nothing was ever read back from a provider.
+- What the providers can report (docs read 2026-11-22): Retell `GET /v2/get-call/{call_id}` → `call_cost.combined_cost`
+  in cents with product lines; NO balance endpoint (a 402 on call creation = credit balance exhausted, our code
+  `voice_billing`). ElevenLabs `GET /v1/convai/conversations/{id}` → `metadata.cost` (credits) and `cost_fiat` (USD,
+  optional) + `charging.llm_charge`; `GET /v1/user/subscription` → `character_count` / `character_limit` (credits used
+  / allowed this billing period). OpenAI: the organization costs API needs an admin key; a project key gets nothing;
+  only the adapter-measured tokens exist.
+- Built (server/voice/budgets.js, charges.js, compare.js, src/admin/Comparison.jsx; details in docs/RECEPTIONIST.md
+  "Cost controls"):
+  - Limits that refuse a start at the ceiling, customer path AND Lab: per provider per day
+    (`VOICE_PROVIDER_DAILY_MINUTES`, per-provider `_OPENAI | _ELEVENLABS | _RETELL`; Retell only when its own switch is
+    set), per test business per day (`VOICE_TEST_DAILY_MINUTES`, default 30, admin tests + Lab calls), the existing Lab
+    and per-business ceilings. Ended rows count their full length, open rows at most 15 min. The Lab shows every
+    budget with ok / near the limit (80%) / used up and the switch that sets it.
+  - Verified charges on the admin's request ("Fetch verified charges": ≤ 20 sessions per run, one business when given,
+    audited): Retell cents and ElevenLabs credits (+ USD when reported) stored on the session as the provider's
+    numbers; failed lookups are codes retried after an hour; credits are never converted to dollars; OpenAI is
+    reported as unsupported. The ElevenLabs conversation id the browser SDK reports on connect is now recorded
+    (`providerSessionId`, session action `provider`) so a charge can be looked up; sessions before this release have no
+    id and stay "no provider id recorded".
+  - "Check provider balances": ElevenLabs' subscription read only on request; Retell/OpenAI say they have none.
+  - "Providers compared (last 30 days)": sessions, connection failures (rate), booking tool (bookings of sessions
+    that reached the availability lookup), latency (lower median of adapter medians; Retell not measured), minutes,
+    estimated cost, verified charges, estimated cost per finished session and per booking; connection failures and
+    incomplete bookings under disclosure as codes.
+- Tests: test/voice-budgets.test.js (limits per provider/test business/Lab with warnings and refusals, isolation
+  between businesses; charges attributed to the right session, errors as codes, business filter never touches another
+  business, audited, owners/anonymous refused; provider ids recorded once; comparison numbers; balances only where an
+  API exists; status route). 822 unit pass; browser suite unchanged.
+- Not changed: provider configuration (ElevenLabs staged, six businesses on Retell), no call was started, no
+  customer-facing setting. Nothing is monitored continuously; every provider read is an admin's click.
+- Next decision (human): whether to fetch the verified charges now (one click; reads Retell/ElevenLabs records for the
+  last 30 days' sessions) and whether the default test ceiling (30 min per test business per day) and the provider
+  ceilings (600 min/day OpenAI and ElevenLabs; Retell uncapped) are the numbers you want; a Retell cap needs
+  `VOICE_PROVIDER_DAILY_MINUTES_RETELL` set on the Pages project (approval).
+
 ## ElevenLabs test calls dropping on the customer path: diagnosis + diagnostics (2026-11-22) — fix/elevenlabs-disconnect-diagnostics (no migration)
 
 - Report: `/chat/gsu-stripe-test-pools?test=elevenlabs&from=admin` showed "The call dropped" on every attempt.

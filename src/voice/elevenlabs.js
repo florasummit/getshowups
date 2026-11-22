@@ -74,6 +74,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
   let queue = []
   let flushTimer = null
   let ended = false
+  let providerSessionId = null
 
   // Events use the shared shape (src/voice/adapter.js): onEvent(name, payload). ElevenLabs' own session states map to
   // the interface's: live → connected, ended → stopped, error → failed.
@@ -123,7 +124,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
   const sendEnd = (outcome, disconnect) => {
     if (!routeOverrides || !session || ended) return Promise.resolve()
     ended = true
-    return post(routes.session, { method: 'POST', body: withSession({ action: 'end', metrics: metrics.snapshot(), ...(outcome ? { outcome } : {}), ...(disconnect ? { disconnect } : {}) }), keepalive: true }).catch(() => {})
+    return post(routes.session, { method: 'POST', body: withSession({ action: 'end', metrics: metrics.snapshot(), ...(outcome ? { outcome } : {}), ...(disconnect ? { disconnect } : {}), ...(providerSessionId ? { providerSessionId } : {}) }), keepalive: true }).catch(() => {})
   }
   // The page is closing (navigation, tab closed, reload) during a call: end the provider session and record it, so no
   // session stays open against the daily minute budgets (the normal finish() never gets to run on unload).
@@ -185,7 +186,15 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
       overrides: data.overrides,
       dynamicVariables: data.dynamicVariables,
       clientTools,
-      onConnect: () => setState('live', { reconnects }),
+      onConnect: ({ conversationId } = {}) => {
+        // The provider's own id of this conversation: recorded on the session so its verified charge can be looked up
+        // (server/voice/charges.js); the first connection's id is the conversation's.
+        if (!providerSessionId && typeof conversationId === 'string' && /^[A-Za-z0-9_-]{6,80}$/.test(conversationId)) {
+          providerSessionId = conversationId
+          post(routes.session, { method: 'POST', body: withSession({ action: 'provider', providerSessionId }) }).catch(() => {})
+        }
+        setState('live', { reconnects, ...(providerSessionId ? { providerSessionId } : {}) })
+      },
       onMessage: ({ message, role, source }) => {
         if (typeof message !== 'string' || !message.trim()) return
         const who = role === 'user' || source === 'user' ? 'customer' : 'receptionist'
@@ -248,6 +257,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
       onEvent = typeof cb === 'function' ? cb : () => {}
       stopping = false
       ended = false
+      providerSessionId = null
       reconnects = 0
       lastUserText = ''
       agentSpeaking = false

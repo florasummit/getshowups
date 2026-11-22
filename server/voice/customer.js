@@ -19,13 +19,15 @@ import { testStatus } from '../testbusiness.js'
 import { mintClientSecret } from './openai.js'
 import { fetchSignedUrl, elevenlabsOverrides, elevenlabsDynamicVariables, elevenlabsClientToolNames, SIGNED_URL_TTL_MS } from './elevenlabs.js'
 import { providerStatus, estimateMicros, PROVIDERS } from './providers.js'
-import { cleanMetrics, cleanDisconnect } from './sessions.js'
+import { cleanMetrics, cleanDisconnect, providerMinutesToday } from './sessions.js'
+import { providerDailyLimit, testDailyMinutes, testMinutesToday, SESSION_CEILING_MS } from './budgets.js'
+import { REF_RE } from './charges.js'
 import { runVoiceTool, appendVoiceTranscript, voiceInstructions, TOOL_KINDS_SET } from './tools.js'
 import { getVoiceSettings, sessionVoiceFor } from './style.js'
 import { adminEmails } from '../platform.js'
 export const isPlatformAdminEmail = (env, email) => adminEmails(env).includes(String(email || '').toLowerCase())
 
-export const VOICE_SESSION_MAX_MS = 15 * 60 * 1000
+export const VOICE_SESSION_MAX_MS = SESSION_CEILING_MS
 export const MAX_CONNECTS = 3
 // Bounds (env, each with a default): concurrent sessions per business, minutes per business per UTC day (every
 // provider), minutes per provider per day across the platform for the providers billed per minute to GetShowUps.
@@ -48,13 +50,11 @@ const dayStart = (now) => now - (now % 86_400_000)
 // session ceiling, never "until now": production 2026-11-22, two such rows on one test business would have used up
 // its whole daily budget (120 min) within two hours and refused every further test with voice_limit.
 export async function businessMinutesToday(env, customerId, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?3), created_at + ?4) - created_at), 0) AS ms FROM receptionist_calls WHERE customer = ?1 AND created_at >= ?2').bind(customerId, dayStart(now), now, VOICE_SESSION_MAX_MS).first()
+  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN MIN(?3, created_at + ?4) ELSE ended_at END - created_at), 0) AS ms FROM receptionist_calls WHERE customer = ?1 AND created_at >= ?2').bind(customerId, dayStart(now), now, VOICE_SESSION_MAX_MS).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
-export async function providerMinutesToday(env, provider, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?3), created_at + ?4) - created_at), 0) AS ms FROM receptionist_calls WHERE provider = ?1 AND created_at >= ?2').bind(provider, dayStart(now), now, VOICE_SESSION_MAX_MS).first()
-  return Math.ceil(Number(r?.ms || 0) / 60_000)
-}
+// Minutes of one provider today, every kind of session (Lab Retell rows included): server/voice/sessions.js.
+export { providerMinutesToday }
 async function openSessions(env, customerId, now) {
   const r = await env.ONBOARDING_DB.prepare('SELECT count(*) AS n FROM receptionist_calls WHERE customer = ?1 AND ended_at IS NULL AND created_at > ?2').bind(customerId, now - VOICE_SESSION_MAX_MS).first()
   return Number(r?.n || 0)
@@ -91,7 +91,12 @@ export async function startCustomerVoiceSession(env, customer, { existing = null
   if (provider === 'retell' && !test && !voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available', httpStatus: 403 }
   if ((await openSessions(env, customer.id, now)) >= voiceConcurrentLimit(env)) return { ok: false, error: 'voice_busy', httpStatus: 429 }
   if ((await businessMinutesToday(env, customer.id, now)) >= voiceDailyMinutes(env)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
-  if (provider !== 'retell' && (await providerMinutesToday(env, provider, now)) >= providerDailyMinutes(env)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
+  // Per-provider ceiling (server/voice/budgets.js: OpenAI/ElevenLabs by default, Retell only with its own switch).
+  const providerCap = providerDailyLimit(env, provider)
+  if (providerCap != null && (await providerMinutesToday(env, provider, now)) >= providerCap) return { ok: false, error: 'voice_limit', httpStatus: 429 }
+  // Test usage of this business today (admin tests + Lab calls): capped on its own, so testing never spends more
+  // than VOICE_TEST_DAILY_MINUTES per business per day.
+  if (test && (await testMinutesToday(env, customer.id, now)) >= testDailyMinutes(env)) return { ok: false, error: 'test_limit', httpStatus: 429 }
   const conv = existing && !existing.state?.endedAt ? existing : { ...(await startConversation(env, customer, 'voice', now, { attribution })), state: {} }
   const state = conv.state || {}
   if (state.voice && !state.voice.endedAt && state.voice.callId) {
@@ -186,9 +191,23 @@ export const customerVoiceTranscript = (env, { customer, conv }, lines, now = Da
 // `outcome` is a code (ended | a failure code such as provider_refused); `disconnect` is the adapter's record of how
 // the connection ended when it did not end cleanly (cleanDisconnect: codes, the WebSocket close code, the provider's
 // reason text), the evidence a dropped call is diagnosed from.
-export async function endCustomerVoiceSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null } = {}, now = Date.now()) {
+// The provider's own id of a session (ElevenLabs' conversation id, reported by the browser SDK on connect): what a
+// verified charge is looked up by later (server/voice/charges.js). Well-formed ids only; recorded once.
+export async function recordProviderSession(env, { customer, conv }, providerSessionId, now = Date.now()) {
+  const voice = conv.state.voice
+  const id = String(providerSessionId || '')
+  if (!REF_RE.test(id)) return { ok: false, error: 'invalid_reference' }
+  if (voice.providerSessionId && voice.providerSessionId !== id) return { ok: false, error: 'already_recorded' }
+  if (voice.providerSessionId === id) return { ok: true, already: true }
+  voice.providerSessionId = id
+  await env.ONBOARDING_DB.prepare('UPDATE receptionist_conversations SET state = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(conv.id, customer.id, JSON.stringify(conv.state), now).run()
+  return { ok: true }
+}
+
+export async function endCustomerVoiceSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null, providerSessionId = null } = {}, now = Date.now()) {
   const voice = conv.state.voice
   if (voice.endedAt) return { ok: true, already: true, voice: summary(voice) }
+  if (!voice.providerSessionId && REF_RE.test(String(providerSessionId || ''))) voice.providerSessionId = String(providerSessionId)
   const seconds = Math.max(0, Math.round((now - voice.startedAt) / 1000))
   voice.metrics = { ...cleanMetrics(voice.metrics), ...cleanMetrics(metrics), durationSeconds: seconds }
   voice.endedAt = now
@@ -208,7 +227,7 @@ export async function endCustomerVoiceSession(env, { customer, conv }, { metrics
   ])
   return { ok: true, voice: summary(voice) }
 }
-const summary = (v) => ({ provider: v.provider, startedAt: v.startedAt, endedAt: v.endedAt || null, test: Boolean(v.test), metrics: v.metrics || {}, estimatedMicros: v.estimatedMicros ?? null, outcome: v.outcome || null, disconnect: v.disconnect || null })
+const summary = (v) => ({ provider: v.provider, startedAt: v.startedAt, endedAt: v.endedAt || null, test: Boolean(v.test), metrics: v.metrics || {}, estimatedMicros: v.estimatedMicros ?? null, outcome: v.outcome || null, disconnect: v.disconnect || null, providerSessionId: v.providerSessionId || null, charge: v.charge || null })
 
 // The voice sessions of ONE business, newest first, as the admin console's test history: provider, kind (admin test
 // on the customer path | Lab | customer), timing, the adapter's audio evidence, whether the availability and booking
@@ -251,6 +270,7 @@ export async function voiceSessionHistory(env, customerId, { limit = 20, now = D
         tools: withTools ? { availability, booking, count: tools.length } : { availability: false, booking: false, count: 0 },
         outcome: x.outcome || (withTools ? row.outcome : null) || null,
         disconnect: x.disconnect || null,
+        charge: x.charge || null,
         booked: withTools && Boolean(s.booked),
         simulated: withTools && Boolean(s.booked?.simulated),
         estimatedMicros: x.estimatedMicros ?? null,

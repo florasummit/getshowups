@@ -14,6 +14,7 @@ import { Badge, Empty, Facts, LoadError, Loading, PageHead } from './control/ui.
 import { ago, mins } from './control/lib.js'
 import GlobalProvider from './GlobalProvider.jsx'
 import Businesses from './Businesses.jsx'
+import Comparison from './Comparison.jsx'
 import './control.css'
 import './voice-lab.css'
 
@@ -42,6 +43,8 @@ const START_ERRORS = {
   invalid_provider: 'Unknown provider.',
   not_test_business: 'That business is not marked as a test business.',
   lab_daily_limit: 'The Lab’s daily minute budget is used up for today.',
+  voice_limit: 'This provider’s daily minute budget is used up for today (VOICE_PROVIDER_DAILY_MINUTES).',
+  test_limit: 'This test business has used its testing minutes for today (VOICE_TEST_DAILY_MINUTES).',
   lab_busy: 'Another Lab call is still open. Stop it first (an abandoned one ages out after 15 minutes).',
   reconnect_limit: 'This session reconnected too many times. Start a new one.',
   voice_billing: 'The Retell account refused the call (billing).',
@@ -145,6 +148,7 @@ export default function VoiceLab() {
   const linesRef = useRef([])
   const metricsRef = useRef({})
   const disconnectRef = useRef(null) // the adapter's disconnect record of a failed session, sent with the end
+  const providerSessionRef = useRef(null) // the provider's own session id (ElevenLabs conversation id), sent with the end
 
   useEffect(() => {
     document.title = 'Voice Lab · GetShowUps'
@@ -237,7 +241,9 @@ export default function VoiceLab() {
     }
     const disconnect = disconnectRef.current
     disconnectRef.current = null
-    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'end', customer: s.customer.id, id: s.id, token: s.token, metrics, ...(disconnect ? { disconnect } : {}) } })
+    const providerSessionId = providerSessionRef.current
+    providerSessionRef.current = null
+    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'end', customer: s.customer.id, id: s.id, token: s.token, metrics, ...(disconnect ? { disconnect } : {}), ...(providerSessionId ? { providerSessionId } : {}) } })
     adapterRef.current = null
     update((s) => ({ phase: 'done', summary: code === 200 ? data.summary : null, error: code === 200 ? s.error : `Couldn’t close the session (${data?.error || code}).` }))
     setReload((n) => n + 1)
@@ -250,6 +256,7 @@ export default function VoiceLab() {
       if (!ev || typeof ev !== 'object') return
       if (ev.type === 'status') {
         if (ev.disconnect) disconnectRef.current = ev.disconnect
+        if (ev.providerSessionId) providerSessionRef.current = ev.providerSessionId
         update((s) => ({ connection: ev.state || s.connection, connectionReason: ev.reason || null, mic: ev.mic || s.mic, audio: ev.audio || s.audio }))
         if ((ev.state === 'ended' || ev.state === 'stopped' || ev.state === 'failed') && sessionRef.current && !finishingRef.current) finish()
       } else if (ev.type === 'transcript') {
@@ -553,6 +560,7 @@ export default function VoiceLab() {
         {global && !global.error && <GlobalProvider global={global} businesses={Array.isArray(list) ? list : []} reload={reloadAll} />}
         {global?.error && <LoadError what="the provider" onRetry={reloadAll} />}
         <Businesses list={list} global={global && !global.error ? global : null} selected={selected} choose={choose} view={view} reload={reloadAll} />
+        {status && !status.error && <Comparison status={status} reload={() => setReload((n) => n + 1)} />}
         <details className="cc-details" data-lab-call open={labShown || undefined} onToggle={(e) => setLabOpen(e.currentTarget.open)}>
           <summary>Lab call: compare providers, voices and latency</summary>
           {lab}

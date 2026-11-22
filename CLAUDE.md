@@ -517,6 +517,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   conversation's token again and keeps earlier attempts in state.voiceHistory. The page explains the code and keeps the
   microphone; an admin test page shows the record (data-test-diag); the Voice Lab's last-test line and providerVerification
   show/count it (path connection). Never map a failure to "The call dropped" without recording why.
+  Cost controls (server/voice/budgets.js, charges.js, compare.js; docs/RECEPTIONIST.md "Cost controls"): daily minute
+  ceilings refuse a start at the limit (voice_limit / test_limit / lab_daily_limit): VOICE_PROVIDER_DAILY_MINUTES
+  (+ _OPENAI/_ELEVENLABS/_RETELL per provider; Retell capped only with its own switch), VOICE_TEST_DAILY_MINUTES (admin
+  tests + Lab calls per test business, default 30), VOICE_LAB_DAILY_MINUTES, RECEPTIONIST_VOICE_DAILY_MINUTES. Estimates
+  (COST_ESTIMATES) are labelled estimates; a VERIFIED charge is the provider's own record fetched on the admin's request
+  (Retell call_cost in cents, ElevenLabs conversation credits + USD when reported, by providerSessionId; OpenAI has none):
+  never convert credits to dollars, never invent a number for a failed lookup. Balances: ElevenLabs' subscription read on
+  request only; Retell and OpenAI have none (say so). The Lab's comparison is session records of every kind.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in

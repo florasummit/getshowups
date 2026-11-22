@@ -274,6 +274,38 @@
   font-weight: 700;
 }
 
+/* Providers compared: a wide table scrolls sideways on narrow screens (phones stack it like the history table). */
+.vp-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.vp-compare-table th,
+.vp-compare-table td {
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .vp-compare-table th,
+  .vp-compare-table td {
+    white-space: normal;
+  }
+  .vp-compare-table tbody th {
+    font-weight: 700;
+  }
+  .vp-compare-table td[data-label]::before {
+    content: attr(data-label) ': ';
+    color: var(--text-muted);
+  }
+}
+.vp-budget {
+  display: inline-block;
+  margin: 0 var(--s-2) 4px 0;
+}
+.vp-budget-switches {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
 /* Provider tiles (the target and the alternatives): buttons, same look as the Lab's provider cards. */
 .vp-tiles {
   display: grid;

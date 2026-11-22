@@ -7,7 +7,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
-import { customerVoiceTranscript, endCustomerVoiceSession, loadCustomerVoiceSession } from '../../../../server/voice/customer.js'
+import { customerVoiceTranscript, endCustomerVoiceSession, loadCustomerVoiceSession, recordProviderSession } from '../../../../server/voice/customer.js'
 
 export async function onRequestPost({ request, env, params }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
@@ -18,6 +18,7 @@ export async function onRequestPost({ request, env, params }) {
   const s = await loadCustomerVoiceSession(env, customer, body?.id || body?.conversationId, body?.token)
   if (!s) return json(404, { error: 'not_found' })
   if (body.action === 'transcript') return json(200, await customerVoiceTranscript(env, s, body.lines))
-  if (body.action === 'end') return json(200, await endCustomerVoiceSession(env, s, { metrics: body.metrics, outcome: body.outcome, disconnect: body.disconnect }))
+  if (body.action === 'provider') return json(200, await recordProviderSession(env, s, body.providerSessionId))
+  if (body.action === 'end') return json(200, await endCustomerVoiceSession(env, s, { metrics: body.metrics, outcome: body.outcome, disconnect: body.disconnect, providerSessionId: body.providerSessionId }))
   return json(400, { error: 'invalid_action' })
 }
