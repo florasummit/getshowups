@@ -21,6 +21,11 @@
   align-items: start;
   padding-top: 20px;
 }
+/* One column, no side nav (Voice Lab, Voice providers). Lives next to .cc on purpose: a modifier of this grid must be
+   in the same stylesheet, or a page gets it only when another page's chunk happens to have loaded it. */
+.cc--single {
+  grid-template-columns: minmax(0, 1fr);
+}
 .cc :where(h1, h2, h3, h4) {
   margin: 0;
   letter-spacing: -0.01em;

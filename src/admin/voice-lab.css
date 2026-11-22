@@ -1,7 +1,5 @@
-/* Voice Lab (/admin/voice-lab): the Control Center's surfaces and tokens (control.css), one column, no side nav. */
-.cc--single {
-  grid-template-columns: minmax(0, 1fr);
-}
+/* Voice Lab (/admin/voice-lab): the Control Center's surfaces and tokens (control.css), one column (.cc--single, defined
+   with .cc in control.css so every page that uses it gets it), no side nav. */
 .vl-providers {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

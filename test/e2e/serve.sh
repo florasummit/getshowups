@@ -260,6 +260,19 @@ INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$
 npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
+# Global default history (voice-providers.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
+# the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
+# kept (changed since). So every seeded business is a ROLLOUT PIN on Retell (same behaviour as before for every other
+# spec: Retell everywhere, businesses created later follow Retell) and "Promote to 100%" has something to release.
+d1 "
+INSERT INTO receptionist_voice_settings (customer, provider, voice_id, voice_name, personality, pace, language, previous, version, updated_by, updated_at)
+  SELECT id, 'retell', NULL, NULL, 'standard', 'normal', 'en', NULL, 1, 'ref:seed', $NOW FROM customers
+   WHERE id != '$E2E_VOICE_SWITCH_CUSTOMER' AND id NOT IN (SELECT customer FROM receptionist_voice_settings);
+INSERT INTO receptionist_voice_defaults (version, provider, previous, mode, pinned, switched, set_by, set_at) VALUES
+  (1, 'elevenlabs', 'retell', 'staged', (SELECT json_group_array(json_object('customer', id, 'version', 1, 'provider', 'retell')) FROM customers WHERE id != '$E2E_VOICE_SWITCH_CUSTOMER'), '[]', 'ref:seed', $((NOW - 7200000))),
+  (2, 'retell', 'elevenlabs', 'rollback', '[]', '[]', 'ref:seed', $((NOW - 3600000)));
+"
+
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --compatibility-date 2026-11-08 --persist-to "$STATE" --show-interactive-dev-session=false \
   --d1 ONBOARDING_DB=e2e-onboarding --kv GOOGLE_TOKENS=GOOGLE_TOKENS \
