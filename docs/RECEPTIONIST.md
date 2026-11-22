@@ -213,6 +213,43 @@ whose owner chose a voice on the new provider is kept there as an override and r
 back. Production (2026-11-22): no defaults row, so the default is Retell until a platform admin selects and confirms
 another provider in the console.
 
+### Promote to 100% (2026-11-22, no migration)
+
+A staged rollout leaves unverified businesses pinned; `Promote <provider> to 100%` (console, `server/voice/global.js`
+`checkGlobalPromotion` / `promoteGlobalProvider`, `POST /api/platform/voice-provider` actions `global_promote_check` |
+`global_promote`, provider typed back, global version carried) releases them in ONE action. Evidence is split in two:
+
+- **Provider-level verification** (`providerVerification`): a finished session on the PRODUCTION path (customer-facing
+  voice, admin test or real customer; Voice Lab sessions never count) on the target in the last 30 days with audio both
+  ways, the availability and booking tools succeeding through our server (a simulated booking on a test business
+  counts) and a clean end (no connection outcome). Performed on a designated test business
+  (`/chat/<test business>?test=<provider>`), it stands for the provider, never for a business's own test.
+- **Business-level compatibility**, automated for every business in scope: the per-business checklist minus the
+  evidence (configuration, customer path, switched off, eligibility, the seven tools, a voice chosen on this provider
+  valid in its catalog or no voice, booking readiness). A voice chosen on another provider, a missing catalog entry,
+  missing credentials, a switched-off provider block (never bypassed); a missing per-business test session is the
+  `unverified` WARNING the admin acknowledges explicitly (`acknowledgeUnverified: true`; the audit records the count;
+  nobody is reported as individually tested); booking not ready / receptionist off are warnings the promotion does not
+  change. ANY blocker refuses the whole promotion (all or nothing, blockers by name).
+
+Scope: every business that follows the default plus every **rollout pin** (`pinOrigins`: an override on the provider
+a version pinned it to, no admin switch since; the version's `pinned[]` entries carry `provider`), deliberate overrides
+only with `includeOverrides` (shown as untouched otherwise, their previous provider kept for the rollback), suspended
+businesses excluded (one that follows the default follows the new default when reactivated). Released pins and
+replaced overrides get an inherit row: they FOLLOW the default again, no permanent override is created on the new
+provider. The new version (mode `all`) records `switched[] = { customer, version, from, kind: inherited | pin | override }`.
+The batch is guarded: the defaults row is inserted first with `provider = CASE WHEN every in-scope business still has
+the settings version and inheritance the checklist saw THEN … ELSE NULL`, so a business changed under the checklist
+makes the whole batch roll back (nothing applied, `stale`). Audits: `receptionist.global_provider_promoted` (counts,
+acknowledged count), `receptionist.provider_promoted` per business, `receptionist.global_promotion_blocked`.
+Rollback (`global_rollback`, same guard) restores the previous default, moved rows, released pins (still recognisable
+as pins) and replaced overrides, keeps a business whose owner chose a voice on the new provider meanwhile (reported),
+and cannot restore conversations already held or provider charges. Rollout status (`globalRolloutStatus`, console):
+sessions on the current default since its version (newest 500), businesses, connection failures (session outcomes),
+tool and booking failures (the engine's tool outcomes), minutes and the cost estimate; anything the records cannot give
+is shown as unavailable. Production (2026-11-22): default ElevenLabs version 1 (staged) with 6 pins on Retell; the
+deployment changed nothing; the promotion is the human admin's action after an ElevenLabs production-path test.
+
 ## Location policy (2026-11-22)
 
 The receptionist answers questions about services, prices, hours and how soon it can usually come without asking

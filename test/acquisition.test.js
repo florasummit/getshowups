@@ -18,7 +18,9 @@ import * as revenueApi from '../functions/api/dashboard/revenue.js'
 
 const ORIGIN = 'https://getshowups.com'
 const DAY = 86_400_000
-const NOW = Date.UTC(2026, 10, 17, 12)
+// Noon (UTC) of today: fixtures are relative to the real clock because the routes use Date.now() (a fixed date aged
+// its 2-day-old leads out of the 7-day window after a few days).
+const NOW = Date.now() - (Date.now() % DAY) + 12 * 3_600_000
 let env, db
 
 function d1({ skip = [] } = {}) {

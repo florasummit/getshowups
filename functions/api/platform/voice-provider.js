@@ -11,6 +11,12 @@
 //   POST { action: 'global_check', provider }                                           → { check }  (nothing changes)
 //   POST { action: 'global_switch', provider, confirmProvider, mode: 'all' | 'staged', confirm: true, version }
 //   POST { action: 'global_rollback', confirmProvider, confirm: true, version }
+//   GET ?global_promote_check=<provider>[&include_overrides=1]  |  POST { action: 'global_promote_check', provider?, includeOverrides? }
+//                                    → { check }  the promotion checklist (provider-level verification + every business in
+//                                      scope through its compatibility checks; warnings vs blockers; nothing changes)
+//   POST { action: 'global_promote', provider?, confirmProvider, includeOverrides?, acknowledgeUnverified?, confirm: true, version }
+//                                    → promotes the target (default: the current global default) to 100% of the businesses
+//                                      in scope in one guarded batch; { global, applied, distribution, check, businesses }
 // Global changes (server/voice/global.js) require the provider id typed back (`confirmProvider` = the provider the
 // platform ends up on) and carry the global version read (409 stale).
 // The switch and the rollback are the SAME functions the dashboard control calls (checklist, blockers, confirmation,
@@ -21,7 +27,7 @@ import { json } from '../../../server/google-oauth.js'
 import { requirePlatformAdmin } from '../../../server/platform.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { adminVoiceView, listVoiceBusinesses, loadVoiceBusiness } from '../../../server/voice/admin.js'
-import { checkGlobalSwitch, getGlobalDefault, globalOverview, rollbackGlobalProvider, switchGlobalProvider } from '../../../server/voice/global.js'
+import { checkGlobalPromotion, checkGlobalSwitch, getGlobalDefault, globalOverview, promoteGlobalProvider, rollbackGlobalProvider, switchGlobalProvider } from '../../../server/voice/global.js'
 import { catalogFor, checkProviderSwitch, PROVIDER_CAPABILITIES, rollbackProvider, switchProvider } from '../../../server/voice/settings.js'
 import { PROVIDERS } from '../../../server/voice/providers.js'
 
@@ -32,6 +38,8 @@ export async function onRequestGet({ request, env }) {
   const id = url.searchParams.get('customer')
   const gc = url.searchParams.get('global_check')
   if (gc) return PROVIDERS.includes(gc) ? json(200, { check: await checkGlobalSwitch(env, { provider: gc }) }) : json(400, { error: 'invalid_provider' })
+  const gp = url.searchParams.get('global_promote_check')
+  if (gp) return PROVIDERS.includes(gp) ? json(200, { check: await checkGlobalPromotion(env, { provider: gp, includeOverrides: url.searchParams.get('include_overrides') === '1' }) }) : json(400, { error: 'invalid_provider' })
   if (!id) return json(200, { businesses: await listVoiceBusinesses(env), global: await globalOverview(env) })
   const { customer, error, httpStatus } = await loadVoiceBusiness(env, id)
   if (error) return json(httpStatus, { error })
@@ -55,9 +63,22 @@ export async function onRequestPost({ request, env }) {
   const b = await request.json().catch(() => ({}))
   const action = b?.action
   const now = Date.now()
-  if (action === 'global_check' || action === 'global_switch' || action === 'global_rollback') {
+  if (action === 'global_check' || action === 'global_switch' || action === 'global_rollback' || action === 'global_promote_check' || action === 'global_promote') {
     const provider = String(b.provider || '')
     if (action === 'global_check') return PROVIDERS.includes(provider) ? json(200, { check: await checkGlobalSwitch(env, { provider }, now) }) : json(400, { error: 'invalid_provider' })
+    const includeOverrides = b.includeOverrides === true
+    if (action === 'global_promote_check') {
+      const target = provider || (await getGlobalDefault(env.ONBOARDING_DB)).provider
+      return PROVIDERS.includes(target) ? json(200, { check: await checkGlobalPromotion(env, { provider: target, includeOverrides }, now) }) : json(400, { error: 'invalid_provider' })
+    }
+    if (action === 'global_promote') {
+      const target = provider || (await getGlobalDefault(env.ONBOARDING_DB)).provider
+      if (!PROVIDERS.includes(target)) return json(400, { error: 'invalid_provider' })
+      if (String(b.confirmProvider || '').toLowerCase() !== target) return json(400, { error: 'confirm_provider_mismatch' })
+      const r = await promoteGlobalProvider(env, admin, { provider: target, includeOverrides, acknowledgeUnverified: b.acknowledgeUnverified === true, confirm: b.confirm === true, version: b.version }, now)
+      if (!r.ok) return json(r.error === 'not_platform_admin' ? 403 : ['blocked', 'confirmation_required', 'acknowledgement_required', 'stale'].includes(r.error) ? 409 : 400, { error: r.error, ...(r.check ? { check: r.check } : {}), ...(r.version !== undefined ? { version: r.version } : {}) })
+      return json(200, { global: await globalOverview(env), applied: r.applied, distribution: r.distribution, check: r.check, businesses: await listVoiceBusinesses(env) })
+    }
     // The provider the platform ends up on must be typed back (the target for a switch, the previous one for a rollback).
     const typed = String(b.confirmProvider || '').toLowerCase()
     if (action === 'global_switch') {

@@ -12,3 +12,4 @@
   .vp-history tr { display: grid; gap: 4px; padding: var(--s-2) 0; border-top: 1px solid var(--surface-muted); }
   .vp-history th, .vp-history td { border: 0; padding: 0; }
 }
+.vp-sub { margin: 0; font-size: var(--fs-md); font-weight: 700; }

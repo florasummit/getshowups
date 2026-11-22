@@ -71,13 +71,14 @@ test('owner: browses, previews (one at a time), picks a voice, personality and p
   await expect(after.getByRole('radio', { name: 'A little slower' })).toHaveAttribute('aria-checked', 'true')
   // Stored server-side with the version; a save carrying an old version is refused (409), nothing overwritten.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
-  expect([me.voice.voiceId, me.voice.voiceName, me.voice.personality, me.voice.pace, me.voice.version]).toEqual(['11labs-Adrian', 'Adrian', 'calm', 'slower', 1])
+  expect([me.voice.voiceId, me.voice.voiceName, me.voice.personality, me.voice.pace]).toEqual(['11labs-Adrian', 'Adrian', 'calm', 'slower'])
+  expect(me.voice.version).toBeGreaterThanOrEqual(2) // the seed's rollout pin is version 1; a concurrent global promotion/rollback (another spec) may bump it further
   const origin = new URL(page.url()).origin
   const stale = await page.request.post('/api/dashboard/receptionist', { data: { action: 'voice', personality: 'upbeat', version: 0 }, headers: { Origin: origin } })
   expect(stale.status()).toBe(409)
   expect((await (await page.request.get('/api/dashboard/receptionist')).json()).voice.personality).toBe('calm')
   // A voice that is not in the catalog, or another provider's, is refused by the server.
-  const bad = await page.request.post('/api/dashboard/receptionist', { data: { action: 'voice', voiceId: 'cjVigY5qzO86Huf0OWal', version: 1 }, headers: { Origin: origin } })
+  const bad = await page.request.post('/api/dashboard/receptionist', { data: { action: 'voice', voiceId: 'cjVigY5qzO86Huf0OWal', version: me.voice.version }, headers: { Origin: origin } })
   expect([bad.status(), (await bad.json()).error]).toEqual([400, 'voice_unknown'])
   // Provider actions are refused for owners, server-side.
   const sw = await page.request.post('/api/dashboard/receptionist', { data: { action: 'provider_switch', provider: 'elevenlabs', confirm: true, version: 1 }, headers: { Origin: origin } })

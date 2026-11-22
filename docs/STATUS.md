@@ -2,6 +2,46 @@
 
 _Update at the end of every task. Newest first._
 
+## Promote the staged provider to 100% + Admin Console layout (2026-11-22) — feat/global-promotion (no migration)
+
+- Production before this work: global default ElevenLabs version 1 (staged), all 6 businesses pinned to Retell, 0
+  switched: the staged rollout worked as designed but nothing could release the pins without 6 individual tests.
+- Promotion (server/voice/global.js checkGlobalPromotion / promoteGlobalProvider, route actions global_promote_check /
+  global_promote, console block "Promote <provider> to 100%"): ONE action for every business in scope. Evidence policy
+  split: PROVIDER-level verification (providerVerification: a finished production-path session on the target in the
+  last 30 days with audio both ways, availability + booking tools through our server, a clean end; Lab sessions do not
+  count; done on a test business) + automated BUSINESS-level compatibility (checkProviderSwitch minus the evidence:
+  configuration, customer path, switched off, eligibility, tools, voice on this provider valid or absent, catalog).
+  A missing per-business test is a WARNING (`unverified`) the admin acknowledges explicitly (`acknowledgeUnverified`,
+  recorded in the audit as a count; nobody is reported as individually tested); booking not ready / receptionist off
+  are warnings (the promotion doesn't change them); everything else blocks and the whole promotion is refused (all or
+  nothing, blockers by name). Scope: businesses that follow the default + rollout pins (pinOrigins: an override on the
+  provider a version pinned it to, no admin switch since) ; deliberate overrides only with `includeOverrides` (shown as
+  untouched otherwise); suspended businesses excluded (a suspended one that follows the default follows the new one).
+  Released pins and replaced overrides get an inherit row (they FOLLOW the default; no permanent override on the new
+  provider); their previous provider is recorded in the version's `switched[].kind/from` for the rollback.
+- Atomicity: the defaults row is inserted first with provider = CASE WHEN every in-scope business still has the
+  settings version + inheritance the checklist saw THEN provider ELSE NULL (NOT NULL violation → the whole batch rolls
+  back; test proves nothing applied). Version PK stops concurrent promotions; a repeat finds no_change. Rollback
+  (global_rollback, same guard) restores the previous default, moved rows, released pins (kept recognisable as pins)
+  and replaced overrides, keeps a business whose owner chose a voice on the new provider (reported), audited.
+- Monitoring (globalRolloutStatus in the overview): sessions on the current default since its version (newest 500),
+  businesses, connection failures (session outcomes connect_failed / reconnect_failed / connection_lost / disconnected /
+  microphone), tool + booking failures (the engine's tool outcomes), minutes + cost estimate; null = "unavailable".
+- Layout bug: /admin/voice-providers rendered as a ~220px column after a tab click (fine after reload only when the
+  Voice Lab chunk's CSS was present): `.cc--single` lived in voice-lab.css, which Voice providers never imports, so the
+  one-column modifier existed only when that chunk had loaded. Moved next to `.cc` in control.css. Regression:
+  test/e2e/admin-layout.spec.js clicks through every admin tab both ways without reloading, direct links, back/forward,
+  desktop + phone, measuring the rendered column width and sideways scroll.
+- e2e seed: every seeded business is now a rollout pin on Retell (defaults v1 staged ElevenLabs + v2 rollback; rows on
+  Retell); behaviour is Retell everywhere as before, and the promotion spec has pins to release.
+- CI note: PR #120's first verify run failed only on the known studio-editor mobile flake (Add a section options 11 ≠ 2
+  after the legal-page switch; the retry inherits the first attempt's state); 234 passed; local gate green. Re-run by a
+  docs-only push (the token cannot re-run CI). Still open: make that spec's page switch + publish step idempotent.
+- Production: default unchanged by the deployment (ElevenLabs v1, 6 pins). Still needed before a promotion: a finished
+  ElevenLabs test session on the production path (/chat/<test business>?test=elevenlabs by a signed-in admin), then
+  Promote to 100% → acknowledge → type `elevenlabs` → confirm.
+
 ## Global default AI voice provider (2026-11-22) — feat/global-voice-provider (migration 0036)
 
 - Resolution: explicit business override → global default (receptionist_voice_defaults; no row = Retell) → Retell.

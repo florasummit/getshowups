@@ -478,8 +478,18 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   overrides. A global change checks EVERY inherited business with checkProviderSwitch: mode all refused while any is
   blocked, mode staged pins the blocked ones to today's provider (override, audited receptionist.provider_pinned) and
   switches only verified ones; overrides untouched; sessions in progress stay pinned; global rollback undoes exactly
-  what the version did and reports what it kept. Never report a global switch as applied to everyone. Production
-  default stays Retell until the founder selects and confirms another provider in the console.
+  what the version did and reports what it kept. Never report a global switch as applied to everyone.
+  Promote to 100% (checkGlobalPromotion / promoteGlobalProvider, actions global_promote_check / global_promote): one
+  action for every business in scope (following + rollout pins; deliberate overrides only with includeOverrides;
+  suspended excluded). PROVIDER-level verification (providerVerification: a finished production-path session on a
+  test business with audio both ways, both booking tools, a clean end; Lab never counts) + automated per-business
+  compatibility (checkProviderSwitch minus the evidence) stand in for per-business tests, which become the `unverified`
+  WARNING acknowledged explicitly (never reported as tested); credentials, customer path, voice on another provider,
+  catalog, tools, switched off stay BLOCKERS and refuse the whole promotion (all or nothing). Released pins and
+  replaced overrides FOLLOW the default (inherit row), never a permanent override; the guarded defaults INSERT
+  (provider NULL unless every in-scope row is unchanged) makes the batch all-or-nothing; rollback restores pins and
+  overrides as they were. Rollout status = session records only (null = unavailable); never invent a metric.
+  Production: the human admin runs the promotion; a deployment never changes the default or any business.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in
