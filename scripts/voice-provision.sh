@@ -60,11 +60,16 @@ case "$PROVIDER" in
     echo "OpenAI: key valid; Realtime client secret minted (HTTP 200). Secret to set: OPENAI_API_KEY."
     ;;
   elevenlabs)
-    S=$(status -H "xi-api-key: $KEY" https://api.elevenlabs.io/v1/user)
-    [ "$S" = "200" ] || { echo "ElevenLabs refused the key (HTTP $S)." >&2; exit 4; }
+    # A key scoped to Conversational AI only is fine (it has no user_read): the Agents Platform is what we use.
     S2=$(status -H "xi-api-key: $KEY" "https://api.elevenlabs.io/v1/convai/agents?page_size=1")
-    [ "$S2" = "200" ] || { echo "ElevenLabs key works but the Agents Platform refused (HTTP $S2): the key needs Conversational AI permissions (API key settings → ConvAI read/write)." >&2; exit 4; }
-    echo "ElevenLabs: key valid; Agents Platform reachable. Secrets to set: ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID (from the agent setup)."
+    [ "$S2" = "200" ] || { echo "ElevenLabs refused the key for the Agents Platform (HTTP $S2): the key needs Conversational AI permissions (API key settings → Conversational AI read + write)." >&2; exit 4; }
+    if [ -n "$AGENT_ID" ]; then
+      # Write permission: the Lab mints a signed session URL per session (convai_write); a key without it can read
+      # agents but can neither be configured by this script nor start a session. The URL expires in 15 minutes, unused.
+      S3=$(status -H "xi-api-key: $KEY" "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=$AGENT_ID")
+      [ "$S3" = "200" ] || { echo "ElevenLabs key can read agents but cannot start a session for $AGENT_ID (HTTP $S3): grant the key Conversational AI WRITE permission (convai_write), or check the agent id." >&2; exit 4; }
+    fi
+    echo "ElevenLabs: key valid for the Agents Platform${AGENT_ID:+ (read + write, session URL minted)}. Secrets to set: ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID."
     echo "Agent setup (dry run):"
     printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs ${AGENT_ID:+--agent-id "$AGENT_ID"}
     ;;
