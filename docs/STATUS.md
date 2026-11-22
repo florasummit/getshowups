@@ -15,6 +15,8 @@ _Update at the end of every task. Newest first._
   provider in the console. Tests: test/voice-global.test.js (sequence Retell → OpenAI → ElevenLabs → Retell, inherit,
   overrides, pins, "all" refused, rollback incl. kept businesses, sessions pinned, concurrent isolation, route auth +
   typed provider), existing voice tests updated for the resolution; e2e voice-providers.spec global section.
+- CI note: the first verify run of PR #119 failed only on the known studio-editor flake (click timeout at 90 s, retry sees
+  the first attempt's state); the local gate passed 235/235. Still open: make that spec's publish step idempotent.
 
 ## Admin Console: voice-provider management for any business (2026-11-22) — feat/admin-voice-providers (no migration)
 
