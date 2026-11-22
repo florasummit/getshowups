@@ -1,16 +1,23 @@
 // Admin Console → Voice providers (/admin/voice-providers) in a real browser against the real Functions on local
-// workerd, Retell faked at the network edge: the FIRST platform admin (a member of no business) picks a business,
-// sees its active provider, readiness, history and blockers, and runs Review → Activate (business id typed back) →
-// Rollback on an admin-marked test business seeded on OpenAI (not configured here) with a finished Retell test session.
-// A live business without evidence is blocked by the checklist; owners get neither the page nor the API. Desktop only.
+// workerd, Retell faked at the network edge. The FIRST platform admin (a member of no business) sees the global
+// provider card (state + the one next action), the business table, manages one business (Review → Activate, business
+// id typed back → Rollback), stages/reviews a global change, opens the provider test page from the console (a test
+// business whose receptionist is OFF for customers; customers still get the unavailable page), promotes to 100% with
+// one typed confirmation, watches the rollout and rolls it back. Owners get neither the page nor the API. Desktop
+// project; the layout is also checked at 320px and tablet width within the tests.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const noSideScroll = async (page) => expect(await page.evaluate(() => document.documentElement.scrollWidth - Math.min(window.innerWidth, screen.width))).toBeLessThanOrEqual(0)
+// The content column fills the width the page offers it (regression: a 220px column after client-side navigation).
+const fillsWidth = async (page) => {
+  const m = await page.evaluate(() => ({ main: document.querySelector('main.app-main').getBoundingClientRect().width, col: document.querySelector('.cc-main').getBoundingClientRect().width }))
+  expect(m.col, `content ${m.col} of ${m.main}`).toBeGreaterThanOrEqual(m.main * 0.9)
+}
 
-test('admin (member of nothing): picks a live business, sees honest states and blockers, the checklist blocks an unverified switch, nothing changes; owners are refused', async ({ page, context }) => {
+test('admin (member of nothing): the page shows the global card and the business table; Manage opens a live business with honest states and blockers; the checklist blocks an unverified switch; nothing changes; owners are refused', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin')
   await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Voice providers' }).click()
@@ -20,7 +27,21 @@ test('admin (member of nothing): picks a live business, sees honest states and b
   const voice = list.businesses.find((b) => b.id === fixtures.E2E_VOICE_CUSTOMER)
   expect([voice.name, voice.test, voice.receptionist, voice.provider]).toEqual(['Voice Pools', false, true, 'retell'])
   expect(JSON.stringify(list)).not.toMatch(/@|sk-|Bearer/)
-  await page.getByRole('combobox', { name: 'Business' }).selectOption(fixtures.E2E_VOICE_CUSTOMER)
+  // One provider, one state, one next action; the technical facts sit under Advanced details.
+  const g = page.locator('[data-global-provider]')
+  await expect(g).toHaveAttribute('data-global-provider', 'retell')
+  await expect(g.locator('.vp-provider')).toHaveText('Retell')
+  await expect(g.locator('[data-global-advanced]')).not.toHaveAttribute('open', /.*/)
+  await expect(g.locator('[data-global-advanced]')).toContainText('Version') // present, collapsed
+  await fillsWidth(page)
+  // The business table: name, provider, follows the default or business-specific, readiness.
+  const row = page.locator(`[data-vp-row="${fixtures.E2E_VOICE_CUSTOMER}"]`)
+  await expect(row).toContainText('Voice Pools')
+  await expect(row).toContainText('Retell')
+  await expect(row).toContainText('Still on the previous provider') // a rollout pin, not a deliberate override
+  await expect(page.locator(`[data-vp-row="${fixtures.E2E_VOICE_SWITCH_CUSTOMER}"]`)).toContainText('Business-specific')
+  await expect(row).toContainText('Receptionist on')
+  await row.locator('[data-vp-manage]').click()
   await expect(page).toHaveURL(new RegExp(`customer=${fixtures.E2E_VOICE_CUSTOMER}$`))
   const selected = page.locator('[data-vp-selected]')
   await expect(selected).toHaveAttribute('data-vp-selected', fixtures.E2E_VOICE_CUSTOMER)
@@ -31,7 +52,8 @@ test('admin (member of nothing): picks a live business, sees honest states and b
   await expect(page.locator('[data-vp-state="retell"]')).toContainText('Active for customers')
   await expect(page.locator('[data-vp-state="openai"]')).toContainText('Not configured')
   await expect(page.locator('[data-vp-state="elevenlabs"]')).toContainText('Not configured')
-  await expect(page.getByRole('region', { name: 'Test history' })).toContainText('No voice sessions yet.')
+  await selected.locator('[data-vp-history-details] > summary').click()
+  await expect(selected.locator('[data-vp-history-details]')).toContainText('No voice sessions yet.')
   const control = page.locator('[data-provider-control]')
   await expect(control).toHaveCount(1)
   await expect(control.getByRole('row', { name: /Retell/ })).toContainText('Active for customers')
@@ -71,10 +93,12 @@ test('admin: on a test business with evidence, Test now is offered, Review passe
   await expect(selected).toContainText('Test business')
   await expect(selected).toContainText('OpenAI Realtime')
   await expect(selected).toContainText('Cedar')
-  // History: the seeded finished admin test session on Retell counts as evidence; nothing said in it is shown.
+  await expect(page.locator(`[data-vp-row="${id}"]`)).toHaveAttribute('aria-current', 'true')
+  // History (under disclosure): the seeded finished admin test session on Retell counts as evidence; nothing said in it is shown.
+  await selected.locator('[data-vp-history-details] > summary').click()
   const history = page.locator('[data-vp-history]')
   await expect(history.locator('[data-vp-session="retell"]')).toHaveCount(1)
-  await expect(history).toContainText('Admin test (customer path)')
+  await expect(history).toContainText('Admin test')
   await expect(history).toContainText('Counts')
   await expect(page.locator('[data-vp-state="retell"]')).toContainText('Ready for production')
   await expect(page.locator('[data-vp-state="openai"]')).toContainText('Active for customers')
@@ -120,13 +144,13 @@ test('admin: on a test business with evidence, Test now is offered, Review passe
   await noSideScroll(page)
 })
 
-test('admin: the global default section shows Retell with honest counts (every seeded business is a rollout pin on Retell, one deliberate override); a review of an unconfigured provider is blocked and Change stays disabled; the API refuses a global change without the typed provider, with a mismatch, and for owners; nothing changes', async ({ page, context }) => {
+test('admin: the global card shows Retell (rolled back, verified by the test business, one business still business-specific) with plain counts, Advanced details collapsed; Change provider… reviews an unconfigured provider as blocked and Change stays disabled; the test page opens from the console on a test business whose receptionist is OFF, while customers and owners still get the unavailable page; the API refuses a global change without the typed provider, with a mismatch, and for owners; nothing changes', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin/voice-providers')
   const g = page.locator('[data-global-provider]')
   await expect(g).toHaveAttribute('data-global-provider', 'retell')
-  await expect(g).toContainText('Retell (version 2')
-  await expect(g).toContainText('rollback')
+  await expect(g).toHaveAttribute('data-global-state', 'rolled_back')
+  await expect(g).toContainText('Rolled back')
   const me = await (await page.request.get('/api/platform/voice-provider')).json()
   expect(me.global.ready).toBe(true)
   expect(me.global.current).toMatchObject({ provider: 'retell', version: 2, previous: 'elevenlabs', mode: 'rollback', canRollBack: false })
@@ -136,10 +160,23 @@ test('admin: the global default section shows Retell with honest counts (every s
   expect(me.global.counts.pins).toBeGreaterThanOrEqual(3)
   expect(me.businesses.find((b) => b.id === fixtures.E2E_VOICE_SWITCH_CUSTOMER).inherited).toBe(false)
   expect(me.businesses.find((b) => b.id === fixtures.E2E_VOICE_CUSTOMER).inherited).toBe(false)
-  await expect(g).toContainText('Pinned to a previous provider by a rollout')
+  // Verified by the seeded production-path session on the test business; the test page is that business's chat page.
+  expect(me.global.verification).toMatchObject({ ok: true, businesses: [fixtures.E2E_VOICE_SWITCH_CUSTOMER] })
+  expect(me.global.testPage).toMatchObject({ url: `/chat/${fixtures.E2E_VOICE_SWITCH_CUSTOMER}?test=retell&from=admin`, business: { id: fixtures.E2E_VOICE_SWITCH_CUSTOMER, receptionist: true } })
+  await expect(g.locator('[data-global-counts]')).toContainText(`${me.global.counts.usingDefault} of ${me.global.counts.total} using it`)
+  await expect(g.locator('[data-global-counts]')).toContainText('still using OpenAI Realtime')
+  await expect(g.locator('[data-global-verification]')).toHaveAttribute('data-global-verification', 'ok')
+  await expect(g.locator('[data-global-promote]')).toBeVisible()
+  await expect(g.locator('[data-global-test]')).toHaveAttribute('href', me.global.testPage.url)
   await expect(g.locator('[data-global-promotion]')).toHaveAttribute('data-global-promotion-pins', String(me.global.counts.pins))
-  await expect(g).toContainText(`${me.global.counts.inherited} of ${me.global.counts.total}`)
   await expect(g.locator('[data-global-rollback]')).toHaveCount(0)
+  await expect(g).not.toContainText('version 2') // technical detail only under Advanced details
+  await g.locator('[data-global-advanced] > summary').click()
+  await expect(g.locator('[data-global-advanced]')).toContainText('Still on the previous provider (rollout)')
+  await expect(g.locator('[data-global-advanced]')).toContainText(`${me.global.counts.inherited} of ${me.global.counts.total}`)
+  await expect(g.locator('[data-global-advanced]')).toContainText('Switch Pools')
+  // Stage a different provider: review is blocked for an unconfigured one, nothing can be confirmed.
+  await g.locator('[data-global-stage]').click()
   await g.locator('[data-global-target]').selectOption('elevenlabs')
   await g.locator('[data-global-review]').click()
   const check = g.locator('[data-global-check]')
@@ -148,6 +185,40 @@ test('admin: the global default section shows Retell with honest counts (every s
   await expect(g.locator('[data-global-change]')).toBeDisabled()
   await expect(g.locator('[data-global-confirm]')).toHaveCount(0)
   await noSideScroll(page)
+  await g.locator('[data-global-staging]').getByRole('button', { name: 'Cancel' }).click()
+  await expect(g.locator('[data-global-staging]')).toHaveCount(0)
+  // The test page itself (the console's link shape) on a test business whose receptionist is OFF for customers: the
+  // admin gets the dry-run voice session page (typed chat off), with the way back.
+  const cc = fixtures.E2E_CC_CUSTOMER
+  expect((await (await page.request.get(`/api/receptionist/${cc}`)).json()).enabled).toBe(false)
+  await page.goto(`/chat/${cc}?test=retell&from=admin`)
+  const banner = page.locator('[data-test-session]')
+  await expect(banner).toHaveAttribute('data-test-session', 'retell')
+  await expect(banner).toContainText('Admin test session on Retell')
+  await expect(banner.getByRole('link', { name: 'Back to the Admin Console' })).toHaveAttribute('href', '/admin/voice-providers')
+  await expect(page.getByRole('button', { name: /Talk instead/ })).toBeVisible()
+  await expect(page.getByLabel('Your message')).toBeDisabled()
+  await expect(page.getByText('Chat isn’t available right now.')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Ask for a person' })).toHaveCount(0)
+  // Customers (and owners) are unaffected: the same unavailable page as before; the ?test link explains the refusal.
+  await context.clearCookies()
+  await page.goto(`/chat/${cc}`)
+  await expect(page.getByText('Chat isn’t available right now.')).toBeVisible()
+  await expect(page.locator('[data-test-session]')).toHaveCount(0)
+  await page.goto(`/chat/${cc}?test=retell`)
+  await expect(page.getByText('Chat isn’t available right now.')).toBeVisible()
+  await expect(page.locator('[data-test-refused]')).toHaveAttribute('data-test-refused', 'test_not_allowed')
+  await expect(page.getByRole('button', { name: /Talk instead/ })).toHaveCount(0)
+  await useSession(context, fixtures.E2E_VOICE_SESSION_TOKEN)
+  await page.goto(`/chat/${cc}?test=retell`)
+  await expect(page.locator('[data-test-refused]')).toHaveAttribute('data-test-refused', 'test_not_allowed')
+  // A live business never opens as a test, even for the admin.
+  await context.clearCookies()
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto(`/chat/${fixtures.E2E_VOICE_CUSTOMER}?test=retell`)
+  await expect(page.locator('[data-test-refused]')).toHaveAttribute('data-test-refused', 'not_test_business')
+  await expect(page.locator('[data-test-session]')).toHaveCount(0)
+  // The API refuses a global change without the typed provider, with a mismatch, and for owners.
   const origin = new URL(page.url()).origin
   const noTyped = await page.request.post('/api/platform/voice-provider', { data: { action: 'global_switch', provider: 'elevenlabs', mode: 'staged', confirm: true, version: 2 }, headers: { Origin: origin } })
   expect([noTyped.status(), (await noTyped.json()).error]).toEqual([400, 'confirm_provider_mismatch'])
@@ -164,7 +235,7 @@ test('admin: the global default section shows Retell with honest counts (every s
   expect((await page.request.post('/api/platform/voice-provider', { data: { action: 'global_promote', confirmProvider: 'retell', acknowledgeUnverified: true, confirm: true, version: 2 }, headers: { Origin: origin } })).status()).toBe(403)
 })
 
-test('admin: Promote to 100% reviews every business (provider verified on the production path by the test business, the others a warning), needs the acknowledgement and the typed provider, releases every rollout pin in one action (all follow Retell, the deliberate override untouched), shows the actual distribution and the rollout status; Roll back global promotion restores the pins', async ({ page, context }) => {
+test('admin: Promote to 100% reviews every business (provider verified on the production path by the test business, the others a warning), needs the acknowledgement and the typed provider in ONE confirmation, releases every rollout pin in one action (all follow Retell, the business-specific one untouched), shows the actual distribution and the rollout monitoring; Roll back restores the pins', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin/voice-providers')
   const g = page.locator('[data-global-provider]')
@@ -173,41 +244,50 @@ test('admin: Promote to 100% reviews every business (provider verified on the pr
   await g.locator('[data-global-promote]').click()
   const check = g.locator('[data-global-promote-check]')
   await expect(check).toHaveAttribute('data-global-promote-check', 'ok')
+  // The seeded pins already sit on Retell, so releasing them changes no provider: the card says so instead of "switch".
+  await expect(check).toContainText(/Ready to promote Retell: [1-9]\d* businesses follow it from now on/)
   await expect(check).toContainText('Retell is verified on the production path')
   await expect(check).toContainText(`on ${fixtures.E2E_VOICE_SWITCH_CUSTOMER}`)
   await expect(check).toContainText('no finished Retell test session of their own')
-  await expect(check.locator('[data-global-promote-summary]')).toContainText(/Rollout pins to release: [1-9]\d*/)
-  await expect(check.locator('[data-global-promote-summary]')).toContainText('Businesses blocked: 0')
-  await expect(check.locator('[data-global-promote-summary]')).toContainText(/Deliberate overrides to replace: 0 \([1-9]\d* untouched, not included\)/)
+  await expect(check.locator('[data-global-promote-summary]')).toContainText(/Businesses affected: [1-9]\d* of \d+ \(0 change provider, [1-9]\d* still on the previous provider, 0 business-specific replaced, [1-9]\d* business-specific untouched\)/)
+  await expect(check.locator('[data-global-promote-summary]')).toContainText('Blocked: 0')
+  await expect(check).toContainText('Telephone routing is unchanged')
+  await expect(check).toContainText('No automatic fallback')
+  await check.locator('> details > summary').click()
   await expect(check.locator('[data-global-promote-business]').first()).toBeVisible()
   await expect(check.locator(`[data-global-promote-business="${fixtures.E2E_VOICE_SWITCH_CUSTOMER}"]`)).toHaveAttribute('data-global-promote-status', 'excluded')
   await expect(check.locator(`[data-global-promote-business="${fixtures.E2E_VOICE_CUSTOMER}"]`)).toHaveAttribute('data-global-promote-status', 'promote')
   await expect(check.locator(`[data-global-promote-business="${fixtures.E2E_VOICE_CUSTOMER}"]`)).toContainText('no test session of its own')
   await expect(check.locator('[data-global-promote-status="blocked"]')).toHaveCount(0)
-  await expect(check).toContainText('Telephone routing is unchanged')
-  await expect(check).toContainText('No automatic fallback')
-  // Nothing until the warning is acknowledged, then the provider typed.
-  const confirmBtn = g.locator('[data-global-promote-confirm]')
-  await expect(confirmBtn).toBeDisabled()
-  await g.locator('[data-global-promote-ack]').check()
-  await expect(confirmBtn).toBeEnabled()
-  await confirmBtn.click()
-  const confirm = g.locator('[data-global-confirm]')
-  await expect(confirm).toHaveAttribute('data-global-confirm', 'promote')
-  await expect(confirm).toContainText('Promote Retell to 100%')
-  await expect(confirm).toContainText('conversations in progress continue')
-  const go = confirm.locator('[data-global-confirm-action]')
+  // Narrow screens with the review open: no sideways scroll, the card uses the width it is given.
+  await page.setViewportSize({ width: 320, height: 720 })
+  await noSideScroll(page)
+  await fillsWidth(page)
+  await page.setViewportSize({ width: 834, height: 900 })
+  await noSideScroll(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  // One confirmation: the acknowledgement, then the provider typed; a wrong provider keeps it disabled.
+  const go = check.locator('[data-global-confirm-action]')
   await expect(go).toBeDisabled()
-  await confirm.getByLabel('Type the provider id to confirm').fill('elevenlabs')
+  await check.getByLabel('Type the provider id to confirm').fill('retell')
+  await expect(go).toBeDisabled()
+  await g.locator('[data-global-promote-ack]').check()
+  await expect(go).toBeEnabled()
+  await check.getByLabel('Type the provider id to confirm').fill('elevenlabs')
   await expect(go).toBeDisabled()
   expect((await (await page.request.get('/api/platform/voice-provider')).json()).global.current.version).toBe(2)
-  await confirm.getByLabel('Type the provider id to confirm').fill('retell')
+  await check.getByLabel('Type the provider id to confirm').fill('retell')
   await go.click()
-  await expect(g.locator('[data-global-status]')).toContainText(/Promoted Retell to 100%: [1-9]\d* businesses promoted \([1-9]\d* pins released, 0 overrides replaced/)
+  await expect(g.locator('[data-global-status]')).toContainText(/Promoted Retell to 100%: [1-9]\d* businesses promoted \([1-9]\d* were still on the previous provider, 0 business-specific replaced/)
   await expect(g.locator('[data-global-promotion]')).toHaveAttribute('data-global-promotion-pins', '0')
-  await expect(g).toContainText('promoted to 100%')
-  await expect(g.locator('[data-global-rollout]')).toContainText('Session connection failures')
-  const after = (await (await page.request.get('/api/platform/voice-provider')).json())
+  await expect(g).toHaveAttribute('data-global-state', 'partial') // the business-specific one still uses OpenAI
+  await expect(g).toContainText('Partially rolled out')
+  const rollout = page.locator('[data-global-rollout]')
+  await expect(rollout).toHaveAttribute('data-global-rollout', 'retell')
+  await expect(rollout).toContainText('Connection failures')
+  await expect(rollout).toContainText('Booking failures')
+  await expect(rollout).toContainText('Usage and estimated cost')
+  const after = await (await page.request.get('/api/platform/voice-provider')).json()
   expect(after.global.current).toMatchObject({ provider: 'retell', version: 3, mode: 'all', canRollBack: true })
   expect([after.global.counts.pins, after.global.counts.independent, after.global.counts.inherited]).toEqual([0, before.counts.independent, after.global.counts.total - before.counts.independent])
   expect(after.businesses.find((b) => b.id === fixtures.E2E_VOICE_CUSTOMER)).toMatchObject({ provider: 'retell', inherited: true })
@@ -216,17 +296,19 @@ test('admin: Promote to 100% reviews every business (provider verified on the pr
   const detail = await (await page.request.get(`/api/platform/customer?id=${fixtures.E2E_VOICE_CUSTOMER}`)).json()
   expect(detail.audit.map((a) => a.action)).toContain('receptionist.provider_promoted')
   await noSideScroll(page)
-  // Roll back global promotion: pins restored, same distribution as before.
-  await expect(g).toContainText('Roll back global promotion')
-  await g.locator('[data-global-rollback]').click()
-  const rb = g.locator('[data-global-confirm]')
+  // Roll back from the monitoring section: pins restored, same distribution as before.
+  await rollout.locator('[data-global-rollback]').click()
+  const rb = rollout.locator('[data-global-confirm]')
   await expect(rb).toHaveAttribute('data-global-confirm', 'rollback')
+  await expect(rb).toContainText('Roll back to Retell?') // the promotion kept Retell as the default; the rollback restores the pins
   await rb.getByLabel('Type the provider id to confirm').fill('retell')
   await rb.locator('[data-global-confirm-action]').click()
-  await expect(g.locator('[data-global-status]')).toContainText(/[1-9]\d* rollout pins restored/)
+  await expect(g.locator('[data-global-status]')).toContainText(/[1-9]\d* put back on their previous provider/)
   const restored = (await (await page.request.get('/api/platform/voice-provider')).json()).global
   expect(restored.current).toMatchObject({ provider: 'retell', version: 4, mode: 'rollback', canRollBack: false })
   expect(restored.counts.pins).toBeGreaterThanOrEqual(3)
   expect(restored.counts.independent).toBe(before.counts.independent)
   expect(restored.counts.inherited).toBe(restored.counts.total - restored.counts.overrides)
+  await expect(g).toHaveAttribute('data-global-state', 'rolled_back')
+  await expect(page.locator('[data-global-rollout]')).toHaveCount(0)
 })

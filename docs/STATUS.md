@@ -2,6 +2,35 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice provider rollout UX + test-page access (2026-11-22) — feat/voice-rollout-ux (no migration)
+
+- Root cause of the unusable test page: `/chat/gsu-stripe-test-pools?test=elevenlabs` showed "Chat isn't available
+  right now" because the public info route (`GET /api/receptionist/<id>`) answers `enabled: false` whenever the
+  business's receptionist is off for customers, and both production test businesses (gsu-stripe-test-pools,
+  gsu-journey-test: active, test-marked, calendar connected, no receptionist_settings row) are off by design. The chat
+  page stops there, before its `?test=` logic; the voice route itself already accepted admin tests regardless of the
+  receptionist switch. So no test session could ever start without exposing a sandbox receptionist to customers.
+- Fix (smallest): `server/voice/testing.js adminTestAccess` = signed-in platform admin + admin-marked test business +
+  configured, not-switched-off provider; the info route honours `?test=<provider>` through it: the page renders
+  voice-only for that admin (`testOnly`: typed chat stays off, dry run, "Back to the Admin Console"), everyone else
+  keeps the unavailable page plus the refusal code (test_not_allowed / not_test_business / voice_not_configured /
+  voice_unavailable / invalid_provider) explained on the page. Customers' availability unchanged; no business turned on.
+- Console: `globalOverview` now carries `verification` (providerVerification of the current default, records only)
+  and `testPage` (`testPageFor`: the first eligible test business = admin-marked, active, bookable, receptionist-on
+  first; none → reason). /admin/voice-providers redesigned (src/admin/GlobalProvider.jsx, VoiceProviders.jsx,
+  rollout-state.js, voice-providers.css): one card per situation (provider, state badge, "X of N using it · 6 still
+  using Retell", verification line, ONE next action: Test <provider> → Promote to 100% → monitoring → Roll back);
+  promotion = checklist + one typed confirmation (acknowledgement for untested businesses kept; blockers by name);
+  Advanced details holds versions, counts by kind, the verification record, the test business; Businesses = compact
+  table (name, provider, follows the default / business-specific, readiness, Manage); Rollout monitoring only after a
+  rollout. ProviderControl (per business) and the server-side safeguards (checks, atomic batch, audit, rollback) unchanged.
+- Tests: test/voice-testing.test.js (info route access matrix incl. live business and switched-off provider; eligible
+  test businesses; verification record flips only on a qualifying session); test/e2e/voice-providers.spec.js rewritten
+  for the new UI (+ the test page on a receptionist-off test business for admin vs anonymous/owner/live business, 320px
+  and tablet layout with the review open, rollback from the monitoring section).
+- Production after deploy: ElevenLabs still staged (version 1), 6 businesses on Retell pins, 0 promoted. Next action:
+  Test ElevenLabs from the console (opens /chat/gsu-stripe-test-pools?test=elevenlabs&from=admin), then Promote to 100%.
+
 ## Dashboard → Receptionist: honest channel statuses (2026-11-22) — fix/receptionist-status (no migration)
 
 - Root cause of the misleading page: the "Browser voice" tile mapped the server's `voiceStatus: 'testing'` (the

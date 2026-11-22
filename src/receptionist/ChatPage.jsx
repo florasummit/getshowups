@@ -42,6 +42,14 @@ const VOICE_ERRORS = {
   voice_in_progress: 'A call is already running in this conversation.',
   test_not_allowed: 'Test sessions are for signed-in platform admins only.',
   not_test_business: 'Test sessions run only on a test business.',
+}
+// Why the server refused to open the page as an admin test (codes only).
+const TEST_REFUSED = {
+  test_not_allowed: 'Test sessions open only for a signed-in platform admin. Sign in to the Admin Console first, then open this page again.',
+  not_test_business: 'This is not an admin-marked test business, so no test session can run here. Mark a test business in the Admin Console and test there.',
+  invalid_provider: 'Unknown provider in the test link.',
+  voice_not_configured: 'This provider is not configured on the platform (credentials missing), so it cannot be tested.',
+  voice_unavailable: 'This provider is switched off on the platform, so it cannot be tested.',
   mic_denied: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
   connection_lost: 'The call dropped. You can talk again or keep typing.',
 }
@@ -91,8 +99,9 @@ export default function ChatPage({ id }) {
 
   useEffect(() => noIndex(), [])
   useEffect(() => {
-    api(`/api/receptionist/${id}`).then(({ status, data }) => setInfo(status === 200 ? data : { missing: true }))
-  }, [id])
+    // ?test=<provider>: the server decides whether this is an authorized admin test (signed-in platform admin, test business).
+    api(`/api/receptionist/${id}${test ? `?test=${encodeURIComponent(test)}` : ''}`).then(({ status, data }) => setInfo(status === 200 ? data : { missing: true }))
+  }, [id, test])
   useEffect(() => save(id, conv), [id, conv])
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -293,9 +302,16 @@ export default function ChatPage({ id }) {
             </>
           )}
         </p>
+        {test && (
+          <p className="rc-empty" data-test-refused={info.test?.error || 'unknown'}>
+            {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-providers">Back to the Admin Console</a>
+          </p>
+        )}
       </main>
     )
   }
+  const testing = Boolean(test && info.test?.provider) // the server confirmed this admin test session
+  const testOnly = Boolean(info.testOnly) // receptionist off for customers: the admin's voice test only, no typed chat
   const onCall = voice.state === 'connecting' || voice.state === 'live'
   const started = Boolean(conv) || lines.length > 0
   return (
@@ -458,28 +474,43 @@ export default function ChatPage({ id }) {
                   ref={inputRef}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder={onCall ? 'Type while you talk, e.g. your phone number' : 'Ask about services, prices or a time…'}
+                  placeholder={testOnly ? 'Typed chat is off for this test business: talk instead' : onCall ? 'Type while you talk, e.g. your phone number' : 'Ask about services, prices or a time…'}
                   maxLength={1500}
                   autoComplete="off"
                   enterKeyHint="send"
+                  disabled={testOnly}
                 />
                 {(info.voice || test) && !onCall && (
                   <button type="button" className="composer-mic" onClick={startVoice} aria-label={voice.state === 'ended' ? 'Talk again (uses your microphone)' : 'Talk instead (uses your microphone)'} title="Talk instead">
                     <Mic />
                   </button>
                 )}
-                <button type="submit" className="btn btn-primary composer-send" disabled={!text.trim() || sending}>
+                <button type="submit" className="btn btn-primary composer-send" disabled={!text.trim() || sending || testOnly}>
                   Send
                 </button>
               </form>
               <p className="chat-links">
-                <button type="button" className="link-btn" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
-                  Ask for a person
-                </button>
+                {!testOnly && (
+                  <button type="button" className="link-btn" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
+                    Ask for a person
+                  </button>
+                )}
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
                 <a href={`/book/${id}`}>Book online</a>
               </p>
-              {test ? <p className="chat-legal" data-test-session>Admin test session: voice runs on the candidate provider you chose, in dry run (nothing is booked, nobody is messaged).</p> : info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice isn’t available for this business yet.</p>}
+              {testing ? (
+                <p className="chat-legal" data-test-session={info.test.provider}>
+                  Admin test session on {info.test.name}, dry run: nothing is booked, nobody is messaged. Press the microphone, say hello, ask for available times, book one, then end the call.{' '}
+                  {voice.state === 'ended' ? 'Call ended: the Admin Console shows whether it counts as verification. ' : ''}
+                  <a href="/admin/voice-providers">Back to the Admin Console</a>
+                </p>
+              ) : test ? (
+                <p className="chat-legal" data-test-refused={info.test?.error || 'unknown'}>
+                  {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-providers">Back to the Admin Console</a>
+                </p>
+              ) : (
+                info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice isn’t available for this business yet.</p>
+              )}
             </>
           )}
           <p className="chat-legal">

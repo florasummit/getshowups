@@ -17,6 +17,7 @@ import { isPlatformAdminEmail, providerDailyMinutes, providerDisabled, VOICE_SES
 import { providerStatus, PROVIDERS } from './providers.js'
 import { checkProviderSwitch, getVoiceSettings } from './settings.js'
 import { DEFAULT_PROVIDER, PROVIDER_CAPABILITIES } from './style.js'
+import { testPageFor } from './testing.js'
 
 export const GLOBAL_MAX_BUSINESSES = 200
 export const GLOBAL_MODES = ['all', 'staged']
@@ -302,7 +303,7 @@ export async function checkGlobalPromotion(env, { provider, includeOverrides = f
   add('enabled', !providerDisabled(env, target), providerDisabled(env, target) ? `${cap.name} is switched off for customers (VOICE_PROVIDERS_DISABLED).` : `${cap.name} is not switched off.`, 'disabled')
   const verification = status.configured ? await providerVerification(env, target, now) : { ok: false, provider: target, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'] }
   const MISSING = { session: 'no finished production-path session', audio: 'audio both ways not measured', tools: 'the availability tool did not succeed', booking: 'no booking (simulated or real) went through', clean_end: 'no session ended cleanly' }
-  add('verification', verification.ok, verification.ok ? `${cap.name} is verified on the production path: ${verification.finished} finished session(s) in the last 30 days with audio both ways, the availability and booking tools through our server and a clean end (on ${verification.businesses.join(', ')}).` : `${cap.name} is not verified on the production path yet: ${verification.missing.map((m) => MISSING[m]).join('; ')}. Run a test session on a test business (/chat/<test-business>?test=${target}): say hello, ask for times, book (dry run), hang up.`, 'provider_not_verified')
+  add('verification', verification.ok, verification.ok ? `${cap.name} is verified on the production path: ${verification.finished} finished session(s) in the last 30 days with audio both ways, the availability and booking tools through our server and a clean end (on ${verification.businesses.join(', ')}).` : `Test ${cap.name} before switching businesses: ${verification.missing.map((m) => MISSING[m]).join('; ')}. A test session on a test business (Test ${cap.name} in the console): say hello, ask for times, book (dry run), hang up.`, 'provider_not_verified')
   add('phone_routing', true, 'No phone line is connected to GetShowUps; phone routing is unaffected.')
   add('fallback', true, 'No automatic provider fallback exists: a session that cannot connect fails visibly, it is never moved to another provider.')
   const all = await globalBusinesses(env)
@@ -580,15 +581,26 @@ export async function globalRolloutStatus(env, current, now = Date.now()) {
 
 // What the console shows above the business list: the current default, who follows it, who sits on a rollout pin, who
 // overrides it deliberately, how the current version was applied, and the rollout status since then.
-export async function globalOverview(env) {
+// Also: the provider-level verification of the current default (the same record providerVerification gives the
+// promotion checklist: finished production-path sessions, never claimed) and the test page an admin opens to produce
+// it (server/voice/testing.js testPageFor: the first eligible test business, or why there is none).
+export async function globalOverview(env, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const [current, ready, distribution] = await Promise.all([getGlobalDefault(db), globalDefaultsReady(db), providerDistribution(env)])
   const status = providerStatus(env)
-  const rollout = await globalRolloutStatus(env, current)
+  const [rollout, verification, testPage] = await Promise.all([
+    globalRolloutStatus(env, current, now),
+    status[current.provider]?.configured ? providerVerification(env, current.provider, now) : { ok: false, provider: current.provider, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'] },
+    testPageFor(env, current.provider),
+  ])
   return {
     ready,
     current: { provider: current.provider, name: PROVIDER_CAPABILITIES[current.provider]?.name || current.provider, version: current.version, previous: current.previous, mode: current.mode, setAt: current.setAt, pinned: current.pinned.length, switched: current.switched.length, canRollBack: current.version > 0 && Boolean(current.previous) && current.mode !== 'rollback' },
     counts: { total: distribution.total, inherited: distribution.byKind.inherited, overrides: distribution.byKind.pin + distribution.byKind.override, pins: distribution.byKind.pin, independent: distribution.byKind.override, usingDefault: distribution.byProvider[current.provider] || 0, byProvider: distribution.byProvider },
+    verification: { ok: verification.ok, sessions: verification.sessions, finished: verification.finished, businesses: verification.businesses, lastAt: verification.lastAt, missing: verification.missing },
+    // Per business: inherited | pin (a rollout left it on the previous provider) | override (business-specific).
+    kinds: Object.fromEntries(distribution.businesses.map((b) => [b.id, b.kind])),
+    testPage,
     rollout,
     providers: PROVIDERS.map((id) => ({ id, name: PROVIDER_CAPABILITIES[id].name, configured: Boolean(status[id].configured), enabled: !providerDisabled(env, id), customerPath: PROVIDER_CAPABILITIES[id].customers })),
   }

@@ -493,6 +493,17 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (provider NULL unless every in-scope row is unchanged) makes the batch all-or-nothing; rollback restores pins and
   overrides as they were. Rollout status = session records only (null = unavailable); never invent a metric.
   Production: the human admin runs the promotion; a deployment never changes the default or any business.
+  Console UX (src/admin/GlobalProvider.jsx + rollout-state.js, 2026-11-22): ONE card = provider, rollout state
+  (not configured · needs verification · ready to promote · promoting · active · partially rolled out · blocked ·
+  rolled back, derived from globalOverview facts, never from a click) and the one next action: Test <provider>
+  (opens globalOverview.testPage, server/voice/testing.js testPageFor = first eligible admin-marked, bookable test
+  business; none → the reason) → Promote to 100% (checklist + ONE typed confirmation) → Rollout monitoring (records
+  only, shown after a rollout) → Roll back (typed). Versions, counts by kind, the verification record and the test
+  business sit under Advanced details. Plain English: "still using Retell", "business-specific settings".
+  Test page access (server/voice/testing.js adminTestAccess, GET /api/receptionist/<id>?test=<p>): a test business
+  whose receptionist is OFF still opens its chat page for the signed-in platform admin's ?test= (voice only, dry run,
+  `testOnly`); customers/owners keep "Chat isn't available" (refusal as a code). Never turn a test business's
+  receptionist on for customers to make a test possible.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in
