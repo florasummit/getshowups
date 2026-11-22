@@ -203,11 +203,34 @@ export function missingForBooking(c, customer) {
   return need
 }
 
+// The customer declined, deferred or doesn't know their ZIP code ("I'd rather not", "I don't know my zip", "why do you
+// need that?", "later"). Remembered on the conversation (state.zipDeferred) so the ZIP is never asked again until it is
+// genuinely needed to book, and then only once, as something needed to confirm the area. Deterministic, no model.
+// The phrase must be about the ZIP: it mentions the ZIP, or the receptionist's last line asked for one.
+const ZIP_WORD = /\b(zip|zip ?code|postal( code)?|postcode)\b/i
+const ZIP_DEFER = /\b(don'?t (know|have|remember)|not sure|no idea|rather not|prefer not|why do you need|do you (really )?need (that|it|my)|skip (that|it)|not right now|not now|later|i'?ll (get|give|send|find) (it|that|you)|without (it|that|the zip)|can'?t (give|share)|won'?t (give|share)|is that necessary|do i have to)\b/i
+export function zipDeferral(text, lastReceptionistLine = '') {
+  const t = String(text || '')
+  if (!ZIP_DEFER.test(t)) return false
+  return ZIP_WORD.test(t) || (ZIP_WORD.test(String(lastReceptionistLine || '')) && !/\b\d{5}\b/.test(t))
+}
+export function noteZipDeferral(conv, text) {
+  const s = conv.state
+  if (s.customer?.zip || s.zipDeferred) return false
+  const last = [...(conv.transcript || [])].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string')?.content || [...(s.log || [])].reverse().find((l) => l.who === 'receptionist')?.text || ''
+  if (!zipDeferral(text, last)) return false
+  s.zipDeferred = { at: Date.now() }
+  return true
+}
+const DEFERRED_NOTE = 'they declined or deferred their ZIP code: do NOT ask for it again; answer what they ask; when they want a visit booked, say once that a ZIP code is needed to confirm the area and book, or offer to take their details for a service-area request instead'
+
 // What the area check resolved from a place the customer named (state.area), for the note and the owner summary.
-function areaLine(a) {
+function areaLine(a, deferred = false) {
   if (!a?.place) return null
   if (a.served) return `location: ${a.place} (served${a.basis === 'town_fully_served' ? ', fully served town; a ZIP code is needed only to book' : ''})`
-  return `location: ${a.place} (area NOT confirmed yet; ask only: ${a.ask === 'zip' ? 'the ZIP code there' : `"What part of ${a.place}?"`})`
+  const ask = a.ask === 'zip' ? 'the ZIP code there' : `"What part of ${a.place}?"`
+  if (deferred) return `location: ${a.place} (area not confirmed yet; ${DEFERRED_NOTE})`
+  return `location: ${a.place} (area not confirmed yet: answer their question first; when they want a visit or ask whether you serve them, ask only ${ask}, once)`
 }
 
 // Everything the customer has said so far, so nothing is asked twice: details saved through the tools, the place the
@@ -221,7 +244,8 @@ function knownLine(s, customer, { rulesLive = false } = {}) {
   if (c.phone) parts.push(`phone: ${c.phone}`)
   if (c.email) parts.push(`email: ${c.email}`)
   if (c.zip) parts.push(`ZIP: ${c.zip}${s.inArea === false ? ' (OUTSIDE the service area)' : s.inArea ? ' (served)' : ''}`)
-  const area = areaLine(s.area)
+  else if (s.zipDeferred) parts.push(`ZIP: not given (${DEFERRED_NOTE})`)
+  const area = areaLine(s.area, Boolean(s.zipDeferred && !c.zip))
   if (area) parts.push(area)
   else if (!rulesLive && f.city) parts.push(`place they named: ${f.city} (check it with check_service_area place=${JSON.stringify(f.city)} before offering times; do not ask where they are)`)
   if (c.street) parts.push(`address: ${[c.street, c.city, c.state].filter(Boolean).join(', ')}`)
@@ -233,8 +257,11 @@ function knownLine(s, customer, { rulesLive = false } = {}) {
   if (s.requests?.callback) parts.push('callback request: recorded')
   if (s.requests?.message) parts.push('message: recorded')
   if (!parts.length) return null
-  const missing = s.booked ? [] : missingForBooking(c, customer)
-  return `Known so far (do NOT ask for any of this again): ${parts.join('; ')}.${missing.length && !s.booked ? ` Still needed only if they want to book: ${missing.join(', ')}.` : ''}`
+  // What a booking still needs is listed only once booking is in play (a place, a detail, a time or a day was given):
+  // a plain price or service question gets no reminder about ZIPs or phone numbers.
+  const bookingInPlay = Boolean(s.offered || s.area || c.name || c.phone || c.zip || f.day || f.part)
+  const missing = s.booked || !bookingInPlay ? [] : missingForBooking(c, customer)
+  return `Known so far (do NOT ask for any of this again): ${parts.join('; ')}.${missing.length ? ` Still needed only if they want to book: ${missing.join(', ')}.` : ''}`
 }
 
 // Deterministic reading of one customer message (server/intelligence/understand.js: no model, no I/O) folded into
@@ -434,7 +461,7 @@ function resolvePlace(ctx, place) {
       resolved: false,
       basis: 'town_partly_served',
       ask: ask === 'part' ? `What part of ${hit.town}?` : 'their ZIP code',
-      note: `${customer.name} serves part of ${hit.town}, not all of it. Do not say it is covered and do not say it isn't. Ask exactly one short question${ask === 'part' ? `: "What part of ${hit.town}?" (a neighbourhood or a ZIP code answers it)` : ': the ZIP code there'}, then check again. Do not offer times yet.`,
+      note: `${customer.name} serves part of ${hit.town}, not all of it. Do not say it is covered and do not say it isn't. Answer what they asked; when they want a visit or ask whether you serve them, ask exactly one short question${ask === 'part' ? `: "What part of ${hit.town}?" (a neighbourhood or a ZIP code answers it)` : ': the ZIP code there'}, once, then check again. Do not offer times until the area is confirmed.`,
     }
   }
   s.area = { place, basis: 'place_not_listed', served: null, ask: 'zip' }
@@ -445,7 +472,7 @@ function resolvePlace(ctx, place) {
     resolved: false,
     basis: 'place_not_listed',
     ask: 'their ZIP code',
-    note: `"${place}" is not a place on ${customer.name}'s list, so the area can't be confirmed from it. Do not say it is covered and do not say it isn't. Ask once for the ZIP code there, then check again. Do not offer times yet.`,
+    note: `"${place}" is not a place on ${customer.name}'s list, so the area can't be confirmed from it. Do not say it is covered and do not say it isn't. Answer what they asked; when they want a visit or ask whether you serve them, ask once for the ZIP code there, then check again. Do not offer times until the area is confirmed.`,
   }
 }
 
@@ -466,7 +493,8 @@ async function runTool(ctx, name, input) {
       if (!s.inArea) conv.outcome = conv.outcome || 'out_of_area'
     }
     const notes = Object.entries(problems).map(([k, p]) => `${k}: ${PROBLEM_NOTE[p] || PROBLEM_NOTE[`${k}_${p}`] || p}`)
-    return { ok: Object.keys(problems).length === 0, saved: Object.keys(values), known: s.customer, in_service_area: s.inArea ?? null, still_needed_to_book: s.booked ? [] : missingForBooking(s.customer, customer), ...(notes.length ? { recheck: notes } : {}) }
+    const deferred = Boolean(s.zipDeferred && !s.customer.zip)
+    return { ok: Object.keys(problems).length === 0, saved: Object.keys(values), known: s.customer, in_service_area: s.inArea ?? null, still_needed_to_book: s.booked ? [] : missingForBooking(s.customer, customer), ...(deferred ? { zip_deferred: true, note: `The customer ${DEFERRED_NOTE}.` } : {}), ...(notes.length ? { recheck: notes } : {}) }
   }
   if (name === 'check_service_area') {
     const zip = spokenToDigits(input.zip || '').replace(/\D/g, '').slice(0, 5)
@@ -765,6 +793,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   // into the conversation's facts; corrections replace the old value. With live owner rules, observe() does it with the
   // owner's context and turnNote carries it; otherwise knownLine does.
   let flags = null
+  noteZipDeferral(conv, text)
   if (rules) flags = observe(rules, conv, text)
   else rememberFacts(conv, text, k)
   // Operator notes for this turn: what is already known (so it is never asked again) and any correction from the

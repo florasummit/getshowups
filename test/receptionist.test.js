@@ -13,6 +13,8 @@ import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
 import { checkDetails, executeTool, inventedPrices, loadConversation, respond, sentenceProblem, spokenToDigits, startConversation, visibleTranscript, HOLD_AFTER_MS, TOOLS } from '../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, factText, playbookFor, systemPrompt } from '../server/receptionist/knowledge.js'
+import { zipDeferral } from '../server/receptionist/engine.js'
+import { runVoiceTool } from '../server/voice/tools.js'
 import { defaultConfig, validateConfig } from '../server/intelligence/schema.js'
 import { recordsFor } from '../server/intelligence/access.js'
 import { anthropicSchemaProblems } from './schema-limits.js'
@@ -1058,7 +1060,7 @@ test('coverage by place without rules: a listed town that is not fully served ge
     return say('What is the ZIP code there?')
   })
   await respond(env, customer, await conv(), 'James Island')
-  assert.match(systemNote(modelRequests.at(-1)), /location: Charleston \(area NOT confirmed yet; ask only: "What part of Charleston\?"\)/, 'the turn note is built before its tools run')
+  assert.match(systemNote(modelRequests.at(-1)), /location: Charleston \(area not confirmed yet: answer their question first; when they want a visit or ask whether you serve them, ask only "What part of Charleston\?", once\)/, 'the turn note is built before its tools run')
   // Turn 3: the ZIP decides (areaFor, unchanged): 29412 is a real ZIP not on alpha's list → service-area request path.
   script.push(calls(tool('check_service_area', { zip: '29412', place: '' })), (b) => {
     const [r] = lastToolResults(b)
@@ -1067,7 +1069,7 @@ test('coverage by place without rules: a listed town that is not fully served ge
     return say("We may be able to help in your area. Leave your details and we'll confirm availability.")
   })
   await respond(env, customer, await conv(), '29412')
-  assert.match(systemNote(modelRequests.at(-1)), /location: James Island \(area NOT confirmed yet; ask only: the ZIP code there\)/)
+  assert.match(systemNote(modelRequests.at(-1)), /location: James Island \(area not confirmed yet: answer their question first; when they want a visit or ask whether you serve them, ask only the ZIP code there, once\)/)
   assert.deepEqual((await conv()).state.area, { place: 'James Island', basis: 'zip', served: false, ask: null })
   assert.equal((await conv()).state.inArea, false)
   // Resolution rules, directly: longest listed town wins; a direction-prefixed name never matches a shorter town; a
@@ -1163,4 +1165,73 @@ test('GetShowUps selling itself: the Software playbook turns the same engine int
   const lead = db.sql.prepare("SELECT customer, status, zip FROM leads WHERE customer = 'getshowups'").get()
   assert.deepEqual([lead.customer, lead.status, lead.zip], ['getshowups', 'booked', ''])
   assert.equal(db.sql.prepare("SELECT count(*) AS n FROM appointments WHERE customer = 'getshowups'").get().n, 1)
+})
+
+test('location policy: prices and services are answered without asking where they are; a declined ZIP is never asked again (chat and provider paths); a named place is context, not coverage; out of area and booking readiness unchanged', async () => {
+  await seed('alpha', { towns: ['Charleston', 'West Ashley'] })
+  enable('alpha')
+  const customer = await cust('alpha')
+  // The prompt says it: answer first, location only when needed, one ask, a deferral respected; the old demand is gone.
+  const prompt = systemPrompt(await knowledgeFor(env, customer, {}), 'chat', { requests: true })
+  assert.match(prompt, /Location, only when needed: answer questions about services, prices, hours and how soon you can usually come directly, without asking where they are/)
+  assert.match(prompt, /If they decline, defer or don't know their ZIP code, accept that without comment, answer what they asked, and do not ask again/)
+  assert.match(prompt, /never demand a ZIP code first/)
+  assert.doesNotMatch(prompt, /check whether .* serves their area, and book/)
+  // Pricing question first: no tool, no location note; the model answers from the facts.
+  script.push(say('Weekly pool care is $180 a month.'))
+  const t1 = await chat('alpha', 'How much is weekly pool care?')
+  assert.doesNotMatch(systemNote(modelRequests[0]), /zip|location|where/i, 'nothing about location is asked for a price question')
+  // The customer declines the ZIP: remembered; from then on every note says not to ask again.
+  script.push(say('No problem. We cover most of Charleston; what is going on with your pool?'))
+  await chat('alpha', "I'd rather not give my zip code right now, I just want to know if you can come this week.", t1.json())
+  let conv = await loadConversation(env, customer, t1.json().conversationId)
+  assert.ok(conv.state.zipDeferred, 'deferral remembered')
+  script.push(say('Got it.'))
+  await chat('alpha', 'ok', t1.json())
+  const n3 = systemNote(modelRequests.at(-1))
+  assert.match(n3, /ZIP: not given \(they declined or deferred their ZIP code: do NOT ask for it again; answer what they ask; when they want a visit booked, say once that a ZIP code is needed to confirm the area and book/)
+  // A place as context: West Ashley (listed, partly served) → the area is not claimed; the note says answer first, one question only when a visit is in play.
+  script.push(calls(tool('check_service_area', { zip: '', place: 'West Ashley' })), (b) => {
+    const [r] = lastToolResults(b)
+    assert.deepEqual([r.served, r.resolved, r.basis], [null, false, 'town_partly_served'])
+    assert.match(r.note, /Answer what they asked; when they want a visit or ask whether you serve them, ask exactly one short question: "What part of West Ashley\?"/)
+    assert.match(r.note, /Do not offer times until the area is confirmed/)
+    return say('West Ashley, got it. What is happening with the pool?')
+  })
+  await chat('alpha', "I'm in West Ashley.", t1.json())
+  script.push(say('Ok.'))
+  await chat('alpha', 'green water', t1.json())
+  const n5 = systemNote(modelRequests.at(-1))
+  assert.match(n5, /location: West Ashley \(area not confirmed yet; they declined or deferred their ZIP code: do NOT ask for it again/)
+  assert.doesNotMatch(n5, /ask only: the ZIP code there/)
+  // Booking readiness: a ZIP is still required to book (the backend rule), listed only as "if they want to book".
+  assert.match(n5, /Still needed only if they want to book: .*zip/)
+  conv = await loadConversation(env, customer, t1.json().conversationId)
+  const ctx = { env, customer, conv, now: Date.now(), userText: 'yes', knowledge: await knowledgeFor(env, customer, {}), channel: 'chat', after: [], committed: false, rules: null }
+  const times = await executeTool(ctx, 'find_available_times', { date: '', part_of_day: 'any' })
+  assert.equal(times.ok, true, 'availability can be looked up; the area rule bites at booking')
+  const booked = await executeTool(ctx, 'book_appointment', { slot_id: times.options[0].slot_id, confirmation_quote: 'yes' })
+  assert.equal(booked.ok, false)
+  assert.ok(/missing|detail/.test(booked.error), booked.error)
+  // A ZIP given later decides as before: 29412 is real but not on the list → out of area, never a booking, coverage path.
+  conv.transcript.push({ role: 'user', content: '29412' }) // the digit check reads what the customer actually said
+  const saved = await executeTool({ ...ctx, userText: '29412' }, 'save_customer_details', { name: '', phone: '', email: '', zip: '29412', street: '', city: '', state: '', need: '' })
+  assert.deepEqual([saved.in_service_area, saved.zip_deferred], [false, undefined], 'once a ZIP exists the deferral note stops')
+  assert.equal(conv.state.area.served, false)
+  // Deferral phrases: about the ZIP, or any refusal right after the receptionist asked for one; a plain "later" about
+  // something else is not a deferral; five digits are an answer, not a refusal.
+  assert.equal(zipDeferral("I don't know my zip code"), true)
+  assert.equal(zipDeferral('why do you need that?', "What's the ZIP code there?"), true)
+  assert.equal(zipDeferral('later', "What's the ZIP code there?"), true)
+  assert.equal(zipDeferral('later', 'Does Tuesday at 10 work?'), false)
+  assert.equal(zipDeferral('29412', "What's the ZIP code there?"), false)
+  assert.equal(zipDeferral('I would like a tune-up later this month'), false)
+  // Provider paths (OpenAI, ElevenLabs): the caller's words reach the shared runner; a deferral is remembered there too
+  // and the tool result says so, so the model is told once and never asks again.
+  const c2 = await startConversation(env, customer, 'voice')
+  c2.state = { lab: { provider: 'openai', dryRun: true, metrics: {} } }
+  const r = await runVoiceTool(env, { customer, conv: c2, userText: "I'd rather not share my zip, is weekly care one eighty a month?", dryRun: true, provider: 'openai' }, 'save_customer_details', { name: '', phone: '', email: '', zip: '', street: '', city: '', state: '', need: 'weekly care' })
+  assert.deepEqual([r.ok, r.zip_deferred], [true, true])
+  assert.match(r.note, /declined or deferred their ZIP code: do NOT ask for it again/)
+  assert.ok(c2.state.zipDeferred)
 })
