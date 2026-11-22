@@ -106,6 +106,20 @@ Published rules reach conversations only for businesses in `AI_RULES_LIVE_BUSINE
 exactly as described above. Rules add a short block to the cached system prompt, one deterministic note per turn (what
 is known, the one thing to ask next) and extra tool guards; they never remove a platform guard.
 
+## Location policy (2026-11-22)
+
+The receptionist answers questions about services, prices, hours and how soon it can usually come without asking
+where the customer is. Location comes up only when it is needed: the customer asks whether the business serves them,
+wants a visit or a time, or booking details are being collected. A town or neighbourhood is accepted as context
+(`check_service_area` with `place`; coverage is never claimed from it: the tool decides, and the backend ZIP rule
+decides again at booking). If the customer declines, defers or doesn't know their ZIP ("I'd rather not", "why do you
+need that?", "later" right after a ZIP question), the engine remembers it (`state.zipDeferred`, deterministic, no
+model) and every later note says so: not asked again; when they want a visit booked, the ZIP is named once as what is
+needed to confirm the area and book, or a service-area request is offered. Provider paths (OpenAI Realtime,
+ElevenLabs) get the same memory through the shared tool runner and the `save_customer_details` result
+(`zip_deferred`). Nothing changes in the booking guards, the service-area configuration or the OpenAI audio path (the
+instructions are a few lines longer; they are built once per session).
+
 ## Activation (each step needs approval)
 
 1. **Migration 0026** (4 additive tables):

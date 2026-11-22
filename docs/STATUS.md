@@ -2,6 +2,20 @@
 
 _Update at the end of every task. Newest first._
 
+## Receptionist location policy: ZIP only when needed (2026-11-22) — fix/receptionist-zip-policy (no migration; PR for approval)
+
+- Prompt (server/receptionist/knowledge.js): "answer first, location only when needed, a town is fine, one ask, a
+  declined or deferred ZIP is respected"; the job line no longer leads with checking the area.
+- Engine (server/receptionist/engine.js): `zipDeferral` / `noteZipDeferral` remember a refusal or deferral
+  (phrase about the ZIP, or any refusal right after a ZIP question; five digits are never a refusal); the per-turn
+  note then says "do NOT ask for it again … say once when they want a visit booked"; area-check notes say "answer
+  what they asked; when they want a visit or ask whether you serve them, ask once"; `save_customer_details` returns
+  `zip_deferred` for provider paths; the shared voice tool runner records the deferral from the caller's words.
+- Unchanged: booking still requires a ZIP (missingForBooking), areaFor decides out-of-area, coverage never claimed
+  from a place, OpenAI Realtime audio path and latency (instructions built once per session).
+- Tests: test/receptionist.test.js "location policy" (pricing first, refusal remembered across turns and in the
+  provider path, place as context, out of area, booking readiness, phrase rules).
+
 ## Website Studio legal pages + complete domain setup (2026-11-22) — feat/legal-pages-domain-setup (no migration; PR for approval)
 
 - **PoolThru findings (read-only):** the "broken Privacy Policy link" is not on our site. Authoritative DNS (Google

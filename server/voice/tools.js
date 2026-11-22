@@ -10,7 +10,7 @@
 // (the Lab's default) every guard still runs but nothing is created and the result says simulated: true.
 // Tool schemas are the engine's (same names, same arguments), re-shaped per provider. Business rules stay in the
 // engine and in Teach Your AI; provider prompts never duplicate them.
-import { TOOLS, executeTool, event, getSettings, receptionistRequestsReady } from '../receptionist/engine.js'
+import { TOOLS, executeTool, event, getSettings, receptionistRequestsReady, noteZipDeferral } from '../receptionist/engine.js'
 import { knowledgeFor, systemPrompt } from '../receptionist/knowledge.js'
 import { activeRules } from '../intelligence/runtime.js'
 import { rulesInstructions } from '../intelligence/compile.js'
@@ -70,6 +70,7 @@ export async function runVoiceTool(env, session, name, input = {}, now = Date.no
   const rules = session.rules === undefined ? await activeRules(env, customer, now).catch(() => null) : session.rules
   const userText = String(session.userText || '').trim().slice(0, 2000)
   heard(conv, userText)
+  noteZipDeferral(conv, userText) // "I'd rather not give my ZIP": remembered so it is never asked again
   const ctx = { env, customer, conv, now, userText, knowledge: session.knowledge || null, channel: 'voice', after: [], committed: false, rules, dryRun: session.dryRun !== false }
   let out
   try {
