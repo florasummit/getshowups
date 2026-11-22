@@ -37,7 +37,7 @@ export default defineConfig({
     {
       command: 'bash test/e2e/serve.sh',
       url: site,
-      timeout: 120_000,
+      timeout: 180_000, // the seed makes ~30 wrangler calls; CI runners need the headroom
       reuseExistingServer: false,
       stdout: 'ignore',
       stderr: 'pipe',

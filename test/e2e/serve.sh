@@ -198,11 +198,13 @@ for E in "$E2E_TEXTS_CUSTOMER:$E2E_TEXTS_SESSION_TOKEN:$E2E_TEXTS_SENDER:$E2E_TE
   "
 done
 
-# Receptionist voice seeds: one business per browser project, receptionist on.
+# Receptionist voice seeds: one business per browser project, receptionist on; the voice admin is a member of the
+# desktop business (customer_users.email is the key: one business per member). ONE wrangler call for all of it.
+VOICE_SQL=""
 for E in "$E2E_VOICE_CUSTOMER:$E2E_VOICE_SESSION_TOKEN" "$E2E_VOICE_M_CUSTOMER:$E2E_VOICE_M_SESSION_TOKEN"; do
   VC=${E%%:*}
   VT=${E#*:}
-  d1 "
+  VOICE_SQL="$VOICE_SQL
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$VC', 'Voice Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$VC.example', '$VC', $NOW);
@@ -210,8 +212,8 @@ for E in "$E2E_VOICE_CUSTOMER:$E2E_VOICE_SESSION_TOKEN" "$E2E_VOICE_M_CUSTOMER:$
   INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$VC', '(843) 555-0188', 'Pool service', 'Pool care.', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280/month\"}]', '[\"Charleston\"]', $NOW);
   INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VC', 1, 'ai_first', 'Hi! Thanks for calling Voice Pools.', $NOW);"
 done
-# One business per member email (customer_users.email is the key): the voice admin belongs to the desktop business.
-d1 "INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_VOICE_ADMIN_EMAIL', '$E2E_VOICE_CUSTOMER', $NOW);
+d1 "$VOICE_SQL
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_VOICE_ADMIN_EMAIL', '$E2E_VOICE_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_VOICE_ADMIN_SESSION_TOKEN")', '$E2E_VOICE_ADMIN_EMAIL', $NOW, $FAR);"
 
 for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER"; do
