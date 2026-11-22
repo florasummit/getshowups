@@ -85,13 +85,24 @@ Command per migration (from a checkout containing the file):
   editor sends a waiting change on leaving (keepalive). Every draft/settings save carries the version it saw, so a
   page from before the deploy can't overwrite newer work (409; older pages without the field still save).
 
+## 4b. Business Review: the plain-language map (2026-11-21)
+
+Above the capability list, "What this means for operating" shows the same capabilities in the founder's words.
+Groups (server/ops/review.js `groupOf`, derived from status + health + state, never from labels): **Broken right now**
+(an open failure), **Works now** (live_verified), **Can be tested now** (switched on but not seen working, or
+sandbox), **Needs configuration** (credentials, a binding or a migration), **Needs your approval** (a switch that is a
+decision), **Not built**. Each capability carries a one-line next step and, where one exists, a link to the existing
+setup screen (registry `action`, same-site only). Tiers (registry `tier`): *Needed to operate now*, *before live
+payments*, *before live advertising*, *optional*, *not needed now*; a tier's blockers are its capabilities that are
+neither working nor testable. Optional/later never block. Status badges, evidence and incidents are unchanged.
+
 ## 5. Incident recovery
 
 | Symptom (Business Review) | Meaning | What to do |
 | --- | --- | --- |
 | "Ads still running while on hold" | A held business has a campaign we couldn't pause | If "unreachable": ask the owner to pause it in Google Ads, then record it (`/api/platform/campaign-pause` or the owner's button). Otherwise it retries every 5 min; pause it in Google Ads to stop spend now. |
 | "Deletion stuck" | A deletion step failed 3+ times | Business → see the step and error. Stripe/Google down: wait or "Retry now". Unreachable campaign: record the confirmation. Never mark complete by hand. |
-| Reconciliation differences | Stripe and our records disagree | Status/amount/cancel: "Resync from Stripe" (audited). Billing after deletion: cancel in Stripe immediately. Missing payments: check the webhook endpoint. |
+| Reconciliation differences | Stripe and our records disagree for a REAL business (the run classifies every difference: `real`, `test_business`, `unknown_record` = an id that doesn't exist here, a sandbox leftover) | Status/amount/cancel: "Resync from Stripe" (audited). Billing after deletion: cancel in Stripe immediately. Missing payments: check the webhook endpoint. Leftovers (test businesses, unknown ids): nothing to fix; they are listed, not alarming. 2026-11-21: the four differences were all `unknown_record` ids from sandbox checks (`gsu-billing-test-*`, `gsu-sandbox-check-*`) in Stripe test mode. |
 | "Audit log integrity check failed" | An entry was changed or removed | Stop and investigate access; compare with the last exported log; do not "fix" entries. |
 | Migration pending | Code expects a table production lacks | Apply the migration (approval) or roll back the code. |
 | "<capability>: not seen working recently" | It worked before and nothing has happened since | Check whether usage simply stopped or the integration broke (e.g. no bookings reaching Google Calendar). |

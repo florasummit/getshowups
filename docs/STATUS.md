@@ -2,6 +2,26 @@
 
 _Update at the end of every task. Newest first._
 
+## Operational launch sprint, step 1: Business Review in plain language + reconciliation scopes (2026-11-21) — feat/operational-readiness (no migration)
+
+- **Business Review → "What this means for operating"**: the same capabilities grouped as Broken right now / Works
+  now / Can be tested now / Needs configuration / Needs your approval / Not built (server/ops/review.js `groupOf`,
+  derived from status + health + state), each with a one-line next step and a link to the existing setup screen
+  (registry `action`, same-site only). Tiers (registry `tier`): needed to operate now / before live payments / before
+  live advertising / optional / not needed now, with each tier's blockers (capabilities neither working nor testable).
+  Status badges, evidence, incidents and approvals unchanged.
+- **Reconciliation differences are classified** (server/reconcile.js `scopeOf`): `real` (a business in our records),
+  `test_business`, `unknown_record` (an id that doesn't exist here). Only real differences are a problem: the Business
+  Review evidence and the admin card say "No differences for real businesses; N for test or unknown records (sandbox
+  leftovers)". Production 2026-11-21: all four differences are `unknown_record` ids (`gsu-billing-test-a`,
+  `gsu-billing-test-temp`, `gsu-sandbox-check-…`) from sandbox checks against Stripe test mode: not lost revenue, no
+  webhook defect (those ids were never businesses here). Nothing in Stripe was changed.
+- Production facts gathered read-only (D1/KV names and counts only): the `getshowups` sales business EXISTS and its
+  calendar is connected (enrollment `salesChat: true`); a clean visitor session on the live site saw the homepage
+  entry, an accurate $499/month answer, "ad spend is separate", and two real open consultation times (nothing booked).
+  PoolThru: active, hours confirmed, `at_customer`, website live (version 13), receptionist on, 6 leads, 3
+  appointments, 2 outcomes recorded, 5 conversations, no ZIP list (every area counts as in).
+
 ## Voice Lab usable by the owner + one-click sales records (2026-11-21) — feat/voice-lab-usable (no migration)
 
 - **LIVE 2026-11-21**: PR #103 merged pinned (head 8d9087b) → main 48ea7c7 → production deployment

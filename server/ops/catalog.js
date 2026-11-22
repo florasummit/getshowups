@@ -1,6 +1,7 @@
 // The capabilities GetShowUps has today. Each declares where it sits in the journey, what it depends on, what its
-// configuration says (state), and how real production activity proves it works (verify: read-only database checks,
-// no calls to outside services). A new feature adds its own registerCapability() call (here or in its module,
+// configuration says (state), how real production activity proves it works (verify: read-only database checks,
+// no calls to outside services), what it is needed for (tier: operate | payments | advertising | optional | later,
+// the founder's 2026-11-21 operating classification) and the existing screen where it is set up (action). A new feature adds its own registerCapability() call (here or in its module,
 // imported below) and appears in Business Review with no UI change.
 import { feedbackConfigured } from '../email-feedback.js'
 import { registerCapability } from './registry.js'
@@ -47,6 +48,7 @@ const REAL_LEAD = `NOT EXISTS (SELECT 1 FROM test_marks t WHERE t.lead_id = l.id
 // ---------- platform ----------
 registerCapability({
   id: 'platform.database',
+  tier: 'operate',
   name: 'Database (Cloudflare D1)',
   journey: 'platform',
   external: 'Cloudflare',
@@ -58,6 +60,7 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.alerts',
+  tier: 'optional',
   name: 'Founder alerts (email to platform admins)',
   journey: 'platform',
   description: 'Calendar broken, booking page without times, messages failing: one email per incident (server/alerts.js).',
@@ -71,6 +74,8 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.incidents',
+  tier: 'operate',
+  action: { label: 'Open the Control Center', href: '/admin/control' },
   name: 'Incident register (Control Center)',
   journey: 'platform',
   description: 'Customer-impacting failures from existing records, deduplicated, resolved on evidence (server/ops/incidents.js).',
@@ -79,6 +84,7 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.tokens',
+  tier: 'operate',
   name: 'Encrypted credentials store (KV)',
   journey: 'platform',
   external: 'Cloudflare',
@@ -101,6 +107,7 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.audit',
+  tier: 'operate',
   name: 'Permanent audit log',
   journey: 'platform',
   dependsOn: ['platform.database', 'platform.cron'],
@@ -109,6 +116,7 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.cron',
+  tier: 'operate',
   name: 'Scheduler (every 5 minutes)',
   journey: 'platform',
   description: 'Sends due messages, pauses held ads, retries deletions, reconciles billing, checks the audit chain.',
@@ -120,6 +128,8 @@ registerCapability({
 })
 registerCapability({
   id: 'platform.admin',
+  tier: 'operate',
+  action: { label: 'Open the admin console', href: '/admin' },
   name: 'Founder admin console',
   journey: 'platform',
   dependsOn: ['auth.google_signin', 'platform.audit'],
@@ -135,6 +145,7 @@ registerCapability({
 // ---------- sign up / billing / onboarding ----------
 registerCapability({
   id: 'auth.google_signin',
+  tier: 'operate',
   name: 'Sign in with Google',
   journey: 'signup',
   external: 'Google',
@@ -144,6 +155,8 @@ registerCapability({
 })
 registerCapability({
   id: 'billing.stripe',
+  tier: 'payments',
+  action: { label: 'Billing reconciliation in the admin console', href: '/admin' },
   name: 'Stripe billing ($499/month)',
   journey: 'billing',
   external: 'Stripe',
@@ -163,6 +176,8 @@ registerCapability({
 })
 registerCapability({
   id: 'billing.reconcile',
+  tier: 'payments',
+  action: { label: 'Billing reconciliation card', href: '/admin' },
   name: 'Billing reconciliation (Stripe vs records)',
   journey: 'billing',
   dependsOn: ['billing.stripe', 'platform.cron', 'platform.audit'],
@@ -172,12 +187,17 @@ registerCapability({
     const r = await env.ONBOARDING_DB.prepare("SELECT at, details FROM audit_log WHERE action = 'billing.reconciliation' ORDER BY seq DESC LIMIT 1").first()
     if (!r) return { ok: false, at: null, evidence: 'Not run yet' }
     const d = JSON.parse(r.details)
-    if (d.issues) return { ok: false, problem: true, at: r.at, evidence: `${d.issues} difference(s) between Stripe and our records (${Object.entries(d.byType || {}).map(([k, n]) => `${k.replace(/_/g, ' ')} ${n}`).join(', ')}), checked ${ago(r.at, now)}` }
+    const kinds = Object.entries(d.byType || {}).map(([k, n]) => `${k.replace(/_/g, ' ')} ${n}`).join(', ')
+    // Differences classified by the run (server/reconcile.js scopeOf): only those for real businesses are a problem;
+    // Stripe objects for ids that don't exist here (sandbox leftovers) and test businesses are reported, not alarming.
+    if (d.issues && (d.real === undefined || d.real > 0)) return { ok: false, problem: true, at: r.at, evidence: `${d.real ?? d.issues} difference(s) between Stripe and our records for real businesses (${kinds}), checked ${ago(r.at, now)}` }
+    if (d.issues) return { ok: now - r.at < 2 * DAY, at: r.at, evidence: `No differences for real businesses; ${d.issues} for test or unknown records (sandbox leftovers: ${kinds}), checked ${ago(r.at, now)}` }
     return { ok: now - r.at < 2 * DAY, at: r.at, evidence: `Clean ${ago(r.at, now)}` }
   },
 })
 registerCapability({
   id: 'billing.lifecycle',
+  tier: 'payments',
   name: 'Cancellation, 90-day recovery, payment problems',
   journey: 'account',
   dependsOn: ['billing.stripe', 'platform.cron'],
@@ -190,6 +210,8 @@ registerCapability({
 })
 registerCapability({
   id: 'onboarding.selfserve',
+  tier: 'payments',
+  action: { label: 'Self-serve sign-up', href: '/dashboard?plan=founding' },
   name: 'Self-serve onboarding',
   journey: 'onboarding',
   dependsOn: ['auth.google_signin', 'billing.stripe', 'calendar.google', 'website.hosting'],
@@ -200,6 +222,8 @@ registerCapability({
 // ---------- website ----------
 registerCapability({
   id: 'website.hosting',
+  tier: 'operate',
+  action: { label: 'Website tab (business dashboard)', href: '/dashboard/website' },
   name: 'Hosted business websites',
   journey: 'website',
   dependsOn: ['platform.database'],
@@ -212,6 +236,8 @@ registerCapability({
 })
 registerCapability({
   id: 'website.ai',
+  tier: 'optional',
+  action: { label: 'Website tab', href: '/dashboard/website' },
   name: 'AI website designs',
   journey: 'website',
   external: 'Cloudflare Workers AI',
@@ -221,6 +247,8 @@ registerCapability({
 })
 registerCapability({
   id: 'website.studio',
+  tier: 'optional',
+  action: { label: 'Website Studio', href: '/dashboard/website' },
   name: 'Website Studio (AI designer on the business’s own Claude/OpenAI key)',
   journey: 'website',
   external: 'Customer-owned Anthropic / OpenAI accounts',
@@ -235,6 +263,8 @@ registerCapability({
 })
 registerCapability({
   id: 'website.domains',
+  tier: 'optional',
+  action: { label: 'Domain settings (Website tab)', href: '/dashboard/website' },
   name: 'Own domains',
   journey: 'website',
   external: 'Cloudflare',
@@ -246,6 +276,8 @@ registerCapability({
 // ---------- advertising ----------
 registerCapability({
   id: 'ads.google',
+  tier: 'advertising',
+  action: { label: 'Ads tab (business dashboard)', href: '/dashboard/ads' },
   name: 'Google Ads campaigns',
   journey: 'advertising',
   external: 'Google Ads',
@@ -269,6 +301,8 @@ registerCapability({
 })
 registerCapability({
   id: 'ads.meta',
+  tier: 'advertising',
+  action: { label: 'Ads tab (business dashboard)', href: '/dashboard/ads' },
   name: 'Meta (Facebook/Instagram) ads',
   journey: 'advertising',
   external: 'Meta',
@@ -277,6 +311,7 @@ registerCapability({
 })
 registerCapability({
   id: 'ads.safety_stop',
+  tier: 'advertising',
   name: 'Ads safety stop (pause on failed payment, cancellation, suspension, deletion)',
   journey: 'advertising',
   dependsOn: ['billing.stripe', 'platform.cron', 'platform.audit'],
@@ -296,6 +331,7 @@ registerCapability({
 })
 registerCapability({
   id: 'ads.conversions',
+  tier: 'later',
   name: 'Conversions sent to Google',
   journey: 'results',
   external: 'Google Data Manager API',
@@ -306,6 +342,8 @@ registerCapability({
 // ---------- lead / booking / show-up / results ----------
 registerCapability({
   id: 'lead.capture',
+  tier: 'operate',
+  action: { label: 'Appointments (business dashboard)', href: '/dashboard/appointments' },
   name: 'Lead capture (website + booking page)',
   journey: 'lead',
   dependsOn: ['website.hosting', 'platform.database'],
@@ -314,6 +352,7 @@ registerCapability({
 })
 registerCapability({
   id: 'lead.qualify',
+  tier: 'later',
   name: 'Qualify or route leads (book / qualify / human)',
   journey: 'lead',
   dependsOn: ['lead.capture'],
@@ -321,6 +360,8 @@ registerCapability({
 })
 registerCapability({
   id: 'calendar.google',
+  tier: 'operate',
+  action: { label: 'Connect Google Calendar (business Settings)', href: '/dashboard/settings' },
   name: 'Google Calendar booking',
   journey: 'booking',
   external: 'Google Calendar',
@@ -331,6 +372,7 @@ registerCapability({
 })
 registerCapability({
   id: 'messaging.email',
+  tier: 'operate',
   name: 'Email confirmations, reminders, follow-ups',
   journey: 'booking',
   external: 'Resend',
@@ -345,6 +387,7 @@ registerCapability({
 })
 registerCapability({
   id: 'messaging.owner_notices',
+  tier: 'optional',
   name: 'Owner notices (new bookings and unbooked leads)',
   journey: 'lead',
   description: 'Emails the business members about each new booking, and about a qualified lead not booked after 10 minutes.',
@@ -360,6 +403,7 @@ registerCapability({
 })
 registerCapability({
   id: 'messaging.email_feedback',
+  tier: 'optional',
   name: 'Email bounces and spam complaints (Resend webhook)',
   journey: 'booking',
   description: 'Permanently bounced or complaining addresses are not emailed again; the owner is asked to call instead.',
@@ -373,6 +417,8 @@ registerCapability({
 })
 registerCapability({
   id: 'messaging.sms',
+  tier: 'later',
+  action: { label: 'Messaging operations (admin console)', href: '/admin' },
   name: 'Text messages',
   journey: 'booking',
   external: 'Twilio',
@@ -382,6 +428,7 @@ registerCapability({
 })
 registerCapability({
   id: 'messaging.optouts',
+  tier: 'operate',
   name: 'Unsubscribe and STOP handling',
   journey: 'booking',
   dependsOn: ['platform.database'],
@@ -389,6 +436,8 @@ registerCapability({
 })
 registerCapability({
   id: 'showup.outcomes',
+  tier: 'operate',
+  action: { label: 'Appointments (business dashboard)', href: '/dashboard/appointments' },
   name: 'Show-up and job tracking',
   journey: 'showup',
   dependsOn: ['calendar.google'],
@@ -397,6 +446,7 @@ registerCapability({
 })
 registerCapability({
   id: 'results.attribution',
+  tier: 'advertising',
   name: 'Attribution (which campaign brought the lead)',
   journey: 'results',
   dependsOn: ['lead.capture', 'ads.google'],
@@ -407,6 +457,7 @@ registerCapability({
 // ---------- account lifecycle ----------
 registerCapability({
   id: 'account.deletion',
+  tier: 'payments',
   name: 'Permanent account deletion',
   journey: 'account',
   dependsOn: ['ads.safety_stop', 'billing.stripe', 'platform.tokens', 'platform.audit', 'platform.cron'],
@@ -418,6 +469,7 @@ registerCapability({
 })
 registerCapability({
   id: 'account.retention',
+  tier: 'later',
   name: 'Retention schedule after the 90-day recovery period',
   journey: 'account',
   dependsOn: ['account.deletion', 'billing.lifecycle'],
@@ -426,6 +478,8 @@ registerCapability({
 // ---------- AI receptionist (server/receptionist/) ----------
 registerCapability({
   id: 'receptionist.chat',
+  tier: 'operate',
+  action: { label: 'Receptionist settings (business Settings)', href: '/dashboard/settings' },
   name: 'AI receptionist: website chat',
   journey: 'lead',
   description: 'Answers customers from the business records and books through the same booking engine.',
@@ -436,6 +490,8 @@ registerCapability({
 })
 registerCapability({
   id: 'receptionist.voice',
+  tier: 'optional',
+  action: { label: 'Voice Lab', href: '/admin/voice-lab' },
   name: 'AI receptionist: browser voice (Retell)',
   journey: 'lead',
   description: 'Browser voice calls; released per business (RECEPTIONIST_VOICE_BUSINESSES). Failures: voice_turn / voice_frame events.',
@@ -456,6 +512,8 @@ registerCapability({
 // ---------- Teach Your AI (server/intelligence/, migration 0033) ----------
 registerCapability({
   id: 'intelligence.studio',
+  tier: 'optional',
+  action: { label: 'Teach Your AI (business Settings)', href: '/dashboard/settings' },
   name: 'Teach Your AI: owner rules for the receptionist',
   journey: 'lead',
   description: 'Owners configure, test and publish versioned AI rules. Published rules reach real conversations only for AI_RULES_LIVE_BUSINESSES.',
@@ -470,6 +528,7 @@ registerCapability({
 })
 registerCapability({
   id: 'crm.ghl',
+  tier: 'later',
   name: 'GoHighLevel sync',
   journey: 'lead',
   external: 'GoHighLevel',
