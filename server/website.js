@@ -3,6 +3,7 @@
 // restored), and hosting that follows the subscription. Everything customers read goes through the
 // same unapproved-claims filter as ads, so a site never invents reviews, guarantees or credentials.
 import { unapprovedClaims } from './ads/spec.js'
+import { isComplimentary } from './business-accounts.js'
 import { approvedClaimsFor } from './landing.js'
 import { billingSubscription, getSubscription } from './stripe.js'
 import { validateDesign } from './site-design.js'
@@ -550,6 +551,8 @@ export const HOSTING_GRACE_MS = 14 * 24 * 60 * 60 * 1000
 // env: pass it (every production caller does) so that, once live billing is on, a test-mode subscription doesn't count
 // as paid (billingSubscription → 'sandbox'): a business that never finished onboarding is then 'unpaid', not hosted.
 export async function hostingStatus(db, customerId, now = Date.now(), env = null) {
+  // Complimentary entitlement (internal live / sandbox, server/business-accounts.js): hosted whatever Stripe says.
+  if (env && (await isComplimentary(env, customerId))) return { status: 'active', exempt: true, complimentary: true }
   const signup = await db.prepare('SELECT onboarded_at FROM self_signups WHERE customer = ?1').bind(customerId).first()
   if (!signup) return { status: 'active', exempt: true }
   const sub = env ? await billingSubscription(env, customerId) : await getSubscription(db, customerId)

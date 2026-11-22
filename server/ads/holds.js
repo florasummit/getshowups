@@ -9,6 +9,7 @@
 // Billing holds apply only to billed businesses (a self-serve signup or a Stripe subscription) and only
 // while billing is configured. Never-billed pilots (PoolThru) are never paused for billing.
 import { stripeConfigured } from '../stripe.js'
+import { isComplimentary } from '../business-accounts.js'
 import { adapter, logAction, verifyAndRecord, UNREACHABLE } from './campaigns.js'
 
 export const HOLD_REASONS = {
@@ -41,6 +42,7 @@ export async function adsHold(env, customerId) {
   if (deleting) return { reason: 'account_deleted' }
   if (biz.status === 'suspended') return { reason: 'suspended' }
   if (!stripeConfigured(env)) return null
+  if (await isComplimentary(env, customerId)) return null // complimentary entitlement: no billing hold, ever
   const [sub, signup] = await Promise.all([
     db.prepare('SELECT status, stripe_subscription_id, last_event_at FROM subscriptions WHERE customer = ?1').bind(customerId).first(),
     db.prepare('SELECT 1 AS x FROM self_signups WHERE customer = ?1').bind(customerId).first(),

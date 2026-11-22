@@ -1,6 +1,7 @@
 // Campaign service: ad profile, drafts, owner approval, launch (non-spending by default), pause/resume,
 // metrics sync, and the dashboard results summary. Routes stay thin and call these.
 import { randomToken } from '../google-oauth.js'
+import { providerSpendAllowed } from '../business-accounts.js'
 import { validateSpec, dailyCeilingCents, LIMITS } from './spec.js'
 import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
@@ -222,6 +223,7 @@ export const liveLaunchEnabled = (env) => env.ADS_LIVE_LAUNCH === 'true'
 // (server/testbusiness.js). A test business therefore stays on Google Ads test accounts forever.
 export async function liveFor(env, customerId, createdAt = Date.now()) {
   if (!liveLaunchEnabled(env)) return false
+  if (!(await providerSpendAllowed(env, customerId))) return false // account's provider spend blocked (server/business-accounts.js)
   return !sandboxed(await testStatus(env, customerId), createdAt)
 }
 
