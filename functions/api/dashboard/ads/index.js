@@ -9,6 +9,7 @@ import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../.
 import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
 import { internalEmails } from '../../../../server/testdata.js'
 import { listAssets } from '../../../../server/assets.js'
+import { isSandboxAdAccount } from '../../../../server/ads/meta.js'
 
 export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -33,7 +34,24 @@ export async function onRequestGet({ request, env }) {
     const live = await liveFor(env, id) // false for a test business, whatever ADS_LIVE_LAUNCH says
     const hold = await adsHold(env, id)
     const stuck = hold ? await runningOnHold(env, id) : null
-    const connections = Object.fromEntries(conns.results.map((c) => [c.platform, { accountId: c.account_id, accountName: c.account_name, currency: c.currency, status: c.status, testAccount: JSON.parse(c.extra || '{}').testAccount === true }]))
+    const connections = Object.fromEntries(
+      conns.results.map((c) => {
+        const extra = JSON.parse(c.extra || '{}')
+        return [
+          c.platform,
+          {
+            accountId: c.account_id,
+            accountName: c.account_name,
+            currency: c.currency,
+            status: c.status,
+            testAccount: extra.testAccount === true,
+            // Meta: the connected Page (the lead form and ads belong to it) and whether the ad account is one the
+            // operator listed as a sandbox (API-only, never delivers, never charges).
+            ...(c.platform === 'meta' ? { pageName: extra.pageName || null, pageId: extra.pageId || null, sandboxAccount: isSandboxAdAccount(env, c.account_id) } : {}),
+          },
+        ]
+      }),
+    )
     return json(200, {
       profile,
       hold: hold ? { reason: hold.reason, text: HOLD_REASONS[hold.reason], stillRunning: stuck?.running ?? 0, unreachable: stuck?.unreachable ?? false } : null,
@@ -55,6 +73,8 @@ export async function onRequestGet({ request, env }) {
         // Google Ads test account connected: campaigns can be created (paused), resumed and changed
         // there without the live switch. Re-verified with Google before every change.
         sandbox: !live && connections.google?.status === 'connected' && connections.google.testAccount === true,
+        // Meta sandbox ad account connected (META_SANDBOX_AD_ACCOUNTS): same rule, re-read from the connection before every change.
+        metaSandbox: !live && connections.meta?.status === 'connected' && connections.meta.sandboxAccount === true,
       },
       bookingUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${id}`,
     })

@@ -11,7 +11,8 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { getConnection, loadToken, saveToken, upsertConnection } from '../server/ads/connections.js'
-import { fetchDailyMetrics, launchCampaign, mapError, metaBase, setDailyBudget, setStatus, verifyCampaign } from '../server/ads/meta.js'
+import { fetchDailyMetrics, launchCampaign, mapError, metaBase, setDailyBudget, setStatus, verifyCampaign, refreshToken, refreshMetaTokens, isSandboxAccount, REFRESH_WITHIN_MS } from '../server/ads/meta.js'
+import { requestTestLead, setCampaignStatus, verifyLaunched } from '../server/ads/campaigns.js'
 import * as start from '../functions/api/ads/meta/start.js'
 import * as callback from '../functions/api/ads/meta/callback.js'
 import * as accounts from '../functions/api/ads/meta/accounts.js'
@@ -79,7 +80,8 @@ function fakeMeta() {
       return f.response
     }
     if (k === 'GET /oauth/access_token') {
-      if (params.grant_type === 'fb_exchange_token') return params.fb_exchange_token === SHORT ? [200, { access_token: LONG, token_type: 'bearer', expires_in: 5183944 }] : [400, { error: { code: 190 } }]
+      // A short-lived token OR a still-valid long-lived one exchanges for a (new) long-lived token; anything else is 190.
+      if (params.grant_type === 'fb_exchange_token') return params.fb_exchange_token === SHORT || params.fb_exchange_token === LONG ? [200, { access_token: LONG, token_type: 'bearer', expires_in: 5183944 }] : [400, { error: { code: 190 } }]
       return params.code === 'good-code' ? [200, { access_token: SHORT, expires_in: 3600 }] : [400, { error: { code: 100, message: 'bad code for owner@pools.example' } }]
     }
     if (params.access_token !== LONG && !String(params.access_token).startsWith('PAGE')) return [400, { error: { code: 190 } }]
@@ -118,8 +120,27 @@ function fakeMeta() {
       return [200, { success: true }]
     }
     if (method === 'GET' && /^\/\d+\/insights$/.test(path)) return [200, { data: m.insights }]
+    // Lead Ads Testing (POST /{form}/test_leads): one test lead per form, organic (no ad), fetched like any lead.
+    if (method === 'GET' && /^\/\d+\/test_leads$/.test(path)) return [200, { data: Object.values(m.testLeads).filter((l) => l.form_id === path.split('/')[1]).map((l) => ({ id: l.id })) }]
+    if (method === 'POST' && /^\/\d+\/test_leads$/.test(path)) {
+      const formId = path.split('/')[1]
+      if (Object.values(m.testLeads).some((l) => l.form_id === formId)) return [400, { error: { code: 100, message: 'A test lead already exists for this form' } }]
+      const id = String(++m.seq)
+      m.testLeads[id] = { id, form_id: formId }
+      m.leads[id] = { id, form_id: formId, created_time: 'x', field_data: params.field_data }
+      return [200, { id }]
+    }
+    if (method === 'DELETE' && /^\/\d+$/.test(path)) {
+      const id = path.slice(1)
+      const had = m.testLeads[id] || m.objects[id]
+      delete m.testLeads[id]
+      delete m.leads[id]
+      delete m.objects[id]
+      return had ? [200, { success: true }] : [400, { error: { code: 100 } }]
+    }
     return [404, { error: { code: 803 } }]
   }
+  m.testLeads = {}
   return m
 }
 
@@ -154,7 +175,7 @@ beforeEach(async () => {
     assert.ok(u.href.startsWith(G), `unexpected ${u.origin}`)
     assert.ok(init.signal, 'every Graph call has a timeout signal')
     const method = init.method || 'GET'
-    const params = method === 'GET' ? Object.fromEntries(u.searchParams) : Object.fromEntries(new URLSearchParams(init.body))
+    const params = method === 'POST' ? Object.fromEntries(new URLSearchParams(init.body)) : Object.fromEntries(u.searchParams)
     for (const [k, v] of Object.entries(params)) if (/^[[{]/.test(v)) params[k] = JSON.parse(v)
     const path = u.pathname.replace('/v27.0', '')
     calls.push({ method, path, params })
@@ -537,6 +558,117 @@ test('metaBase: mock origin honored only for loopback http', () => {
   assert.equal(metaBase({}), G)
   assert.equal(metaBase({ META_API_MOCK_ORIGIN: 'http://127.0.0.1:8787' }), 'http://127.0.0.1:8787/v27.0')
   for (const bad of ['https://evil.example', 'http://localhost:1', 'http://127.0.0.1.evil.example:80']) assert.equal(metaBase({ META_API_MOCK_ORIGIN: bad }), G)
+})
+
+// ---------- token refresh, sandbox accounts, daily verification, test leads ----------
+
+test('token refresh: a token within 14 days of expiry is re-exchanged for a new long-lived one (stored, never logged); far from expiry nothing is called; an expired or refused token marks the connection reconnect_required; the cron step counts', async () => {
+  await connected() // expiresAt in 1 day → due
+  const now = Date.now()
+  const r = await refreshToken(env, 'pools', now)
+  assert.deepEqual([r.ok, r.refreshed], [true, true])
+  assert.ok(r.expiresAt > now + 59 * 864e5 && r.expiresAt <= now + 61 * 864e5, 'about 60 days')
+  const stored = await loadToken(env, 'meta', 'pools')
+  assert.deepEqual([stored.accessToken, stored.expiresAt, stored.refreshedAt], [LONG, r.expiresAt, now])
+  assert.deepEqual(calls.filter((c) => c.path === '/oauth/access_token').map((c) => c.params.grant_type), ['fb_exchange_token'])
+  // Far from expiry: nothing is exchanged.
+  calls = []
+  const skip = await refreshToken(env, 'pools', now)
+  assert.deepEqual([skip.ok, skip.skipped, calls.length], [true, true, 0])
+  assert.ok(REFRESH_WITHIN_MS === 14 * 864e5)
+  // Expired: cannot be refreshed (Meta: an expired token cannot request a long-lived one) → reconnect.
+  await saveToken(env, 'meta', 'pools', { accessToken: LONG, expiresAt: now - 1 })
+  const ex = await refreshToken(env, 'pools', now)
+  assert.deepEqual([ex.ok, ex.error, ex.reconnect, (await getConnection(env, 'pools', 'meta')).status, calls.length], [false, 'reconnect_required', true, 'reconnect_required', 0])
+  // Refused by Meta (190): reconnect; a transient error is reported, nothing stored.
+  await upsertConnection(env, 'pools', 'meta', { accountId: 'act_111', accountName: 'Pools Ads', currency: 'USD', extra: { pageId: '222' }, status: 'connected' })
+  await saveToken(env, 'meta', 'pools', { accessToken: LONG, expiresAt: now + 864e5 })
+  meta.fail['GET /oauth/access_token'] = { times: 1, response: [400, { error: { code: 190, message: 'Error validating access token for owner@pools.example' } }] }
+  const refused = await refreshToken(env, 'pools', now)
+  assert.deepEqual([refused.error, (await getConnection(env, 'pools', 'meta')).status, (await loadToken(env, 'meta', 'pools')).expiresAt], ['reconnect_required', 'reconnect_required', now + 864e5])
+  // Cron: counts only; salon not connected is not counted.
+  await upsertConnection(env, 'pools', 'meta', { accountId: 'act_111', accountName: 'Pools Ads', currency: 'USD', extra: { pageId: '222' }, status: 'connected' })
+  assert.deepEqual(await refreshMetaTokens(env, { now }), { checked: 1, refreshed: 1, reconnect: 0, failed: 0 })
+  delete env.META_APP_ID
+  assert.deepEqual(await refreshMetaTokens(env, { now }), { checked: 0, refreshed: 0, reconnect: 0, failed: 0 })
+})
+
+// A created (paused) Meta campaign row from a mocked real launch, with the owner's budget approval.
+async function launchedRow(id = 'cmpmeta0001') {
+  const r = await launchCampaign(env, 'pools', { ...CAMPAIGN, id }, { dryRun: false })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  db.sql
+    .prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, launched_at, created_at, updated_at) VALUES (?, 'pools', 'meta', 'paused', ?, 2500, ?, ?, 1, 1, 1)")
+    .run(id, JSON.stringify(SPEC), r.platformCampaignId, JSON.stringify(r.platformIds))
+  db.sql.prepare("INSERT OR IGNORE INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('ba1', 'pools', 90000, 'owner@pools.example', 1)").run()
+  return r
+}
+const row = (id) => db.sql.prepare('SELECT * FROM ad_campaigns WHERE id = ?').get(id)
+
+test('sandbox ad account: a Meta campaign on an account listed in META_SANDBOX_AD_ACCOUNTS can be started without the live switch and is set ACTIVE on Meta (ad, ad set, campaign); an unlisted account is refused; the daily verification now covers Meta and reconciles a change made in Ads Manager', async () => {
+  await connected()
+  approvedImage()
+  const r = await launchedRow()
+  const pools = { id: 'pools' }
+  assert.equal(await isSandboxAccount(env, 'pools'), false)
+  assert.deepEqual((await setCampaignStatus(env, pools, 'cmpmeta0001', 'active', 'owner:x')).error, 'live_launch_disabled', 'no live switch, not a sandbox account')
+  env.META_SANDBOX_AD_ACCOUNTS = 'act_999, act_111'
+  assert.equal(await isSandboxAccount(env, 'pools'), true)
+  const started = await setCampaignStatus(env, pools, 'cmpmeta0001', 'active', 'owner:x')
+  assert.equal(started.ok, true, JSON.stringify(started))
+  for (const k of ['adId', 'adsetId', 'campaignId']) assert.equal(meta.objects[r.platformIds[k]].status, 'ACTIVE', k)
+  assert.equal(row('cmpmeta0001').status, 'active')
+  // Another business's connection on an unlisted account: refused even with the list set.
+  env.META_SANDBOX_AD_ACCOUNTS = 'act_999'
+  assert.deepEqual((await setCampaignStatus(env, pools, 'cmpmeta0001', 'paused', 'owner:x')).ok, true, 'pausing is always allowed')
+  assert.equal((await setCampaignStatus(env, pools, 'cmpmeta0001', 'active', 'owner:x')).error, 'live_launch_disabled')
+  assert.equal(row('cmpmeta0001').status, 'paused')
+  // Daily verification: the owner started it in Ads Manager → our record follows Meta (reconcile), read-only.
+  meta.objects[r.platformIds.campaignId].status = 'ACTIVE'
+  const v = await verifyLaunched(env, { now: Date.now() })
+  assert.deepEqual(v, { checked: 1, failed: 0 })
+  assert.equal(row('cmpmeta0001').status, 'active')
+  const kinds = db.sql.prepare("SELECT kind FROM ad_actions WHERE campaign_id = 'cmpmeta0001' ORDER BY at, rowid").all().map((a) => a.kind)
+  assert.ok(kinds.includes('verify') && kinds.includes('reconcile'), kinds.join(','))
+  assert.ok(!calls.some((c) => c.method === 'POST' && calls.indexOf(c) > calls.findIndex((x) => x.path.endsWith('/insights') || x.params.fields === 'id,name,status,objective,effective_status')), 'verification writes nothing')
+})
+
+test('test leads (Meta’s testing API): the owner asks for one on a created campaign; Meta creates it on the campaign’s form with our test field data (an earlier one removed first); the id is kept on the campaign; its webhook delivery creates the lead MARKED AS TEST, attributed to the campaign although no ad produced it; refused for Google and for unlaunched drafts; never logs lead data', async () => {
+  await connected()
+  approvedImage()
+  const r = await launchedRow()
+  const pools = { id: 'pools' }
+  const t1 = await requestTestLead(env, pools, 'cmpmeta0001', 'owner:x')
+  assert.deepEqual([t1.ok, typeof t1.leadgenId, t1.removed], [true, 'string', 0])
+  const created = calls.find((c) => c.method === 'POST' && c.path === `/${r.platformIds.formId}/test_leads`)
+  assert.ok(created, 'asked Meta for a test lead on the campaign’s form')
+  assert.ok(String(created.params.access_token).startsWith('PAGE'), 'with the Page token')
+  assert.deepEqual(created.params.field_data.map((f) => f.name), ['full_name', 'email', 'phone_number', 'zip_code'])
+  assert.deepEqual(JSON.parse(row('cmpmeta0001').platform_ids).testLeadIds, [t1.leadgenId])
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ad_actions WHERE campaign_id = 'cmpmeta0001' AND kind = 'test_lead' AND status = 'applied'").get().n, 1)
+  // Meta delivers it like any lead: organic, no ad id.
+  const raw = JSON.stringify({ object: 'page', entry: [{ id: '222', time: 1, changes: [{ field: 'leadgen', value: { leadgen_id: t1.leadgenId, page_id: '222', form_id: r.platformIds.formId, created_time: 1 } }] }] })
+  const hook = await post(raw)
+  assert.deepEqual([hook.status, hook.json().processed, hook.json().test], [200, 1, 1])
+  const lead = db.sql.prepare('SELECT * FROM leads').get()
+  assert.deepEqual([lead.customer, lead.email, lead.need], ['pools', 'meta-test-lead@getshowups.com', 'Facebook lead form'])
+  assert.equal(db.sql.prepare('SELECT is_test FROM test_marks WHERE lead_id = ?').get(lead.id).is_test, 1, 'marked as test data')
+  const attr = db.sql.prepare('SELECT * FROM lead_attribution').get()
+  assert.deepEqual([attr.campaign_id, JSON.parse(attr.details).test, JSON.parse(attr.details).adId], ['cmpmeta0001', true, null])
+  assert.equal(db.sql.prepare('SELECT source FROM lead_threads WHERE lead_id = ?').get(lead.id)?.source ?? 'meta_lead_form', 'meta_lead_form')
+  // A second request replaces the first test lead (Meta keeps one per form).
+  const t2 = await requestTestLead(env, pools, 'cmpmeta0001', 'owner:x')
+  assert.deepEqual([t2.ok, t2.removed, t2.leadgenId !== t1.leadgenId], [true, 1, true])
+  assert.deepEqual(JSON.parse(row('cmpmeta0001').platform_ids).testLeadIds, [t1.leadgenId, t2.leadgenId])
+  // Refusals.
+  db.sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES ('googlerow01', 'pools', 'google', 'paused', '{}', 100, 1, 1), ('draftmeta01', 'pools', 'meta', 'draft', '{}', 100, 1, 1)").run()
+  assert.equal((await requestTestLead(env, pools, 'googlerow01', 'owner:x')).error, 'invalid_request')
+  assert.equal((await requestTestLead(env, pools, 'draftmeta01', 'owner:x')).error, 'not_launched')
+  assert.equal((await requestTestLead(env, { id: 'salon' }, 'cmpmeta0001', 'owner:x')).error, 'not_found', 'another business never reaches it')
+  meta.fail[`POST /${r.platformIds.formId}/test_leads`] = { times: 1, response: [400, { error: { code: 10, message: 'App not approved for owner@pools.example' } }] }
+  const refused = await requestTestLead(env, pools, 'cmpmeta0001', 'owner:x')
+  assert.deepEqual([refused.ok, refused.error], [false, 'app_not_approved'])
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ad_actions WHERE campaign_id = 'cmpmeta0001' AND kind = 'test_lead' AND status = 'failed'").get().n, 1)
 })
 
 // ---------- webhook ----------

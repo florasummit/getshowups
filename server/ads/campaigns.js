@@ -234,7 +234,11 @@ export async function liveFor(env, customerId, createdAt = Date.now()) {
 // Returns 'live', 'sandbox' (verified Google Ads test account: never serves or spends) or null.
 async function serveMode(env, platform, customerId, a, row) {
   if (await liveFor(env, customerId, row.created_at)) return 'live'
-  return platform === 'google' && typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId)) ? 'sandbox' : null
+  // Google: Google's own test-account flag, re-checked live. Meta: a sandbox ad account the operator listed
+  // (META_SANDBOX_AD_ACCOUNTS; Meta exposes no flag), re-read from the connection before every change.
+  if (platform === 'google') return typeof a.isTestAccount === 'function' && (await a.isTestAccount(env, customerId)) ? 'sandbox' : null
+  if (platform === 'meta') return typeof a.isSandboxAccount === 'function' && (await a.isSandboxAccount(env, customerId)) ? 'sandbox' : null
+  return null
 }
 
 // Access rule: once billing is configured, starting LIVE ads needs an active or trialing subscription.
@@ -405,13 +409,37 @@ export async function verifyAndRecord(env, row, now = Date.now()) {
   return { ok: true, failed, google: r.google, remote: read }
 }
 
-// Cron: re-check created campaigns at most once a day each (oldest first).
+// Meta's official test-lead workflow for a created (paused) lead-ads campaign: Meta creates a test lead on the
+// campaign's instant form and delivers it to our webhook like a real lead; the lead's id is kept on the campaign
+// (platform_ids.testLeadIds, last 5) so the webhook marks the resulting lead as test data. Nothing runs, nothing
+// is charged (Meta: test leads are organic and tied to no ad). Logged as an ad action; never for Google.
+export async function requestTestLead(env, customer, id, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const row = await getRow(db, customer.id, id)
+  if (!row) return { ok: false, error: 'not_found' }
+  if (row.platform !== 'meta') return { ok: false, error: 'invalid_request' }
+  if (!row.platform_campaign_id) return { ok: false, error: 'not_launched' }
+  const a = await adapter('meta')
+  const profile = await getProfile(db, customer.id)
+  const r = await a.createTestLead(env, customer.id, row, { zip: JSON.parse(row.spec || '{}').geo?.zips?.[0] || profile?.serviceArea?.zips?.[0] || '' })
+  if (!r.ok) {
+    await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'test_lead', status: 'failed', reason: `Meta did not create a test lead (${r.error})`, platform: 'meta' }, now)
+    return { ok: false, error: r.error }
+  }
+  const ids = JSON.parse(row.platform_ids || '{}')
+  ids.testLeadIds = [...(ids.testLeadIds || []).filter((x) => x !== r.leadgenId), r.leadgenId].slice(-5)
+  await db.prepare('UPDATE ad_campaigns SET platform_ids = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(id, customer.id, JSON.stringify(ids), now).run()
+  await logAction(db, { customer: customer.id, campaignId: id, actor, kind: 'test_lead', reason: `Meta created test lead ${r.leadgenId} on the instant form${r.removed ? ` (previous test lead removed)` : ''}; it arrives through the lead webhook as test data`, details: { leadgenId: r.leadgenId, removed: r.removed }, platform: 'meta' }, now)
+  return { ok: true, leadgenId: r.leadgenId, removed: r.removed }
+}
+
+// Cron: re-check created campaigns at most once a day each (oldest first), on every platform that reads back.
 export async function verifyLaunched(env, { now = Date.now(), limit = 10 } = {}) {
   const db = env.ONBOARDING_DB
   const { results } = await db
     .prepare(
-      `SELECT c.* FROM ad_campaigns c WHERE c.platform = 'google' AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
-       AND EXISTS (SELECT 1 FROM ad_connections x WHERE x.customer = c.customer AND x.platform = 'google' AND x.status = 'connected')
+      `SELECT c.* FROM ad_campaigns c WHERE c.platform IN ('google', 'meta') AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
+       AND EXISTS (SELECT 1 FROM ad_connections x WHERE x.customer = c.customer AND x.platform = c.platform AND x.status = 'connected')
        AND coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) < ?1
        ORDER BY coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) LIMIT ?2`,
     )

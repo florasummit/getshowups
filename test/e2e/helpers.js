@@ -5,6 +5,22 @@ export async function useSession(context, token) {
   await context.addCookies([{ name: '__Host-gsu_session', value: token, domain: '127.0.0.1', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }])
 }
 
+// Lets the real Meta start handler run (state cookie, scopes), then sends the browser to our callback instead of
+// Facebook's login dialog (mock code; the Graph stand-in exchanges it).
+export async function returnFromMeta(page, startPattern, callbackPath, code) {
+  await page.route(startPattern, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const res = await route.fetch({ maxRedirects: 0 })
+    const meta = new URL(res.headers()['location'])
+    expect(meta.origin).toBe('https://www.facebook.com')
+    expect(meta.searchParams.get('scope')).toContain('leads_retrieval')
+    return route.fulfill({
+      status: 302,
+      headers: { location: `${callbackPath}?code=${encodeURIComponent(code)}&state=${meta.searchParams.get('state')}`, 'set-cookie': res.headers()['set-cookie'] },
+    })
+  })
+}
+
 // Lets the real start handler run, then sends the browser to our callback instead of Google.
 export async function returnFromGoogle(page, startPattern, method, callbackPath, code) {
   await page.route(startPattern, async (route) => {
