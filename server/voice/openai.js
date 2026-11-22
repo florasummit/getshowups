@@ -34,9 +34,10 @@ export const CLIENT_SECRET_MAX_TTL_SECONDS = 300
 
 // Built-in voices from the client-secret reference (2026-11-21). OPENAI_REALTIME_VOICE picks one; default 'marin'
 // (the docs' current example voice). Anything else falls back to the default, never to a free string.
-export const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar']
+import { OPENAI_VOICES } from './providers.js'
+export { OPENAI_VOICES }
 export const OPENAI_DEFAULT_VOICE = 'marin'
-export const openaiVoice = (env) => (OPENAI_VOICES.includes(env?.OPENAI_REALTIME_VOICE) ? env.OPENAI_REALTIME_VOICE : OPENAI_DEFAULT_VOICE)
+export const openaiVoice = (env, chosen) => (OPENAI_VOICES.includes(chosen) ? chosen : OPENAI_VOICES.includes(env?.OPENAI_REALTIME_VOICE) ? env.OPENAI_REALTIME_VOICE : OPENAI_DEFAULT_VOICE)
 
 // Input transcription gives the Lab the caller's words (and the tool route's userText: the engine's digit and
 // confirmation checks read what the caller actually said). Documented model options include gpt-4o-mini-transcribe,
@@ -47,7 +48,7 @@ export const openaiTranscribeModel = (env) => (/^[a-z0-9.-]{3,60}$/i.test(env?.O
 // The session the Lab runs: audio in and out, server VAD (natural turn-taking: the model starts answering when the
 // caller stops and is cut off when they start again), our instructions, our tools. Nothing secret goes in here;
 // the same object is returned to the admin's browser (which re-sends it as session.update after a reconnect).
-export function openaiSessionConfig(env, instructions) {
+export function openaiSessionConfig(env, instructions, { voice } = {}) {
   return {
     type: 'realtime',
     model: openaiModel(env),
@@ -58,7 +59,7 @@ export function openaiSessionConfig(env, instructions) {
         turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true, threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 500 },
         transcription: { model: openaiTranscribeModel(env), language: 'en' },
       },
-      output: { voice: openaiVoice(env) },
+      output: { voice: openaiVoice(env, voice) },
     },
     tools: toolsForOpenAI(),
     tool_choice: 'auto',
@@ -71,9 +72,9 @@ const statusCode = (status) => (status === 401 || status === 403 ? 'openai_auth_
 // Mints one short-lived client secret for one Lab session. → { ok, clientSecret, expiresAt (ms), model, sessionConfig }
 // or { ok: false, error: <code>, status? }. The permanent key is used for this one call and never returned; a
 // defensive check refuses to hand back anything that contains it.
-export async function mintClientSecret(env, { instructions, ttlSeconds = CLIENT_SECRET_TTL_SECONDS } = {}, fetchFn = globalThis.fetch) {
+export async function mintClientSecret(env, { instructions, ttlSeconds = CLIENT_SECRET_TTL_SECONDS, voice } = {}, fetchFn = globalThis.fetch) {
   if (!openaiConfigured(env)) return { ok: false, error: 'openai_not_configured' }
-  const sessionConfig = openaiSessionConfig(env, instructions)
+  const sessionConfig = openaiSessionConfig(env, instructions, { voice })
   const seconds = Math.min(CLIENT_SECRET_MAX_TTL_SECONDS, Math.max(10, Math.round(Number(ttlSeconds) || CLIENT_SECRET_TTL_SECONDS)))
   let res
   try {

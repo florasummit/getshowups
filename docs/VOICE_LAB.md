@@ -43,9 +43,15 @@ confirmation (messages still obey the launch gate; test businesses only reach `M
 3. Talk. The transcript, tool results (name, ok/error code, simulated tag, ms) and connection state are what the
    adapter reports. Stop ends the session: the transcript is stored as text on the conversation, the adapter's metrics
    are saved (numbers only), and the engine's summary is shown (outcome, booked/simulated, estimated cost).
-4. Retell: "Open browser voice test" opens the public chat page of the test business (`/chat/<id>`) in a new tab, the
-   production path. Metrics for Retell come from the engine's recorded events (`voice_turn` timings, tool outcomes),
-   not from this browser. The Talk button appears there only for businesses in `RECEPTIONIST_VOICE_BUSINESSES`.
+4. Retell runs in the Lab itself (PR #103): the production agent on the test business through the Lab's own call
+   row; speech, barge-in and the transcript come from `retell-client-js-sdk` in this browser, tool outcomes from the
+   engine's events. OpenAI: pick a voice per session (allowlisted on the server; default `OPENAI_REALTIME_VOICE` or
+   marin). Retell and ElevenLabs take voice and turn-taking from their agent.
+5. "Readiness: <provider>" under the setup answers the owner's questions from configuration alone (never a provider
+   call): integration built, credentials (NAMES of missing settings only), account/billing to set up, whether a browser
+   session can run now, tool safety, what is recorded, estimated cost per minute, the smallest authorized test, voice
+   settings; blockers are named. GET /api/platform/voice-lab/status → `readiness[]` (server/voice/providers.js
+   providerReadiness).
 
 Recent sessions list provider, business, outcome, booked/simulated, duration and the saved metrics.
 
