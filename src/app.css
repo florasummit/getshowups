@@ -4096,7 +4096,10 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .review .notice-warn { background: var(--warn-bg); color: var(--warn-text); }
 
 /* Admin → Growth */
-.growth .growth-value { font-size: 1.1rem; white-space: nowrap; }
+.growth .growth-value { font-size: 1.1rem; max-width: 100%; overflow-wrap: anywhere; }
+.growth .seg { display: flex; flex-wrap: wrap; border-radius: 20px; max-width: 100%; }
+.growth .tag { white-space: normal; }
+@media (max-width: 420px) { .growth .row { flex-direction: column; align-items: flex-start; gap: 6px; } .growth .seg button { padding: 8px 12px; } }
 .growth .sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 12px 16px; margin: 8px 0; }
 .growth .sim-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .growth .sim-table th, .growth .sim-table td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--ink-100); vertical-align: top; }
