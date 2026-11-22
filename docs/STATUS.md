@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Voice providers provisioned the Retell way (2026-11-21/22) — feat/voice-provisioning (no migration)
+
+- `scripts/voice-provision.sh <provider> [--apply]`: Keychain (`getshowups-<provider>-api-key`) → read-only check
+  against the provider → Pages secret by pipe; never prints the value. ElevenLabs `--apply` also creates/updates the
+  Lab agent through the API (scripts/elevenlabs-setup.mjs) and sets `ELEVENLABS_AGENT_ID`.
+- OpenAI Realtime: the key already in Keychain (demo item from 2026-11-16) lists every `gpt-realtime*` model and
+  minted a 10-second client secret (HTTP 200, no usage) → `OPENAI_API_KEY` set on the Pages project 2026-11-22;
+  applies on the next deployment. The Lab then shows OpenAI "Configured"; sessions are server-issued ephemeral
+  secrets (server/voice/openai.js), tools run server-side with dry run, the permanent key never reaches the browser.
+- ElevenLabs: no key in Keychain or Cloudflare. Owner creates the account + an API key with Conversational AI
+  permissions, stores it once, runs the script with `--apply`; the agent is created by API (no dashboard work).
+- Lab test business for the sales knowledge: `getshowups-lab` is not created yet in production (one click, Admin →
+  Platform) and would have no calendar (no owner row: an email owns one business). Availability lookups in the Lab
+  need a test business with a calendar: link a second email to `getshowups-lab` (admin customers route / invite) and
+  connect a calendar from its dashboard, or use another admin-marked test business that has one.
+- Retell unchanged. Nothing customer-facing, no phone routing, no unattended usage.
+
 ## Operational launch sprint, step 4: Admin → Growth (Measure | Simulate | Decide) (2026-11-21) — feat/admin-growth (no migration)
 
 - **Measure** (server/growth.js, GET /api/platform/growth): the admin overview's own queries, each figure labelled

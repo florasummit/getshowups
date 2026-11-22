@@ -117,7 +117,27 @@ written to be read aloud by a tester for exactly that.
 3. Admin → Voice Lab → provider **Retell** (configured in production) → test business → Start conversation → speak →
    Stop. Dry run is on by default. Transcript, timings (first/median/p95 reply from the browser), tool outcomes (from
    the engine's events) and the estimated cost line show per session.
-4. OpenAI and ElevenLabs stay "Not configured" until their keys exist (approval: paid services).
+4. OpenAI and ElevenLabs are provisioned the way Retell was, with one command each (below). 2026-11-21: OpenAI is
+   set (the key already in Keychain lists the realtime models and minted a client secret); ElevenLabs waits for an
+   account and key.
+
+## Provisioning a provider (the Retell pattern: Keychain → read-only check → Pages secret, never shown)
+
+`scripts/voice-provision.sh openai|elevenlabs|retell [--apply]`. The key lives only in macOS Keychain as a generic
+password (account `getshowups`, service `getshowups-<provider>-api-key`); the script reads it into memory, checks it
+read-only against the provider (OpenAI: model list + a 10-second Realtime client secret, which costs nothing;
+ElevenLabs: `/v1/user` + the Agents list; Retell: list agents), prints what it would set, and with `--apply` pipes it
+into the Pages secret(s). It never prints, files, logs or commits the value. For ElevenLabs, `--apply` also runs
+`scripts/elevenlabs-setup.mjs --apply` (creates or updates the Voice Lab agent and its seven client tools through the
+API; auth on, overrides on, 15-minute ceiling) and sets `ELEVENLABS_AGENT_ID` from the result. Secrets take effect on
+the next deployment (a merged PR). The owner's only steps: create the account and key, store it once
+(`security add-generic-password -a getshowups -s getshowups-<provider>-api-key -w`, typed hidden), run the script.
+Rotation: store the new key under the same name, run `--apply` again, deploy.
+
+What the keys enable: ONLY the admin-only Voice Lab (VOICE_LAB_ENABLED, admin-marked test businesses, dry run by
+default, one call at a time, 15 minutes, `VOICE_LAB_DAILY_MINUTES`). No customer-facing voice, no phone routing, no
+unattended usage: a session starts only when an admin presses Start. Retell's production path is untouched.
+
 
 What is billable: every provider charges per minute (Retell on the GetShowUps Retell account, the same agent customers
 use). A session starts only on Start, one Lab call at a time, ≤ 15 minutes, inside the daily minute budget
