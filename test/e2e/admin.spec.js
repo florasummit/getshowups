@@ -325,3 +325,45 @@ test('Twilio setup per business: steps in its own subaccount, submitting off, a 
   await useSession(context, fixtures.E2E_TEXTS_SESSION_TOKEN)
   expect((await page.request.get(`/api/platform/messaging?customer=${fixtures.E2E_TEXTS_CUSTOMER}`)).status()).toBe(403)
 })
+
+test('Growth: Measure labels every figure; Simulate changes outputs without touching billing; Decide names an experiment with evidence @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  const billingCalls = []
+  page.on('request', (r) => /stripe|billing|checkout/i.test(r.url()) && billingCalls.push(r.url()))
+  await page.goto('/admin')
+  await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Growth' }).click()
+  await expect(page).toHaveURL(/\/admin\/growth$/)
+  await expect(page.getByRole('heading', { name: 'Growth', level: 1 })).toBeVisible()
+  // Measure: every row carries a kind; test-mode billing is never shown as revenue.
+  const measure = page.locator('[data-growth-measure]')
+  await expect(measure.locator('[data-measure="mrr"]')).toHaveAttribute('data-kind', 'unavailable')
+  await expect(measure.locator('[data-measure="payingCustomers"]')).toHaveAttribute('data-kind', 'test')
+  expect(await measure.locator('[data-measure][data-kind]').count()).toBeGreaterThan(8)
+  await expect(measure).toContainText('test businesses and test leads excluded')
+  // Simulate: raising the close rate raises new customers; the price field is modeling only (no billing request).
+  await page.locator('[data-growth-mode="simulate"]').click()
+  const cell = page.locator('[data-sim-scenario="New customers"]')
+  const before = await cell.textContent()
+  await page.locator('[data-sim-field="closeRate"] input').fill('90')
+  await expect(cell).not.toHaveText(before)
+  await page.locator('[data-sim-field="priceMonthlyCents"] input').fill('999')
+  await expect(page.locator('[data-sim-scenario="New MRR"]')).not.toHaveText('—')
+  await expect(page.locator('[data-sim-limits]')).toContainText('Not a forecast')
+  await page.locator('[data-sim-reset]').click()
+  await expect(cell).toHaveText(before)
+  expect(billingCalls).toEqual([])
+  // Decide: a bottleneck (or "not enough data") with experiment, cost, effort and evidence; never spend.
+  await page.locator('[data-growth-mode="decide"]').click()
+  const decide = page.locator('[data-growth-decide]')
+  await expect(decide).toContainText('Experiment')
+  await expect(decide).toContainText('Evidence')
+  await expect(decide).toContainText('Nothing runs by itself')
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    for (const mode of ['measure', 'simulate', 'decide']) {
+      await page.locator(`[data-growth-mode="${mode}"]`).click()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow, `${mode} overflow at ${width}px`).toBeLessThanOrEqual(0)
+    }
+  }
+})

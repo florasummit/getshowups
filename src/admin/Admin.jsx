@@ -11,13 +11,15 @@ import '../app.css'
 const Review = lazyPage(() => import('./Review.jsx'))
 const Control = lazyPage(() => import('./Control.jsx'))
 const VoiceLab = lazyPage(() => import('./VoiceLab.jsx'))
+const Growth = lazyPage(() => import('./Growth.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
   ['control', 'Control Center', '/admin/control'],
   ['review', 'Business Review', '/admin/review'],
   ['voicelab', 'Voice Lab', '/admin/voice-lab'],
+  ['growth', 'Growth', '/admin/growth'],
 ]
-const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') ? 'voicelab' : 'overview')
+const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') ? 'voicelab' : path.startsWith('/admin/growth') ? 'growth' : 'overview')
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -114,11 +116,10 @@ function Metrics({ m }) {
             </div>
           ))}
           <div data-sales-funnel={m.sales ? 'on' : 'off'}>
-            <dt>Sales funnel (30 days, GetShowUps selling itself)</dt>
+            <dt>Sales funnel, acquisition and revenue scenarios</dt>
             <dd>
-              {m.sales
-                ? `${m.sales.leads} leads · ${m.sales.qualifiedLeads} qualified · ${m.sales.callbackRequests ?? '—'} callback requests · ${m.sales.consultationsBooked} consultations booked (${pct(m.sales.demoBookingRate)} of qualified) · ${m.sales.consultationsAttended} attended (${pct(m.sales.demoAttendanceRate)}) · paying ${m.sales.paying ?? '—'} · activated ${m.sales.activated}`
-                : 'Set up the GetShowUps business (docs/SALES_PLAYBOOK.md §6) to count leads, consultations and outcomes here.'}
+              {m.sales ? `${m.sales.leads} prospects · ${m.sales.consultationsBooked} consultations booked · ${m.sales.consultationsAttended} attended (30 days). ` : 'The GetShowUps sales business is not set up yet. '}
+              <a href="/admin/growth">Open Growth</a> for samples, date ranges, the simulator and the next experiment.
             </dd>
           </div>
           {m.signupsByWeek.length > 0 && (
@@ -1249,6 +1250,10 @@ function Console({ me }) {
         ) : section === 'voicelab' ? (
           <Suspense fallback={<div aria-busy="true" />}>
             <VoiceLab />
+          </Suspense>
+        ) : section === 'growth' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Growth />
           </Suspense>
         ) : (
           <Overview me={me} />
