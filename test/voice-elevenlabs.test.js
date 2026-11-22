@@ -12,7 +12,7 @@ import { getCustomer } from '../server/customers.js'
 import { COST_ESTIMATES, estimateMicros, providerStatus } from '../server/voice/providers.js'
 import { VOICE_TOOL_NAMES } from '../server/voice/tools.js'
 import { startLabSession, loadLabSession, endLabSession, cleanMetrics } from '../server/voice/sessions.js'
-import { connectElevenLabs, fetchSignedUrl, elevenlabsBase, elevenlabsOverrides, SIGNED_URL_TTL_MS, MAX_CONNECTS_PER_SESSION } from '../server/voice/elevenlabs.js'
+import { connectElevenLabs, fetchSignedUrl, elevenlabsBase, elevenlabsOverrides, elevenlabsDynamicVariables, SIGNED_URL_TTL_MS, MAX_CONNECTS_PER_SESSION } from '../server/voice/elevenlabs.js'
 import * as connectApi from '../functions/api/platform/voice-lab/elevenlabs.js'
 import { createTurnMetrics, ADAPTER_STATES } from '../src/voice/adapter.js'
 import { createElevenLabsAdapter, MAX_RECONNECTS } from '../src/voice/elevenlabs.js'
@@ -123,11 +123,12 @@ test('connect: a short-lived signed URL for the configured agent, overrides with
   assert.ok(SIGNED_URL_TTL_MS <= 15 * 60_000, 'expiry is the documented 15 minutes or shorter')
   assert.match(r.overrides.agent.prompt.prompt, /alpha Co/)
   assert.match(r.overrides.agent.prompt.prompt, /Yes, we service <place>/)
-  assert.equal(r.overrides.agent.firstMessage, 'Thanks for calling alpha Co, how can I help?')
+  assert.equal(r.overrides.agent.firstMessage, undefined, 'no first_message override: ElevenLabs refuses it on a published agent')
+  assert.equal(r.dynamicVariables.greeting, 'Thanks for calling alpha Co, how can I help?', 'the greeting is the {{greeting}} dynamic variable')
   assert.equal(r.overrides.agent.language, 'en')
   assert.deepEqual(r.clientTools, VOICE_TOOL_NAMES)
   assert.equal(r.clientTools.length, 7)
-  assert.deepEqual(r.dynamicVariables, { business_name: 'alpha Co', dry_run: true, channel: 'voice_lab' })
+  assert.deepEqual(r.dynamicVariables, { business_name: 'alpha Co', dry_run: true, channel: 'voice_lab', greeting: 'Thanks for calling alpha Co, how can I help?' })
   assert.deepEqual([r.connection, r.connectionsLeft], [1, MAX_CONNECTS_PER_SESSION - 1])
   const text = JSON.stringify(r)
   for (const sec of SECRETS) assert.ok(!text.includes(sec))
@@ -138,7 +139,8 @@ test('connect: a short-lived signed URL for the configured agent, overrides with
   assert.equal(el.length, 1)
   assert.ok(!el[0][0].includes(EL_KEY))
   // The SDK shape is what elevenlabsOverrides builds; the greeting comes from the business's receptionist settings.
-  assert.deepEqual(elevenlabsOverrides({ instructions: 'X', greeting: 'Hi' }), { agent: { prompt: { prompt: 'X' }, firstMessage: 'Hi', language: 'en' } })
+  assert.deepEqual(elevenlabsOverrides({ instructions: 'X', greeting: 'Hi' }), { agent: { prompt: { prompt: 'X' }, language: 'en' } })
+  assert.equal(elevenlabsDynamicVariables({ name: 'Beta Co' }, { dryRun: true }, '').greeting, 'Thanks for calling Beta Co, how can I help?', 'never an empty greeting (the agent would wait for the caller)')
   assert.equal(customer.id, 'alpha')
 })
 
@@ -242,6 +244,13 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
       writes.push(['update_agent', JSON.parse(init.body)])
       return json(200, { agent_id: 'agent_new1234' })
     }
+    // A dashboard-published agent (the owner's "GetShowUps Voice Test": custom LLM, chosen voice).
+    if (u === `${R}/v1/convai/agents/agent_pub1` && (!init.method || init.method === 'GET')) return json(200, { agent_id: 'agent_pub1', name: 'GetShowUps Voice Test', conversation_config: { agent: { language: 'en', first_message: 'Hello from the dashboard', prompt: { prompt: 'dashboard prompt', llm: 'deepseek-flash-4.1', temperature: 0.4, tool_ids: ['tool_old'] } }, tts: { voice_id: 'voice_eric', model_id: 'eleven_turbo_v2_5' }, conversation: { client_events: ['audio'] } } })
+    if (u === `${R}/v1/convai/agents/agent_pub1` && init.method === 'PATCH') {
+      writes.push(['update_published', JSON.parse(init.body)])
+      return json(200, { agent_id: 'agent_pub1' })
+    }
+    if (u === `${R}/v1/convai/agents/agent_missing` && (!init.method || init.method === 'GET')) return json(404, { detail: 'not found' })
     throw new Error(`unexpected ${init.method} ${u}`)
   }
   const lines = []
@@ -260,6 +269,8 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.deepEqual(find.parameters.properties.part_of_day.enum, ['any', 'morning', 'afternoon', 'evening'])
   assert.deepEqual(find.parameters.required, ['date', 'part_of_day'])
   assert.equal(toolBodies.find((t) => t.name === 'request_callback').parameters.properties.urgent.type, 'boolean')
+  assert.ok(toolBodies.every((t) => Object.values(t.parameters.properties).every((p) => typeof p.description === 'string' && p.description.length > 0)), 'ElevenLabs refuses a parameter without a description (422)')
+  assert.equal(toolBodies.find((t) => t.name === 'request_callback').parameters.properties.urgent.description, 'urgent (boolean)')
   const agent = writes.at(-1)[1]
   assert.equal(agent.name, AGENT_NAME)
   assert.deepEqual(agent.conversation_config.agent.prompt.tool_ids, created.toolIds)
@@ -270,6 +281,8 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.equal(agent.conversation_config.conversation.max_duration_seconds, 900)
   assert.equal(agent.conversation_config.tts.voice_id, 'voice_abc123')
   assert.match(agent.conversation_config.agent.prompt.prompt, /placeholder/i)
+  assert.equal(agent.conversation_config.agent.first_message, '{{greeting}}', 'the greeting is a dynamic variable, never overridden')
+  assert.equal(agent.conversation_config.agent.dynamic_variables.dynamic_variable_placeholders.greeting, 'This line is not set up yet.')
   assert.ok(!/alpha Co|Charleston/.test(JSON.stringify(agent)), 'no business facts live on the ElevenLabs side')
   // Second run: everything exists → PATCH only, same shapes.
   const updated = await setupElevenLabsAgent({ ...opts, apply: true })
@@ -278,6 +291,27 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.equal(writes.at(-1)[1].conversation_config.tts, undefined)
   assert.deepEqual(agentBody({ name: 'n', hostname: 'h', toolIds: ['t'], voiceId: '', llm: 'gpt-4o-mini' }).conversation_config.agent.prompt.llm, 'gpt-4o-mini')
   assert.equal(clientToolConfig({ name: 'x', description: 'd', parameters: { type: 'object', properties: { a: { type: 'string', description: 'A' } }, required: ['a'] } }).parameters.properties.a.description, 'A')
+  // An agent published from the dashboard, configured in place by id: its model, temperature, voice and language are
+  // read back and kept; only what the Lab needs is set; its name is not touched; no second agent is ever created.
+  const dryPub = await setupElevenLabsAgent({ ...opts, agentId: 'agent_pub1', apply: false })
+  assert.deepEqual([dryPub.dryRun, dryPub.action, dryPub.agentId, dryPub.keep.prompt.llm, dryPub.keep.tts.voice_id], [true, 'update', 'agent_pub1', 'deepseek-flash-4.1', 'voice_eric'])
+  assert.match(lines.at(-1), /would update "GetShowUps Voice Test" \(agent_pub1, keeping its model deepseek-flash-4.1, voice voice_eric, language en\)/)
+  const before = writes.length
+  const pub = await setupElevenLabsAgent({ ...opts, agentId: 'agent_pub1', apply: true })
+  assert.deepEqual([pub.action, pub.agentId, pub.toolIds.length], ['updated', 'agent_pub1', 7])
+  assert.deepEqual(writes.slice(before).map((w) => w[0]), [...Array(7).fill('update_tool'), 'update_published'])
+  const patched = writes.at(-1)[1]
+  assert.equal(patched.name, undefined, 'the owner’s agent keeps its name')
+  assert.deepEqual([patched.conversation_config.agent.prompt.llm, patched.conversation_config.agent.prompt.temperature, patched.conversation_config.tts, patched.conversation_config.agent.language], ['deepseek-flash-4.1', 0.4, { voice_id: 'voice_eric', model_id: 'eleven_turbo_v2_5' }, 'en'])
+  assert.deepEqual(patched.conversation_config.agent.prompt.tool_ids, pub.toolIds)
+  assert.ok(!patched.conversation_config.agent.prompt.tool_ids.includes('tool_old'), 'our seven tools replace the dashboard list')
+  assert.match(patched.conversation_config.agent.prompt.prompt, /placeholder/i)
+  assert.deepEqual(patched.platform_settings.overrides.conversation_config_override, { agent: { prompt: { prompt: true }, first_message: true, language: true } })
+  assert.deepEqual(patched.platform_settings.auth, { enable_auth: true, allowlist: [{ hostname: 'getshowups.com' }] })
+  assert.deepEqual(patched.conversation_config.conversation.client_events, CLIENT_EVENTS)
+  assert.equal((await setupElevenLabsAgent({ ...opts, agentId: 'agent_missing', apply: true })).error, 'agent_not_found')
+  assert.equal((await setupElevenLabsAgent({ ...opts, agentId: 'bad id!', apply: true })).error, 'invalid_agent_id')
+  assert.equal(agents.length, 1, 'never a second agent')
   agents.push({ agent_id: 'agent_dupe', name: AGENT_NAME })
   assert.equal((await setupElevenLabsAgent({ ...opts, apply: true })).error, 'duplicate_agents')
   agents.pop()

@@ -20,6 +20,11 @@
 //   - Overrides are OFF by default and must be enabled per field on the agent (Security tab, or API
 //     platform_settings.overrides.conversation_config_override.agent.{prompt.prompt,first_message,language}: true);
 //     sending an override that is not enabled is an error (customization/personalization/overrides).
+//   - Verified live 2026-11-22 (agent published from the dashboard, flags on, version committed): the prompt and
+//     language overrides are accepted, a first_message override is refused ("Override for field 'first_message' is
+//     not allowed by config", close 1008). So the greeting travels as a DYNAMIC VARIABLE instead: the agent's
+//     first_message is "{{greeting}}" (scripts/elevenlabs-setup.mjs) and we send dynamic_variables.greeting; a
+//     session without it is refused by ElevenLabs ("Missing required dynamic variables"), never a placeholder spoken.
 //   - Client tools: tool objects (type 'client', name, description, parameters, expects_response) created with
 //     POST /v1/convai/tools and attached by id in conversation_config.agent.prompt.tool_ids; the browser SDK runs
 //     the handler registered under the same name (customization/tools/client-tools). scripts/elevenlabs-setup.mjs
@@ -48,11 +53,13 @@ export const MAX_CONNECTS_PER_SESSION = 3
 // The per-conversation overrides in the browser SDK's shape (camelCase; the SDK sends the snake_case wire form):
 // OUR system prompt and OUR greeting, English. No key, token, email or id goes here; the prompt is the engine's
 // per-business prompt (facts + guards + voice manner), which never contains secrets.
-export const elevenlabsOverrides = ({ instructions, greeting }) => ({ agent: { prompt: { prompt: String(instructions || '') }, firstMessage: String(greeting || ''), language: 'en' } })
+export const elevenlabsOverrides = ({ instructions }) => ({ agent: { prompt: { prompt: String(instructions || '') }, language: 'en' } })
 
 // Dynamic variables ({{business_name}} etc. in the agent's dashboard prompt, if anyone types one there): public,
 // non-personal facts only.
-export const elevenlabsDynamicVariables = (customer, lab) => ({ business_name: String(customer?.name || ''), dry_run: lab?.dryRun !== false, channel: 'voice_lab' })
+// The greeting is the agent's first message ("{{greeting}}" on the agent): the business's own, never empty (an empty
+// first message would make the agent wait for the caller).
+export const elevenlabsDynamicVariables = (customer, lab, greeting = '') => ({ business_name: String(customer?.name || ''), dry_run: lab?.dryRun !== false, channel: 'voice_lab', greeting: String(greeting || '').trim() || `Thanks for calling ${String(customer?.name || 'us')}, how can I help?` })
 
 // The client tools the browser must register for this agent (names only; the handler forwards to our tool route).
 export const elevenlabsClientToolNames = () => toolsForElevenLabs().map((t) => t.name)
@@ -99,7 +106,7 @@ export async function connectElevenLabs(env, { customer, conv }, now = Date.now(
     signedUrl: signed.signedUrl,
     expiresAt: now + SIGNED_URL_TTL_MS,
     overrides: elevenlabsOverrides(v),
-    dynamicVariables: elevenlabsDynamicVariables(customer, lab),
+    dynamicVariables: elevenlabsDynamicVariables(customer, lab, v.greeting),
     clientTools: elevenlabsClientToolNames(),
     connection: lab.elevenlabs.connects,
     connectionsLeft: MAX_CONNECTS_PER_SESSION - lab.elevenlabs.connects,
