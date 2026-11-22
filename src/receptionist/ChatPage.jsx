@@ -37,6 +37,7 @@ const VOICE_ERRORS = {
   start: 'Couldn’t start talking. Try again or keep typing.',
   voice_busy: 'All voice lines are busy right now. Try again in a minute, or keep typing.',
   voice_limit: 'Voice isn’t available right now. You can keep typing.',
+  test_limit: 'This test business has used its testing minutes for today (VOICE_TEST_DAILY_MINUTES). Try again tomorrow or raise the limit.',
   voice_unavailable: 'Voice isn’t available right now. You can keep typing.',
   voice_unreachable: 'Voice isn’t available right now. You can keep typing.',
   voice_in_progress: 'A call is already running in this conversation.',

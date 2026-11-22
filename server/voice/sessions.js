@@ -15,18 +15,27 @@ import { emailRef } from '../auditlog.js'
 import { PROVIDERS, labEnabled, labDailyMinutes, labSettings, providerStatus, estimateMicros } from './providers.js'
 import { labVoiceFor } from './settings.js'
 import { TOOL_KINDS_SET } from './tools.js'
+import { providerDailyLimit, testDailyMinutes, testMinutesToday, SESSION_CEILING_MS } from './budgets.js'
+import { REF_RE } from './charges.js'
 
-export const LAB_SESSION_MAX_MS = 15 * 60 * 1000
+export const LAB_SESSION_MAX_MS = SESSION_CEILING_MS
 const TOOL_KINDS = TOOL_KINDS_SET
 
 // Minutes of Lab calls started today (UTC), from receptionist_calls rows of Lab conversations.
+// Minutes of one provider's calls today (every kind of session; Lab Retell rows carry provider 'retell-lab').
+export async function providerMinutesToday(env, provider, now = Date.now()) {
+  const day = now - (now % 86_400_000)
+  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN MIN(?3, created_at + ?4) ELSE ended_at END - created_at), 0) AS ms FROM receptionist_calls WHERE provider IN (?1, ?5) AND created_at >= ?2').bind(provider, day, now, SESSION_CEILING_MS, provider === 'retell' ? 'retell-lab' : provider).first()
+  return Math.ceil(Number(r?.ms || 0) / 60_000)
+}
+
 export async function labMinutesToday(env, now = Date.now()) {
   const day = now - (now % 86_400_000)
   // Lab rows only: 'lab_…' call ids (Retell Lab calls take Retell's id but keep provider 'retell-lab'); customer
   // sessions on OpenAI/ElevenLabs ('web_…', server/voice/customer.js) have their own ceilings.
   // A row never ended (the page closed before its end was recorded) counts at most the session ceiling, never "until
   // now": otherwise one abandoned call eats the whole day's budget by itself.
-  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?2), created_at + ?3) - created_at), 0) AS ms FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND created_at >= ?1").bind(day, now, LAB_SESSION_MAX_MS).first()
+  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN MIN(?2, created_at + ?3) ELSE ended_at END - created_at), 0) AS ms FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND created_at >= ?1").bind(day, now, LAB_SESSION_MAX_MS).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
 
@@ -49,6 +58,10 @@ export async function startLabSession(env, admin, { customer: customerId, provid
   const t = await testStatus(env, customerId)
   if (!t.test || t.unreadable) return { ok: false, httpStatus: 403, error: 'not_test_business' }
   if ((await labMinutesToday(env, now)) >= labDailyMinutes(env)) return { ok: false, httpStatus: 429, error: 'lab_daily_limit' }
+  // The provider's platform-wide ceiling and this business's test ceiling (server/voice/budgets.js) bound Lab calls too.
+  const cap = providerDailyLimit(env, provider)
+  if (cap != null && (await providerMinutesToday(env, provider, now)) >= cap) return { ok: false, httpStatus: 429, error: 'voice_limit' }
+  if ((await testMinutesToday(env, customerId, now)) >= testDailyMinutes(env)) return { ok: false, httpStatus: 429, error: 'test_limit' }
   if (await labBusy(env, now)) return { ok: false, httpStatus: 409, error: 'lab_busy' }
   const customer = customerFromRow(row)
   const conv = await startConversation(env, customer, 'voice', now)
@@ -108,8 +121,22 @@ export function cleanDisconnect(d) {
   return { phase: PHASES.has(d.phase) ? d.phase : 'start', code, closeCode, reason }
 }
 
-export async function endLabSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null } = {}, now = Date.now()) {
+// The provider's own id of the Lab session (ElevenLabs' conversation id from the browser SDK): what a verified charge
+// is looked up by (server/voice/charges.js). Recorded once; well-formed ids only.
+export async function recordLabProviderSession(env, { customer, conv }, providerSessionId, now = Date.now()) {
   const lab = conv.state.lab
+  const id = String(providerSessionId || '')
+  if (!REF_RE.test(id)) return { ok: false, error: 'invalid_reference' }
+  if (lab.providerSessionId && lab.providerSessionId !== id) return { ok: false, error: 'already_recorded' }
+  if (lab.providerSessionId === id) return { ok: true, already: true }
+  lab.providerSessionId = id
+  await env.ONBOARDING_DB.prepare('UPDATE receptionist_conversations SET state = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(conv.id, customer.id, JSON.stringify(conv.state), now).run()
+  return { ok: true }
+}
+
+export async function endLabSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null, providerSessionId = null } = {}, now = Date.now()) {
+  const lab = conv.state.lab
+  if (!lab.providerSessionId && REF_RE.test(String(providerSessionId || ''))) lab.providerSessionId = String(providerSessionId)
   const seconds = Math.max(0, Math.round((now - lab.startedAt) / 1000))
   lab.metrics = { ...cleanMetrics(lab.metrics), ...cleanMetrics(metrics), durationSeconds: seconds }
   lab.endedAt = now
@@ -141,6 +168,8 @@ export function labSummary(conv) {
     status: conv.status,
     outcome: lab.outcome || conv.outcome || null,
     disconnect: lab.disconnect || null,
+    providerSessionId: lab.providerSessionId || null,
+    charge: lab.charge || null,
     booked: Boolean(conv.state.booked),
     simulated: Boolean(conv.state.booked?.simulated),
     tools: conv.state.tools || [],

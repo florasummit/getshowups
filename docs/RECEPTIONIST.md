@@ -152,6 +152,44 @@ business whose adapter measured audio both ways (`micLive`, `audioReceived`) and
 both succeeded. Readiness states: active · ready (configured, on, evidence complete) · needs_test · not_configured ·
 disabled. Activation (Select → Test now → Review checklist → Activate → Confirm) is refused without evidence.
 
+## Cost controls and provider comparison (2026-11-22, no migration)
+
+**Limits that refuse a start at the ceiling** (server/voice/budgets.js; enforced in `startCustomerVoiceSession` and
+`startLabSession`; codes `voice_limit`, `test_limit`, `lab_daily_limit`; nothing queues): per provider per UTC day
+platform-wide (`VOICE_PROVIDER_DAILY_MINUTES`, default 600 for OpenAI/ElevenLabs, or one provider's own
+`VOICE_PROVIDER_DAILY_MINUTES_OPENAI | _ELEVENLABS | _RETELL`; Retell, the production path, is capped only when its own
+switch is set), per TEST business per day (`VOICE_TEST_DAILY_MINUTES`, default 30: admin tests on the customer path +
+Lab calls on that business; customer sessions never count), the Lab across admins (`VOICE_LAB_DAILY_MINUTES`, 60) and
+every session of a business (`RECEPTIONIST_VOICE_DAILY_MINUTES`, 120). Minutes come from `receptionist_calls` rows; a
+row never ended counts at most the 15-minute ceiling. The Voice Lab shows every budget with its state (ok · near the
+limit at 80% · used up) and the switch that sets it (`budgetOverview`).
+
+**Verified charges vs estimates** (server/voice/charges.js): `estimatedMicros` on a session is the public per-minute
+price (server/voice/providers.js COST_ESTIMATES) and is labelled an estimate everywhere. A verified charge is the
+provider's own record, fetched read-only on the admin's "Fetch verified charges" (POST voice-lab/session `charges`,
+≤ 20 sessions per run, one business when given, audited `voice_lab.charges_fetched`) and stored on the session
+(`state.voice.charge` / `state.lab.charge`): Retell `GET /v2/get-call/{call_id}` → `call_cost.combined_cost` in cents
+(+ product lines); ElevenLabs `GET /v1/convai/conversations/{id}` → `metadata.cost` in credits and `cost_fiat` in USD
+when ElevenLabs reports one (the conversation id is what the browser SDK reports on connect, recorded as
+`providerSessionId` via session action `provider` / with the end). OpenAI keeps no per-session record for a project
+key (the organization costs API needs an admin key): unsupported, said so. Credits are never converted to dollars; a
+failed lookup is a code (`auth_failed`, `not_found`, `not_ended`, `no_cost_yet`, `http_<n>`, `unreachable`) and
+retried after an hour, never a number.
+
+**Balances** (`providerBalances`, only on "Check provider balances" → status `?balances=1`): ElevenLabs' subscription
+read (`character_count` / `character_limit` = the plan's credits used and allowed this billing period, the pool Agents
+conversations draw from, with the reset time); Retell has no balance endpoint (a 402 on call creation = credit balance
+exhausted, code `voice_billing`); OpenAI exposes none to a project key. Nothing is monitored continuously.
+
+**Providers compared** (server/voice/compare.js `providerComparison`, Voice Lab "Providers compared"): per provider from
+the session records of the last 30 days, every kind (customer sessions, admin tests, Lab calls): sessions / finished,
+connection failures (outcome or disconnect record) and rate, booking tool (bookings of sessions that reached the
+availability lookup), response latency (lower median of the adapters' per-session medians; Retell's path does not
+measure it), minutes, estimated cost, verified charges (USD where reported, credits otherwise), estimated cost per
+finished session and per booking (verified per booking only when every finished session carries a verified USD
+charge). Connection failures and incomplete bookings (no tool ran · times offered but no booking) sit under disclosure
+as codes with the WebSocket close code when there is one.
+
 **Live checks without a browser**: `node scripts/voice-live-check.mjs openai|elevenlabs` runs ONE bounded session
 against the real provider through the same server functions (in-memory D1, Google mocked, keys from Keychain, caller =
 synthesized speech), prints greeting/answers/tools/audio bytes/latency/cost and whether it counts as evidence. It
