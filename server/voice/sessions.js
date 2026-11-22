@@ -12,7 +12,7 @@ import { customerFromRow } from '../auth.js'
 import { testStatus } from '../testbusiness.js'
 import { startConversation, loadConversation, endConversation, receptionistReady } from '../receptionist/engine.js'
 import { emailRef } from '../auditlog.js'
-import { PROVIDERS, labEnabled, labDailyMinutes, providerStatus, estimateMicros } from './providers.js'
+import { PROVIDERS, labEnabled, labDailyMinutes, labSettings, providerStatus, estimateMicros } from './providers.js'
 
 export const LAB_SESSION_MAX_MS = 15 * 60 * 1000
 const TOOL_KINDS = new Set(['save_customer_details', 'check_service_area', 'request_coverage', 'find_available_times', 'book_appointment', 'request_callback', 'leave_message'])
@@ -32,7 +32,7 @@ export async function labBusy(env, now = Date.now()) {
 }
 
 // → { ok, session } | { ok: false, error, httpStatus }. `admin` = { email } from requirePlatformAdmin.
-export async function startLabSession(env, admin, { customer: customerId, provider, dryRun = true }, now = Date.now()) {
+export async function startLabSession(env, admin, { customer: customerId, provider, dryRun = true, settings = {} }, now = Date.now()) {
   if (!labEnabled(env)) return { ok: false, httpStatus: 404, error: 'not_found' }
   if (!PROVIDERS.includes(provider)) return { ok: false, httpStatus: 400, error: 'invalid_provider' }
   if (!providerStatus(env)[provider].configured) return { ok: false, httpStatus: 409, error: `${provider}_not_configured` }
@@ -48,12 +48,12 @@ export async function startLabSession(env, admin, { customer: customerId, provid
   const conv = await startConversation(env, customer, 'voice', now)
   const callId = `lab_${randomToken(12)}`
   const by = await emailRef(admin.email)
-  const lab = { provider, dryRun: dryRun !== false, by, startedAt: now, callId, metrics: {} }
+  const lab = { provider, dryRun: dryRun !== false, by, startedAt: now, callId, metrics: {}, settings: labSettings(provider, settings) }
   await env.ONBOARDING_DB.batch([
     env.ONBOARDING_DB.prepare('UPDATE receptionist_conversations SET state = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(conv.id, customer.id, JSON.stringify({ lab }), now),
     env.ONBOARDING_DB.prepare('INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES (?1, ?2, ?3, ?4, ?5)').bind(callId, customer.id, conv.id, provider === 'retell' ? 'retell-lab' : provider, now),
   ])
-  return { ok: true, session: { id: conv.id, token: conv.token, callId, customer: { id: customer.id, name: customer.name, timezone: customer.timezone }, provider, dryRun: lab.dryRun, startedAt: now } }
+  return { ok: true, session: { id: conv.id, token: conv.token, callId, customer: { id: customer.id, name: customer.name, timezone: customer.timezone }, provider, dryRun: lab.dryRun, settings: lab.settings, startedAt: now } }
 }
 
 // The Lab session for (business, conversation id, token) — never another business's, never a customer's chat.

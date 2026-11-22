@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Operational launch sprint, step 2: Voice Lab provider readiness (2026-11-21) — feat/voice-lab-readiness (no migration)
+
+- The Lab answers the owner's eight provider questions per provider from configuration only (providerReadiness:
+  built / credentials (missing setting NAMES) / account or billing to set up / can a browser session run now / tools
+  safe / transcripts + latency recorded / cost estimate / smallest authorized test, plus voice settings and blockers),
+  shown as "Readiness: <provider>" under the setup and returned by the status route. Production today: Retell ready
+  (configured, Lab on); OpenAI needs OPENAI_API_KEY; ElevenLabs needs ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID (both
+  are paid-service activations: approval).
+- OpenAI sessions take a per-session voice (allowlisted OPENAI_VOICES; stored on the Lab conversation, used when the
+  client secret is minted, audited). Retell/ElevenLabs take voice from their agent (stated in the panel).
+- Tests: test/voice-readiness.test.js; voice-openai (voice override + fallback); e2e voice-lab (panel per provider,
+  blockers named, voice select only for OpenAI).
 ## Operational launch sprint, step 1: Business Review in plain language + reconciliation scopes (2026-11-21) — feat/operational-readiness (no migration)
 
 - **Business Review → "What this means for operating"**: the same capabilities grouped as Broken right now / Works
