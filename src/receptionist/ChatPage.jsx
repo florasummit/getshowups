@@ -304,7 +304,7 @@ export default function ChatPage({ id }) {
         </p>
         {test && (
           <p className="rc-empty" data-test-refused={info.test?.error || 'unknown'}>
-            {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-providers">Back to the Admin Console</a>
+            {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-lab">Back to the Admin Console</a>
           </p>
         )}
       </main>
@@ -502,11 +502,11 @@ export default function ChatPage({ id }) {
                 <p className="chat-legal" data-test-session={info.test.provider}>
                   Admin test session on {info.test.name}, dry run: nothing is booked, nobody is messaged. Press the microphone, say hello, ask for available times, book one, then end the call.{' '}
                   {voice.state === 'ended' ? 'Call ended: the Admin Console shows whether it counts as verification. ' : ''}
-                  <a href="/admin/voice-providers">Back to the Admin Console</a>
+                  <a href="/admin/voice-lab">Back to the Admin Console</a>
                 </p>
               ) : test ? (
                 <p className="chat-legal" data-test-refused={info.test?.error || 'unknown'}>
-                  {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-providers">Back to the Admin Console</a>
+                  {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-lab">Back to the Admin Console</a>
                 </p>
               ) : (
                 info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice isn’t available for this business yet.</p>

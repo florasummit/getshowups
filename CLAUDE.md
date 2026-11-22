@@ -57,7 +57,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)
-  api/platform/voice-provider  Admin Console voice-provider management for ANY business (server/voice/admin.js; /admin/voice-providers)
+  api/platform/voice-provider  Admin Console voice-provider management for ANY business (server/voice/admin.js; /admin/voice-lab)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
@@ -471,7 +471,7 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   checklist → consequences → confirm → one conditional write → audited → rollback. Only providers with a customer path
   can be activated (today Retell; OpenAI/ElevenLabs = Voice Lab only, "test only"); no provider has phone routing.
   No row = today's configuration (Retell, agent voice, Balanced). Never substitute a voice silently.
-  Admin Console entry point (/admin/voice-providers, GET/POST /api/platform/voice-provider, server/voice/admin.js):
+  Admin Console entry point (/admin/voice-lab → Businesses, GET/POST /api/platform/voice-provider, server/voice/admin.js):
   the same check/switch/rollback functions for ANY business (platform admins only, membership not needed), plus the
   business id typed back (`confirmCustomer`) before a switch or rollback; the view is facts, readiness and a
   codes-only session history (never transcripts or customer details). ProviderControl.jsx is the one UI for both.
@@ -493,13 +493,18 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (provider NULL unless every in-scope row is unchanged) makes the batch all-or-nothing; rollback restores pins and
   overrides as they were. Rollout status = session records only (null = unavailable); never invent a metric.
   Production: the human admin runs the promotion; a deployment never changes the default or any business.
-  Console UX (src/admin/GlobalProvider.jsx + rollout-state.js, 2026-11-22): ONE card = provider, rollout state
-  (not configured · needs verification · ready to promote · promoting · active · partially rolled out · blocked ·
-  rolled back, derived from globalOverview facts, never from a click) and the one next action: Test <provider>
-  (opens globalOverview.testPage, server/voice/testing.js testPageFor = first eligible admin-marked, bookable test
-  business; none → the reason) → Promote to 100% (checklist + ONE typed confirmation) → Rollout monitoring (records
-  only, shown after a rollout) → Roll back (typed). Versions, counts by kind, the verification record and the test
-  business sit under Advanced details. Plain English: "still using Retell", "business-specific settings".
+  Console UX (2026-11-22, ONE page: /admin/voice-lab = src/admin/VoiceLab.jsx; /admin/voice-providers lands there):
+  Provider card (GlobalProvider.jsx + rollout-state.js) = provider tiles (picking another configured provider stages
+  it: review → typed change), the target's rollout state (not configured · needs a test · ready to activate ·
+  activating · active for every business · active for most · blocked · rolled back; from globalOverview facts, never
+  from a click) and the one next action: Test <provider> (opens globalOverview.testPage, server/voice/testing.js
+  testPageFor = first eligible admin-marked, bookable test business, those WITHOUT a service-area list first; the card
+  then polls the facts until the session is recorded) → Activate for all businesses (checklist + ONE typed
+  confirmation) → Rollout monitoring (records only, after a rollout) → Roll back (typed). When the newest finished
+  production-path test did not verify, the card says what it showed/missed and why (providerVerification.latest:
+  path area | no_tools | no_availability | no_booking | audio | connection + the failed tool codes) and what to retry
+  (with the ZIP to say). Businesses (Businesses.jsx) and the Lab call (not the customer path, never verification) sit
+  under disclosure; versions, counts by kind, the verification record and the test business under Advanced details.
   Test page access (server/voice/testing.js adminTestAccess, GET /api/receptionist/<id>?test=<p>): a test business
   whose receptionist is OFF still opens its chat page for the signed-in platform admin's ?test= (voice only, dry run,
   `testOnly`); customers/owners keep "Chat isn't available" (refusal as a code). Never turn a test business's

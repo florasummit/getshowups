@@ -15,6 +15,10 @@ test('admin: provider statuses are honest (Retell configured, the others not), s
   await expect(page.getByRole('heading', { level: 1, name: 'Voice Lab' })).toBeVisible()
   const root = page.locator('[data-voice-lab]')
   await expect(root).toHaveAttribute('data-voice-lab', 'idle')
+  // The Lab call sits under disclosure below the provider rollout and the businesses.
+  await expect(page.locator('[data-global-provider]')).toBeVisible()
+  await expect(page.locator('[data-lab-call]')).not.toHaveAttribute('open', /.*/)
+  await page.locator('[data-lab-call] > summary').click()
   // OpenAI and ElevenLabs: not configured, with the reason in words, straight from /api/platform/voice-lab/status;
   // Retell (faked) is configured.
   const status = await (await page.request.get('/api/platform/voice-lab/status')).json()
@@ -71,6 +75,7 @@ test('admin: provider statuses are honest (Retell configured, the others not), s
   await page.locator('[data-dry-run] input').check()
   await expect(page.locator('[data-dry-run-warning]')).toHaveCount(0)
   await expect(page.locator('[data-lab-sessions]')).toContainText('No Lab session yet.')
+  await expect(page.locator('[data-lab-sessions]')).toContainText('Recent Lab sessions (0)')
   await noSideScroll(page)
   // Deep link works too.
   await page.goto('/admin/voice-lab')

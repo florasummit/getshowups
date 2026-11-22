@@ -2,6 +2,32 @@
 
 _Update at the end of every task. Newest first._
 
+## ElevenLabs verification diagnosis + Voice Lab consolidation (2026-11-22) — feat/voice-lab-consolidation (no migration)
+
+- Diagnosis (production records, codes only): the founder's ElevenLabs test on 2026-11-22 17:37 UTC (conversation on
+  gsu-journey-test, provider elevenlabs, admin test, 70 s, mic live + AI audio received, outcome ended) WAS recorded and
+  attributed correctly, but its tools were check_service_area ✓, save_customer_details ✓✓, request_coverage ✗
+  (zip_missing): the receptionist took the service-area path (gsu-journey-test lists ZIPs 29401/29403; the caller's
+  place was not served) and never ran find_available_times / book_appointment. providerVerification therefore stayed
+  "missing tools, booking" and the console said "Needs verification" without saying why. Nothing was lost or rejected;
+  the test was incomplete for the verification's requirements. Two contributing choices of ours: the console picked
+  gsu-journey-test (alphabetical) although gsu-stripe-test-pools has no service-area list, and the instructions never
+  said which ZIP to give.
+- Fix: providerVerification now returns `latest` (the newest finished production-path session: audio / availability /
+  booking / clean end, the tool list, the failed tool codes from receptionist_events, and a `path` code) and the
+  console says what the last test showed and missed and exactly what to retry, with the ZIP to say; eligible test
+  businesses without a service-area list come first (production now picks gsu-stripe-test-pools); after Test is
+  opened the card polls the facts (8 s, on focus, ≤ 15 min) until the session is recorded, so no manual refresh.
+  Verification rules unchanged (audio both ways + availability + simulated booking + clean end in one session).
+- Consolidation: /admin/voice-lab is the one voice page (src/admin/VoiceLab.jsx): Provider card (tiles to choose the
+  target, state, counts, one next action: Test → Activate for all businesses → monitoring → Roll back), Businesses
+  under disclosure (Businesses.jsx, the per-business control unchanged), Lab call under disclosure (compare providers,
+  voices, latency; not the customer path). The Voice providers tab is retired; /admin/voice-providers[?customer=]
+  lands on /admin/voice-lab with the deep link. Owners/anonymous: unchanged (403/401, no tab).
+- Tests: test/voice-testing.test.js (latest-session record incl. the production shape, test-business order);
+  test/e2e/voice-rollout.spec.js (renamed; tiles, redirect, Activate flow), voice-lab.spec.js (disclosure),
+  admin-layout.spec.js (tab list, redirect keeps the layout).
+
 ## Voice provider rollout UX + test-page access (2026-11-22) — feat/voice-rollout-ux (no migration)
 
 - Root cause of the unusable test page: `/chat/gsu-stripe-test-pools?test=elevenlabs` showed "Chat isn't available

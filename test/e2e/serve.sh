@@ -260,7 +260,7 @@ INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$
 npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
-# Global default history (voice-providers.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
+# Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
 # kept (changed since). So every seeded business is a ROLLOUT PIN on Retell (same behaviour as before for every other
 # spec: Retell everywhere, businesses created later follow Retell) and "Promote to 100%" has something to release.

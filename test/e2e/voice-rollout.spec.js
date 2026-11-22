@@ -1,10 +1,11 @@
-// Admin Console → Voice providers (/admin/voice-providers) in a real browser against the real Functions on local
-// workerd, Retell faked at the network edge. The FIRST platform admin (a member of no business) sees the global
-// provider card (state + the one next action), the business table, manages one business (Review → Activate, business
-// id typed back → Rollback), stages/reviews a global change, opens the provider test page from the console (a test
-// business whose receptionist is OFF for customers; customers still get the unavailable page), promotes to 100% with
-// one typed confirmation, watches the rollout and rolls it back. Owners get neither the page nor the API. Desktop
-// project; the layout is also checked at 320px and tablet width within the tests.
+// Voice Lab → provider rollout (/admin/voice-lab) in a real browser against the real Functions on local workerd,
+// Retell faked at the network edge. The FIRST platform admin (a member of no business) sees the provider card (target,
+// state, the one next action), the business table under disclosure, manages one business (Review → Activate, business
+// id typed back → Rollback), sees unconfigured providers as unpickable, opens the provider test page from the console
+// (a test business whose receptionist is OFF for customers; customers still get the unavailable page), activates the
+// target for all businesses with one typed confirmation, watches the rollout and rolls it back. The former
+// /admin/voice-providers address lands here. Owners get neither the page nor the API. Desktop project; the layout is
+// also checked at 320px and tablet width within the tests.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
@@ -20,9 +21,9 @@ const fillsWidth = async (page) => {
 test('admin (member of nothing): the page shows the global card and the business table; Manage opens a live business with honest states and blockers; the checklist blocks an unverified switch; nothing changes; owners are refused', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin')
-  await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Voice providers' }).click()
-  await expect(page).toHaveURL(/\/admin\/voice-providers$/)
-  await expect(page.getByRole('heading', { level: 1, name: 'Voice providers' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Voice Lab' }).click()
+  await expect(page).toHaveURL(/\/admin\/voice-lab$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Voice Lab' })).toBeVisible()
   const list = await (await page.request.get('/api/platform/voice-provider')).json()
   const voice = list.businesses.find((b) => b.id === fixtures.E2E_VOICE_CUSTOMER)
   expect([voice.name, voice.test, voice.receptionist, voice.provider]).toEqual(['Voice Pools', false, true, 'retell'])
@@ -34,7 +35,8 @@ test('admin (member of nothing): the page shows the global card and the business
   await expect(g.locator('[data-global-advanced]')).not.toHaveAttribute('open', /.*/)
   await expect(g.locator('[data-global-advanced]')).toContainText('Version') // present, collapsed
   await fillsWidth(page)
-  // The business table: name, provider, follows the default or business-specific, readiness.
+  // The business table (under disclosure): name, provider, follows the default or business-specific, readiness.
+  await page.locator('[data-vp-businesses-details] > summary').click()
   const row = page.locator(`[data-vp-row="${fixtures.E2E_VOICE_CUSTOMER}"]`)
   await expect(row).toContainText('Voice Pools')
   await expect(row).toContainText('Retell')
@@ -86,7 +88,7 @@ test('admin (member of nothing): the page shows the global card and the business
 test('admin: on a test business with evidence, Test now is offered, Review passes, Activate needs the business id typed back, the switch is audited; Roll back (typed) restores the previous provider', async ({ page, context }) => {
   const id = fixtures.E2E_VOICE_SWITCH_CUSTOMER
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
-  await page.goto(`/admin/voice-providers?customer=${id}`)
+  await page.goto(`/admin/voice-lab?customer=${id}`)
   const selected = page.locator('[data-vp-selected]')
   await expect(selected).toHaveAttribute('data-vp-selected', id)
   await expect(selected).toContainText('Switch Pools')
@@ -144,9 +146,9 @@ test('admin: on a test business with evidence, Test now is offered, Review passe
   await noSideScroll(page)
 })
 
-test('admin: the global card shows Retell (rolled back, verified by the test business, one business still business-specific) with plain counts, Advanced details collapsed; Change provider… reviews an unconfigured provider as blocked and Change stays disabled; the test page opens from the console on a test business whose receptionist is OFF, while customers and owners still get the unavailable page; the API refuses a global change without the typed provider, with a mismatch, and for owners; nothing changes', async ({ page, context }) => {
+test('admin: the provider card shows Retell (rolled back, verified by the test business, one business still business-specific) with plain counts, Advanced details collapsed; unconfigured providers cannot be picked as the target; the old address lands here with its deep link; the test page opens from the console on a test business whose receptionist is OFF, while customers and owners still get the unavailable page; the API refuses a global change without the typed provider, with a mismatch, and for owners; nothing changes', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
-  await page.goto('/admin/voice-providers')
+  await page.goto('/admin/voice-lab')
   const g = page.locator('[data-global-provider]')
   await expect(g).toHaveAttribute('data-global-provider', 'retell')
   await expect(g).toHaveAttribute('data-global-state', 'rolled_back')
@@ -160,11 +162,12 @@ test('admin: the global card shows Retell (rolled back, verified by the test bus
   expect(me.global.counts.pins).toBeGreaterThanOrEqual(3)
   expect(me.businesses.find((b) => b.id === fixtures.E2E_VOICE_SWITCH_CUSTOMER).inherited).toBe(false)
   expect(me.businesses.find((b) => b.id === fixtures.E2E_VOICE_CUSTOMER).inherited).toBe(false)
-  // Verified by the seeded production-path session on the test business; the test page is that business's chat page.
-  expect(me.global.verification).toMatchObject({ ok: true, businesses: [fixtures.E2E_VOICE_SWITCH_CUSTOMER] })
-  expect(me.global.testPage).toMatchObject({ url: `/chat/${fixtures.E2E_VOICE_SWITCH_CUSTOMER}?test=retell&from=admin`, business: { id: fixtures.E2E_VOICE_SWITCH_CUSTOMER, receptionist: true } })
-  await expect(g.locator('[data-global-counts]')).toContainText(`${me.global.counts.usingDefault} of ${me.global.counts.total} using it`)
-  await expect(g.locator('[data-global-counts]')).toContainText('still using OpenAI Realtime')
+  // Verified by the seeded production-path session on the test business; the test page is the test business without a
+  // service-area list (nothing can send the receptionist down the coverage path), receptionist off for customers.
+  expect(me.global.verification).toMatchObject({ ok: true, businesses: [fixtures.E2E_VOICE_SWITCH_CUSTOMER], latest: { customer: fixtures.E2E_VOICE_SWITCH_CUSTOMER, path: 'ok', audio: true, availability: true, booking: true } })
+  expect(me.global.testPage).toMatchObject({ url: `/chat/${fixtures.E2E_CC_CUSTOMER}?test=retell&from=admin`, business: { id: fixtures.E2E_CC_CUSTOMER, receptionist: false, zips: 0, zip: null } })
+  await expect(g.locator('[data-global-counts]')).toContainText(`${me.global.counts.usingDefault} of ${me.global.counts.total} businesses use it`)
+  await expect(g.locator('[data-global-counts]')).toContainText('1 on OpenAI Realtime')
   await expect(g.locator('[data-global-verification]')).toHaveAttribute('data-global-verification', 'ok')
   await expect(g.locator('[data-global-promote]')).toBeVisible()
   await expect(g.locator('[data-global-test]')).toHaveAttribute('href', me.global.testPage.url)
@@ -174,19 +177,25 @@ test('admin: the global card shows Retell (rolled back, verified by the test bus
   await g.locator('[data-global-advanced] > summary').click()
   await expect(g.locator('[data-global-advanced]')).toContainText('Still on the previous provider (rollout)')
   await expect(g.locator('[data-global-advanced]')).toContainText(`${me.global.counts.inherited} of ${me.global.counts.total}`)
-  await expect(g.locator('[data-global-advanced]')).toContainText('Switch Pools')
-  // Stage a different provider: review is blocked for an unconfigured one, nothing can be confirmed.
-  await g.locator('[data-global-stage]').click()
-  await g.locator('[data-global-target]').selectOption('elevenlabs')
-  await g.locator('[data-global-review]').click()
-  const check = g.locator('[data-global-check]')
-  await expect(check).toHaveAttribute('data-global-check', 'blocked')
-  await expect(check).toContainText('ElevenLabs is not configured')
-  await expect(g.locator('[data-global-change]')).toBeDisabled()
+  await expect(g.locator('[data-global-advanced]')).toContainText('Control Demo Pools (e2e-cc), no service-area list')
+  // Choose provider: the target tile is pressed; unconfigured providers say so and cannot be picked (nothing to stage).
+  await expect(g.locator('[data-target-provider="retell"]')).toHaveAttribute('data-target-state', 'target')
+  await expect(g.locator('[data-target-provider="retell"]')).toHaveAttribute('aria-pressed', 'true')
+  for (const id of ['openai', 'elevenlabs']) {
+    await expect(g.locator(`[data-target-provider="${id}"]`)).toHaveAttribute('data-target-state', 'not_configured')
+    await expect(g.locator(`[data-target-provider="${id}"]`)).toBeDisabled()
+    await expect(g.locator(`[data-target-provider="${id}"]`)).toContainText('Not configured')
+  }
+  await expect(g.locator('[data-global-staging]')).toHaveCount(0)
   await expect(g.locator('[data-global-confirm]')).toHaveCount(0)
   await noSideScroll(page)
-  await g.locator('[data-global-staging]').getByRole('button', { name: 'Cancel' }).click()
-  await expect(g.locator('[data-global-staging]')).toHaveCount(0)
+  // The former Voice providers address lands on the Voice Lab, deep link kept, the Businesses disclosure open.
+  await page.goto(`/admin/voice-providers?customer=${fixtures.E2E_VOICE_SWITCH_CUSTOMER}`)
+  await expect(page).toHaveURL(new RegExp(`/admin/voice-lab\\?customer=${fixtures.E2E_VOICE_SWITCH_CUSTOMER}$`))
+  await expect(page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Voice Lab', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Voice providers' })).toHaveCount(0)
+  await expect(page.locator('[data-vp-selected]')).toHaveAttribute('data-vp-selected', fixtures.E2E_VOICE_SWITCH_CUSTOMER)
+  await page.goto('/admin/voice-lab')
   // The test page itself (the console's link shape) on a test business whose receptionist is OFF for customers: the
   // admin gets the dry-run voice session page (typed chat off), with the way back.
   const cc = fixtures.E2E_CC_CUSTOMER
@@ -195,7 +204,7 @@ test('admin: the global card shows Retell (rolled back, verified by the test bus
   const banner = page.locator('[data-test-session]')
   await expect(banner).toHaveAttribute('data-test-session', 'retell')
   await expect(banner).toContainText('Admin test session on Retell')
-  await expect(banner.getByRole('link', { name: 'Back to the Admin Console' })).toHaveAttribute('href', '/admin/voice-providers')
+  await expect(banner.getByRole('link', { name: 'Back to the Admin Console' })).toHaveAttribute('href', '/admin/voice-lab')
   await expect(page.getByRole('button', { name: /Talk instead/ })).toBeVisible()
   await expect(page.getByLabel('Your message')).toBeDisabled()
   await expect(page.getByText('Chat isn’t available right now.')).toHaveCount(0)
@@ -235,9 +244,9 @@ test('admin: the global card shows Retell (rolled back, verified by the test bus
   expect((await page.request.post('/api/platform/voice-provider', { data: { action: 'global_promote', confirmProvider: 'retell', acknowledgeUnverified: true, confirm: true, version: 2 }, headers: { Origin: origin } })).status()).toBe(403)
 })
 
-test('admin: Promote to 100% reviews every business (provider verified on the production path by the test business, the others a warning), needs the acknowledgement and the typed provider in ONE confirmation, releases every rollout pin in one action (all follow Retell, the business-specific one untouched), shows the actual distribution and the rollout monitoring; Roll back restores the pins', async ({ page, context }) => {
+test('admin: Activate for all businesses reviews every business (provider verified on the production path by the test business, the others a warning), needs the acknowledgement and the typed provider in ONE confirmation, releases every rollout pin in one action (all follow Retell, the business-specific one untouched), shows the actual distribution and the rollout monitoring; Roll back restores the pins', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
-  await page.goto('/admin/voice-providers')
+  await page.goto('/admin/voice-lab')
   const g = page.locator('[data-global-provider]')
   const before = (await (await page.request.get('/api/platform/voice-provider')).json()).global
   expect(before.counts.pins).toBeGreaterThanOrEqual(3)
@@ -245,7 +254,7 @@ test('admin: Promote to 100% reviews every business (provider verified on the pr
   const check = g.locator('[data-global-promote-check]')
   await expect(check).toHaveAttribute('data-global-promote-check', 'ok')
   // The seeded pins already sit on Retell, so releasing them changes no provider: the card says so instead of "switch".
-  await expect(check).toContainText(/Ready to promote Retell: [1-9]\d* businesses follow it from now on/)
+  await expect(check).toContainText(/Activate Retell for all businesses: [1-9]\d* businesses follow it from now on/)
   await expect(check).toContainText('Retell is verified on the production path')
   await expect(check).toContainText(`on ${fixtures.E2E_VOICE_SWITCH_CUSTOMER}`)
   await expect(check).toContainText('no finished Retell test session of their own')
@@ -278,10 +287,10 @@ test('admin: Promote to 100% reviews every business (provider verified on the pr
   expect((await (await page.request.get('/api/platform/voice-provider')).json()).global.current.version).toBe(2)
   await check.getByLabel('Type the provider id to confirm').fill('retell')
   await go.click()
-  await expect(g.locator('[data-global-status]')).toContainText(/Promoted Retell to 100%: [1-9]\d* businesses promoted \([1-9]\d* were still on the previous provider, 0 business-specific replaced/)
+  await expect(g.locator('[data-global-status]')).toContainText(/Retell activated for all businesses: [1-9]\d* businesses switched \([1-9]\d* were still on the previous provider, 0 business-specific replaced/)
   await expect(g.locator('[data-global-promotion]')).toHaveAttribute('data-global-promotion-pins', '0')
   await expect(g).toHaveAttribute('data-global-state', 'partial') // the business-specific one still uses OpenAI
-  await expect(g).toContainText('Partially rolled out')
+  await expect(g).toContainText('Active for most businesses')
   const rollout = page.locator('[data-global-rollout]')
   await expect(rollout).toHaveAttribute('data-global-rollout', 'retell')
   await expect(rollout).toContainText('Connection failures')

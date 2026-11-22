@@ -37,8 +37,10 @@ export async function adminTestAccess(env, request, customer, provider) {
 }
 
 // The admin-marked test businesses a production-path test can run on: bookable like any customer (active, hours
-// confirmed, calendar connected, hosted), not deleted. Receptionist-on ones first (their chat page is live too), then
-// by name. Names and ids only.
+// confirmed, calendar connected, hosted), not deleted. Businesses WITHOUT a service-area list first (a ZIP outside the
+// list sends the receptionist down the coverage-request path, never to the booking tools the verification needs; see
+// the 2026-11-22 ElevenLabs test), then receptionist-on ones, then by name. Names, ids and the first service ZIP only
+// (the ZIP an admin should say when asked where they are).
 export async function eligibleTestBusinesses(env) {
   const db = env.ONBOARDING_DB
   let rows = []
@@ -62,9 +64,9 @@ export async function eligibleTestBusinesses(env) {
   const out = []
   for (const r of rows) {
     const { customer } = await bookableCustomer(env, { customer: r.id }).catch(() => ({}))
-    if (customer) out.push({ id: r.id, name: r.name, receptionist: Number(r.receptionist) === 1 })
+    if (customer) out.push({ id: r.id, name: r.name, receptionist: Number(r.receptionist) === 1, zips: customer.serviceZips.length, zip: customer.serviceZips[0] || null })
   }
-  return out.sort((a, b) => Number(b.receptionist) - Number(a.receptionist) || a.name.localeCompare(b.name))
+  return out.sort((a, b) => Number(a.zips > 0) - Number(b.zips > 0) || Number(b.receptionist) - Number(a.receptionist) || a.name.localeCompare(b.name))
 }
 
 // The test page for `provider`: the first eligible test business, or null (with why) when there is none.

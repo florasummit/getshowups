@@ -1,77 +1,32 @@
-// /admin/voice-providers — the AI receptionist's voice provider, platform-wide and per business (platform admins only;
-// every request is authorized server-side, membership of a business is never needed).
-//   Global voice provider: the provider, its rollout state and the one next action (GlobalProvider.jsx).
-//   Businesses: a compact table (name, provider, follows the default or business-specific, readiness) → Manage opens
-//   one business: its settings, the per-business control (ProviderControl.jsx: Select → Test → Review → Activate,
-//   typed) and, under disclosure, the session history as codes and counts.
-//   Rollout monitoring: after a promotion (records only), with rollback.
-// Codes, counts and times only: no transcripts, no customer details.
-import { useEffect, useState } from 'react'
-import { api } from '../lib/api.js'
-import { Badge, Empty, Facts, LoadError, Loading, PageHead, Section } from './control/ui.jsx'
+// Voice Lab → Businesses: every business with its provider (follows the default · still on the previous provider ·
+// business-specific), readiness, and Manage → the per-business control (ProviderControl.jsx: Select → Test → Review →
+// Activate, business id typed back → Roll back) with its settings and, under disclosure, the session history as codes
+// and counts. Platform admins only (server-checked); never transcripts or customer details.
+import { useState } from 'react'
+import { Badge, Empty, Facts, LoadError, Loading } from './control/ui.jsx'
 import { when, mins } from './control/lib.js'
 import ProviderControl from '../dashboard/ProviderControl.jsx'
 import { consoleOps, STATE } from '../dashboard/provider-control.js'
-import GlobalProvider from './GlobalProvider.jsx'
-import './control.css'
-import './voice-providers.css'
 
 const KIND = { test: 'Admin test', lab: 'Voice Lab', customer: 'Customer' }
 const SETTINGS = { inherited: 'Follows the default', pin: 'Still on the previous provider', override: 'Business-specific' }
 const usd = (micros) => (micros == null ? '—' : `$${(micros / 1e6).toFixed(micros < 100_000 ? 4 : 2)}`)
-const fromUrl = () => new URLSearchParams(window.location.search).get('customer') || ''
 
-export default function VoiceProviders() {
-  const [list, setList] = useState(null)
-  const [global, setGlobal] = useState(null)
-  const [selected, setSelected] = useState(fromUrl)
-  const [loaded, setLoaded] = useState(null) // { id, data } for the business last answered by the server
-  const [tick, setTick] = useState(0)
-  // The view shown is the loaded one for the CURRENT selection only (a switch of business shows "Loading…", never
-  // the previous business's data).
-  const view = loaded && loaded.id === selected ? loaded.data : null
-
-  useEffect(() => {
-    document.title = 'Voice providers · GetShowUps'
-  }, [])
-  useEffect(() => {
-    let live = true
-    api('/api/platform/voice-provider').then(({ status, data }) => {
-      if (!live) return
-      setList(status === 200 ? data.businesses : { error: data?.error || status })
-      setGlobal(status === 200 ? data.global : { error: data?.error || status })
-    })
-    return () => {
-      live = false
-    }
-  }, [tick])
-  useEffect(() => {
-    if (!selected) return undefined
-    let live = true
-    api(`/api/platform/voice-provider?customer=${encodeURIComponent(selected)}`).then(({ status, data }) => live && setLoaded({ id: selected, data: status === 200 ? data : { error: data?.error || status } }))
-    return () => {
-      live = false
-    }
-  }, [selected, tick])
-  useEffect(() => {
-    const onPop = () => setSelected(fromUrl())
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
-
-  const choose = (id) => {
-    const url = new URL(window.location.href)
-    if (id) url.searchParams.set('customer', id)
-    else url.searchParams.delete('customer')
-    window.history.pushState(null, '', url.pathname + url.search)
-    setSelected(id)
+export default function Businesses({ list, global, selected, choose, view, reload }) {
+  // Open when a business is selected (deep link or Manage); the admin may fold it until the selection changes.
+  const [manual, setManual] = useState(null)
+  const [prevSelected, setPrevSelected] = useState(selected)
+  if (selected !== prevSelected) {
+    setPrevSelected(selected)
+    setManual(null)
   }
-  const reload = () => setTick((n) => n + 1)
+  const open = manual ?? Boolean(selected)
   const businesses = Array.isArray(list) ? list : []
   const b = view?.business
-  const businessesSection = (
-    <Section title="Businesses" id="vp-business">
-      <div className="cc-section-body">
+  return (
+    <details className="cc-details vp-businesses" data-vp-businesses-details open={open || undefined} onToggle={(e) => setManual(e.currentTarget.open)}>
+      <summary>Businesses{businesses.length ? ` (${businesses.length})` : ''}</summary>
+      <div className="vp-stack">
         {list === null && <Loading label="Loading businesses…" />}
         {list?.error && <LoadError what="the business list" onRetry={reload} />}
         {Array.isArray(list) && businesses.length === 0 && <Empty title="No businesses yet." />}
@@ -142,7 +97,7 @@ export default function VoiceProviders() {
               <summary>Session history ({view.history.length})</summary>
               <p className="fine">Newest first; admin tests, Lab and customer sessions. Codes and measurements only. {view.ready ? `Settings version ${view.voice.version}.` : 'Voice settings storage not available (migration 0035).'}</p>
               {view.history.length === 0 ? (
-                <Empty title="No voice sessions yet.">Run a test session (Test on a test business, or the Voice Lab) to collect evidence.</Empty>
+                <Empty title="No voice sessions yet.">Run a test session (Test on a test business, or a Lab call) to collect evidence.</Empty>
               ) : (
                 <table className="vp-history vp-table" data-vp-history>
                   <thead>
@@ -184,21 +139,6 @@ export default function VoiceProviders() {
           </div>
         )}
       </div>
-    </Section>
-  )
-  return (
-    <div className="cc cc--single" data-voice-providers={b ? b.id : 'none'}>
-      <div className="cc-main">
-        <PageHead title="Voice providers" lede="Choose a provider, test it, promote it to every business, watch the rollout, roll back if needed." />
-        {global && !global.error && (
-          <GlobalProvider global={global} reload={reload}>
-            {businessesSection}
-          </GlobalProvider>
-        )}
-        {global?.error && <LoadError what="the global default" onRetry={reload} />}
-        {global?.error && businessesSection}
-        {global === null && <Loading label="Loading…" />}
-      </div>
-    </div>
+    </details>
   )
 }

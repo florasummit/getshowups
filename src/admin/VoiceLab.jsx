@@ -1,13 +1,19 @@
-// /admin/voice-lab — the Voice Lab (platform admins; every request is authorized server-side and the Lab is 404 unless
-// VOICE_LAB_ENABLED=true). Put the SAME receptionist on a voice call through a provider (Retell = the production path,
-// OpenAI Realtime, ElevenLabs) against an admin-marked TEST business, dry-run by default, and see honestly what
-// happened: provider status (configured or not, with the reason), the daily minute budget, the live transcript and
-// tool results as the adapter reports them, latency as the adapter measured it, and the engine's end-of-session summary.
-// Adapters (src/voice/<provider>.js) are loaded lazily: a provider whose adapter isn't in this build says so.
+// /admin/voice-lab — the one place for voice operations (platform admins; every request is authorized server-side).
+//   Provider (GlobalProvider.jsx): choose the target provider → Test it on the customer path (a dry-run session on
+//     the chat page of a test business; the server records the evidence) → Activate for all businesses (one typed
+//     confirmation) → Rollout monitoring → Roll back.
+//   Businesses (Businesses.jsx, under disclosure): every business's provider and the per-business control.
+//   Lab call (under disclosure; 404 unless VOICE_LAB_ENABLED=true): the SAME receptionist on a call through any
+//     provider against a test business, dry-run by default, with the live transcript, tool results and latency as the
+//     adapter measured them. A Lab call compares providers; it is not the customer path, so it never counts as
+//     verification (that comes from Test above).
+// /admin/voice-providers (the former tab) lands here with its ?customer= deep link.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { Badge, Empty, Facts, LoadError, Loading, PageHead, Section } from './control/ui.jsx'
+import { Badge, Empty, Facts, LoadError, Loading, PageHead } from './control/ui.jsx'
 import { ago, mins } from './control/lib.js'
+import GlobalProvider from './GlobalProvider.jsx'
+import Businesses from './Businesses.jsx'
 import './control.css'
 import './voice-lab.css'
 
@@ -81,6 +87,7 @@ async function loadAdapter(p) {
 const ms = (v) => (Number.isFinite(v) ? `${Math.round(v)} ms` : '—')
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 100_000 ? 4 : 2)}`
 const outcomeLabel = (s) => (s.booked ? (s.simulated ? 'Booked (dry run: nothing created)' : 'Booked') : OUTCOME[s.outcome] || s.outcome || 'No outcome recorded')
+const fromUrl = () => new URLSearchParams(window.location.search).get('customer') || ''
 
 // The owner's readiness questions for one provider, answered by the server from configuration (never a provider call).
 function Readiness({ r }) {
@@ -98,30 +105,39 @@ function Readiness({ r }) {
     ['Voice settings', r.settings],
   ]
   return (
-    <Section title={`Readiness: ${r.name}`} id="vl-readiness" sub={r.blockers.length ? `Blocked: ${r.blockers.join('; ')}.` : 'Ready for a test session.'} data-readiness={r.id} data-ready={r.session.canRun ? 'yes' : 'no'}>
-      <div className="cc-section-body">
-        <dl className="cc-kv vl-readiness">
-          {rows.map(([k, v]) => (
-            <div key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-    </Section>
+    <details className="cc-details" data-readiness={r.id} data-ready={r.session.canRun ? 'yes' : 'no'}>
+      <summary>
+        Readiness: {r.name} · {r.blockers.length ? `Blocked: ${r.blockers.join('; ')}.` : 'Ready for a test session.'}
+      </summary>
+      <dl className="cc-kv vl-readiness">
+        {rows.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   )
 }
 
 export default function VoiceLab() {
   const [status, setStatus] = useState(null)
   const [reload, setReload] = useState(0)
-  const [provider, setProvider] = useState('openai')
+  const [provider, setProvider] = useState('')
   const [business, setBusiness] = useState('')
   const [dryRun, setDryRun] = useState(true)
   const [voice, setVoice] = useState('')
   const [session, setSession] = useState({ phase: 'idle', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null })
   const [now, setNow] = useState(0)
+  const [labOpen, setLabOpen] = useState(() => new URLSearchParams(window.location.search).get('lab') === '1')
+  // Provider rollout + businesses (/api/platform/voice-provider): independent of the Lab switch.
+  const [list, setList] = useState(null)
+  const [global, setGlobal] = useState(null)
+  const [selected, setSelected] = useState(fromUrl)
+  const [loaded, setLoaded] = useState(null)
+  const [tick, setTick] = useState(0)
+  const view = loaded && loaded.id === selected ? loaded.data : null
   const adapterRef = useRef(null)
   const sentRef = useRef(0)
   const finishingRef = useRef(false)
@@ -131,6 +147,8 @@ export default function VoiceLab() {
 
   useEffect(() => {
     document.title = 'Voice Lab · GetShowUps'
+    // The former Voice providers tab lands here, keeping its deep link.
+    if (window.location.pathname.startsWith('/admin/voice-providers')) window.history.replaceState(null, '', `/admin/voice-lab${window.location.search}`)
   }, [])
   useEffect(() => {
     let live = true
@@ -139,7 +157,7 @@ export default function VoiceLab() {
       if (code === 200) {
         setStatus(data)
         setBusiness((b) => b || data.businesses[0]?.id || '')
-        setProvider((p) => (data.providers[p]?.configured ? p : PROVIDERS.find(([id]) => data.providers[id]?.configured)?.[0] || p))
+        setProvider((p) => (p && data.providers[p]?.configured ? p : PROVIDERS.find(([id]) => data.providers[id]?.configured)?.[0] || p || 'retell'))
       } else setStatus({ error: code === 404 ? 'off' : data?.error || 'failed' })
     })
     return () => {
@@ -147,11 +165,52 @@ export default function VoiceLab() {
     }
   }, [reload])
   useEffect(() => {
+    let live = true
+    api('/api/platform/voice-provider').then(({ status: code, data }) => {
+      if (!live) return
+      setList(code === 200 ? data.businesses : { error: data?.error || code })
+      setGlobal(code === 200 ? data.global : { error: data?.error || code })
+    })
+    return () => {
+      live = false
+    }
+  }, [tick])
+  useEffect(() => {
+    if (!selected) return undefined
+    let live = true
+    api(`/api/platform/voice-provider?customer=${encodeURIComponent(selected)}`).then(({ status: code, data }) => live && setLoaded({ id: selected, data: code === 200 ? data : { error: data?.error || code } }))
+    return () => {
+      live = false
+    }
+  }, [selected, tick])
+  useEffect(() => {
+    const onPop = () => setSelected(fromUrl())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  // The Lab call defaults to the target provider once both are known (a configured one only).
+  useEffect(() => {
+    const target = global?.current?.provider
+    if (target && status?.providers?.[target]?.configured) setProvider((p) => (session.phase === 'idle' ? target : p))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [global?.current?.provider, status])
+  useEffect(() => {
     if (session.phase !== 'live') return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [session.phase])
 
+  const choose = (id) => {
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set('customer', id)
+    else url.searchParams.delete('customer')
+    window.history.pushState(null, '', url.pathname + url.search)
+    setSelected(id)
+  }
+  const reloadAll = useCallback(() => {
+    setTick((n) => n + 1)
+    setReload((n) => n + 1)
+  }, [])
   const update = (fn) => setSession((s) => ({ ...s, ...fn(s) }))
 
   const finish = useCallback(async () => {
@@ -258,202 +317,195 @@ export default function VoiceLab() {
     }
   }
 
-  if (!status) return <Loading label="Loading the Voice Lab…" />
-  if (status.error === 'off') {
-    return (
-      <div className="cc cc--single" data-voice-lab="off">
-        <div className="cc-main">
-          <PageHead title="Voice Lab" lede="Put the receptionist on a voice call through a provider, against a test business, and see what happened." />
-          <div className="cc-callout" role="status">
-            <strong>Voice Lab is switched off.</strong>
-            <span>VOICE_LAB_ENABLED is not set to true on this deployment, so no session can be started and nothing is shown. Turning it on needs approval.</span>
-          </div>
-        </div>
-      </div>
-    )
-  }
-  if (status.error) return <LoadError what="the Voice Lab" onRetry={() => setReload((n) => n + 1)} />
-
-  const p = status.providers[provider] || { configured: false }
-  const budgetLeft = Math.max(0, status.limits.dailyMinutes - status.limits.usedMinutesToday)
   const live = session.phase === 'live' || session.phase === 'starting' || session.phase === 'ending'
-  const blocker = !p.configured ? `Unavailable: ${REASON[p.reason] || 'not configured'}.` : !adapterAvailable(provider) ? START_ERRORS.adapter_unavailable : !business ? 'No admin-marked test business is active.' : budgetLeft === 0 ? START_ERRORS.lab_daily_limit : null
-  const biz = status.businesses.find((b) => b.id === business)
-  const m = session.summary?.metrics || session.metrics
-  const est = status.estimates?.[provider]
-  const duration = session.summary ? (session.summary.metrics?.durationSeconds ?? 0) * 1000 : session.startedAt && now ? Math.max(0, now - session.startedAt) : null
-  return (
-    <div className="cc cc--single" data-voice-lab={session.phase}>
-      <div className="cc-main">
-        <PageHead title="Voice Lab" lede="Put the same receptionist on a voice call through a provider, against an admin-marked test business, and see honestly what happened. Dry run creates nothing." />
-        <Section title="Set up a test call" id="vl-setup" sub={`Daily budget: ${status.limits.usedMinutesToday} of ${status.limits.dailyMinutes} minutes used today (${budgetLeft} left).`} data-budget={budgetLeft}>
-          <div className="cc-section-body">
-            <fieldset className="vl-providers" disabled={live}>
-              <legend className="cc-label">Provider</legend>
-              {PROVIDERS.map(([id, name, what]) => {
-                const st = status.providers[id] || { configured: false }
-                return (
-                  <label key={id} className={`vl-provider${provider === id ? ' vl-provider--on' : ''}`} data-provider={id} data-configured={st.configured ? 'true' : 'false'}>
-                    <input type="radio" name="provider" value={id} checked={provider === id} onChange={() => setProvider(id)} />
-                    <span className="vl-provider-name">{name}</span>
-                    <Badge tone={st.configured ? 'ok' : 'neutral'}>{st.configured ? `Configured${st.model ? ` · ${st.model}` : ''}` : 'Not configured'}</Badge>
-                    <span className="vl-provider-what">{st.configured ? what : `Unavailable: ${REASON[st.reason] || 'not configured'}.`}</span>
-                    {!adapterAvailable(id) && <span className="vl-provider-what">Adapter unavailable in this build.</span>}
-                  </label>
-                )
-              })}
-            </fieldset>
-            <div className="vl-controls">
-              <label className="field">
-                <span>Test business</span>
-                <select data-lab-business value={business} onChange={(e) => setBusiness(e.target.value)} disabled={live}>
-                  {status.businesses.length === 0 && <option value="">No active test business</option>}
-                  {status.businesses.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.id})
-                    </option>
-                  ))}
-                </select>
+  const labShown = labOpen || live || session.phase === 'done'
+  const lab = (() => {
+    if (!status) return <Loading label="Loading the Lab…" />
+    if (status.error === 'off') {
+      return (
+        <div className="cc-callout" role="status">
+          <strong>Lab calls are switched off.</strong>
+          <span>VOICE_LAB_ENABLED is not set to true on this deployment, so no Lab call can be started. Turning it on needs approval. Test above still works: it uses the customer path.</span>
+        </div>
+      )
+    }
+    if (status.error) return <LoadError what="the Voice Lab" onRetry={() => setReload((n) => n + 1)} />
+    const p = status.providers[provider] || { configured: false }
+    const budgetLeft = Math.max(0, status.limits.dailyMinutes - status.limits.usedMinutesToday)
+    const blocker = !p.configured ? `Unavailable: ${REASON[p.reason] || 'not configured'}.` : !adapterAvailable(provider) ? START_ERRORS.adapter_unavailable : !business ? 'No admin-marked test business is active.' : budgetLeft === 0 ? START_ERRORS.lab_daily_limit : null
+    const biz = status.businesses.find((b) => b.id === business)
+    const m = session.summary?.metrics || session.metrics
+    const est = status.estimates?.[provider]
+    const duration = session.summary ? (session.summary.metrics?.durationSeconds ?? 0) * 1000 : session.startedAt && now ? Math.max(0, now - session.startedAt) : null
+    return (
+      <div className="vp-stack">
+        <p className="fine" data-budget={budgetLeft}>
+          Compare providers, voices and latency on a call that is not the customer path (it never counts as verification). Daily budget: {status.limits.usedMinutesToday} of {status.limits.dailyMinutes} minutes used today ({budgetLeft} left).
+        </p>
+        <fieldset className="vl-providers" disabled={live}>
+          <legend className="cc-label">Provider</legend>
+          {PROVIDERS.map(([id, name, what]) => {
+            const st = status.providers[id] || { configured: false }
+            return (
+              <label key={id} className={`vl-provider${provider === id ? ' vl-provider--on' : ''}`} data-provider={id} data-configured={st.configured ? 'true' : 'false'}>
+                <input type="radio" name="provider" value={id} checked={provider === id} onChange={() => setProvider(id)} />
+                <span className="vl-provider-name">{name}</span>
+                <Badge tone={st.configured ? 'ok' : 'neutral'}>{st.configured ? `Configured${st.model ? ` · ${st.model}` : ''}` : 'Not configured'}</Badge>
+                <span className="vl-provider-what">{st.configured ? what : `Unavailable: ${REASON[st.reason] || 'not configured'}.`}</span>
+                {!adapterAvailable(id) && <span className="vl-provider-what">Adapter unavailable in this build.</span>}
               </label>
-              {status.settings?.[provider]?.voices?.length > 0 && (
-                <label className="field">
-                  <span>Voice ({status.readiness?.find((r) => r.id === provider)?.name || provider})</span>
-                  <select data-lab-voice value={voice} onChange={(e) => setVoice(e.target.value)} disabled={live}>
-                    <option value="">Default (the business’s own setting if it has one)</option>
-                    {status.settings[provider].voices.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="check" data-dry-run={dryRun ? 'on' : 'off'}>
-                <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={live} />
-                <span>Dry run: every guard runs, nothing is created (no lead, appointment, request or email).</span>
-              </label>
-              {!dryRun && (
-                <div className="cc-callout cc-callout--warn" role="alert" data-dry-run-warning>
-                  <strong>Dry run is off.</strong>
-                  <span>A confirmed booking in this call creates a REAL appointment on {biz?.name || 'the test business'}’s calendar and sends its confirmation. Test businesses only; messages still obey the launch gate.</span>
-                </div>
-              )}
-              <p className="cc-status-line" data-cost-note={provider}>
-                {COST[provider]} Limits: one Lab call at a time, 15 minutes per session, {status.limits.dailyMinutes} minutes per day across the Lab. Stop ends the call at once.
-              </p>
+            )
+          })}
+        </fieldset>
+        <div className="vl-controls">
+          <label className="field">
+            <span>Test business</span>
+            <select data-lab-business value={business} onChange={(e) => setBusiness(e.target.value)} disabled={live}>
+              {status.businesses.length === 0 && <option value="">No active test business</option>}
+              {status.businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          {status.settings?.[provider]?.voices?.length > 0 && (
+            <label className="field">
+              <span>Voice ({status.readiness?.find((r) => r.id === provider)?.name || provider})</span>
+              <select data-lab-voice value={voice} onChange={(e) => setVoice(e.target.value)} disabled={live}>
+                <option value="">Default (the business’s own setting if it has one)</option>
+                {status.settings[provider].voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="check" data-dry-run={dryRun ? 'on' : 'off'}>
+            <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} disabled={live} />
+            <span>Dry run: every guard runs, nothing is created (no lead, appointment, request or email).</span>
+          </label>
+          {!dryRun && (
+            <div className="cc-callout cc-callout--warn" role="alert" data-dry-run-warning>
+              <strong>Dry run is off.</strong>
+              <span>A confirmed booking in this call creates a REAL appointment on {biz?.name || 'the test business'}’s calendar and sends its confirmation. Test businesses only; messages still obey the launch gate.</span>
             </div>
-            <div className="cc-actions">
-              {live ? (
-                <button type="button" className="btn btn-danger btn-sm" onClick={finish} disabled={session.phase !== 'live'} data-lab-stop>
-                  {session.phase === 'ending' ? 'Ending…' : 'Stop conversation'}
-                </button>
-              ) : (
-                <button type="button" className="btn btn-primary btn-sm" onClick={start} disabled={Boolean(blocker)} data-lab-start>
-                  Start conversation
-                </button>
-              )}
-              {blocker && !live && (
-                <span className="cc-status-line" data-lab-blocker>
-                  {blocker}
-                </span>
-              )}
-            </div>
-            {session.error && (
-              <p className="form-error" role="alert" data-lab-error>
-                {session.error}
-              </p>
-            )}
-          </div>
-        </Section>
+          )}
+          <p className="cc-status-line" data-cost-note={provider}>
+            {COST[provider]} Limits: one Lab call at a time, 15 minutes per session, {status.limits.dailyMinutes} minutes per day across the Lab. Stop ends the call at once.
+          </p>
+        </div>
+        <div className="cc-actions">
+          {live ? (
+            <button type="button" className="btn btn-danger btn-sm" onClick={finish} disabled={session.phase !== 'live'} data-lab-stop>
+              {session.phase === 'ending' ? 'Ending…' : 'Stop conversation'}
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary btn-sm" onClick={start} disabled={Boolean(blocker)} data-lab-start>
+              Start conversation
+            </button>
+          )}
+          {blocker && !live && (
+            <span className="cc-status-line" data-lab-blocker>
+              {blocker}
+            </span>
+          )}
+        </div>
+        {session.error && (
+          <p className="form-error" role="alert" data-lab-error>
+            {session.error}
+          </p>
+        )}
         <Readiness r={(status.readiness || []).find((x) => x.id === provider)} />
 
         {(live || session.phase === 'done') && (
-          <Section title={session.phase === 'done' ? 'Session summary' : 'Live call'} id="vl-live" data-lab-live={session.phase}>
-            <div className="cc-section-body">
-              <div className="cc-actions">
-                <Badge tone={CONNECTION[session.connection]?.[0] || 'neutral'}>{CONNECTION[session.connection]?.[1] || session.connection}</Badge>
-                {session.connectionReason && <span className="cc-status-line">{String(session.connectionReason).replaceAll('_', ' ')}</span>}
-                <Badge tone="info" plain>
-                  {PROVIDERS.find(([id]) => id === (session.provider || provider))?.[1]}
-                </Badge>
-                <Badge tone={session.dryRun === false ? 'warn' : 'neutral'} plain>
-                  {session.dryRun === false ? 'LIVE booking' : 'Dry run'}
-                </Badge>
-                <span className="cc-status-line" data-lab-duration>
-                  {duration == null ? '—' : mins(duration)}
-                </span>
-              </div>
-              {live && (
-                <div className="cc-actions" data-lab-diagnostics data-mic={session.mic || 'unknown'} data-audio={session.audio || 'none'}>
-                  <Badge tone={session.mic === 'live' ? 'ok' : session.mic === 'silent' ? 'bad' : 'neutral'} plain>
-                    {MIC_LABEL[session.mic] || MIC_LABEL.unknown}
-                  </Badge>
-                  <Badge tone={session.audio === 'received' ? 'ok' : session.audio === 'blocked' ? 'bad' : 'neutral'} plain>
-                    {AUDIO_LABEL[session.audio] || AUDIO_LABEL.none}
-                  </Badge>
-                  {session.audioBlocked && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      data-lab-enable-sound
-                      onClick={() => {
-                        adapterRef.current?.resumeAudio?.()
-                        update(() => ({ audioBlocked: false, error: null }))
-                      }}
-                    >
-                      Enable sound
-                    </button>
-                  )}
-                </div>
-              )}
-              <Facts
-                items={[
-                  ['First response', ms(m.firstResponseMs)],
-                  ['Median response', ms(m.medianResponseMs)],
-                  ['p95 response', ms(m.p95ResponseMs)],
-                  ['Turns', m.turns ?? '—'],
-                  ['Interruptions', m.interruptions ?? '—'],
-                  ['Tool calls', `${m.toolCalls ?? session.tools.length}${m.toolFailures ? ` (${m.toolFailures} failed)` : ''}`],
-                  ['Reconnects', m.reconnects ?? '—'],
-                  ['Usage', [m.audioSeconds != null && `${m.audioSeconds} s audio`, m.inputTokens != null && `${m.inputTokens} in`, m.outputTokens != null && `${m.outputTokens} out tokens`].filter(Boolean).join(' · ') || 'not reported'],
-                  session.summary && ['Estimated cost', session.summary.estimatedMicros == null ? 'Not estimated' : `${usd(session.summary.estimatedMicros)} (estimate${est?.source ? `, ${est.source}` : ''}${est?.asOf ? ` as of ${est.asOf}` : ''})`],
-                  session.summary && ['Outcome', outcomeLabel(session.summary)],
-                ]}
-              />
-              <p className="cc-status-line">Latency figures are what the adapter measured in this browser (speech end to first reply audio). They are not engine-side timings.</p>
-              <h3 className="cc-label">Transcript</h3>
-              {session.lines.length ? (
-                <ol className="vl-transcript" data-lab-transcript>
-                  {session.lines.map((l, i) => (
-                    <li key={i} className={`vl-line vl-line--${l.who}${l.final ? '' : ' vl-line--interim'}`}>
-                      <span className="vl-who">{l.who === 'customer' ? 'Caller' : 'Receptionist'}</span>
-                      <span>{l.text}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <Empty title={live ? 'Nothing said yet.' : 'No transcript was reported.'} />
-              )}
-              <h3 className="cc-label">Tool results</h3>
-              {session.tools.length || session.summary?.tools?.length ? (
-                <ul className="vl-tools" data-lab-tools>
-                  {(session.tools.length ? session.tools : session.summary.tools).map((t, i) => (
-                    <li key={i}>
-                      <code className="cc-code">{t.name}</code>
-                      <Badge tone={t.ok === false ? 'bad' : 'ok'}>{t.ok === false ? t.error || 'error' : 'ok'}</Badge>
-                      {t.simulated && <Badge tone="neutral" plain>simulated</Badge>}
-                      {Number.isFinite(t.ms) && <span className="cc-status-line">{ms(t.ms)}</span>}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <Empty title="No tool has run." />
-              )}
+          <div className="vp-card" data-lab-live={session.phase}>
+            <p className="vp-card-title">{session.phase === 'done' ? 'Session summary' : 'Live call'}</p>
+            <div className="cc-actions">
+              <Badge tone={CONNECTION[session.connection]?.[0] || 'neutral'}>{CONNECTION[session.connection]?.[1] || session.connection}</Badge>
+              {session.connectionReason && <span className="cc-status-line">{String(session.connectionReason).replaceAll('_', ' ')}</span>}
+              <Badge tone="info" plain>
+                {PROVIDERS.find(([id]) => id === (session.provider || provider))?.[1]}
+              </Badge>
+              <Badge tone={session.dryRun === false ? 'warn' : 'neutral'} plain>
+                {session.dryRun === false ? 'LIVE booking' : 'Dry run'}
+              </Badge>
+              <span className="cc-status-line" data-lab-duration>
+                {duration == null ? '—' : mins(duration)}
+              </span>
             </div>
-          </Section>
+            {live && (
+              <div className="cc-actions" data-lab-diagnostics data-mic={session.mic || 'unknown'} data-audio={session.audio || 'none'}>
+                <Badge tone={session.mic === 'live' ? 'ok' : session.mic === 'silent' ? 'bad' : 'neutral'} plain>
+                  {MIC_LABEL[session.mic] || MIC_LABEL.unknown}
+                </Badge>
+                <Badge tone={session.audio === 'received' ? 'ok' : session.audio === 'blocked' ? 'bad' : 'neutral'} plain>
+                  {AUDIO_LABEL[session.audio] || AUDIO_LABEL.none}
+                </Badge>
+                {session.audioBlocked && (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    data-lab-enable-sound
+                    onClick={() => {
+                      adapterRef.current?.resumeAudio?.()
+                      update(() => ({ audioBlocked: false, error: null }))
+                    }}
+                  >
+                    Enable sound
+                  </button>
+                )}
+              </div>
+            )}
+            <Facts
+              items={[
+                ['First response', ms(m.firstResponseMs)],
+                ['Median response', ms(m.medianResponseMs)],
+                ['p95 response', ms(m.p95ResponseMs)],
+                ['Turns', m.turns ?? '—'],
+                ['Interruptions', m.interruptions ?? '—'],
+                ['Tool calls', `${m.toolCalls ?? session.tools.length}${m.toolFailures ? ` (${m.toolFailures} failed)` : ''}`],
+                ['Reconnects', m.reconnects ?? '—'],
+                ['Usage', [m.audioSeconds != null && `${m.audioSeconds} s audio`, m.inputTokens != null && `${m.inputTokens} in`, m.outputTokens != null && `${m.outputTokens} out tokens`].filter(Boolean).join(' · ') || 'not reported'],
+                session.summary && ['Estimated cost', session.summary.estimatedMicros == null ? 'Not estimated' : `${usd(session.summary.estimatedMicros)} (estimate${est?.source ? `, ${est.source}` : ''}${est?.asOf ? ` as of ${est.asOf}` : ''})`],
+                session.summary && ['Outcome', outcomeLabel(session.summary)],
+              ]}
+            />
+            <p className="cc-status-line">Latency figures are what the adapter measured in this browser (speech end to first reply audio). They are not engine-side timings.</p>
+            <h3 className="cc-label">Transcript</h3>
+            {session.lines.length ? (
+              <ol className="vl-transcript" data-lab-transcript>
+                {session.lines.map((l, i) => (
+                  <li key={i} className={`vl-line vl-line--${l.who}${l.final ? '' : ' vl-line--interim'}`}>
+                    <span className="vl-who">{l.who === 'customer' ? 'Caller' : 'Receptionist'}</span>
+                    <span>{l.text}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <Empty title={live ? 'Nothing said yet.' : 'No transcript was reported.'} />
+            )}
+            <h3 className="cc-label">Tool results</h3>
+            {session.tools.length || session.summary?.tools?.length ? (
+              <ul className="vl-tools" data-lab-tools>
+                {(session.tools.length ? session.tools : session.summary.tools).map((t, i) => (
+                  <li key={i}>
+                    <code className="cc-code">{t.name}</code>
+                    <Badge tone={t.ok === false ? 'bad' : 'ok'}>{t.ok === false ? t.error || 'error' : 'ok'}</Badge>
+                    {t.simulated && <Badge tone="neutral" plain>simulated</Badge>}
+                    {Number.isFinite(t.ms) && <span className="cc-status-line">{ms(t.ms)}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty title="No tool has run." />
+            )}
+          </div>
         )}
 
-        <Section title="Recent sessions" id="vl-sessions" sub="The last Lab sessions on test businesses: codes, counts and timings only." data-lab-sessions>
+        <details className="cc-details" data-lab-sessions>
+          <summary>Recent Lab sessions ({status.sessions.length})</summary>
           {status.sessions.length ? (
             <ul className="cc-list">
               {status.sessions.map((s) => {
@@ -484,7 +536,23 @@ export default function VoiceLab() {
           ) : (
             <Empty title="No Lab session yet.">Sessions appear here once a call has been started.</Empty>
           )}
-        </Section>
+        </details>
+      </div>
+    )
+  })()
+
+  return (
+    <div className="cc cc--single" data-voice-lab={session.phase} data-voice-providers={view?.business ? view.business.id : 'none'}>
+      <div className="cc-main">
+        <PageHead title="Voice Lab" lede="Choose a provider, test it on the customer path, activate it for every business, watch the rollout." />
+        {global === null && <Loading label="Loading…" />}
+        {global && !global.error && <GlobalProvider global={global} businesses={Array.isArray(list) ? list : []} reload={reloadAll} />}
+        {global?.error && <LoadError what="the provider" onRetry={reloadAll} />}
+        <Businesses list={list} global={global && !global.error ? global : null} selected={selected} choose={choose} view={view} reload={reloadAll} />
+        <details className="cc-details" data-lab-call open={labShown || undefined} onToggle={(e) => setLabOpen(e.currentTarget.open)}>
+          <summary>Lab call: compare providers, voices and latency</summary>
+          {lab}
+        </details>
       </div>
     </div>
   )

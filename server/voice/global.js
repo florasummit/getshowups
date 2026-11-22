@@ -224,12 +224,12 @@ const FAIL_OUTCOMES = new Set(['connect_failed', 'reconnect_failed', 'connection
 export async function providerVerification(env, provider, now = Date.now()) {
   let rows = []
   try {
-    const r = await env.ONBOARDING_DB.prepare("SELECT customer, state FROM receptionist_conversations WHERE created_at > ?1 AND json_extract(state, '$.voice.provider') = ?2 ORDER BY created_at DESC LIMIT 100").bind(now - 30 * DAY, provider).all()
+    const r = await env.ONBOARDING_DB.prepare("SELECT id, customer, state FROM receptionist_conversations WHERE created_at > ?1 AND json_extract(state, '$.voice.provider') = ?2 ORDER BY created_at DESC LIMIT 100").bind(now - 30 * DAY, provider).all()
     rows = r.results || []
   } catch {
     rows = []
   }
-  const out = { ok: false, provider, sessions: 0, finished: 0, audio: false, tools: false, booking: false, cleanEnd: false, businesses: [], lastAt: null, missing: [] }
+  const out = { ok: false, provider, sessions: 0, finished: 0, audio: false, tools: false, booking: false, cleanEnd: false, businesses: [], lastAt: null, missing: [], latest: null }
   for (const row of rows) {
     let s
     try {
@@ -250,12 +250,28 @@ export async function providerVerification(env, provider, now = Date.now()) {
     const availability = tools.some((t) => t.name === 'find_available_times' && t.ok)
     const booking = tools.some((t) => t.name === 'book_appointment' && t.ok)
     const clean = !FAIL_OUTCOMES.has(v.outcome)
+    // The newest finished session, as a record the console can explain (what it showed, what it did not, why): codes
+    // and counts only. Rows come newest first.
+    if (!out.latest) {
+      const names = tools.map((t) => t.name)
+      const path = !clean ? 'connection' : !audio ? 'audio' : !names.length ? 'no_tools' : !availability ? (names.includes('check_service_area') || names.includes('request_coverage') ? 'area' : 'no_availability') : !booking ? 'no_booking' : 'ok'
+      out.latest = { id: row.id, customer: row.customer, startedAt: v.startedAt || null, endedAt: v.endedAt, durationSeconds: m.durationSeconds ?? (v.startedAt ? Math.round((v.endedAt - v.startedAt) / 1000) : null), test: Boolean(v.test), audio, availability, booking, cleanEnd: clean, outcome: v.outcome || null, tools: tools.map((t) => ({ name: t.name, ok: t.ok !== false })), failures: [], path }
+    }
     // One session must show all of it at once (not audio in one and tools in another).
     if (audio && availability && booking && clean) {
       out.audio = true
       out.tools = true
       out.booking = true
       out.cleanEnd = true
+    }
+  }
+  // Why a tool of the latest session failed (receptionist_events detail codes, e.g. request_coverage zip_missing).
+  if (out.latest) {
+    try {
+      const { results } = await env.ONBOARDING_DB.prepare('SELECT kind, detail FROM receptionist_events WHERE conversation_id = ?1 AND ok = 0 ORDER BY at').bind(out.latest.id).all()
+      out.latest.failures = (results || []).map((e) => ({ tool: e.kind, code: e.detail || 'failed' })).slice(0, 10)
+    } catch {
+      out.latest.failures = []
     }
   }
   if (!out.finished) out.missing.push('session')
@@ -590,14 +606,14 @@ export async function globalOverview(env, now = Date.now()) {
   const status = providerStatus(env)
   const [rollout, verification, testPage] = await Promise.all([
     globalRolloutStatus(env, current, now),
-    status[current.provider]?.configured ? providerVerification(env, current.provider, now) : { ok: false, provider: current.provider, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'] },
+    status[current.provider]?.configured ? providerVerification(env, current.provider, now) : { ok: false, provider: current.provider, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'], latest: null },
     testPageFor(env, current.provider),
   ])
   return {
     ready,
     current: { provider: current.provider, name: PROVIDER_CAPABILITIES[current.provider]?.name || current.provider, version: current.version, previous: current.previous, mode: current.mode, setAt: current.setAt, pinned: current.pinned.length, switched: current.switched.length, canRollBack: current.version > 0 && Boolean(current.previous) && current.mode !== 'rollback' },
     counts: { total: distribution.total, inherited: distribution.byKind.inherited, overrides: distribution.byKind.pin + distribution.byKind.override, pins: distribution.byKind.pin, independent: distribution.byKind.override, usingDefault: distribution.byProvider[current.provider] || 0, byProvider: distribution.byProvider },
-    verification: { ok: verification.ok, sessions: verification.sessions, finished: verification.finished, businesses: verification.businesses, lastAt: verification.lastAt, missing: verification.missing },
+    verification: { ok: verification.ok, sessions: verification.sessions, finished: verification.finished, businesses: verification.businesses, lastAt: verification.lastAt, missing: verification.missing, latest: verification.latest || null },
     // Per business: inherited | pin (a rollout left it on the previous provider) | override (business-specific).
     kinds: Object.fromEntries(distribution.businesses.map((b) => [b.id, b.kind])),
     testPage,
