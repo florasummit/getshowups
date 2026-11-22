@@ -13,13 +13,13 @@
 // provider cannot start, the customer gets a clear error and can keep typing.
 import { randomToken } from '../google-oauth.js'
 import { emailRef } from '../auditlog.js'
-import { startConversation, loadConversation } from '../receptionist/engine.js'
+import { startConversation, loadConversation, conversationToken } from '../receptionist/engine.js'
 import { startVoiceCall, voiceAllowedFor, voiceStatus } from '../receptionist/voice.js'
 import { testStatus } from '../testbusiness.js'
 import { mintClientSecret } from './openai.js'
 import { fetchSignedUrl, elevenlabsOverrides, elevenlabsDynamicVariables, elevenlabsClientToolNames, SIGNED_URL_TTL_MS } from './elevenlabs.js'
 import { providerStatus, estimateMicros, PROVIDERS } from './providers.js'
-import { cleanMetrics } from './sessions.js'
+import { cleanMetrics, cleanDisconnect } from './sessions.js'
 import { runVoiceTool, appendVoiceTranscript, voiceInstructions, TOOL_KINDS_SET } from './tools.js'
 import { getVoiceSettings, sessionVoiceFor } from './style.js'
 import { adminEmails } from '../platform.js'
@@ -44,12 +44,15 @@ export const providerDisabled = (env, provider) =>
     .includes(provider)
 
 const dayStart = (now) => now - (now % 86_400_000)
+// Minutes used today. A call row never ended (the browser went away before its end was recorded) counts at most the
+// session ceiling, never "until now": production 2026-11-22, two such rows on one test business would have used up
+// its whole daily budget (120 min) within two hours and refused every further test with voice_limit.
 export async function businessMinutesToday(env, customerId, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(COALESCE(ended_at, ?3) - created_at), 0) AS ms FROM receptionist_calls WHERE customer = ?1 AND created_at >= ?2').bind(customerId, dayStart(now), now).first()
+  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?3), created_at + ?4) - created_at), 0) AS ms FROM receptionist_calls WHERE customer = ?1 AND created_at >= ?2').bind(customerId, dayStart(now), now, VOICE_SESSION_MAX_MS).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
 export async function providerMinutesToday(env, provider, now = Date.now()) {
-  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(COALESCE(ended_at, ?3) - created_at), 0) AS ms FROM receptionist_calls WHERE provider = ?1 AND created_at >= ?2').bind(provider, dayStart(now), now).first()
+  const r = await env.ONBOARDING_DB.prepare('SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?3), created_at + ?4) - created_at), 0) AS ms FROM receptionist_calls WHERE provider = ?1 AND created_at >= ?2').bind(provider, dayStart(now), now, VOICE_SESSION_MAX_MS).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
 async function openSessions(env, customerId, now) {
@@ -97,6 +100,9 @@ export async function startCustomerVoiceSession(env, customer, { existing = null
     if (row?.ended_at) state.voice.endedAt = Number(row.ended_at)
   }
   if (state.voice && !state.voice.endedAt && now - state.voice.startedAt < VOICE_SESSION_MAX_MS) return { ok: false, error: 'voice_in_progress', httpStatus: 409 }
+  // A retry on the same conversation keeps the previous attempt's record (how it ended, its disconnect record): the
+  // console's session history and the diagnosis of a dropped call must not vanish because the caller tried again.
+  if (state.voice) state.voiceHistory = [...(state.voiceHistory || []), summary(state.voice)].slice(-5)
   const settings = test?.voiceId ? { voice: test.voiceId } : null
   const voice = { provider, startedAt: now, connects: 0, test: Boolean(test), by: test?.admin?.ref || null, settings }
   let payload
@@ -117,7 +123,11 @@ export async function startCustomerVoiceSession(env, customer, { existing = null
   }
   state.voice = voice
   await db.prepare('UPDATE receptionist_conversations SET state = ?3, updated_at = ?4 WHERE id = ?1 AND customer = ?2').bind(conv.id, customer.id, JSON.stringify(state), now).run()
-  const token = existing?.token || conv.token
+  // The conversation's token authorizes every later request of this session (tools, transcript, end). A loaded
+  // conversation carries none (the token is derived, never stored), so it is derived again here: without it a
+  // "Talk again" on the same conversation handed the page no token and the retry could never report, end or run a
+  // tool (production 2026-11-22: two such sessions stayed open).
+  const token = existing ? await conversationToken(env, conv.id) : conv.token
   return { ok: true, provider, conversationId: conv.id, token, ...payload }
 }
 
@@ -172,8 +182,11 @@ export async function customerVoiceTool(env, { customer, conv }, name, input, us
 
 export const customerVoiceTranscript = (env, { customer, conv }, lines, now = Date.now()) => appendVoiceTranscript(env, customer, conv, lines, now)
 
-// End of the voice part (the conversation itself stays open: the customer can keep typing). Metrics are numbers only.
-export async function endCustomerVoiceSession(env, { customer, conv }, { metrics = {}, outcome = null } = {}, now = Date.now()) {
+// End of the voice part (the conversation itself stays open: the customer can keep typing). Metrics are numbers only;
+// `outcome` is a code (ended | a failure code such as provider_refused); `disconnect` is the adapter's record of how
+// the connection ended when it did not end cleanly (cleanDisconnect: codes, the WebSocket close code, the provider's
+// reason text), the evidence a dropped call is diagnosed from.
+export async function endCustomerVoiceSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null } = {}, now = Date.now()) {
   const voice = conv.state.voice
   if (voice.endedAt) return { ok: true, already: true, voice: summary(voice) }
   const seconds = Math.max(0, Math.round((now - voice.startedAt) / 1000))
@@ -181,6 +194,8 @@ export async function endCustomerVoiceSession(env, { customer, conv }, { metrics
   voice.endedAt = now
   voice.estimatedMicros = estimateMicros(voice.provider, seconds)
   if (typeof outcome === 'string' && /^[a-z_]{1,32}$/.test(outcome)) voice.outcome = outcome
+  const dc = cleanDisconnect(disconnect)
+  if (dc) voice.disconnect = dc
   // What the tools did, from the engine's own events (Retell runs them server-side; the others through runVoiceTool).
   if (!conv.state.tools?.length) {
     const { results } = await env.ONBOARDING_DB.prepare('SELECT kind, ok, detail, at FROM receptionist_events WHERE conversation_id = ?1 AND customer = ?2 ORDER BY id').bind(conv.id, customer.id).all()
@@ -193,7 +208,7 @@ export async function endCustomerVoiceSession(env, { customer, conv }, { metrics
   ])
   return { ok: true, voice: summary(voice) }
 }
-const summary = (v) => ({ provider: v.provider, startedAt: v.startedAt, endedAt: v.endedAt || null, test: Boolean(v.test), metrics: v.metrics || {}, estimatedMicros: v.estimatedMicros ?? null, outcome: v.outcome || null })
+const summary = (v) => ({ provider: v.provider, startedAt: v.startedAt, endedAt: v.endedAt || null, test: Boolean(v.test), metrics: v.metrics || {}, estimatedMicros: v.estimatedMicros ?? null, outcome: v.outcome || null, disconnect: v.disconnect || null })
 
 // The voice sessions of ONE business, newest first, as the admin console's test history: provider, kind (admin test
 // on the customer path | Lab | customer), timing, the adapter's audio evidence, whether the availability and booking
@@ -217,28 +232,36 @@ export async function voiceSessionHistory(env, customerId, { limit = 20, now = D
     }
     const v = s.voice?.provider ? s.voice : s.lab?.provider ? s.lab : null
     if (!v) continue
-    const m = v.metrics || {}
     const tools = s.tools || []
     const availability = tools.some((t) => t.name === 'find_available_times' && t.ok)
     const booking = tools.some((t) => t.name === 'book_appointment' && t.ok)
-    const audio = m.micLive === 1 && m.audioReceived === 1
-    const endedAt = v.endedAt || null
-    out.push({
-      id: row.id,
-      provider: v.provider,
-      kind: s.lab?.provider ? 'lab' : v.test ? 'test' : 'customer',
-      dryRun: s.lab?.provider ? s.lab.dryRun !== false : Boolean(v.test),
-      startedAt: v.startedAt || row.created_at,
-      endedAt,
-      inProgress: !endedAt && now - (v.startedAt || row.created_at) < VOICE_SESSION_MAX_MS,
-      audio: { micLive: m.micLive === 1, audioReceived: m.audioReceived === 1 },
-      tools: { availability, booking, count: tools.length },
-      outcome: v.outcome || row.outcome || null,
-      booked: Boolean(s.booked),
-      simulated: Boolean(s.booked?.simulated),
-      estimatedMicros: v.estimatedMicros ?? null,
-      evidence: Boolean(endedAt) && audio && availability && booking && now - endedAt <= 30 * 864e5,
-    })
+    const entry = (x, id, withTools) => {
+      const m = x.metrics || {}
+      const audio = m.micLive === 1 && m.audioReceived === 1
+      const endedAt = x.endedAt || null
+      return {
+        id,
+        provider: x.provider,
+        kind: s.lab?.provider ? 'lab' : x.test ? 'test' : 'customer',
+        dryRun: s.lab?.provider ? s.lab.dryRun !== false : Boolean(x.test),
+        startedAt: x.startedAt || row.created_at,
+        endedAt,
+        inProgress: !endedAt && now - (x.startedAt || row.created_at) < VOICE_SESSION_MAX_MS,
+        audio: { micLive: m.micLive === 1, audioReceived: m.audioReceived === 1 },
+        tools: withTools ? { availability, booking, count: tools.length } : { availability: false, booking: false, count: 0 },
+        outcome: x.outcome || (withTools ? row.outcome : null) || null,
+        disconnect: x.disconnect || null,
+        booked: withTools && Boolean(s.booked),
+        simulated: withTools && Boolean(s.booked?.simulated),
+        estimatedMicros: x.estimatedMicros ?? null,
+        evidence: withTools && Boolean(endedAt) && audio && availability && booking && now - endedAt <= 30 * 864e5,
+      }
+    }
+    out.push(entry(v, row.id, true))
+    // Earlier attempts in the same conversation (a retry after a dropped call), newest first; their tools are not
+    // separable from the conversation's, so they carry their own ending only.
+    const earlier = Array.isArray(s.voiceHistory) ? s.voiceHistory : []
+    for (let i = earlier.length - 1; i >= 0; i--) if (earlier[i]?.provider) out.push(entry(earlier[i], `${row.id}#${i + 1}`, false))
   }
   return out
 }

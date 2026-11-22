@@ -509,6 +509,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   whose receptionist is OFF still opens its chat page for the signed-in platform admin's ?test= (voice only, dry run,
   `testOnly`); customers/owners keep "Chat isn't available" (refusal as a code). Never turn a test business's
   receptionist on for customers to make a test possible.
+  How a call ended is RECORDED, never guessed (2026-11-22): a non-clean end carries its failure code as the outcome
+  plus a disconnect record (src/voice/elevenlabs.js disconnectInfo → voice-session end → sessions.js cleanDisconnect:
+  phase start|live|reconnect, code, WebSocket closeCode, the provider's reason as printable ASCII ≤ 120 chars; never
+  audio/transcript/credentials). The end is sent keepalive and on pagehide; the handshake times out (connect_timeout);
+  an open receptionist_calls row counts at most the 15-min ceiling toward daily minutes; a resumed session returns the
+  conversation's token again and keeps earlier attempts in state.voiceHistory. The page explains the code and keeps the
+  microphone; an admin test page shows the record (data-test-diag); the Voice Lab's last-test line and providerVerification
+  show/count it (path connection). Never map a failure to "The call dropped" without recording why.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in

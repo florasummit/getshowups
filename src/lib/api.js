@@ -1,11 +1,13 @@
 // Same-origin JSON helper. Session auth rides on the HttpOnly cookie; nothing secret lives here.
-export async function api(path, { method = 'GET', body } = {}) {
+// keepalive: the request completes even if the page is closing (a voice session's end record on unload; small bodies only).
+export async function api(path, { method = 'GET', body, keepalive = false } = {}) {
   try {
     const res = await fetch(path, {
       method,
       credentials: 'same-origin',
       headers: body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(keepalive ? { keepalive: true } : {}),
     })
     return { status: res.status, data: await res.json().catch(() => ({})) }
   } catch {

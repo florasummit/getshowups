@@ -11,11 +11,11 @@ import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
 import { COST_ESTIMATES, estimateMicros, providerStatus } from '../server/voice/providers.js'
 import { VOICE_TOOL_NAMES } from '../server/voice/tools.js'
-import { startLabSession, loadLabSession, endLabSession, cleanMetrics } from '../server/voice/sessions.js'
+import { startLabSession, loadLabSession, endLabSession, cleanMetrics, cleanDisconnect } from '../server/voice/sessions.js'
 import { connectElevenLabs, fetchSignedUrl, elevenlabsBase, elevenlabsOverrides, elevenlabsDynamicVariables, SIGNED_URL_TTL_MS, MAX_CONNECTS_PER_SESSION } from '../server/voice/elevenlabs.js'
 import * as connectApi from '../functions/api/platform/voice-lab/elevenlabs.js'
 import { createTurnMetrics, ADAPTER_STATES } from '../src/voice/adapter.js'
-import { createElevenLabsAdapter, MAX_RECONNECTS } from '../src/voice/elevenlabs.js'
+import { createElevenLabsAdapter, disconnectInfo, MAX_RECONNECTS } from '../src/voice/elevenlabs.js'
 
 const ORIGIN = 'https://getshowups.com'
 const EL = 'http://127.0.0.1:9931'
@@ -447,7 +447,7 @@ test('browser adapter: a refused connection ends in a coded error; stop() ends t
   const refusing = createElevenLabsAdapter({ sdk: sdk.load, post: async () => ({ status: 404, data: { error: 'elevenlabs_not_configured' } }) })
   await refusing.start({ customer: 'alpha', id: 'c', token: 't', onEvent: (type, payload) => events.push({ type, ...payload }) })
   assert.equal(refusing.state, 'failed')
-  assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'elevenlabs_not_configured', fatal: true }])
+  assert.deepEqual(events.filter((e) => e.type === 'error'), [{ type: 'error', code: 'elevenlabs_not_configured', fatal: true, disconnect: { phase: 'start', code: 'elevenlabs_not_configured', closeCode: null, reason: null } }])
   assert.equal(sdk.sessions.length, 0)
   const sdkFail = fakeSdk()
   const failing = createElevenLabsAdapter({ sdk: sdkFail.load, post: async () => ({ status: 200, data: { signedUrl: 'wss://api.elevenlabs.io/fail', overrides: {}, clientTools: [] } }) })
@@ -468,4 +468,101 @@ test('browser adapter: a refused connection ends in a coded error; stop() ends t
   assert.equal(ev3.at(-2).type, 'metrics')
   await adapter.stop() // idempotent
   assert.equal(adapter.state, 'stopped')
+})
+
+// Production 2026-11-22: three ElevenLabs test calls on the customer path ended 3–5 s after the signed URL with "The
+// call dropped" and NOTHING recorded about why (the SDK's SessionConnectionError carried the WebSocket close code and
+// the provider's reason; the adapter threw them away and reported no outcome), two more never ended at all.
+const CUSTOMER_ROUTES = { connect: '/api/receptionist/alpha/voice-connect', tool: '/api/receptionist/alpha/voice-tool', session: '/api/receptionist/alpha/voice-session' }
+const START = { signedUrl: 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=agent_abc123&conversation_signature=s0', overrides: {}, clientTools: [] }
+const sdkThrowing = (make) => ({ load: async () => ({ Conversation: { startSession: async () => { throw make() } } }) })
+const refusal = () => Object.assign(new Error("Override for field 'first_message' is not allowed by config"), { name: 'SessionConnectionError', closeCode: 1008, closeReason: "Override for field 'first_message' is not allowed by config\u0007\n <x>" })
+
+test('browser adapter (customer path): a WebSocket the provider closes during the handshake ends the session with the close code and its reason (sanitized) as the outcome and disconnect record, posted keepalive; no close code → socket_error; codes map per RFC 6455; a second start records again', async () => {
+  const posts = []
+  const post = async (path, opts) => {
+    posts.push([path, opts])
+    return { status: 200, data: { ok: true } }
+  }
+  const events = []
+  const adapter = createElevenLabsAdapter({ sdk: sdkThrowing(refusal).load, post, routes: CUSTOMER_ROUTES })
+  await adapter.start({ customer: 'alpha', id: 'c1', token: 't1', onEvent: (type, payload) => events.push({ type, ...payload }), connect: START })
+  assert.equal(adapter.state, 'failed')
+  const ends = posts.filter(([p, o]) => p === CUSTOMER_ROUTES.session && o.body.action === 'end')
+  assert.equal(ends.length, 1)
+  const record = { phase: 'start', code: 'provider_refused', closeCode: 1008, reason: "Override for field 'first_message' is not allowed by config <x>" }
+  assert.deepEqual([ends[0][1].keepalive, ends[0][1].body.outcome, ends[0][1].body.disconnect, ends[0][1].body.id], [true, 'provider_refused', record, 'c1'])
+  assert.deepEqual(cleanDisconnect(ends[0][1].body.disconnect), record, 'the server keeps exactly this record')
+  assert.equal(posts.filter(([p]) => p === CUSTOMER_ROUTES.connect).length, 0, 'the start payload was used: no signed URL minted')
+  const fatal = events.find((e) => e.type === 'error')
+  assert.deepEqual([fatal.code, fatal.fatal, fatal.disconnect], ['provider_refused', true, record])
+  assert.deepEqual(events.at(-1), { type: 'status', state: 'failed', reason: 'provider_refused', reconnects: 0, disconnect: record })
+  // Talk again on the same adapter: a fresh attempt, a fresh record (the "ended once" latch resets per start).
+  await adapter.start({ customer: 'alpha', id: 'c1', token: 't1', onEvent: () => {}, connect: START })
+  assert.equal(posts.filter(([p, o]) => p === CUSTOMER_ROUTES.session && o.body.action === 'end').length, 2)
+  // The code table.
+  assert.deepEqual(disconnectInfo('start', Object.assign(new Error('The connection was closed due to a socket error.'), { name: 'SessionConnectionError' })), { phase: 'start', code: 'socket_error', closeCode: null, reason: 'The connection was closed due to a socket error.' })
+  assert.deepEqual(disconnectInfo('live', { reason: 'error', message: 'The connection was closed by the server.', closeCode: 1006, closeReason: undefined }), { phase: 'live', code: 'socket_closed', closeCode: 1006, reason: null })
+  assert.deepEqual(disconnectInfo('live', { reason: 'error', closeCode: 1000 }), { phase: 'live', code: 'agent_ended', closeCode: 1000, reason: null })
+  assert.deepEqual(disconnectInfo('start', { closeCode: 1000, closeReason: '' }), { phase: 'start', code: 'closed_before_start', closeCode: 1000, reason: null })
+  assert.deepEqual(disconnectInfo('reconnect', Object.assign(new Error('connect refused'), { code: 'reconnect_limit' })), { phase: 'reconnect', code: 'reconnect_limit', closeCode: null, reason: null })
+  assert.deepEqual([disconnectInfo('start', { closeCode: 1009 }).code, disconnectInfo('start', { closeCode: 1011 }).code, disconnectInfo('start', { closeCode: 4000 }).code, disconnectInfo('start', { closeCode: 99999 }).closeCode, disconnectInfo('start', {}).code, disconnectInfo('live', {}).code], ['payload_too_large', 'provider_error', 'provider_closed', null, 'connect_failed', 'connection_lost'])
+  assert.equal(disconnectInfo('start', { closeCode: 1008, closeReason: 'x'.repeat(500) }).reason.length, 120)
+  // A live drop after both reconnects: the last close details are the record; the reconnects minted fresh URLs.
+  const sdk = fakeSdk()
+  const posts2 = []
+  let n = 0
+  const live = createElevenLabsAdapter({ sdk: sdk.load, post: async (path, opts) => { posts2.push([path, opts]); return path === CUSTOMER_ROUTES.connect ? { status: 200, data: { ...START, signedUrl: `${START.signedUrl.slice(0, -2)}s${++n}` } } : { status: 200, data: { ok: true } } }, routes: CUSTOMER_ROUTES })
+  const ev2 = []
+  await live.start({ customer: 'alpha', id: 'c2', token: 't2', onEvent: (type, payload) => ev2.push({ type, ...payload }), connect: START })
+  await tick()
+  assert.equal(live.state, 'connected')
+  for (let i = 0; i < 3; i++) {
+    sdk.sessions[i].opts.onDisconnect({ reason: 'error', message: 'The connection was closed by the server.', closeCode: 1006, context: { type: 'close', code: 1006 } })
+    await tick()
+    await tick()
+  }
+  assert.equal(live.state, 'failed')
+  const end2 = posts2.find(([p, o]) => p === CUSTOMER_ROUTES.session && o.body.action === 'end')
+  assert.deepEqual([end2[1].body.outcome, end2[1].body.disconnect, end2[1].body.metrics.reconnects], ['disconnected', { phase: 'live', code: 'socket_closed', closeCode: 1006, reason: null }, 2])
+})
+
+test('browser adapter (customer path): a handshake the provider never confirms times out (connect_timeout) and the late session is ended; the page closing during a call ends the provider session and records page_closed (keepalive), once', async () => {
+  let late = null
+  const sdkHanging = { load: async () => ({ Conversation: { startSession: () => new Promise((resolve) => { late = { ended: false, endSession: async () => { late.ended = true } }; setTimeout(() => resolve(late), 60) }) } }) }
+  const posts = []
+  const post = async (path, opts) => {
+    posts.push([path, opts])
+    return { status: 200, data: { ok: true } }
+  }
+  const hanging = createElevenLabsAdapter({ sdk: sdkHanging.load, post, routes: CUSTOMER_ROUTES, connectTimeoutMs: 15 })
+  const events = []
+  await hanging.start({ customer: 'alpha', id: 'c3', token: 't3', onEvent: (type, payload) => events.push({ type, ...payload }), connect: START })
+  assert.equal(hanging.state, 'failed')
+  const end = posts.find(([, o]) => o.body.action === 'end')
+  assert.deepEqual([end[1].body.outcome, end[1].body.disconnect], ['connect_timeout', { phase: 'start', code: 'connect_timeout', closeCode: null, reason: null }])
+  await new Promise((r) => setTimeout(r, 100))
+  assert.equal(late?.ended, true, 'the session that arrived after the timeout was ended, never kept')
+  // pagehide during the handshake (a fake window; the adapter registers/unregisters its listener per session).
+  const listeners = {}
+  globalThis.window = { addEventListener: (n, f) => (listeners[n] = f), removeEventListener: (n) => delete listeners[n] }
+  try {
+    late = null
+    const posts2 = []
+    const closing = createElevenLabsAdapter({ sdk: sdkHanging.load, post: async (p, o) => { posts2.push([p, o]); return { status: 200, data: { ok: true } } }, routes: CUSTOMER_ROUTES, connectTimeoutMs: 5000 })
+    const started = closing.start({ customer: 'alpha', id: 'c4', token: 't4', onEvent: () => {}, connect: START })
+    await tick()
+    assert.equal(typeof listeners.pagehide, 'function')
+    listeners.pagehide()
+    const ends = posts2.filter(([, o]) => o.body.action === 'end')
+    assert.equal(ends.length, 1)
+    assert.deepEqual([ends[0][1].keepalive, ends[0][1].body.outcome, ends[0][1].body.disconnect.code], [true, 'page_closed', 'page_closed'])
+    await started
+    await new Promise((r) => setTimeout(r, 100))
+    assert.equal(late?.ended, true, 'the provider session that arrived after the page closed was ended')
+    assert.equal(posts2.filter(([, o]) => o.body.action === 'end').length, 1, 'ended once')
+    assert.equal(listeners.pagehide, undefined, 'listener removed')
+  } finally {
+    delete globalThis.window
+  }
 })

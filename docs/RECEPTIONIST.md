@@ -122,6 +122,21 @@ rate limits; `VOICE_PROVIDERS_DISABLED` (comma list) is the emergency off switch
 (src/receptionist/ChatPage.jsx) runs Retell's SDK or the shared adapters (src/voice/openai.js, elevenlabs.js) with the
 customer routes; OpenAI's short-lived client secret and ElevenLabs' signed URL are the only credentials the browser sees.
 
+**How a call ended is recorded** (2026-11-22, after three ElevenLabs test calls dropped with nothing to read): a session
+that does not end cleanly ends with its failure code as the outcome AND a disconnect record (`state.voice.disconnect`,
+`server/voice/sessions.js cleanDisconnect`): `phase` start | live | reconnect, `code`, the WebSocket `closeCode` (RFC
+6455) and the provider's close `reason` as printable ASCII ≤ 120 chars. The ElevenLabs adapter derives it from the
+SDK's `SessionConnectionError` / `onDisconnect` details (`disconnectInfo`: 1000 before the handshake →
+`closed_before_start`, 1006 → `socket_closed`, 1008 → `provider_refused` (an override the agent does not allow, a
+missing dynamic variable, an unauthorized agent, a plan limit — the reason text says which), 1009 → `payload_too_large`,
+1011–1013 → `provider_error`, no code → `socket_error` / `connect_failed`; a handshake unanswered for 20 s →
+`connect_timeout`, the page closing → `page_closed`). The end request is sent `keepalive` and on `pagehide`, so no
+session stays open; an open `receptionist_calls` row counts at most the 15-minute ceiling toward the daily minutes. A
+retry on the same conversation returns the conversation's token again and keeps the earlier attempt in
+`state.voiceHistory` (console history: `<id>#n`). The chat page tells the caller what happened per code and keeps the
+microphone; an admin test page also shows the record (`data-test-diag`); the Voice Lab's "Last test" line shows it in
+words with the close code and reason, and `providerVerification` / rollout monitoring count it as a connection failure.
+
 **Admin test sessions on the customer path**: `/chat/<id>?test=<provider>[&voice=<id>]` for a signed-in platform
 admin on an admin-marked TEST business (server-checked; anyone else: 403): the real customer path with that provider,
 dry-run tools, not gated by the Retell release list or the receptionist on/off switch. The chat page opens for that

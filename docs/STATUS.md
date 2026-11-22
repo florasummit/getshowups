@@ -2,6 +2,65 @@
 
 _Update at the end of every task. Newest first._
 
+## ElevenLabs test calls dropping on the customer path: diagnosis + diagnostics (2026-11-22) — fix/elevenlabs-disconnect-diagnostics (no migration)
+
+- Report: `/chat/gsu-stripe-test-pools?test=elevenlabs&from=admin` showed "The call dropped" on every attempt.
+- Production records (codes and timings only; no logs exist for the browser side): three ElevenLabs admin-test
+  sessions on gsu-stripe-test-pools (20:10, 21:21, 21:22 UTC) each got a signed URL (POST /voice 200, a
+  receptionist_calls row) and ended 3–5 s later with metrics turns 0 · micLive 0 · audioReceived 0 · reconnects 0,
+  connects 1, outcome null, no receptionist_events. Two "Talk again" attempts on the same conversations never ended at
+  all (no metrics); the third attempt was a NEW conversation. The 19:30 session on gsu-journey-test (same code, same
+  agent) ran 70 s. Both businesses' connection payloads have the same shape and size (prompt 6.0 KB vs 6.7 KB, the same
+  four dynamic variables, no voice override), and PR #123 touched nothing on the connect path.
+- What the records could NOT say: why. The SDK rejects `startSession` with `SessionConnectionError { closeCode,
+  closeReason }` when the provider closes the WebSocket during the handshake (its own reason text, e.g. an override the
+  agent does not allow → 1008), and the adapter threw both away: it reported `connect_failed` → the page's generic
+  "The call dropped", sent the end WITHOUT an outcome (so the verification record called it a clean end with "audio not
+  measured"), and stored no disconnect record. Confirmed root cause of the diagnosis gap: a client lifecycle bug (lost
+  close code), not a session limit (0 of 3 concurrent, minutes under the cap at the time) and not a tool failure (no
+  tool ran). Whether the provider's 3–5 s close is a 1008 policy refusal (agent/overrides/account) or a transport
+  failure is exactly what the next test will now record; it cannot be read from the existing rows.
+- Three more defects confirmed from the same rows and reproduced in tests:
+  1. **Retry lost its token**: `startCustomerVoiceSession` returned `token: existing?.token || conv.token`, but a loaded
+     conversation carries no token (it is derived, never stored) → a "Talk again" on the same conversation handed the
+     page `token: undefined`; every later request of that session (tools, transcript, END, refresh) answered 404, the
+     session stayed open, and the page's refresh dropped the conversation → the next attempt was a new conversation.
+     Fix: the token is derived again for a resumed conversation (`conversationToken`); the page also keeps its own.
+  2. **Open rows ate the day**: `businessMinutesToday` / `providerMinutesToday` / `labMinutesToday` counted a row
+     without `ended_at` as running "until now": the two open rows would have exhausted gsu-stripe-test-pools' 120 min
+     by ~21:41 UTC (`voice_limit` for the rest of the UTC day) and the provider's 600 min overnight. Fix: an open row
+     counts at most the session ceiling (15 min).
+  3. **No end on page close, no handshake bound**: the end request was a plain fetch (cancelled on unload) and a
+     socket that opened but never confirmed left "Connecting…" forever. Fix: the end is sent `keepalive`, `pagehide`
+     ends the provider session and records `page_closed`, the handshake times out after 20 s (`connect_timeout`) and a
+     late session is ended, never kept.
+- Diagnostics now recorded on every non-clean end (src/voice/elevenlabs.js `disconnectInfo` → voice-session `end`
+  `{ outcome, disconnect: { phase: start|live|reconnect, code, closeCode, reason } }` → server/voice/sessions.js
+  `cleanDisconnect`, stored on `state.voice.disconnect`; the Lab's end carries it too): codes map RFC 6455 close codes
+  (1000 before the handshake → closed_before_start, 1006 → socket_closed, 1008 → provider_refused, 1009 →
+  payload_too_large, 1011–1013 → provider_error, other → provider_closed, no code → socket_error / connect_failed),
+  the reason is the provider's close text as printable ASCII ≤ 120 chars (never audio, transcript or a credential).
+  `providerVerification.latest` / `voiceSessionHistory` / rollout `connectionFailures` treat a disconnect record or a
+  failure outcome as a connection failure; a retry on the same conversation keeps earlier attempts in
+  `state.voiceHistory` (the console history lists them as `<id>#n`).
+- UX: the chat page says what happened per code (refused before start / hung up before start / connection closed /
+  didn't answer in time / …) and keeps the microphone for a retry; on an ADMIN test page a line under the call bar
+  shows the record (`data-test-diag`: code, phase, close code, reason, the session id) and keeps it across a retry
+  until a new call ends. The Voice Lab's "Last test" line adds the connection record in words + the close code and
+  reason (`rollout-state.js DISCONNECT`); Advanced details show "Last session ending".
+- Reproduced in a real browser against the local e2e server (temporary ElevenLabs stand-in + Playwright
+  `routeWebSocket`, not committed): a 1008 close → page "The voice service refused this call before it started", record
+  `provider_refused` 1008 + reason, retry on the same conversation with its token, both attempts ended and listed;
+  1006 → `socket_closed`; a hanging handshake → `connect_timeout` after 20 s. The browser suite cannot carry this
+  (four specs assert ElevenLabs is "Not configured" there); the adapter is covered in node with the SDK's error shape.
+- Tests: 818 unit (3 new/extended: adapter disconnect records, timeout, pagehide, keepalive; customer path record,
+  sanitising, history, verification path, token on retry, capped minute sums); browser suite unchanged.
+- Production state untouched: ElevenLabs staged, six businesses on Retell, no promotion, no booking, no message.
+- Next (human): open the Voice Lab → Test ElevenLabs on gsu-stripe-test-pools once more. If it drops again, the card
+  and the test page now show the close code and the provider's reason; a 1008 with an "Override … not allowed" or
+  "Missing required dynamic variables" text is an agent-configuration fix (scripts/elevenlabs-setup.mjs --agent-id …
+  --apply), a quota text is an ElevenLabs account matter, 1006/socket_error is the network path.
+
 ## ElevenLabs verification diagnosis + Voice Lab consolidation (2026-11-22) — feat/voice-lab-consolidation (no migration)
 
 - Diagnosis (production records, codes only): the founder's ElevenLabs test on 2026-11-22 17:37 UTC (conversation on

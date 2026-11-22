@@ -24,7 +24,9 @@ export async function labMinutesToday(env, now = Date.now()) {
   const day = now - (now % 86_400_000)
   // Lab rows only: 'lab_…' call ids (Retell Lab calls take Retell's id but keep provider 'retell-lab'); customer
   // sessions on OpenAI/ElevenLabs ('web_…', server/voice/customer.js) have their own ceilings.
-  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(COALESCE(ended_at, ?2) - created_at), 0) AS ms FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND created_at >= ?1").bind(day, now).first()
+  // A row never ended (the page closed before its end was recorded) counts at most the session ceiling, never "until
+  // now": otherwise one abandoned call eats the whole day's budget by itself.
+  const r = await env.ONBOARDING_DB.prepare("SELECT COALESCE(SUM(MIN(COALESCE(ended_at, ?2), created_at + ?3) - created_at), 0) AS ms FROM receptionist_calls WHERE (provider = 'retell-lab' OR (provider IN ('openai', 'elevenlabs') AND call_id LIKE 'lab_%')) AND created_at >= ?1").bind(day, now, LAB_SESSION_MAX_MS).first()
   return Math.ceil(Number(r?.ms || 0) / 60_000)
 }
 
@@ -85,13 +87,36 @@ export async function loadLabSession(env, customerId, id, token) {
 const METRIC_KEYS = ['firstResponseMs', 'medianResponseMs', 'p95ResponseMs', 'turns', 'interruptions', 'toolCalls', 'toolFailures', 'repeatedQuestions', 'reconnects', 'audioSeconds', 'inputTokens', 'outputTokens', 'providerCostMicros', 'micLive', 'audioReceived']
 export const cleanMetrics = (m) => Object.fromEntries(Object.entries(m && typeof m === 'object' ? m : {}).filter(([k, v]) => METRIC_KEYS.includes(k) && Number.isFinite(v) && v >= 0).map(([k, v]) => [k, Math.round(v)]))
 
-export async function endLabSession(env, { customer, conv }, { metrics = {}, outcome = null } = {}, now = Date.now()) {
+// How a session's connection ended when it did not end cleanly, as the browser adapter measured it
+// (src/voice/elevenlabs.js disconnectInfo, src/voice/openai.js): phase (start = the handshake, live, reconnect), a code,
+// the WebSocket close code (RFC 6455, 1000–4999) and the provider's close reason as printable ASCII (≤ 120 chars).
+// Anything else is dropped; a record without a valid code is no record. Never audio, transcript or a credential.
+const PHASES = new Set(['start', 'live', 'reconnect'])
+export function cleanDisconnect(d) {
+  if (!d || typeof d !== 'object') return null
+  const code = typeof d.code === 'string' && /^[a-z_]{1,32}$/.test(d.code) ? d.code : null
+  if (!code) return null
+  const closeCode = Number.isInteger(d.closeCode) && d.closeCode >= 1000 && d.closeCode <= 4999 ? d.closeCode : null
+  const reason =
+    typeof d.reason === 'string'
+      ? d.reason
+          .replace(/[^\x20-\x7e]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 120) || null
+      : null
+  return { phase: PHASES.has(d.phase) ? d.phase : 'start', code, closeCode, reason }
+}
+
+export async function endLabSession(env, { customer, conv }, { metrics = {}, outcome = null, disconnect = null } = {}, now = Date.now()) {
   const lab = conv.state.lab
   const seconds = Math.max(0, Math.round((now - lab.startedAt) / 1000))
   lab.metrics = { ...cleanMetrics(lab.metrics), ...cleanMetrics(metrics), durationSeconds: seconds }
   lab.endedAt = now
   lab.estimatedMicros = estimateMicros(lab.provider, seconds)
   if (typeof outcome === 'string' && /^[a-z_]{1,32}$/.test(outcome)) lab.outcome = outcome
+  const dc = cleanDisconnect(disconnect)
+  if (dc) lab.disconnect = dc
   // Retell runs the engine on our server (no browser tool events): read what the tools did from the engine's own
   // receptionist_events for this conversation, so the Lab summary is the same for every provider.
   if (!conv.state.tools?.length) {
@@ -115,6 +140,7 @@ export function labSummary(conv) {
     endedAt: lab.endedAt || null,
     status: conv.status,
     outcome: lab.outcome || conv.outcome || null,
+    disconnect: lab.disconnect || null,
     booked: Boolean(conv.state.booked),
     simulated: Boolean(conv.state.booked?.simulated),
     tools: conv.state.tools || [],

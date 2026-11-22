@@ -42,6 +42,24 @@ const VOICE_ERRORS = {
   voice_in_progress: 'A call is already running in this conversation.',
   test_not_allowed: 'Test sessions are for signed-in platform admins only.',
   not_test_business: 'Test sessions run only on a test business.',
+  // How a call ended when it did not end cleanly (src/voice/elevenlabs.js disconnectInfo codes): what happened and what
+  // to do, in the caller's words; the technical record (close code, the provider's reason) goes to the session record
+  // and is shown on an admin test page only.
+  provider_refused: 'The voice service refused this call before it started. You can try again or keep typing.',
+  closed_before_start: 'The voice service hung up before the call started. You can try again or keep typing.',
+  socket_closed: 'The call dropped: the connection to the voice service closed. Check your internet and try again, or keep typing.',
+  socket_error: 'We couldn’t reach the voice service. Check your internet and try again, or keep typing.',
+  connect_timeout: 'The voice service didn’t answer in time. You can try again or keep typing.',
+  payload_too_large: 'Couldn’t start talking (the call setup was too large). You can keep typing.',
+  provider_error: 'The voice service ended the call with an error. You can try again or keep typing.',
+  provider_closed: 'The voice service ended the call. You can try again or keep typing.',
+  connection_lost: 'The call dropped. You can talk again or keep typing.',
+  disconnected: 'The call dropped and reconnecting didn’t work. You can talk again or keep typing.',
+  reconnect_failed: 'The call dropped and reconnecting didn’t work. You can talk again or keep typing.',
+  connect_failed: 'Couldn’t start talking. Try again or keep typing.',
+  rate_limited: 'Too many calls were started at once. Wait a moment, then try again.',
+  session_expired: 'This call reached its time limit. You can talk again or keep typing.',
+  reconnect_limit: 'The call dropped too many times. You can talk again or keep typing.',
 }
 // Why the server refused to open the page as an admin test (codes only).
 const TEST_REFUSED = {
@@ -158,7 +176,8 @@ export default function ChatPage({ id }) {
 
   const startVoice = async () => {
     if (voice.state === 'connecting' || voice.state === 'live' || outcome.ended) return
-    setVoice({ state: 'connecting', live: [] })
+    // A retry keeps the last call's disconnect record on the page until a new result replaces it.
+    setVoice((v) => ({ state: 'connecting', live: [], diag: v.diag || null }))
     // Microphone first, inside the click (browsers tie the permission prompt and audio playback to the gesture): a
     // blocked or missing microphone is reported before a call is created, and the voice SDK loads meanwhile.
     const sdk = import('retell-client-js-sdk')
@@ -171,8 +190,10 @@ export default function ChatPage({ id }) {
       return setVoice({ state: 'error', live: [], message: err?.name === 'NotFoundError' ? VOICE_ERRORS.noMic : VOICE_ERRORS.mic })
     }
     const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: { ...(conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() }), ...(test ? { test: { provider: test, ...(testVoice() ? { voiceId: testVoice() } : {}) } } : {}) } })
-    if (status !== 200) return setVoice({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start })
-    const c = { id: data.conversationId, token: data.token }
+    if (status !== 200) return setVoice((v) => ({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start, diag: v.diag || null }))
+    // The conversation's token authorizes every later request of this call (tools, transcript, end): a session resumed on
+    // this conversation keeps the token this page already holds.
+    const c = { id: data.conversationId, token: data.token || (conv?.id === data.conversationId ? conv.token : data.token) }
     setConv(c)
     // The server chose the provider (the business's active one, or the admin's test candidate). Retell runs its own
     // SDK below; OpenAI Realtime and ElevenLabs run through the shared adapters, with every tool on our server.
@@ -190,7 +211,10 @@ export default function ChatPage({ id }) {
             if (p.state === 'stopped' || p.state === 'failed') {
               callRef.current = null
               setAudioBlocked(false)
-              setVoice(p.state === 'failed' ? { state: 'error', live: [], message: VOICE_ERRORS[p.reason] || VOICE_ERRORS.dropped } : { state: 'ended', live: [] })
+              // A failure carries the adapter's disconnect record (phase, code, WebSocket close code, the provider's
+              // reason), the same record the server keeps on the session: shown on an admin test page, kept across a retry.
+              const diag = p.disconnect ? { ...p.disconnect, session: c.id, at: Date.now() } : null
+              setVoice((v) => (p.state === 'failed' ? { state: 'error', live: [], message: VOICE_ERRORS[p.reason] || VOICE_ERRORS.dropped, diag: diag || v.diag || null } : { state: 'ended', live: [], diag: v.diag || null }))
               refresh(c)
             }
             if (p.state === 'connected' && p.audio === 'blocked') setAudioBlocked(true)
@@ -208,7 +232,7 @@ export default function ChatPage({ id }) {
         await adapter.start({ customer: id, id: c.id, token: c.token, onEvent, connect: data })
       } catch (err) {
         callRef.current = null
-        setVoice({ state: 'error', live: [], message: VOICE_ERRORS[err?.code] || (err?.code === 'mic_denied' ? VOICE_ERRORS.mic : VOICE_ERRORS.start) })
+        setVoice((v) => ({ state: 'error', live: [], message: VOICE_ERRORS[err?.code] || (err?.code === 'mic_denied' ? VOICE_ERRORS.mic : VOICE_ERRORS.start), diag: v.diag || null }))
       }
       return
     }
@@ -458,6 +482,13 @@ export default function ChatPage({ id }) {
                     <span className="callbar-text">{voice.message || 'Call ended. Your microphone is off; you can keep typing.'}</span>
                   )}
                 </div>
+              )}
+              {testing && voice.diag && !onCall && (
+                <p className="chat-legal" data-test-diag={voice.diag.code} data-test-diag-close={voice.diag.closeCode ?? ''}>
+                  Recorded on this test session ({voice.diag.session}): {voice.diag.code} {voice.diag.phase === 'live' ? 'during the call' : voice.diag.phase === 'reconnect' ? 'while reconnecting' : 'while connecting'}
+                  {voice.diag.closeCode ? `, WebSocket close ${voice.diag.closeCode}` : ', no WebSocket close code'}
+                  {voice.diag.reason ? `: “${voice.diag.reason}”` : ''}. The Voice Lab shows the same record under the last test. Press the microphone to try again; this record stays until a new call ends.
+                </p>
               )}
               <form
                 className="composer"

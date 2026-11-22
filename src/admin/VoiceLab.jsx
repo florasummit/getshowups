@@ -144,6 +144,7 @@ export default function VoiceLab() {
   const sessionRef = useRef(null)
   const linesRef = useRef([])
   const metricsRef = useRef({})
+  const disconnectRef = useRef(null) // the adapter's disconnect record of a failed session, sent with the end
 
   useEffect(() => {
     document.title = 'Voice Lab · GetShowUps'
@@ -234,7 +235,9 @@ export default function VoiceLab() {
     } catch {
       // metrics are optional
     }
-    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'end', customer: s.customer.id, id: s.id, token: s.token, metrics } })
+    const disconnect = disconnectRef.current
+    disconnectRef.current = null
+    const { status: code, data } = await api('/api/platform/voice-lab/session', { method: 'POST', body: { action: 'end', customer: s.customer.id, id: s.id, token: s.token, metrics, ...(disconnect ? { disconnect } : {}) } })
     adapterRef.current = null
     update((s) => ({ phase: 'done', summary: code === 200 ? data.summary : null, error: code === 200 ? s.error : `Couldn’t close the session (${data?.error || code}).` }))
     setReload((n) => n + 1)
@@ -246,6 +249,7 @@ export default function VoiceLab() {
       const ev = typeof name === 'string' ? { type: name, ...(payload && typeof payload === 'object' ? payload : {}) } : name
       if (!ev || typeof ev !== 'object') return
       if (ev.type === 'status') {
+        if (ev.disconnect) disconnectRef.current = ev.disconnect
         update((s) => ({ connection: ev.state || s.connection, connectionReason: ev.reason || null, mic: ev.mic || s.mic, audio: ev.audio || s.audio }))
         if ((ev.state === 'ended' || ev.state === 'stopped' || ev.state === 'failed') && sessionRef.current && !finishingRef.current) finish()
       } else if (ev.type === 'transcript') {
