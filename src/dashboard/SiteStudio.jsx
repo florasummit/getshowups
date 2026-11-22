@@ -642,6 +642,7 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
             {site.pages.map((p) => (
               <option key={p.slug} value={p.slug}>
                 {p.navLabel}
+                {p.legal ? ' (legal page)' : ''}
               </option>
             ))}
             {site.pages.length < 10 && <option value="__add">+ Add a page…</option>}
@@ -1327,7 +1328,7 @@ function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect
         })}
       </ol>
       <div className="studio-add">
-        <Choice label="Add a section" value={adding} options={[['', 'Choose…'], ...ADDABLE.map((t) => [t, SECTION_LABEL[t]])]} onChange={setAdding} />
+        <Choice label="Add a section" value={adding} options={[['', 'Choose…'], ...(page.legal ? ['text'] : ADDABLE).map((t) => [t, SECTION_LABEL[t]])]} onChange={setAdding} />
         <button
           type="button"
           className="btn btn-sm"

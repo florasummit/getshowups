@@ -12,6 +12,16 @@ const STATUS = {
   connected: ['Connected', 'ok'],
   needs_attention: ['Needs attention', 'bad'],
 }
+// DNS providers we can name from the zone's nameservers, with where to find forwarding for the bare domain.
+const PROVIDER_HELP = {
+  squarespace: { name: 'Squarespace Domains', forward: 'Domains → your domain → Domain forwarding (or “Forwarding”): forward the bare domain to https://www.<domain>, permanent (301), with “forward path” on if offered.', keep: 'Squarespace shows a locked “Squarespace defaults” group (its own website records) and a “Custom records” group. Our www record must be the ONLY www record: if a Squarespace-default www record is still listed, disconnect the old Squarespace site from this domain (Settings → Domains) so that preset is removed. Do not delete MX, TXT, SPF, DKIM, DMARC or google-site-verification records: they are your email and verifications.' },
+  cloudflare: { name: 'Cloudflare', forward: 'DNS: a proxied A record for the bare domain (for example 192.0.2.1) plus a Redirect Rule (or Bulk Redirect) from https://<domain>/* to https://www.<domain>/$1 with “preserve query string”, status 301.', keep: 'Leave MX, TXT (SPF/DKIM/DMARC, verifications) and any other records as they are.' },
+  godaddy: { name: 'GoDaddy', forward: 'Domain settings → Forwarding → add forwarding for the bare domain to https://www.<domain>, Permanent (301). GoDaddy adds the A records forwarding needs; keep the www CNAME you added.', keep: 'Do not remove MX, TXT (SPF/DKIM/DMARC) or verification records.' },
+  namecheap: { name: 'Namecheap', forward: 'Domain → Redirect Domain: <domain> → https://www.<domain>, Permanent (301). Namecheap creates the URL Redirect record for @; keep the www CNAME.', keep: 'Keep MX, TXT and other records.' },
+  wix: { name: 'Wix', forward: 'Domains → Advanced → Domain forwarding (if your plan offers it), or move DNS to a provider that does.', keep: 'Keep MX and TXT records.' },
+  google_cloud: { name: 'Google Cloud DNS', forward: 'Cloud DNS has no HTTP forwarding: either keep DNS where it is and use a forwarding service for the bare domain, or move DNS to a provider with forwarding (Cloudflare, GoDaddy, Namecheap, Squarespace Domains all have it).', keep: 'Keep MX, TXT and verification records.' },
+}
+const providerHelp = (p) => (p && PROVIDER_HELP[p.id]) || { name: p?.name || 'your DNS provider', forward: 'Find “Domain forwarding” / “URL redirect” for the bare domain and forward it to https://www.<domain>, permanent (301), keeping the path if offered. If your provider has no forwarding, you can move DNS to one that does (Cloudflare, GoDaddy, Namecheap, Squarespace Domains).', keep: 'Do not delete MX, TXT (SPF, DKIM, DMARC) or verification records: they are your email and verifications.' }
 const ERRORS = {
   invalid_domain: 'That doesn’t look like a domain. Try something like www.yourbusiness.com.',
   reserved_domain: 'That address can’t be used.',
@@ -170,6 +180,49 @@ function AfterSwitch({ d }) {
   )
 }
 
+// The whole setup at a glance, from records we hold plus live public DNS (apex, resolvers): each line is one fact.
+const APEX_TEXT = {
+  forwards: (a) => `${a.apex} forwards to ${a.canonical}${a.permanent ? ' permanently (301)' : ' (temporary redirect; make it permanent/301 if your provider offers it)'}${a.keepsPath === false ? '; the page path is not kept (visitors land on the home page)' : ''}${a.keepsQuery === false ? '; tracking parameters (?utm_…, gclid) are dropped by this forwarding' : ''}.`,
+  forwards_http: (a) => `${a.apex} forwards to ${a.canonical} over plain http only: https://${a.apex} fails because the forwarding service has no certificate for it. Visitors who type https:// see an error.`,
+  points_here: (a) => `${a.apex} points at GetShowUps directly, which isn’t supported yet: forward it to ${a.canonical} instead.`,
+  other: (a) => `${a.apex} currently shows something else${a.target ? ` (it sends visitors to ${a.target})` : ''}. Forward it to ${a.canonical}.`,
+  none: (a) => `${a.apex} has no records: visitors who type it get an error. Forward it to ${a.canonical}.`,
+  unreachable: (a) => `We couldn’t check ${a.apex} just now.`,
+}
+function Checklist({ d, site }) {
+  const www = d.status === 'connected'
+  const https = www // connected = DNS points at us, hosting reports the certificate active, HTTPS answered
+  const apex = d.apex
+  const apexOk = apex?.state === 'forwards' && apex.keepsPath !== false
+  const items = [
+    ['published', site ? Boolean(site.published) : null, site?.published ? 'Website published.' : 'Publish your website first.'],
+    ['www', www, www ? `${d.hostname} connected.` : d.detail === 'propagating' ? `${d.hostname}: your DNS change is found at some resolvers and still spreading to others.` : `${d.hostname}: waiting for your DNS change.`],
+    ['https', https, https ? 'Secure connection (https) active.' : 'Secure connection: set up once the record is found.'],
+    ...(apex ? [['apex', apexOk ? true : apex.state === 'unreachable' ? null : false, APEX_TEXT[apex.state]?.(apex) || ''], ['redirect', apexOk ? (apex.keepsQuery === false ? null : true) : false, apexOk ? (apex.keepsQuery === false ? 'Redirect works, but drops tracking parameters.' : 'Redirect verified: path and parameters kept.') : 'Redirect from the bare domain: not verified yet.']] : []),
+    ['live', www && https && (!apex || apexOk), www && https && (!apex || apexOk) ? 'Website fully live.' : 'Website fully live: after the steps above.'],
+  ]
+  return (
+    <ul className="wj-check" aria-label="Domain setup" data-domain-checklist>
+      {items.map(([id, ok, text]) => (
+        <li key={id} className={ok === true ? 'is-done' : ok === null ? 'is-info' : 'is-todo'} data-check={id} data-ok={ok === true ? 'yes' : ok === null ? 'unknown' : 'no'}>
+          {text}
+        </li>
+      ))}
+    </ul>
+  )
+}
+// What each public resolver answers for www: a split means the change is still spreading or two records exist.
+function Resolvers({ d }) {
+  const r = d.resolvers
+  if (!r || (r.cloudflare !== false && r.google !== false)) return null
+  const old = r.cloudflare === false ? r.cloudflareSees : r.googleSees
+  return (
+    <p className="notice-soft" role="status" data-resolvers>
+      Two public resolvers disagree about <code>{d.hostname}</code>: one already answers our address, the other still answers {old ? <code>{old}</code> : 'the old record'}. Visitors using that resolver still see the old website until it
+      updates (up to a few hours after a correct change). If this lasts longer than a day, your DNS has two www records: keep only the one pointing to <code>{d.records?.[0]?.value || 'getshowups.pages.dev'}</code>.
+    </p>
+  )
+}
 function Steps({ d, site }) {
   if (d.status === 'connected') {
     return (
@@ -181,6 +234,8 @@ function Steps({ d, site }) {
           </a>{' '}
           with a secure (https) connection.
         </p>
+        <Checklist d={d} site={site} />
+        <Resolvers d={d} />
         <BareDomain d={d} />
         <AfterSwitch d={d} />
       </>
@@ -220,8 +275,10 @@ function Steps({ d, site }) {
       {d.records.map((r) => (
         <Record key={r.type} r={r} />
       ))}
-      {d.status === 'securing' && d.detail === 'certificate_pending' ? <p className="fine">Record found. We’re setting up a secure connection (https). This can take up to an hour.</p> : <Finding d={d} />}
+      {d.status === 'securing' && d.detail === 'certificate_pending' ? <p className="fine">Record found. We’re setting up a secure connection (https). This can take up to an hour.</p> : d.detail === 'propagating' ? <p className="fine" data-propagating>Record found at one public resolver; others are still catching up (usually within an hour, up to the old record’s lifetime). We keep checking every 10 minutes.</p> : <Finding d={d} />}
       {d.detail === 'dns_changed' && <p className="notice-soft">The record for {d.hostname} no longer points to your website. Add it back to reconnect.</p>}
+      <Resolvers d={d} />
+      <Checklist d={d} site={site} />
       <BareDomain d={d} />
     </>
   )
@@ -231,10 +288,42 @@ function Steps({ d, site }) {
 function BareDomain({ d }) {
   if (!d.hostname.startsWith('www.')) return null
   const apex = d.hostname.slice(4)
+  const a = d.apex
+  const help = providerHelp(d.provider)
+  const done = a?.state === 'forwards' && a.keepsPath !== false
   return (
-    <p className="fine">
-      Visitors who type <code>{apex}</code> (without www) still reach whatever it shows today. To send them here too, set up forwarding from <code>{apex}</code> to <code>https://{d.hostname}</code> at your domain provider. Your email isn’t affected.
-    </p>
+    <details className="domain-apex" open={!done} data-apex-state={a?.state || 'unknown'}>
+      <summary>
+        <strong>{apex}</strong> (without www): {done ? 'forwards to your website' : 'make it reach your website too'}
+      </summary>
+      <p className="fine">
+        Your website’s one address is <code>https://{d.hostname}</code>. Visitors who type <code>{apex}</code> should be forwarded there (a permanent redirect that keeps the page path), so search engines see a single website. Only the www
+        address is connected to GetShowUps; the bare domain stays where your DNS provider has it.
+      </p>
+      {a && APEX_TEXT[a.state] && (
+        <p className={done ? 'fine' : 'notice-soft'} role="status" data-apex-finding>
+          {APEX_TEXT[a.state](a)}
+        </p>
+      )}
+      <ol className="fine domain-steps">
+        <li>
+          <strong>Where:</strong> {d.provider?.name ? `your DNS is at ${d.provider.name}` : 'sign in where your DNS is managed'} (the same place you added the www record).
+        </li>
+        <li>
+          <strong>Forwarding:</strong> {help.forward.replaceAll('<domain>', apex)}
+        </li>
+        <li>
+          <strong>Keep:</strong> {help.keep}
+        </li>
+        <li>
+          <strong>Check:</strong> open <code>https://{apex}/privacy</code> and <code>http://{apex}/?test=1</code>: both should land on <code>https://{d.hostname}/…</code>. Then press Check now here.
+        </li>
+        <li>
+          <strong>If your provider has no forwarding</strong> (some registrars and Google Cloud DNS): keep DNS where it is and use a forwarding service for the bare domain, or move DNS to a provider with forwarding. Nothing about the www
+          record or your email changes.
+        </li>
+      </ol>
+    </details>
   )
 }
 
@@ -269,7 +358,11 @@ export default function DomainSettings({ siteUrl, compact = false, onChange, sit
       ? ['Record needs a fix', 'bad']
       : d.detail === 'waiting_for_cname'
         ? ['Waiting for your DNS change', 'pending']
-        : STATUS[d.status] || ['Checking', 'pending']
+        : d.detail === 'propagating'
+          ? ['DNS change found, spreading', 'pending']
+          : d.detail === 'dns_inconsistent'
+            ? ['Connected · one resolver still old', 'warn']
+            : STATUS[d.status] || ['Checking', 'pending']
     : []
 
   if (d) {
@@ -285,11 +378,9 @@ export default function DomainSettings({ siteUrl, compact = false, onChange, sit
           </p>
         )}
         <div className="card-actions">
-          {d.status !== 'connected' && (
-            <button type="button" className="btn btn-primary" disabled={state.busy} onClick={() => act({ action: 'check' })}>
-              {state.busy ? 'Checking…' : 'Check now'}
-            </button>
-          )}
+          <button type="button" className={d.status === 'connected' ? 'btn btn-quiet' : 'btn btn-primary'} disabled={state.busy} onClick={() => act({ action: 'check' })} data-domain-check>
+            {state.busy ? 'Checking…' : 'Check now'}
+          </button>
           {!confirming ? (
             <button type="button" className="link-btn" onClick={() => setConfirming(true)}>
               Disconnect domain

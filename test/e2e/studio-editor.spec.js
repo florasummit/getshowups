@@ -106,6 +106,20 @@ test('owner edits the website on the website itself: text in place, button panel
   await expect(frame.getByLabel('Your name')).toBeVisible()
   await studio.getByRole('textbox', { name: /^Title in Google/ }).fill('Contact Editor Pools')
 
+  // Legal pages from the same "Add a page" menu: Terms of Service is a legal page (footer link, text sections only,
+  // the owner's words kept as written); it renders as one document in the preview; the page menu says so.
+  await pageSelect.selectOption('__add')
+  await studio.getByRole('combobox', { name: 'Add a page', exact: true }).selectOption('terms')
+  await studio.getByRole('button', { name: 'Add page' }).click()
+  await expect(pageSelect).toHaveValue('terms')
+  await expect(pageSelect.locator('option[value="terms"]')).toHaveText('Terms (legal page)')
+  await expect(frame.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible()
+  await expect(frame.locator('.legal-doc')).toBeVisible()
+  const addSection = studio.getByRole('combobox', { name: 'Add a section' })
+  await expect(addSection.locator('option')).toHaveCount(2) // "Choose…" + Text: a legal page takes text only
+  await expect(frame.locator('footer').first()).toContainText('Terms') // footer link (the editor rewrites page links to #page=…)
+  await pageSelect.selectOption('contact')
+
   // Look: approved fonts and button style; phone preview; Preview mode shows the website without editing outlines.
   await studio.getByRole('tab', { name: 'Style' }).click()
   await studio.getByLabel('Fonts').selectOption('fraunces|manrope')

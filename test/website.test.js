@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { validateContent, hostingStatus, HOSTING_GRACE_MS } from '../server/website.js'
 import { renderSite } from '../server/site-render.js'
-import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, platformOf, TOKEN_REUSE_MS } from '../server/domains.js'
+import { normalizeHostname, checkDomain, checkDueDomains, claimDomain, disconnectDomain, platformOf, TOKEN_REUSE_MS, apexStatus, nsProviderOf, APEX_PROBE_PATH } from '../server/domains.js'
 import { sniffImage } from '../server/assets.js'
 import { readiness } from '../server/onboarding.js'
 import { customerRows, growth } from '../server/metrics.js'
@@ -91,7 +91,7 @@ const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><s
 beforeEach(() => {
   db = d1()
   kv = new Map()
-  dns = { TXT: {}, CNAME: {} }
+  dns = { TXT: {}, CNAME: {}, A: {}, NS: {}, google: {}, apex: {} } // google: per-resolver overrides ("CNAME:name" → values); apex: { "<apex>": { status, location } }
   provider = { domains: new Map(), calls: [] }
   env = {
     GOOGLE_CLIENT_ID: 'cid',
@@ -111,10 +111,18 @@ beforeEach(() => {
   // Mocked DNS-over-HTTPS, hosting-provider API and HTTPS site probe.
   globalThis.fetch = async (input, init = {}) => {
     const u = new URL(String(input))
-    if (u.hostname === 'cloudflare-dns.com') {
+    if (u.hostname === 'cloudflare-dns.com' || u.hostname === 'dns.google') {
       const type = u.searchParams.get('type')
-      const values = dns[type][u.searchParams.get('name')] || []
-      return new Response(JSON.stringify({ Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) }))
+      const name = u.searchParams.get('name')
+      const values = (u.hostname === 'dns.google' && dns.google[`${type}:${name}`]) || dns[type]?.[name] || []
+      const code = { TXT: 16, CNAME: 5, A: 1, NS: 2 }[type]
+      return new Response(JSON.stringify({ Status: 0, Answer: values.map((data) => ({ type: code, data: type === 'TXT' ? `"${data}"` : type === 'A' ? data : `${data}.` })) }))
+    }
+    if (u.pathname === APEX_PROBE_PATH) {
+      const f = dns.apex[u.hostname]
+      if (!f) return new Response('ok', { status: 200 })
+      if (f.https === false && u.protocol === 'https:') throw new Error('no certificate')
+      return new Response('', { status: f.status || 301, headers: { Location: f.location.replace('{path}', u.pathname).replace('{query}', u.search) } })
     }
     if (u.hostname === 'api.cloudflare.com') {
       provider.calls.push([init.method, u.pathname, init.headers?.Authorization])
@@ -867,4 +875,54 @@ test('connected domain, multi-page AI site: sitemap lists every page; SEO tags; 
   assert.equal(leads().length, before + 1, 'only the real request was stored')
   // A token for one business doesn't work for another.
   assert.equal((await post({ name: 'Cross', email: 'x@example.net', phone: '8435550199', need: 'Hello' }, await formToken(env, 'salon', Date.now() - 10_000))).location, 'https://www.poolsco.com/contact?form=expired#f-reach')
+})
+
+test('domain propagation: a www change seen by one public resolver is "propagating", never "waiting"; connected with a split answer says so; the root domain is checked honestly', async () => {
+  withProvider()
+  const c = await cookieFor('owner@pools.example')
+  const r = await call(domain, 'POST', { cookie: c, body: { action: 'connect', hostname: 'www.poolsco.com' } })
+  dns.TXT['_getshowups.www.poolsco.com'] = [r.json.domain.records[0].value]
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
+  // The live PoolThru case (2026-11-22): Cloudflare's resolver still answers the old Squarespace record, Google answers ours.
+  dns.CNAME['www.poolsco.com'] = ['ext-sq.squarespace.com']
+  dns.google['CNAME:www.poolsco.com'] = ['getshowups.pages.dev']
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeFail }), 'securing')
+  assert.equal(db.sql.prepare("SELECT detail FROM website_domains WHERE hostname = 'www.poolsco.com'").get().detail, 'propagating')
+  dns.NS['poolsco.com'] = ['ns-cloud-e1.googledomains.com', 'ns-cloud-e2.googledomains.com']
+  dns.A['poolsco.com'] = ['198.185.159.144']
+  dns.apex['poolsco.com'] = { status: 301, location: 'https://www.poolsco.com{path}' } // forwards, keeps the path, drops the query
+  let v = (await call(domain, 'GET', { cookie: c })).json.domain
+  assert.deepEqual([v.detail, v.provider, v.resolvers.cloudflare, v.resolvers.google, v.resolvers.cloudflareSees], ['propagating', { id: 'squarespace', name: 'Squarespace Domains' }, false, true, 'ext-sq.squarespace.com'])
+  assert.deepEqual([v.apex.state, v.apex.permanent, v.apex.keepsPath, v.apex.keepsQuery, v.apex.canonical], ['forwards', true, true, false, 'https://www.poolsco.com'])
+  // Hosting active + HTTPS answers while the split persists: connected, with the split named (visitors on the stale
+  // resolver still see the old site), never "waiting for your DNS change".
+  provider.domains.get('www.poolsco.com').status = 'active'
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeOk }), 'connected')
+  assert.equal(db.sql.prepare("SELECT detail FROM website_domains WHERE hostname = 'www.poolsco.com'").get().detail, 'dns_inconsistent')
+  // Both resolvers agree → clean connected on the next check; a later disagreement is reported again, the site stays live.
+  dns.CNAME['www.poolsco.com'] = ['getshowups.pages.dev']
+  assert.equal(await checkDomain(env, 'www.poolsco.com', { probe: probeOk }), 'connected')
+  assert.equal(db.sql.prepare("SELECT detail FROM website_domains WHERE hostname = 'www.poolsco.com'").get().detail, null)
+  // Root-domain states: forwarding that keeps the query, http-only forwarding, pointing elsewhere, nothing, pointing at us.
+  dns.apex['poolsco.com'] = { status: 301, location: 'https://www.poolsco.com{path}{query}' }
+  assert.deepEqual((await apexStatus(env, 'www.poolsco.com')).keepsQuery, true)
+  dns.apex['poolsco.com'] = { status: 302, location: 'https://www.poolsco.com/', https: false }
+  let a = await apexStatus(env, 'www.poolsco.com')
+  assert.deepEqual([a.state, a.permanent, a.keepsPath], ['forwards_http', false, false])
+  dns.apex['poolsco.com'] = { status: 301, location: 'https://old-host.example.net/' }
+  a = await apexStatus(env, 'www.poolsco.com')
+  assert.deepEqual([a.state, a.target], ['other', 'https://old-host.example.net'])
+  delete dns.apex['poolsco.com']
+  assert.equal((await apexStatus(env, 'www.poolsco.com')).state, 'other')
+  dns.A['poolsco.com'] = []
+  assert.equal((await apexStatus(env, 'www.poolsco.com')).state, 'none')
+  dns.CNAME['poolsco.com'] = ['getshowups.pages.dev']
+  assert.equal((await apexStatus(env, 'www.poolsco.com')).state, 'points_here')
+  assert.equal(await apexStatus(env, 'poolsco.com'), null, 'only for www hostnames')
+  // Provider names from nameservers; unknown hosts are not guessed.
+  assert.deepEqual([nsProviderOf(['dns1.registrar-servers.com']).id, nsProviderOf(['ns1.domaincontrol.com']).id, nsProviderOf(['ada.ns.cloudflare.com']).id, nsProviderOf(['ns1.unknown.example']).id, nsProviderOf([])], ['namecheap', 'godaddy', 'cloudflare', 'other', null])
+  // The GET view never stores any of this and never leaks the provider token.
+  const row = db.sql.prepare("SELECT * FROM website_domains WHERE hostname = 'www.poolsco.com'").get()
+  assert.ok(!JSON.stringify(row).includes('poolsco.com{path}'))
+  assert.ok(!JSON.stringify((await call(domain, 'GET', { cookie: c })).json).includes('cf_SECRET_TOKEN'))
 })

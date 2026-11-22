@@ -276,10 +276,25 @@ createServer(async (req, res) => {
     })
   }
   // DNS-over-HTTPS stand-in (DNS_API_MOCK_ORIGIN): records set by tests via /__dns; empty otherwise.
-  if (url.pathname === '/dns-query') {
+  if (url.pathname === '/dns-query' || url.pathname === '/resolve') {
+    // Two public resolvers (Cloudflare /dns-query, Google /resolve): the same seeded records unless a test seeds a
+    // resolver-specific answer (key "google:TYPE:name") to simulate a half-propagated change.
     const type = url.searchParams.get('type')
-    const values = dnsRecords.get(`${type}:${url.searchParams.get('name')}`) || []
-    return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: type === 'TXT' ? 16 : 5, data: type === 'TXT' ? `"${data}"` : `${data}.` })) })
+    const name = url.searchParams.get('name')
+    const code = { TXT: 16, CNAME: 5, A: 1, NS: 2 }[type] || 5
+    const values = (url.pathname === '/resolve' && dnsRecords.get(`google:${type}:${name}`)) || dnsRecords.get(`${type}:${name}`) || []
+    return send(res, 200, { Status: 0, Answer: values.map((data) => ({ type: code, data: type === 'TXT' ? `"${data}"` : type === 'A' ? data : `${data}.` })) })
+  }
+  // Root-domain forwarding probe (server/domains.js apexStatus): /__apex/<scheme>/<apex>/... → what a test seeded for
+  // that apex ("apex:<apex>" → { status, location }) or a plain 200.
+  if (url.pathname.startsWith('/__apex/')) {
+    const [, , , apex] = url.pathname.split('/')
+    const f = dnsRecords.get(`apex:${apex}`)
+    if (f && f.location) {
+      res.writeHead(f.status || 301, { Location: f.location.replace('{path}', url.pathname.split(apex)[1] || '/').replace('{query}', url.search) })
+      return res.end()
+    }
+    return send(res, 200, { ok: true })
   }
   // AI designer (Claude, streamed): a first design, or a darker revision when the prompt carries CURRENT_SITE.
   if (url.pathname === '/anthropic/v1/messages' && req.method === 'POST' && JSON.parse(raw).tools?.some((t) => t.name === 'find_available_times')) {

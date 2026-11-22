@@ -6,14 +6,28 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { track } from '../../../server/events.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
-import { checkDomain, claimDomain, cnameTarget, currentPointer, disconnectDomain, domainFor } from '../../../server/domains.js'
+import { apexStatus, checkDomain, claimDomain, cnameTarget, currentPointer, disconnectDomain, domainFor, dnsViews, zoneProvider } from '../../../server/domains.js'
 
 // While the owner is pointing the domain at us: where it points right now (e.g. Squarespace), read live from public DNS,
 // so the screen can say which existing record to change. Never stored; null when DNS can't be read.
+//   GET → { domain | null, target, provider }. For a www hostname at the pointing/connected stage the view also carries,
+//   read live from public DNS and one HTTPS request (never stored): the DNS provider (from the zone's nameservers), what
+//   each public resolver answers for www (so a half-propagated change is named, not called "waiting"), and the root
+//   domain's state (forwards to www / points elsewhere / nothing), so the setup checklist is complete and honest.
 const view = async (env, customerId) => {
   const domain = await domainFor(env, customerId)
   const current = domain?.step === 'point' && domain.status !== 'connected' ? await currentPointer(env, domain.hostname).catch(() => null) : null
-  return { domain: domain && { ...domain, current }, target: cnameTarget(env) }
+  let extra = {}
+  if (domain && domain.step === 'point') {
+    const [provider, apex, www] = await Promise.all([zoneProvider(env, domain.hostname).catch(() => null), apexStatus(env, domain.hostname).catch(() => null), dnsViews(env, domain.hostname, 'CNAME').catch(() => null)])
+    const t = cnameTarget(env)
+    extra = {
+      provider,
+      apex,
+      resolvers: www ? { cloudflare: www.cloudflare.ok ? www.cloudflare.values.includes(t) : null, google: www.google.ok ? www.google.values.includes(t) : null, cloudflareSees: www.cloudflare.ok ? www.cloudflare.values[0] || null : null, googleSees: www.google.ok ? www.google.values[0] || null : null } : null,
+    }
+  }
+  return { domain: domain && { ...domain, current, ...extra }, target: cnameTarget(env) }
 }
 
 export async function onRequestGet({ request, env }) {
