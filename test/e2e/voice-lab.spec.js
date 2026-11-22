@@ -25,6 +25,20 @@ test('admin: provider statuses are honest (none configured), start is disabled w
     await expect(card).toContainText('Unavailable: not configured')
   }
   expect(JSON.stringify(status)).not.toMatch(/sk-|whsec|Bearer/)
+  // Readiness panel for the selected provider: the owner's questions, answered from configuration; blockers named.
+  for (const id of ['retell', 'openai', 'elevenlabs']) {
+    await page.locator(`[data-provider="${id}"]`).click()
+    const ready = page.locator(`[data-readiness="${id}"]`)
+    await expect(ready).toHaveAttribute('data-ready', 'no')
+    await expect(ready).toContainText('Credentials configured?')
+    await expect(ready).toContainText('Smallest authorized test')
+    await expect(ready).toContainText('Blocked: Not configured')
+  }
+  // OpenAI offers a per-session voice (allowlisted on the server); the others take their voice from the agent.
+  await page.locator('[data-provider="openai"]').click()
+  await expect(page.locator('[data-lab-voice] option')).toHaveCount(status.settings.openai.voices.length + 1)
+  await page.locator('[data-provider="retell"]').click()
+  await expect(page.locator('[data-lab-voice]')).toHaveCount(0)
   // Start is disabled for an unconfigured provider, whichever is selected, and says why.
   for (const id of ['openai', 'elevenlabs', 'retell']) {
     await page.locator(`[data-provider="${id}"]`).click()

@@ -10,7 +10,7 @@
 //   missing        not built
 //   unknown        couldn't be determined (a check failed)
 import './catalog.js'
-import { JOURNEY, listCapabilities } from './registry.js'
+import { JOURNEY, TIERS, listCapabilities } from './registry.js'
 import { buildInfo, configSnapshot, migrationStatus } from './changes.js'
 import { listAudit, verifyAuditChain } from '../auditlog.js'
 import { customerRows } from '../metrics.js'
@@ -35,6 +35,42 @@ const safe = async (fn, fallback, timeoutMs = 0) => {
     console.error('review check failed:', err?.message?.includes('no such table') ? 'table_missing' : err?.name)
     return fallback
   }
+}
+
+// Plain-language grouping for the founder (one group per capability, derived from status + health + state):
+//   broken         switched on and failing right now
+//   works          live and seen working recently
+//   testable       usable now: switched on but not seen working yet, or in test/sandbox mode
+//   configuration  built; waiting on credentials, a binding or a migration (no decision needed, just setup)
+//   approval       built; a switch the founder must decide to turn on
+//   not_built      not built yet
+export const GROUPS = {
+  broken: 'Broken right now',
+  works: 'Works now',
+  testable: 'Can be tested now',
+  configuration: 'Needs configuration',
+  approval: 'Needs your approval',
+  not_built: 'Not built',
+}
+const CONFIG_NOTE = /not configured|missing|not set|binding|not applied/i
+export function groupOf(c) {
+  if (c.health === 'failing') return 'broken'
+  if (c.status === 'live_verified') return 'works'
+  if (c.status === 'sandbox' || c.status === 'built_tested') return 'testable'
+  if (c.status === 'unknown') return 'configuration'
+  if (c.needs === 'configuration') return 'configuration'
+  if (c.needs === 'approval' || c.approval) return 'approval'
+  if (c.status === 'missing') return CONFIG_NOTE.test(c.note || '') ? 'configuration' : 'not_built'
+  return CONFIG_NOTE.test(c.note || '') ? 'configuration' : 'approval'
+}
+// The one next step for a capability, in words the founder can act on.
+export function nextStepOf(c, group) {
+  if (group === 'works') return null
+  if (group === 'broken') return 'Open the Control Center incident and fix the cause; it clears on the next recorded success.'
+  if (group === 'testable') return c.status === 'sandbox' ? `Test it with a test business${c.approval ? `; going live needs: ${c.approval}` : ''}.` : 'Switched on; use it once and the next check will show it working.'
+  if (group === 'configuration') return c.approval ? `Set up: ${c.approval}.` : `Set up: ${c.note || 'configuration missing'}.`
+  if (group === 'approval') return `Your decision: ${c.approval || c.note || 'switch it on'}.`
+  return 'Not built; nothing to do unless it becomes needed.'
 }
 
 function statusOf(state, check) {
@@ -112,6 +148,9 @@ export async function capabilityStatuses(env, now = Date.now()) {
       mode: state?.mode ?? 'unknown',
       note: state?.note ?? null,
       approval: state?.approval ?? null,
+      needs: state?.needs ?? null,
+      tier: c.tier || 'optional',
+      action: c.action || null,
       blockers: c.blockers,
       verification: check ? { ok: Boolean(check.ok), at: check.at ?? null, evidence: check.evidence ?? null, problem: Boolean(check.problem) } : null,
       events,
@@ -123,6 +162,8 @@ export async function capabilityStatuses(env, now = Date.now()) {
   for (const r of rows) {
     r.usedBy = rows.filter((x) => x.dependsOn.includes(r.id)).map((x) => x.id)
     r.blockedBy = r.dependsOn.filter((d) => !byId.has(d) || ['disabled', 'missing', 'unknown'].includes(byId.get(d).status))
+    r.group = groupOf(r)
+    r.nextStep = nextStepOf(r, r.group)
   }
   return rows
 }
@@ -160,6 +201,16 @@ export async function platformReview(env, now = Date.now()) {
   const approvals = capabilities.filter((c) => c.approval && ['disabled', 'sandbox'].includes(c.status)).map((c) => ({ capability: c.id, name: c.name, approval: c.approval }))
   const blocked = capabilities.filter((c) => c.blockers.length || c.blockedBy.length).map((c) => ({ capability: c.id, name: c.name, blockers: c.blockers, blockedBy: c.blockedBy }))
   const counts = Object.fromEntries(STATUS.map((s) => [s, capabilities.filter((c) => c.status === s).length]))
+  // The founder's operating view: what each tier still waits on. A blocker = a capability needed for that tier that
+  // is not working or testable now. Optional / later tiers never block anything.
+  const groups = Object.fromEntries(Object.keys(GROUPS).map((g) => [g, capabilities.filter((c) => c.group === g).map((c) => c.id)]))
+  const tiers = Object.fromEntries(
+    Object.keys(TIERS).map((t) => {
+      const caps = capabilities.filter((c) => c.tier === t)
+      const blockers = caps.filter((c) => ['broken', 'configuration', 'approval', 'not_built'].includes(c.group)).map((c) => c.id)
+      return [t, { label: TIERS[t], capabilities: caps.map((c) => c.id), blockers, ready: ['operate', 'payments', 'advertising'].includes(t) ? blockers.length === 0 : null }]
+    }),
+  )
   const health = Object.fromEntries(['failing', 'degraded', 'healthy', 'unknown', 'not_applicable'].map((h) => [h, capabilities.filter((c) => c.health === h).length]))
   return {
     generatedAt: now,
@@ -167,6 +218,7 @@ export async function platformReview(env, now = Date.now()) {
     capabilities,
     counts,
     health,
+    plain: { groups, groupLabels: GROUPS, tiers },
     incidents,
     approvals,
     blocked,

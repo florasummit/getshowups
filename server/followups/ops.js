@@ -57,6 +57,7 @@ export async function followupOps(env, now = Date.now()) {
 // Business Review entries (server/ops/registry.js).
 registerCapability({
   id: 'followups.engine',
+  tier: 'optional',
   name: 'Lead follow-up engine (conversations)',
   journey: 'lead',
   dependsOn: ['platform.database', 'lead.capture'],
@@ -64,6 +65,7 @@ registerCapability({
 })
 registerCapability({
   id: 'followups.sms',
+  tier: 'later',
   name: 'Two-way texts (Twilio)',
   journey: 'lead',
   external: 'Twilio',
@@ -72,6 +74,7 @@ registerCapability({
 })
 registerCapability({
   id: 'followups.assistant',
+  tier: 'later',
   name: 'Follow-up assistant (included model)',
   journey: 'lead',
   external: 'Cloudflare Workers AI',
@@ -80,6 +83,7 @@ registerCapability({
 })
 registerCapability({
   id: 'followups.registration',
+  tier: 'later',
   name: 'US texting registration (A2P 10DLC) tracking',
   journey: 'lead',
   external: 'Twilio / carriers',

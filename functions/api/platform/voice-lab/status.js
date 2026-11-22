@@ -3,7 +3,7 @@
 // test businesses the Lab may use, and recent Lab sessions. Read-only.
 import { json } from '../../../../server/google-oauth.js'
 import { requirePlatformAdmin } from '../../../../server/platform.js'
-import { labEnabled, labDailyMinutes, providerStatus, COST_ESTIMATES } from '../../../../server/voice/providers.js'
+import { labEnabled, labDailyMinutes, providerStatus, providerReadiness, COST_ESTIMATES, OPENAI_VOICES } from '../../../../server/voice/providers.js'
 import { labMinutesToday, listLabSessions } from '../../../../server/voice/sessions.js'
 import { isTestBusinessSql } from '../../../../server/testbusiness.js'
 
@@ -13,5 +13,5 @@ export async function onRequestGet({ request, env }) {
   if (!labEnabled(env)) return json(404, { error: 'not_found' })
   const { results } = await env.ONBOARDING_DB.prepare(`SELECT id, name, timezone FROM customers WHERE ${isTestBusinessSql('id')} AND status = 'active' ORDER BY name LIMIT 50`).all()
   const [used, sessions] = await Promise.all([labMinutesToday(env), listLabSessions(env, 20)])
-  return json(200, { providers: providerStatus(env), estimates: COST_ESTIMATES, limits: { dailyMinutes: labDailyMinutes(env), usedMinutesToday: used }, businesses: results, sessions })
+  return json(200, { providers: providerStatus(env), readiness: providerReadiness(env), settings: { openai: { voices: OPENAI_VOICES } }, estimates: COST_ESTIMATES, limits: { dailyMinutes: labDailyMinutes(env), usedMinutesToday: used }, businesses: results, sessions })
 }

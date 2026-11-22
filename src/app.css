@@ -4084,3 +4084,13 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .ad-preview-img { display: block; width: 100%; max-height: 14rem; object-fit: cover; border-radius: 8px; margin: 6px 0; }
 .ad-preview-noimg { margin: 6px 0; padding: 18px; text-align: center; border: 1px dashed var(--ink-300); border-radius: 8px; color: var(--ink-500); font-size: 0.85rem; }
 .ad-preview-cta { display: inline-block; margin: 4px 0 0; padding: 6px 12px; border-radius: 6px; background: var(--ink-100); font-weight: 600; font-size: 0.85rem; }
+/* Business Review: plain-language map */
+.review .seg--sm { display: flex; flex-wrap: wrap; border-radius: 20px; margin-bottom: 0.75rem; }
+.review .seg--sm button { font-size: 0.85rem; padding: 0.35rem 0.7rem; }
+.review .plain-group { margin-top: 1rem; }
+.review .plain-group .row { flex-wrap: wrap; }
+.review .plain-group .row-sub { overflow-wrap: anywhere; }
+.review .plain-group .btn { white-space: normal; text-align: left; max-width: 100%; }
+.review .notice-ok, .review .notice-warn { border-radius: var(--radius, 10px); padding: 0.6rem 0.8rem; margin: 0 0 0.5rem; font-size: 0.92rem; }
+.review .notice-ok { background: var(--mint-100, #e8f7ef); color: var(--ink, #111); }
+.review .notice-warn { background: var(--warn-bg); color: var(--warn-text); }

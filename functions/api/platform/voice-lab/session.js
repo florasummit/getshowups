@@ -19,9 +19,9 @@ export async function onRequestPost({ request, env }) {
   if (body?.action === 'start') {
     const rl = await hit(env, 'voiceLabStart', admin.email)
     if (rl.limited) return tooManyJson(rl.retryAfter)
-    const r = await startLabSession(env, admin, { customer: String(body.customer || ''), provider: String(body.provider || ''), dryRun: body.dryRun !== false })
+    const r = await startLabSession(env, admin, { customer: String(body.customer || ''), provider: String(body.provider || ''), dryRun: body.dryRun !== false, settings: body.settings && typeof body.settings === 'object' ? body.settings : {} })
     if (!r.ok) return json(r.httpStatus, { error: r.error })
-    await audit(env, admin.email, 'voice_lab.session_started', r.session.customer.id, { provider: r.session.provider, dryRun: r.session.dryRun })
+    await audit(env, admin.email, 'voice_lab.session_started', r.session.customer.id, { provider: r.session.provider, dryRun: r.session.dryRun, ...r.session.settings })
     return json(200, { session: r.session })
   }
   const s = await loadLabSession(env, String(body?.customer || ''), body?.id, body?.token)

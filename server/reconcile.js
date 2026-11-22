@@ -25,6 +25,16 @@ export const ISSUE_TEXT = {
   payment_unknown: 'Recorded payment not found among Stripe’s paid invoices',
 }
 
+// Whose record a difference belongs to: 'real' (a business in our records, not a test business), 'test_business'
+// (admin-marked test business), 'unknown_record' (an id that does not exist in our records at all: a Stripe object left
+// behind by a sandbox check or a business that never got created here). Only 'real' differences are a problem for the
+// founder; the others are reported as sandbox leftovers.
+export const SCOPES = { real: 'a real business', test_business: 'a test business', unknown_record: 'a record that does not exist here' }
+export function scopeOf(customer, known, tests) {
+  if (!customer || !known.has(customer)) return 'unknown_record'
+  return tests.has(customer) ? 'test_business' : 'real'
+}
+
 async function deletedSet(db) {
   try {
     return new Set((await db.prepare('SELECT customer FROM account_deletions').all()).results.map((r) => r.customer))
@@ -45,10 +55,12 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
     (await db.prepare('SELECT customer, livemode FROM subscription_modes').all().catch(() => ({ results: [] }))).results.map((r) => [r.customer, r.livemode === 1]),
   )
   const deleted = await deletedSet(db)
+  const known = new Set((await db.prepare('SELECT id FROM customers').all()).results.map((r) => r.id))
+  const tests = new Set((await db.prepare('SELECT customer FROM test_businesses WHERE is_test = 1').all().catch(() => ({ results: [] }))).results.map((r) => r.customer))
   const bySubId = new Map(ours.filter((o) => o.stripe_subscription_id).map((o) => [o.stripe_subscription_id, o]))
   const byStripeCustomer = new Map(ours.filter((o) => o.stripe_customer_id).map((o) => [o.stripe_customer_id, o.customer]))
   const issues = []
-  const add = (type, customer, extra = {}) => issues.push({ type, customer: customer ?? null, ...extra })
+  const add = (type, customer, extra = {}) => issues.push({ type, customer: customer ?? null, ...extra, scope: scopeOf(customer, known, tests) })
 
   const seen = new Set()
   const running = new Map() // our customer → ids of Stripe subscriptions still running or pending (LIVE)
@@ -110,9 +122,12 @@ export async function reconcileBilling(env, { now = Date.now(), actor = 'system:
   }
   const byType = {}
   for (const i of issues) byType[i.type] = (byType[i.type] || 0) + 1
-  const result = { ok: true, at: now, checked: { subscriptions: subs.data.length, records: ours.length, invoices: paid.length, windowDays: WINDOW_DAYS }, issues: issues.length, byType, list: issues.slice(0, 50), applied }
+  const byScope = {}
+  for (const i of issues) byScope[i.scope] = (byScope[i.scope] || 0) + 1
+  const real = byScope.real || 0
+  const result = { ok: true, at: now, checked: { subscriptions: subs.data.length, records: ours.length, invoices: paid.length, windowDays: WINDOW_DAYS, live: stripeLiveEnabled(env) }, issues: issues.length, real, byType, byScope, list: issues.slice(0, 50), applied }
   await appendAudit(db, { actorType: actor.startsWith('system') ? 'system' : 'admin', actor, action: 'billing.reconciliation', details: result, at: now })
-  if (issues.length) console.error('billing reconciliation: issues', JSON.stringify(byType))
+  if (issues.length) console.error('billing reconciliation: issues', JSON.stringify({ ...byType, real }))
   return result
 }
 
