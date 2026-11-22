@@ -56,6 +56,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/policies   What customers should know (GET/POST beforeVisit, cancellation ≤300 chars)
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
+  api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
@@ -451,6 +452,14 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   the outbox) is tracked separately: recorded / pending / sent / failed / not_sent (held). Phone routing settings stay
   disabled and labelled "not connected" until a line exists. Voice: an interrupted turn that did nothing is never
   saved; a call continues the page's conversation; ending the conversation ends the call.
+- Customer-facing voice on every provider (server/voice/customer.js, public routes api/receptionist/[customer]/voice,
+  voice-connect, voice-tool, voice-session): the provider comes from receptionist_voice_settings (never the browser),
+  sessions are pinned to their provider, tools run through runVoiceTool bound to the session's business (dry run only
+  for admin test sessions: platform admin + admin-marked test business, /chat/<id>?test=<provider>), limits
+  (RECEPTIONIST_VOICE_CONCURRENT 3, RECEPTIONIST_VOICE_DAILY_MINUTES 120, VOICE_PROVIDER_DAILY_MINUTES 600,
+  VOICE_PROVIDERS_DISABLED off switch), no fallback ever. Activation needs EVIDENCE (providerEvidence: finished session
+  with micLive + audioReceived + find_available_times + book_appointment ok, ≤ 30 days); never claim a provider is
+  production-ready from credentials alone. scripts/voice-live-check.mjs = bounded real-provider check (keys from Keychain).
 - Receptionist voice (server/voice/style.js + settings.js + catalog.js, migration 0035, docs/RECEPTIONIST.md "Voice
   management"): owners pick a voice from the ACTIVE provider's catalog (validated; provider sample previews; never a
   provider name), a personality preset (fixed prompt wording, style only) and a pace where supported; saves carry a

@@ -5,7 +5,9 @@
 //   No row = today's effective configuration (retell, the shared agent's own voice, standard manner): existing
 //   businesses keep exactly what they have. Everything here is server-side authorization + validation; the UI only
 //   shows what these functions answer.
-import { adminEmails, audit } from '../platform.js'
+import { audit } from '../platform.js'
+import { isPlatformAdminEmail, providerDisabled, providerEvidence } from './customer.js'
+import { testStatus } from '../testbusiness.js'
 import { emailRef, recordEvent } from '../auditlog.js'
 import { catalogFor, findVoice, validateVoice } from './catalog.js'
 import { providerStatus, PROVIDERS } from './providers.js'
@@ -98,36 +100,33 @@ export async function saveVoicePreferences(env, customer, { voiceId, personality
 }
 
 // ---------- admin: provider switching ----------
-export const isPlatformAdminEmail = (env, email) => adminEmails(env).includes(String(email || '').toLowerCase())
+export { isPlatformAdminEmail }
 
-// Readiness of every provider for THIS business, honestly: configured? customer path? phone? tested? blockers.
+// Readiness of every provider for THIS business, truthfully: configured? switched off? customer path? evidence of a
+// finished session with audio both ways and the booking tools (server/voice/customer.js providerEvidence)? One state:
+//   active          the business's provider for customers
+//   ready           configured, on, customer path, evidence complete → may be activated
+//   needs_test      configured and on, but no finished session with audio + tools for this business yet
+//   not_configured  credentials missing on the platform        disabled   switched off (VOICE_PROVIDERS_DISABLED)
 export async function providerOverview(env, customer, now = Date.now()) {
   const status = providerStatus(env)
   const current = await getVoiceSettings(env.ONBOARDING_DB, customer.id)
-  const tested = await testedProviders(env, customer.id, now)
-  return {
-    current: current.provider,
-    providers: PROVIDERS.map((id) => {
-      const cap = PROVIDER_CAPABILITIES[id]
-      const blockers = []
-      if (!status[id].configured) blockers.push('not_configured')
-      if (!cap.customers) blockers.push('test_only')
-      return { id, name: cap.name, configured: Boolean(status[id].configured), browserSessions: cap.customers ? 'customers' : cap.lab ? 'lab_only' : 'none', phone: cap.phone, liveCapable: cap.customers, testAvailable: cap.lab && Boolean(status[id].configured), tested: tested.has(id), pace: cap.pace, previews: cap.previews, blockers }
-    }),
+  const testable = await testStatus(env, customer.id).then((t) => t.test && !t.unreadable).catch(() => false)
+  const providers = []
+  for (const id of PROVIDERS) {
+    const cap = PROVIDER_CAPABILITIES[id]
+    const configured = Boolean(status[id].configured)
+    const disabled = providerDisabled(env, id)
+    const evidence = configured ? await providerEvidence(env, customer.id, id, now) : { ok: false, sessions: 0, audio: false, tools: false, lastAt: null, missing: ['session', 'audio', 'tools'] }
+    const blockers = []
+    if (!configured) blockers.push('not_configured')
+    if (disabled) blockers.push('disabled')
+    if (!cap.customers) blockers.push('no_customer_path')
+    if (configured && !disabled && cap.customers && !evidence.ok && id !== current.provider) blockers.push('needs_test')
+    const state = id === current.provider ? 'active' : !configured ? 'not_configured' : disabled ? 'disabled' : !cap.customers ? 'no_customer_path' : evidence.ok ? 'ready' : 'needs_test'
+    providers.push({ id, name: cap.name, state, configured, enabled: !disabled, browserSessions: cap.customers ? 'customers' : cap.lab ? 'lab_only' : 'none', phone: cap.phone, customerPath: cap.customers, testAvailable: cap.lab && configured && !disabled, testUrl: testable && configured && !disabled ? `/chat/${customer.id}?test=${id}` : null, evidence, pace: cap.pace, previews: cap.previews, blockers })
   }
-}
-
-// Providers this business has a finished session on in the last 30 days: a Voice Lab session (receptionist_calls
-// provider 'retell-lab' | 'openai' | 'elevenlabs') or a customer call ('retell'). Finished = ended_at set.
-async function testedProviders(env, customerId, now) {
-  const out = new Set()
-  try {
-    const { results } = await env.ONBOARDING_DB.prepare('SELECT DISTINCT provider FROM receptionist_calls WHERE customer = ?1 AND ended_at IS NOT NULL AND created_at > ?2').bind(customerId, now - 30 * 864e5).all()
-    for (const r of results || []) out.add(r.provider === 'retell-lab' ? 'retell' : r.provider)
-  } catch {
-    /* no calls table yet */
-  }
-  return out
+  return { current: current.provider, testBusiness: testable, providers }
 }
 
 // The switching checklist (nothing changes). Every check answers from configuration and records; blockers block.
@@ -145,7 +144,8 @@ export async function checkProviderSwitch(env, customer, { provider, voiceId = '
   const cap = PROVIDER_CAPABILITIES[provider]
   const status = providerStatus(env)[provider]
   add('configuration', Boolean(status.configured), status.configured ? `${cap.name} is configured on this platform.` : `${cap.name} is not configured (credentials missing).`, 'not_configured')
-  add('live_capable', cap.customers, cap.customers ? `${cap.name} answers customers' browser voice calls (the live path).` : `${cap.name} runs only in the Voice Lab today: no customer-facing path, so it cannot be activated for customers (test only).`, 'test_only')
+  add('customer_path', cap.customers, cap.customers ? `${cap.name} has the customer-facing browser voice path (sessions, tools and lifecycle through our server).` : `${cap.name} has no customer-facing path.`, 'no_customer_path')
+  add('enabled', !providerDisabled(env, provider), providerDisabled(env, provider) ? `${cap.name} is switched off for customers (VOICE_PROVIDERS_DISABLED).` : `${cap.name} is not switched off.`, 'disabled')
   add('eligibility', customer.status === 'active' && (await voiceSettingsReady(db)), customer.status === 'active' ? 'Business is active.' : 'Business is suspended.', 'business_not_eligible')
   add('phone_routing', true, 'No phone line is connected to GetShowUps; phone routing is unaffected by a switch.')
   add('tools', REQUIRED_TOOLS === 7, 'All seven receptionist tools run on our server for every provider.', 'tools_missing')
@@ -164,12 +164,13 @@ export async function checkProviderSwitch(env, customer, { provider, voiceId = '
   }
   const bookable = customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS?.get(`google:${customer.id}`).catch(() => null))
   add('booking', Boolean(bookable), bookable ? 'Calendar connected and booking hours confirmed; bookings go through the same engine on every provider.' : 'Calendar not connected or hours not confirmed: the receptionist cannot book yet.', 'booking_not_ready')
-  const tested = await testedProviders(env, customer.id, now)
-  add('test_session', tested.has(provider), tested.has(provider) ? `A finished ${cap.name} session exists for this business in the last 30 days.` : `No finished ${cap.name} session for this business in the last 30 days: run one in the Voice Lab first.`, 'test_session_required')
+  const ev = await providerEvidence(env, customer.id, provider, now)
+  const MISSING = { session: 'no finished session', audio: 'audio both ways not measured (caller heard and receptionist heard)', tools: 'the availability and booking tools did not both succeed' }
+  add('verified', ev.ok, ev.ok ? `Verified for this business: ${ev.sessions} finished ${cap.name} session(s) in the last 30 days with audio both ways and the booking tools running through our server.` : `Not verified for this business yet: ${ev.missing.map((m) => MISSING[m]).join('; ')}. Run a test session on this business (Test now) with the candidate provider: say hello, ask for times and book (dry run).`, 'test_session_required')
   const same = cur.provider === provider && (voice?.id || null) === (cur.voiceId || null)
   if (same) add('change', false, 'Nothing would change.', 'no_change')
   const consequences = [
-    `New customer voice calls use ${cap.name} from the moment the switch is confirmed; calls already in progress finish on ${PROVIDER_CAPABILITIES[cur.provider].name}.`,
+    `New customer voice sessions use ${cap.name} from the moment the switch is confirmed; sessions already in progress stay on ${PROVIDER_CAPABILITIES[cur.provider].name} (each session is pinned to the provider it started with).`,
     voice ? `Voice becomes "${voice.name}".` : `Voice becomes ${cap.name}'s default voice.`,
     `Personality "${PERSONALITIES[cur.personality]?.name || cur.personality}" is kept (it is provider-independent).`,
     cap.pace ? `Pace "${PACES[cur.pace]?.name || cur.pace}" is kept.` : cur.pace !== 'normal' ? `Pace is not supported on ${cap.name}: it will not apply (setting kept for a rollback).` : 'Pace: normal.',

@@ -16,6 +16,7 @@ import { activeRules } from '../intelligence/runtime.js'
 import { rulesInstructions } from '../intelligence/compile.js'
 
 export const VOICE_TOOL_NAMES = TOOLS.map((t) => t.name)
+export const TOOL_KINDS_SET = new Set(VOICE_TOOL_NAMES)
 
 // Provider-neutral catalogue: { name, description, parameters (JSON Schema) }.
 export const voiceTools = () => TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.input_schema }))

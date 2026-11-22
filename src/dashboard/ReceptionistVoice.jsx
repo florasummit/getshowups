@@ -225,9 +225,12 @@ export default function ReceptionistVoice({ voice, admin, providers, reload }) {
 
 // Admin only (the server checks the platform-admin list; this never renders for owners). Switching is checked,
 // explained, confirmed, audited and reversible; test-only providers are shown as such and cannot be activated.
-const SESSIONS = { customers: ['ok', 'Customers'], lab_only: ['neutral', 'Voice Lab only'], none: ['neutral', 'None'] }
+const STATE = { active: ['ok', 'Active for customers'], ready: ['ok', 'Ready for production'], needs_test: ['warn', 'Needs a test'], not_configured: ['neutral', 'Not configured'], disabled: ['bad', 'Switched off'], no_customer_path: ['neutral', 'Test only'] }
 const BLOCKER = {
   not_configured: 'not configured',
+  disabled: 'switched off',
+  no_customer_path: 'no customer path',
+  needs_test: 'no verified test session yet',
   test_only: 'test only (no customer path)',
   business_not_eligible: 'business not eligible',
   tools_missing: 'tools missing',
@@ -270,10 +273,10 @@ function ProviderControl({ providers, reload }) {
   }
   const doSwitch = async () => {
     if (!check?.ok) return
-    if (!window.confirm(`Switch this business to ${check.provider}?\n\n${check.consequences.join('\n')}`)) return
+    if (!window.confirm(`Activate ${check.provider} for this business's customers?\n\n${check.consequences.join('\n')}`)) return
     const { status, data } = await post({ action: 'provider_switch', provider: target, voiceId, useDefaultVoice: useDefault, confirm: true, version: providers.version })
     if (status === 200) {
-      setMsg('Switched. New calls use the new provider; the previous one is kept for rollback.')
+      setMsg('Activated. New voice sessions use this provider; the previous one is kept for rollback.')
       setTarget('')
       reload()
     } else {
@@ -294,34 +297,39 @@ function ProviderControl({ providers, reload }) {
       <summary>
         AI voice provider (admin) <Pill tone="neutral">{current?.name || providers.current}</Pill>
       </summary>
-      <p className="ui-hint">Owners never see this. Only providers with a customer-facing path can be activated; the others run in the Voice Lab only. No provider has phone routing here.</p>
+      <p className="ui-hint">
+        Owners never see this. Select a provider → Test it on this business (a dry-run session on the customer page) → Review the checklist → Activate → Confirm. A provider is “ready” only after a
+        finished test session here with audio both ways and the booking tools; no provider has phone routing.
+      </p>
       <table className="rx-provider-table">
         <thead>
           <tr>
             <th scope="col">Provider</th>
+            <th scope="col">Status</th>
             <th scope="col">Configured</th>
-            <th scope="col">Browser sessions</th>
             <th scope="col">Phone calls</th>
-            <th scope="col">Tested here</th>
+            <th scope="col">Verified here</th>
             <th scope="col">Blockers</th>
           </tr>
         </thead>
         <tbody>
           {providers.providers.map((p) => (
-            <tr key={p.id} aria-current={p.id === providers.current || undefined}>
+            <tr key={p.id} aria-current={p.id === providers.current || undefined} data-provider-row={p.id} data-provider-state={p.state}>
               <th scope="row">
-                {p.name} {p.id === providers.current && <Pill tone="ok">Active</Pill>}
+                {p.name} {p.id === target && p.id !== providers.current && <Pill tone="neutral">Selected for testing</Pill>}
               </th>
+              <td>
+                <Pill tone={(STATE[p.state] || STATE.not_configured)[0]}>{(STATE[p.state] || STATE.not_configured)[1]}</Pill>
+              </td>
               <td>
                 <Pill tone={p.configured ? 'ok' : 'neutral'}>{p.configured ? 'Yes' : 'No'}</Pill>
               </td>
               <td>
-                <Pill tone={SESSIONS[p.browserSessions][0]}>{SESSIONS[p.browserSessions][1]}</Pill> {!p.liveCapable && <Pill tone="warn">Test only</Pill>}
-              </td>
-              <td>
                 <Pill tone="neutral">{p.phone ? 'Supported' : 'Not supported'}</Pill>
               </td>
-              <td>{p.tested ? 'Yes' : 'No'}</td>
+              <td className="fine">
+                {p.evidence?.ok ? `Yes (${p.evidence.sessions} session${p.evidence.sessions === 1 ? '' : 's'})` : p.evidence?.sessions ? `Partly: missing ${p.evidence.missing.join(', ')}` : 'No'}
+              </td>
               <td className="fine">{p.blockers.map((b) => BLOCKER[b] || b).join(', ') || '—'}</td>
             </tr>
           ))}
@@ -331,13 +339,13 @@ function ProviderControl({ providers, reload }) {
         <label className="field">
           <span>Switch to</span>
           <select value={target} onChange={(e) => pick(e.target.value)} aria-label="Provider to switch to">
-            <option value="">Choose a provider…</option>
+            <option value="">Select a provider…</option>
             {providers.providers
               .filter((p) => p.id !== providers.current)
               .map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {p.liveCapable ? '' : ' (test only)'}
+                  {p.state === 'ready' ? ' (ready)' : p.state === 'needs_test' ? ' (needs a test)' : p.configured ? '' : ' (not configured)'}
                 </option>
               ))}
           </select>
@@ -361,11 +369,18 @@ function ProviderControl({ providers, reload }) {
               <span>Use the provider’s default voice (explicit; a voice is never substituted silently)</span>
             </label>
             <div className="ui-form-actions">
+              {providers.providers.find((p) => p.id === target)?.testUrl ? (
+                <a className="btn btn-quiet btn-sm" href={`${providers.providers.find((p) => p.id === target).testUrl}${voiceId && !useDefault ? `&voice=${encodeURIComponent(voiceId)}` : ''}`} target="_blank" rel="noreferrer" data-test-now>
+                  Test now (dry run, new tab)
+                </a>
+              ) : (
+                <span className="fine">{providers.testBusiness ? 'Test sessions need a configured provider.' : 'Test sessions run on admin-marked test businesses only (mark this business as a test business in /admin to test here).'}</span>
+              )}
               <button type="button" className="btn btn-quiet btn-sm" onClick={run} disabled={busy}>
-                Check prerequisites
+                Review checklist
               </button>
-              <button type="button" className="btn btn-primary btn-sm" onClick={doSwitch} disabled={busy || !check?.ok}>
-                Switch provider…
+              <button type="button" className="btn btn-primary btn-sm" onClick={doSwitch} disabled={busy || !check?.ok} data-activate>
+                Activate…
               </button>
             </div>
           </>

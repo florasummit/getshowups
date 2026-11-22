@@ -133,11 +133,19 @@ async function call(mod, method, path, { cookie, origin = ORIGIN, body } = {}) {
   return { status: res.status, json: () => JSON.parse(text) }
 }
 const admin = { email: 'staff@getshowups.com' }
-const labCall = (id, provider, endedAgoMs = 60_000) => db.sql.prepare('INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)').run(`c_${id}_${provider}_${Math.random()}`, id, `conv_${id}`, provider, Date.now() - endedAgoMs - 1000, Date.now() - endedAgoMs)
+// Evidence of a verified session: a finished Lab/customer-path session on the provider with audio both ways and the
+// availability + booking tools (what server/voice/customer.js providerEvidence reads).
+const labCall = (id, provider, endedAgoMs = 60_000) => {
+  const t = Date.now() - endedAgoMs
+  const cid = `conv_${id}_${provider}_${Math.random().toString(36).slice(2, 8)}`
+  const p = provider === 'retell-lab' ? 'retell' : provider
+  db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES (?, ?, 'voice', ?, '[]', ?, ?)").run(cid, id, JSON.stringify({ lab: { provider: p, startedAt: t - 60000, endedAt: t, metrics: { micLive: 1, audioReceived: 1 } }, tools: [{ name: 'find_available_times', ok: true }, { name: 'book_appointment', ok: true, simulated: true }] }), t - 60000, t)
+  db.sql.prepare('INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)').run(`lab_${cid}`, id, cid, provider, t - 60000, t)
+}
 
 test('catalog: Retell and ElevenLabs lists are normalized (ids well-formed, presentation terms only from the provider, https previews only), cached for a day, refreshed on demand, stale-but-served on a provider failure; OpenAI is the documented fixed list without samples; the three provider ids agree', async () => {
   assert.deepEqual(PROVIDER_IDS, PROVIDERS)
-  assert.deepEqual(LIVE_PROVIDERS, ['retell'], 'only Retell has a customer-facing path today')
+  assert.deepEqual(LIVE_PROVIDERS, ['retell', 'openai', 'elevenlabs'], 'every provider has the customer-facing path (activation is evidence-based, settings.js)')
   const r = await catalogFor(env, 'retell')
   assert.deepEqual([r.source, r.voices.map((v) => v.id)], ['provider', ['retell-Cimo', '11labs-Adrian', '11labs-Myra']], 'the malformed id is dropped')
   assert.deepEqual(r.voices[0], { provider: 'retell', id: 'retell-Cimo', name: 'Cimo', preview: 'https://retell-utils-public.s3.us-west-2.amazonaws.com/cimo.mp3', language: null, accent: 'American', gender: 'masculine', age: 'Middle Aged', description: null, available: true })
@@ -232,18 +240,18 @@ test('routes: the owner gets voice preferences + the active catalog (never anoth
   const staff = await session('staff@getshowups.com', 'alpha')
   const ga = await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: staff })
   assert.equal(ga.json().admin, true)
-  assert.deepEqual(ga.json().providers.providers.map((p) => [p.id, p.configured, p.browserSessions, p.phone, p.liveCapable, p.blockers]), [
-    ['retell', true, 'customers', false, true, []],
-    ['openai', true, 'lab_only', false, false, ['test_only']],
-    ['elevenlabs', true, 'lab_only', false, false, ['test_only']],
+  assert.deepEqual(ga.json().providers.providers.map((p) => [p.id, p.state, p.configured, p.phone, p.customerPath, p.blockers]), [
+    ['retell', 'active', true, false, true, []],
+    ['openai', 'needs_test', true, false, true, ['needs_test']],
+    ['elevenlabs', 'needs_test', true, false, true, ['needs_test']],
   ])
   const va = await call(voicesApi, 'GET', '/api/dashboard/receptionist/voices?provider=elevenlabs', { cookie: staff })
   assert.deepEqual([va.json().provider, va.json().voices.map((x) => x.name)], ['elevenlabs', ['Eric', 'Sarah']])
   const chk = await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: staff, body: { action: 'provider_check', provider: 'elevenlabs', voiceId: 'cjVigY5qzO86Huf0OWal' } })
   assert.equal(chk.status, 200)
-  assert.ok(chk.json().check.blockers.includes('test_only'))
+  assert.ok(chk.json().check.blockers.includes('test_session_required'))
   const sw = await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: staff, body: { action: 'provider_switch', provider: 'elevenlabs', voiceId: 'cjVigY5qzO86Huf0OWal', confirm: true, version: 1 } })
-  assert.deepEqual([sw.status, sw.json().error], [409, 'blocked'], 'a test-only provider can never be activated for customers')
+  assert.deepEqual([sw.status, sw.json().error], [409, 'blocked'], 'an unverified provider can never be activated for customers')
   assert.equal((await getVoiceSettings(db, 'alpha')).provider, 'retell')
   // An admin who is NOT a member of any business has no session business at all (requireSession refuses).
   env.PLATFORM_ADMIN_EMAILS = 'staff@getshowups.com,other@getshowups.com'
@@ -271,11 +279,12 @@ test('provider switch: the checklist blocks test-only providers, unconfigured pr
   assert.deepEqual([c.ok, c.blockers, c.voice], [true, [], null])
   c = await checkProviderSwitch(env, alpha, { provider: 'retell', voiceId: 'retell-Cimo' })
   assert.deepEqual([c.ok, c.voice, c.transfer], [true, { id: 'retell-Cimo', name: 'Cimo' }, { personality: true, pace: true, voice: false }])
-  assert.ok(c.consequences.some((t) => t.includes('calls already in progress finish on OpenAI Realtime')))
+  assert.ok(c.consequences.some((t) => t.includes('sessions already in progress stay on OpenAI Realtime')))
   assert.ok(c.consequences.some((t) => t.includes('Voice becomes "Cimo"')))
   // Other blockers, each on its own.
   assert.ok((await checkProviderSwitch({ ...env, RETELL_API_KEY: '' }, alpha, { provider: 'retell', voiceId: 'retell-Cimo' })).blockers.includes('not_configured'))
-  assert.ok((await checkProviderSwitch(env, alpha, { provider: 'elevenlabs', voiceId: 'cjVigY5qzO86Huf0OWal' })).blockers.includes('test_only'))
+  assert.ok((await checkProviderSwitch(env, alpha, { provider: 'elevenlabs', voiceId: 'cjVigY5qzO86Huf0OWal' })).blockers.includes('test_session_required'))
+  assert.ok((await checkProviderSwitch({ ...env, VOICE_PROVIDERS_DISABLED: 'retell' }, alpha, { provider: 'retell', voiceId: 'retell-Cimo' })).blockers.includes('disabled'))
   assert.ok((await checkProviderSwitch(env, { ...alpha, status: 'suspended' }, { provider: 'retell', voiceId: 'retell-Cimo' })).blockers.includes('business_not_eligible'))
   kv.delete('google:alpha')
   assert.ok((await checkProviderSwitch(env, alpha, { provider: 'retell', voiceId: 'retell-Cimo' })).blockers.includes('booking_not_ready'))
@@ -302,7 +311,7 @@ test('provider switch: the checklist blocks test-only providers, unconfigured pr
   assert.ok(!actions.some((a) => /SECRET|cedar@/.test(a.details)))
   assert.equal((await checkProviderSwitch(env, alpha, { provider: 'retell', voiceId: 'retell-Cimo' })).blockers[0], 'no_change')
   const ov = await providerOverview(env, alpha)
-  assert.deepEqual([ov.current, ov.providers.find((p) => p.id === 'retell').tested], ['retell', true])
+  assert.deepEqual([ov.current, ov.providers.find((p) => p.id === 'retell').state, ov.providers.find((p) => p.id === 'retell').evidence.ok], ['retell', 'active', true])
   // Rollback: admin only, confirmed, versioned; restores provider + voice + pace and clears `previous`; audited.
   assert.equal((await rollbackProvider(env, alpha, { email: 'owner@alpha.example' }, { confirm: true, version: 2 })).error, 'not_platform_admin')
   assert.equal((await rollbackProvider(env, alpha, admin, { version: 2 })).error, 'confirmation_required')

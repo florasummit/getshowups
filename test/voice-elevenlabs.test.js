@@ -324,7 +324,7 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
 test('turn metrics: first/median/p95 response from end of user speech to first agent audio, interruptions, tools, reconnects; every key is one the server keeps', () => {
   let t = 1000
   const m = createTurnMetrics(() => t)
-  assert.deepEqual(m.snapshot(), { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0 })
+  assert.deepEqual(m.snapshot(), { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, micLive: 0, audioReceived: 0 })
   m.agentStarted() // the greeting: no user turn pending, not counted
   for (const ms of [800, 1200, 400, 3000]) {
     m.userFinished()
@@ -337,7 +337,7 @@ test('turn metrics: first/median/p95 response from end of user speech to first a
   m.tool(false)
   m.reconnected()
   const s = m.snapshot()
-  assert.deepEqual(s, { turns: 4, interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 1, firstResponseMs: 800, medianResponseMs: 800, p95ResponseMs: 3000 })
+  assert.deepEqual(s, { turns: 4, interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 1, micLive: 1, audioReceived: 1, firstResponseMs: 800, medianResponseMs: 800, p95ResponseMs: 3000 })
   assert.deepEqual(cleanMetrics(s), s, 'the server keeps every metric the adapter reports')
   assert.deepEqual(ADAPTER_STATES, ['idle', 'connecting', 'connected', 'reconnecting', 'stopping', 'stopped', 'failed'])
 })

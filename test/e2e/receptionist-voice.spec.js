@@ -84,7 +84,7 @@ test('owner: browses, previews (one at a time), picks a voice, personality and p
   expect(sw.status()).toBe(403)
 })
 
-test('admin member: the provider control shows honest readiness (Retell live-capable; OpenAI and ElevenLabs test only, not configured here); a test-only switch is blocked by the checklist; nothing changes for the owner', async ({ page, context }) => {
+test('admin member: the provider control shows truthful states (Retell active; OpenAI and ElevenLabs not configured here); an unverified switch is blocked by the checklist; nothing changes for the owner', async ({ page, context }) => {
   // The voice admin is a member of the desktop voice business (one business per member email); desktop only.
   await useSession(context, fixtures.E2E_VOICE_ADMIN_SESSION_TOKEN)
   await page.goto('/dashboard/receptionist')
@@ -92,25 +92,27 @@ test('admin member: the provider control shows honest readiness (Retell live-cap
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
   expect(me.admin).toBe(true)
   expect(me.providers.current).toBe('retell')
-  expect(me.providers.providers.map((p) => [p.id, p.configured, p.liveCapable, p.phone])).toEqual([
-    ['retell', true, true, false],
-    ['openai', false, false, false],
-    ['elevenlabs', false, false, false],
+  expect(me.providers.providers.map((p) => [p.id, p.state, p.configured, p.customerPath, p.phone])).toEqual([
+    ['retell', 'active', true, true, false],
+    ['openai', 'not_configured', false, true, false],
+    ['elevenlabs', 'not_configured', false, true, false],
   ])
   await expect(control).toHaveCount(1)
   await control.locator('summary').click()
   await expect(control).toContainText('Retell')
-  await expect(control.getByRole('row', { name: /Retell/ })).toContainText('Active')
-  await expect(control.getByRole('row', { name: /ElevenLabs/ })).toContainText('Test only')
+  await expect(control.getByRole('row', { name: /Retell/ })).toContainText('Active for customers')
+  await expect(control.getByRole('row', { name: /ElevenLabs/ })).toContainText('Not configured')
   await expect(control.getByRole('row', { name: /OpenAI/ })).toContainText('Not supported')
   await control.getByRole('combobox', { name: 'Provider to switch to' }).selectOption('elevenlabs')
   await control.getByRole('checkbox').check()
-  await control.getByRole('button', { name: 'Check prerequisites' }).click()
+  await expect(control.locator('[data-test-now]')).toHaveCount(0, 'not a test business: no Test now link')
+  await control.getByRole('button', { name: 'Review checklist' }).click()
   const check = control.getByLabel('Switching checklist')
   await expect(check).toContainText('Blocked')
-  await expect(check).toContainText('cannot be activated for customers (test only)')
+  await expect(check).toContainText('is not configured')
+  await expect(check).toContainText('Not verified for this business yet')
   await expect(check).toContainText('No phone line is connected')
-  await expect(control.getByRole('button', { name: 'Switch provider…' })).toBeDisabled()
+  await expect(control.getByRole('button', { name: 'Activate…' })).toBeDisabled()
   await noSideScroll(page)
   // Server-side the switch is refused as blocked and audited; the business stays on Retell.
   const origin = new URL(page.url()).origin

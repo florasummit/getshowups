@@ -18,7 +18,11 @@ export const MAX_RECONNECTS = 2
 const loadSdk = () => import('@elevenlabs/client')
 const FALLBACK_NOTE = 'Something went wrong on our side: say so honestly and offer a callback request.'
 
-export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(), post = api } = {}) {
+export const LAB_ROUTES = { connect: '/api/platform/voice-lab/elevenlabs', tool: '/api/platform/voice-lab/tool', session: '/api/platform/voice-lab/session' }
+
+export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(), post = api, routes: routeOverrides = null } = {}) {
+  const routes = { ...LAB_ROUTES, ...(routeOverrides || {}) }
+  let initial = null // the start route's own connect payload (signedUrl, overrides, …), first connection only
   let state = 'idle'
   let session = null
   let onEvent = () => {}
@@ -30,6 +34,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
   let metrics = createTurnMetrics(now)
   let queue = []
   let flushTimer = null
+  let ended = false
 
   // Events use the shared shape (src/voice/adapter.js): onEvent(name, payload). ElevenLabs' own session states map to
   // the interface's: live → connected, ended → stopped, error → failed.
@@ -53,7 +58,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
     if (!queue.length || !session) return
     const lines = queue
     queue = []
-    await post('/api/platform/voice-lab/session', { method: 'POST', body: withSession({ action: 'transcript', lines }) })
+    await post(routes.session, { method: 'POST', body: withSession({ action: 'transcript', lines }) })
   }
   const said = (who, text) => {
     const at = now()
@@ -65,7 +70,7 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
   // The only way the agent acts: our server runs the engine tool for this session and tells us what to answer.
   const runTool = async (name, params) => {
     const t0 = now()
-    const { status, data } = await post('/api/platform/voice-lab/tool', { method: 'POST', body: withSession({ name, input: params && typeof params === 'object' ? params : {}, userText: lastUserText }) })
+    const { status, data } = await post(routes.tool, { method: 'POST', body: withSession({ name, input: params && typeof params === 'object' ? params : {}, userText: lastUserText }) })
     const result = status === 200 && data?.result && typeof data.result === 'object' ? data.result : { ok: false, error: data?.error || (status === 429 ? 'rate_limited' : 'tool_failed'), note: FALLBACK_NOTE }
     const ok = result.ok !== false
     metrics.tool(ok)
@@ -78,6 +83,11 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
     if (flushTimer) clearTimeout(flushTimer)
     await flush().catch(() => {})
     emitMetrics()
+    // The customer path ends the session here (the Lab page sends 'end' itself when routes are the Lab's).
+    if (routeOverrides && session && !ended) {
+      ended = true
+      await post(routes.session, { method: 'POST', body: withSession({ action: 'end', metrics: metrics.snapshot(), ...(outcome ? { outcome } : {}) }) }).catch(() => {})
+    }
     if (s === 'error') emit({ type: 'error', code: reason, fatal: true })
     setState(s, { reason, reconnects, ...(outcome ? { outcome } : {}) })
   }
@@ -102,7 +112,8 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
   }
 
   async function connect() {
-    const { status, data } = await post('/api/platform/voice-lab/elevenlabs', { method: 'POST', body: withSession({}) })
+    const { status, data } = initial ? { status: 200, data: initial } : await post(routes.connect, { method: 'POST', body: withSession({}) })
+    initial = null
     if (status !== 200 || typeof data?.signedUrl !== 'string') throw Object.assign(new Error('connect refused'), { code: data?.error || (status === 429 ? 'rate_limited' : 'connect_failed') })
     const { Conversation } = await sdk()
     const clientTools = Object.fromEntries((Array.isArray(data.clientTools) ? data.clientTools : []).map((n) => [n, (params) => runTool(n, params)]))
@@ -147,9 +158,10 @@ export function createElevenLabsAdapter({ sdk = loadSdk, now = () => Date.now(),
       return STATE[state] || state
     },
     metrics: () => metrics.snapshot(),
-    async start({ customer, id, token, onEvent: cb }) {
+    async start({ customer, id, token, onEvent: cb, connect: first = null }) {
       if (state === 'connecting' || state === 'live' || state === 'reconnecting') return
       session = { customer, id, token }
+      initial = first && typeof first.signedUrl === 'string' ? first : null
       onEvent = typeof cb === 'function' ? cb : () => {}
       stopping = false
       reconnects = 0

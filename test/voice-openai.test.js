@@ -321,7 +321,7 @@ test('adapter: mint → WebRTC offer with the ephemeral key → session.update +
   assert.equal(h.adapter.state, 'stopped')
   assert.equal(h.mic.stopped, 1)
   assert.equal(summary.outcome, 'ended')
-  assert.deepEqual(metrics, { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, audioSeconds: 0, inputTokens: 0, outputTokens: 0 })
+  assert.deepEqual(metrics, { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, audioSeconds: 0, inputTokens: 0, outputTokens: 0, micLive: 0, audioReceived: 0 })
   assert.equal(h.calls.at(-1).body.action, 'end')
 })
 
@@ -484,13 +484,13 @@ test('adapter: provider not configured / mint refused / SDP refused / microphone
   assert.ok(ev.some((e) => e.n === 'error' && e.code === 'mic_denied' && e.fatal))
   assert.equal(c.calls.at(-1).body.outcome, 'mic_denied')
   await assert.rejects(createOpenAIAdapter({ api: c.api }).start({ onEvent() {} }), /invalid_session/)
-  assert.deepEqual(await createOpenAIAdapter({ api: c.api }).stop(), { summary: null, metrics: { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, audioSeconds: 0, inputTokens: 0, outputTokens: 0 } })
+  assert.deepEqual(await createOpenAIAdapter({ api: c.api }).stop(), { summary: null, metrics: { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, audioSeconds: 0, inputTokens: 0, outputTokens: 0, micLive: 0, audioReceived: 0 } })
 })
 
 test('adapter interface: documented event names and metric summary', () => {
   assert.deepEqual(ADAPTER_EVENTS, ['status', 'transcript', 'tool', 'metrics', 'error'])
-  assert.deepEqual(summarizeMetrics({ firstResponseMs: 500.4, responseTimes: [900, 500, 1500, 700], interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61.2, inputTokens: 10, outputTokens: 4 }), { firstResponseMs: 500, medianResponseMs: 700, p95ResponseMs: 1500, turns: 4, interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61, inputTokens: 10, outputTokens: 4 })
-  assert.deepEqual(summarizeMetrics({}), { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, inputTokens: 0, outputTokens: 0 })
+  assert.deepEqual(summarizeMetrics({ firstResponseMs: 500.4, responseTimes: [900, 500, 1500, 700], interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61.2, inputTokens: 10, outputTokens: 4 }), { firstResponseMs: 500, medianResponseMs: 700, p95ResponseMs: 1500, turns: 4, interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61, inputTokens: 10, outputTokens: 4, micLive: 0, audioReceived: 0 })
+  assert.deepEqual(summarizeMetrics({}), { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, inputTokens: 0, outputTokens: 0, micLive: 0, audioReceived: 0 })
 })
 
 // ---- Audio, both ways: the element is created when none is injected, playback problems are reported, levels are measured ----

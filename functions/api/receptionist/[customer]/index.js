@@ -4,7 +4,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { getSettings, receptionistOn, receptionistRequestsReady } from '../../../../server/receptionist/engine.js'
-import { voiceStatus } from '../../../../server/receptionist/voice.js'
+import { customerVoiceStatus } from '../../../../server/voice/customer.js'
 import { getProfile } from '../../../../server/onboarding.js'
 import { hostingStatus, isHosted, liveContent } from '../../../../server/website.js'
 import { connectedHost } from '../../../../server/domains.js'
@@ -31,9 +31,10 @@ export async function onRequestGet({ request, env, params }) {
     name: customer.name,
     greeting: s.greeting || `Hi! I'm the ${customer.name} assistant. Ask me anything, or I can find you a time.`,
     phone: profile?.phone || '',
-    // Voice only where released (RECEPTIONIST_VOICE_BUSINESSES); otherwise the page says it is in testing.
-    voice: voiceStatus(env, customer.id) === 'available',
-    voiceStatus: voiceStatus(env, customer.id),
+    // Voice by the business's active provider (server/voice/customer.js): Retell where released
+    // (RECEPTIONIST_VOICE_BUSINESSES), another provider once an admin activated it; otherwise "in testing".
+    voice: (await customerVoiceStatus(env, customer.id)) === 'available',
+    voiceStatus: await customerVoiceStatus(env, customer.id),
     callbacks: await receptionistRequestsReady(env.ONBOARDING_DB),
     website,
   })

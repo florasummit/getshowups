@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## Universal AI receptionist: customer-facing voice on Retell, OpenAI Realtime and ElevenLabs (2026-11-22) — feat/universal-voice (no migration; PR for approval)
+
+- server/voice/customer.js + public routes voice / voice-connect / voice-tool / voice-session: provider decided
+  server-side, sessions pinned, tools through our runner (real for customers, dry run for admin tests), limits, lifecycle;
+  the chat page runs the provider the server returns. Readiness is evidence-based (finished session with audio both
+  ways + availability + booking tools); admin flow Select → Test now → Review → Activate → Confirm; rollback kept.
+- Live: scripts/voice-live-check.mjs ran one real session per provider (OpenAI, ElevenLabs) through the customer-path
+  functions: greeting, price, area check, availability, details and (adaptive) booking confirmation, audio both ways.
+- Unchanged: Retell default for every business without a row; PoolThru untouched; no phone routing; no fallback.
+
 ## Receptionist voice management (2026-11-22) — feat/receptionist-voice (migration 0035; PR for approval)
 
 - Owners: Dashboard → Receptionist → "Receptionist voice": voice from the active provider's catalog (provider samples

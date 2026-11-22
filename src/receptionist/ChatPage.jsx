@@ -35,6 +35,24 @@ const VOICE_ERRORS = {
   voice_not_available: 'Voice is in testing and not available yet. You can keep typing.',
   dropped: 'The call dropped. You can talk again or keep typing.',
   start: 'Couldn’t start talking. Try again or keep typing.',
+  voice_busy: 'All voice lines are busy right now. Try again in a minute, or keep typing.',
+  voice_limit: 'Voice isn’t available right now. You can keep typing.',
+  voice_unavailable: 'Voice isn’t available right now. You can keep typing.',
+  voice_unreachable: 'Voice isn’t available right now. You can keep typing.',
+  voice_in_progress: 'A call is already running in this conversation.',
+  test_not_allowed: 'Test sessions are for signed-in platform admins only.',
+  not_test_business: 'Test sessions run only on a test business.',
+  mic_denied: 'We couldn’t use your microphone. Allow microphone access in your browser, or keep typing.',
+  connection_lost: 'The call dropped. You can talk again or keep typing.',
+}
+// ?test=<provider>: a platform admin testing a candidate provider on a test business (server-checked; dry run).
+const testProvider = () => {
+  const v = new URLSearchParams(window.location.search).get('test') || ''
+  return /^[a-z]{3,20}$/.test(v) ? v : ''
+}
+const testVoice = () => {
+  const v = new URLSearchParams(window.location.search).get('voice') || ''
+  return /^[A-Za-z0-9_.:-]{1,120}$/.test(v) ? v : ''
 }
 const tel = (p) => `tel:${p.replace(/[^\d+]/g, '')}`
 // The ad parameters this page was opened with (a website link from an ad carries them); validated on the server.
@@ -66,8 +84,10 @@ export default function ChatPage({ id }) {
   const [confirmEnd, setConfirmEnd] = useState(false)
   const listRef = useRef(null)
   const inputRef = useRef(null)
-  const callRef = useRef(null)
+  const callRef = useRef(null) // Retell SDK call, or the adapter of another provider (both expose stopCall())
   const newRef = useRef(null)
+  const [audioBlocked, setAudioBlocked] = useState(false)
+  const test = testProvider()
 
   useEffect(() => noIndex(), [])
   useEffect(() => {
@@ -141,16 +161,62 @@ export default function ChatPage({ id }) {
     } catch (err) {
       return setVoice({ state: 'error', live: [], message: err?.name === 'NotFoundError' ? VOICE_ERRORS.noMic : VOICE_ERRORS.mic })
     }
-    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() } })
+    const { status, data } = await api(`/api/receptionist/${id}/voice`, { method: 'POST', body: { ...(conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() }), ...(test ? { test: { provider: test, ...(testVoice() ? { voiceId: testVoice() } : {}) } } : {}) } })
     if (status !== 200) return setVoice({ state: 'error', live: [], message: VOICE_ERRORS[data.error] || VOICE_ERRORS.start })
     const c = { id: data.conversationId, token: data.token }
     setConv(c)
+    // The server chose the provider (the business's active one, or the admin's test candidate). Retell runs its own
+    // SDK below; OpenAI Realtime and ElevenLabs run through the shared adapters, with every tool on our server.
+    if (data.provider && data.provider !== 'retell') {
+      try {
+        const mod = data.provider === 'openai' ? await import('../voice/openai.js') : await import('../voice/elevenlabs.js')
+        const routes = { connect: `/api/receptionist/${id}/voice-connect`, tool: `/api/receptionist/${id}/voice-tool`, session: `/api/receptionist/${id}/voice-session` }
+        const adapter = data.provider === 'openai' ? mod.createOpenAIAdapter({ routes }) : mod.createElevenLabsAdapter({ routes })
+        const live = []
+        callRef.current = { stopCall: () => adapter.stop({ outcome: 'ended' }), adapter }
+        const onEvent = (name, p) => {
+          if (name === 'status') {
+            if (p.state === 'connected') setVoice((v) => ({ ...v, state: 'live', talking: typeof p.speaking === 'boolean' ? p.speaking : p.mode ? p.mode === 'speaking' : v.talking }))
+            if (p.state === 'connecting' || p.state === 'reconnecting') setVoice((v) => ({ ...v, state: 'connecting' }))
+            if (p.state === 'stopped' || p.state === 'failed') {
+              callRef.current = null
+              setAudioBlocked(false)
+              setVoice(p.state === 'failed' ? { state: 'error', live: [], message: VOICE_ERRORS[p.reason] || VOICE_ERRORS.dropped } : { state: 'ended', live: [] })
+              refresh(c)
+            }
+            if (p.state === 'connected' && p.audio === 'blocked') setAudioBlocked(true)
+            if (p.audio === 'playing' || p.audio === 'received') setAudioBlocked(false)
+          }
+          if (name === 'transcript' && p.text) {
+            const i = live.findIndex((l) => l.at === p.at && l.who === p.who)
+            if (i >= 0) live[i] = { who: p.who, text: p.text, at: p.at, channel: 'voice' }
+            else live.push({ who: p.who, text: p.text, at: p.at, channel: 'voice' })
+            setVoice((v) => ({ ...v, live: [...live] }))
+          }
+          if (name === 'error' && p.code === 'audio_blocked') setAudioBlocked(true)
+          if (name === 'error' && p.fatal) setVoice((v) => ({ ...v, message: VOICE_ERRORS[p.code] || VOICE_ERRORS.dropped }))
+        }
+        await adapter.start({ customer: id, id: c.id, token: c.token, onEvent, connect: data })
+      } catch (err) {
+        callRef.current = null
+        setVoice({ state: 'error', live: [], message: VOICE_ERRORS[err?.code] || (err?.code === 'mic_denied' ? VOICE_ERRORS.mic : VOICE_ERRORS.start) })
+      }
+      return
+    }
     try {
       const { RetellWebClient } = await sdk
       const call = new RetellWebClient()
       callRef.current = call
+      const heard = { micLive: 0, audioReceived: 0, startedAt: Date.now() }
+      const reportEnd = () => api(`/api/receptionist/${id}/voice-session`, { method: 'POST', body: { action: 'end', id: c.id, token: c.token, metrics: { micLive: heard.micLive, audioReceived: heard.audioReceived, audioSeconds: Math.round((Date.now() - heard.startedAt) / 1000) }, outcome: 'ended' } }).catch(() => {})
       call.on('call_started', () => setVoice((v) => ({ ...v, state: 'live' })))
-      call.on('agent_start_talking', () => setVoice((v) => ({ ...v, talking: true })))
+      call.on('user_start_talking', () => {
+        heard.micLive = 1
+      })
+      call.on('agent_start_talking', () => {
+        heard.audioReceived = 1
+        setVoice((v) => ({ ...v, talking: true }))
+      })
       call.on('agent_stop_talking', () => setVoice((v) => ({ ...v, talking: false })))
       call.on('update', (u) => {
         if (Array.isArray(u?.transcript)) setVoice((v) => ({ ...v, live: u.transcript.map((l) => ({ who: l.role === 'agent' ? 'receptionist' : 'customer', text: l.content, channel: 'voice' })) }))
@@ -158,7 +224,7 @@ export default function ChatPage({ id }) {
       call.on('call_ended', () => {
         callRef.current = null
         setVoice({ state: 'ended', live: [] })
-        refresh(c)
+        reportEnd().then(() => refresh(c))
       })
       call.on('error', () => {
         // Release the microphone and the connection (the SDK doesn't always end the call on an error).
@@ -176,6 +242,10 @@ export default function ChatPage({ id }) {
     }
   }
   const endVoice = () => callRef.current?.stopCall()
+  const enableSound = () => {
+    const d = callRef.current?.adapter?.resumeAudio?.()
+    if (d && d !== 'blocked') setAudioBlocked(false)
+  }
 
   const endConversation = async () => {
     setConfirmEnd(false)
@@ -359,6 +429,11 @@ export default function ChatPage({ id }) {
                     <>
                       <span className={`rc-dot${voice.talking ? ' rc-dot--talking' : ''}`} aria-hidden="true" />
                       <span className="callbar-text">{voice.state === 'connecting' ? 'Connecting your microphone…' : voice.talking ? 'Speaking…' : 'Listening. Just talk, or type below.'}</span>
+                      {audioBlocked && (
+                        <button type="button" className="btn btn-sm btn-quiet" onClick={enableSound}>
+                          Enable sound
+                        </button>
+                      )}
                       <button type="button" className="btn btn-sm btn-danger" onClick={endVoice}>
                         End call
                       </button>
@@ -388,7 +463,7 @@ export default function ChatPage({ id }) {
                   autoComplete="off"
                   enterKeyHint="send"
                 />
-                {info.voice && !onCall && (
+                {(info.voice || test) && !onCall && (
                   <button type="button" className="composer-mic" onClick={startVoice} aria-label={voice.state === 'ended' ? 'Talk again (uses your microphone)' : 'Talk instead (uses your microphone)'} title="Talk instead">
                     <Mic />
                   </button>
@@ -404,7 +479,7 @@ export default function ChatPage({ id }) {
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
                 <a href={`/book/${id}`}>Book online</a>
               </p>
-              {info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice is in testing and not available yet.</p>}
+              {test ? <p className="chat-legal" data-test-session>Admin test session: voice runs on the candidate provider you chose, in dry run (nothing is booked, nobody is messaged).</p> : info.voiceStatus === 'testing' && <p className="chat-legal">Talking by voice is in testing and not available yet.</p>}
             </>
           )}
           <p className="chat-legal">

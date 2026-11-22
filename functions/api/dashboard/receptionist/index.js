@@ -18,7 +18,7 @@ import { toE164 } from '../../../../server/sms.js'
 import { messagesLive } from '../../../../server/email.js'
 import { getSettings, modelConfigured, receptionistReady, receptionistRequestsReady, visibleTranscript } from '../../../../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, LIMITS } from '../../../../server/receptionist/knowledge.js'
-import { voiceStatus } from '../../../../server/receptionist/voice.js'
+import { customerVoiceStatus } from '../../../../server/voice/customer.js'
 import { checkProviderSwitch, getVoiceSettings, isPlatformAdminEmail, ownerView, providerOverview, rollbackProvider, saveVoicePreferences, switchProvider, voiceSettingsReady } from '../../../../server/voice/settings.js'
 
 const MODES = ['ai_first', 'human_first', 'after_hours']
@@ -97,8 +97,8 @@ export async function onRequestGet({ request, env }) {
     capabilities: {
       model: modelConfigured(env), // the AI can answer at all
       chat: modelConfigured(env),
-      voice: modelConfigured(env) && voiceStatus(env, customer.id) === 'available', // browser microphone calls, released for this business
-      voiceStatus: !modelConfigured(env) ? 'not_configured' : voiceStatus(env, customer.id), // 'testing' = not released yet (RECEPTIONIST_VOICE_BUSINESSES)
+      voice: modelConfigured(env) && (await customerVoiceStatus(env, customer.id)) === 'available', // browser microphone calls on the active provider
+      voiceStatus: !modelConfigured(env) ? 'not_configured' : await customerVoiceStatus(env, customer.id), // 'testing' = Retell not released yet (RECEPTIONIST_VOICE_BUSINESSES)
       callbacks: withRequests, // callback requests and messages are recorded
       staffEmail: messagesLive(env) ? 'live' : 'test_mode', // owner emails about callbacks leave test mode only with MESSAGES_LIVE
       phoneLine: false, // no phone number is connected to GetShowUps: no phone routing, no live transfer
