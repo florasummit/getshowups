@@ -267,6 +267,8 @@ test('setup script: dry run writes nothing; --apply creates the seven client too
   assert.deepEqual(find.parameters.properties.part_of_day.enum, ['any', 'morning', 'afternoon', 'evening'])
   assert.deepEqual(find.parameters.required, ['date', 'part_of_day'])
   assert.equal(toolBodies.find((t) => t.name === 'request_callback').parameters.properties.urgent.type, 'boolean')
+  assert.ok(toolBodies.every((t) => Object.values(t.parameters.properties).every((p) => typeof p.description === 'string' && p.description.length > 0)), 'ElevenLabs refuses a parameter without a description (422)')
+  assert.equal(toolBodies.find((t) => t.name === 'request_callback').parameters.properties.urgent.description, 'urgent (boolean)')
   const agent = writes.at(-1)[1]
   assert.equal(agent.name, AGENT_NAME)
   assert.deepEqual(agent.conversation_config.agent.prompt.tool_ids, created.toolIds)

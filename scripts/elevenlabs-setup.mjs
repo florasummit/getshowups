@@ -45,7 +45,8 @@ export const toolParameters = (schema) => ({
   type: 'object',
   description: '',
   required: Array.isArray(schema?.required) ? schema.required : [],
-  properties: Object.fromEntries(Object.entries(schema?.properties || {}).map(([k, p]) => [k, { type: p.type, description: p.description || (p.enum ? `One of: ${p.enum.join(', ')}` : ''), ...(Array.isArray(p.enum) ? { enum: p.enum } : {}) }])),
+  // ElevenLabs refuses a property without a description (422): an enum lists its values, anything else is named.
+  properties: Object.fromEntries(Object.entries(schema?.properties || {}).map(([k, p]) => [k, { type: p.type, description: p.description || (p.enum ? `One of: ${p.enum.join(', ')}` : `${k.replace(/_/g, ' ')} (${p.type})`), ...(Array.isArray(p.enum) ? { enum: p.enum } : {}) }])),
 })
 
 // One client tool per engine tool; the name stays the engine's (the browser registers handlers under these names).

@@ -92,7 +92,7 @@ case "$PROVIDER" in
     echo "Set OPENAI_API_KEY on $PROJECT (applies on the next deployment)."
     ;;
   elevenlabs)
-    OUT=$(printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs --apply ${AGENT_ID:+--agent-id "$AGENT_ID"} | tail -1)
+    OUT=$(printf '%s\n' "$KEY" | node scripts/elevenlabs-setup.mjs --apply ${AGENT_ID:+--agent-id "$AGENT_ID"} | tail -1) || true # a failed setup is reported on the next line, never a silent exit
     AGENT=$(printf '%s' "$OUT" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const r=JSON.parse(s);process.stdout.write(r.ok&&r.agentId?r.agentId:'')}catch{}})")
     [ -n "$AGENT" ] || { echo "Agent setup did not return an agent id; nothing set. Output: $OUT" >&2; exit 5; }
     printf '%s' "$KEY" | npx wrangler pages secret put ELEVENLABS_API_KEY --project-name "$PROJECT" >/dev/null
