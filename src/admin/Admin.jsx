@@ -11,15 +11,17 @@ import '../app.css'
 const Review = lazyPage(() => import('./Review.jsx'))
 const Control = lazyPage(() => import('./Control.jsx'))
 const VoiceLab = lazyPage(() => import('./VoiceLab.jsx'))
+const VoiceProviders = lazyPage(() => import('./VoiceProviders.jsx'))
 const Growth = lazyPage(() => import('./Growth.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
   ['control', 'Control Center', '/admin/control'],
   ['review', 'Business Review', '/admin/review'],
   ['voicelab', 'Voice Lab', '/admin/voice-lab'],
+  ['voice', 'Voice providers', '/admin/voice-providers'],
   ['growth', 'Growth', '/admin/growth'],
 ]
-const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') ? 'voicelab' : path.startsWith('/admin/growth') ? 'growth' : 'overview')
+const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') ? 'voicelab' : path.startsWith('/admin/voice-providers') ? 'voice' : path.startsWith('/admin/growth') ? 'growth' : 'overview')
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -1074,7 +1076,7 @@ function AuditLog() {
               {a.entries.slice(0, 20).map((e) => (
                 <li key={e.seq} className="row">
                   <div className="row-main">
-                    <p className="row-title">
+                    <p className="row-title row-title--wrap">
                       #{e.seq} {e.action}
                       {e.customer ? ` · ${e.customer}` : ''}
                     </p>
@@ -1461,6 +1463,10 @@ function Console({ me }) {
         ) : section === 'voicelab' ? (
           <Suspense fallback={<div aria-busy="true" />}>
             <VoiceLab />
+          </Suspense>
+        ) : section === 'voice' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <VoiceProviders />
           </Suspense>
         ) : section === 'growth' ? (
           <Suspense fallback={<div aria-busy="true" />}>

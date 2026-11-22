@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Admin Console: voice-provider management for any business (2026-11-22) — feat/admin-voice-providers (no migration)
+
+- Why: the provider control lived only in the business dashboard, and an admin can be a member of one business
+  (customer_users.email), so providers of other businesses could not be managed.
+- /admin/voice-providers + GET/POST /api/platform/voice-provider (server/voice/admin.js): pick a business → facts,
+  stored configuration, readiness/evidence/blockers (providerOverview), voice-session history (codes only) → the SAME
+  ProviderControl (Select → Test now → Review → Activate → Rollback) bound to the platform route, with the business
+  named on the page and its id typed back before a switch or rollback (server-enforced `confirmCustomer`).
+- Unchanged: checkProviderSwitch / switchProvider / rollbackProvider and their audit records; dashboard authorization;
+  no business's provider switched; no phone routing, billing or unrelated features touched.
+- Tests: test/voice-admin.test.js (authorization, membership not needed, deleted businesses excluded, view + history
+  without personal data, typed-id guard, blocked/passing switch audited, rollback, other business untouched),
+  test/e2e/voice-providers.spec.js (live business blocked; test business with evidence: Review → Activate typed →
+  audited → Roll back typed), seeded business e2e-voice-switch.
+- Next: run the admin test sessions on a test business from /admin/voice-providers (Test now) to collect production
+  evidence for OpenAI/ElevenLabs; grant `voices_read` on the ElevenLabs key.
+
 ## Universal AI receptionist: customer-facing voice on Retell, OpenAI Realtime and ElevenLabs (2026-11-22) — feat/universal-voice (no migration; PR for approval)
 
 - server/voice/customer.js + public routes voice / voice-connect / voice-tool / voice-session: provider decided

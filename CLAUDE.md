@@ -57,6 +57,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)
+  api/platform/voice-provider  Admin Console voice-provider management for ANY business (server/voice/admin.js; /admin/voice-providers)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
   api/dashboard/ghl   GoHighLevel connection (GET status, POST save/disconnect); 404 unless GHL_ENABLED=true
@@ -467,6 +468,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   checklist → consequences → confirm → one conditional write → audited → rollback. Only providers with a customer path
   can be activated (today Retell; OpenAI/ElevenLabs = Voice Lab only, "test only"); no provider has phone routing.
   No row = today's configuration (Retell, agent voice, Balanced). Never substitute a voice silently.
+  Admin Console entry point (/admin/voice-providers, GET/POST /api/platform/voice-provider, server/voice/admin.js):
+  the same check/switch/rollback functions for ANY business (platform admins only, membership not needed), plus the
+  business id typed back (`confirmCustomer`) before a switch or rollback; the view is facts, readiness and a
+  codes-only session history (never transcripts or customer details). ProviderControl.jsx is the one UI for both.
 - Teach Your AI (server/intelligence/, migration 0033, docs/INTELLIGENCE_STUDIO.md): owner AI rules as versioned
   structured config (never free-text prompts): draft → explicit publish → append-only versions → rollback (a copy
   published as a new version); every write carries its stamp (409, never a silent overwrite). Business facts stay in

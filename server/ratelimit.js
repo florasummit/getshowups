@@ -54,6 +54,7 @@ export const RULES = {
   voiceLabStart: { limit: 30, windowSec: 3600 }, //  POST /api/platform/voice-lab/session start (per admin)
   voiceLabTool: { limit: 600, windowSec: 600 }, //   POST /api/platform/voice-lab/tool (per admin)
   voiceLabConnect: { limit: 90, windowSec: 3600 }, // POST /api/platform/voice-lab/{openai,elevenlabs} (one provider connect/reconnect each, per admin)
+  voiceProviderAdmin: { limit: 60, windowSec: 600 }, // POST /api/platform/voice-provider check/switch/rollback (per admin)
   websiteExport: { limit: 10, windowSec: 600 }, //   GET static website download (per business; renders every page)
   websiteAi: { limit: 30, windowSec: 600 }, //      POST website generate/revise attempts (per business; burst guard,
   //                                                   daily allowances are in server/ai-usage.js)
