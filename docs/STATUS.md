@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## OpenAI Voice Lab: silent audio fixed (2026-11-22) — fix/openai-voice-lab-audio (no migration; awaiting deploy approval)
+
+- Root causes: (1) src/admin/VoiceLab.jsx handled adapter events as one object while every adapter emits
+  `(name, payload)` → the page ignored every status/transcript/error (shared Lab bug: affected Retell and ElevenLabs
+  displays too; the adapters themselves are unchanged); (2) src/voice/openai.js played the remote track only into an
+  injected `<audio>` element the Lab never passed → nothing was ever played; (3) nothing proved audio flowed.
+- Fix: the adapter creates its own hidden audio element inside the Start click, plays the remote stream, reports
+  `audio_blocked` with an "Enable sound" retry, meters the microphone and the remote stream (status `mic` /
+  `audio`), reports a silent microphone after 8 s; the Lab accepts `(name, payload)`, labels every adapter state,
+  shows "Mic: … / AI audio: …" badges and plain-language errors (never credentials).
+- Evidence: one real gpt-realtime session through the actual adapter in Chromium (fake microphone with a synthesized
+  caller; server pieces in node; dry run): greeting spoken, caller transcribed, 2 interruptions handled, first reply
+  165 ms, remote level peak 0.22, no errors, no key leak. Tests: test/voice-openai.test.js (+2: element creation,
+  playback, blocked autoplay, levels, mic_silent, audio_unavailable), e2e voice-lab + voice-mic.
+- Not changed: Retell path, ElevenLabs adapter, billing, limits (dry run default, admin-only, one call, 15 min, daily
+  minutes). Deploy needs the owner's approval (PR open).
+
 ## Voice providers provisioned the Retell way (2026-11-21/22) — feat/voice-provisioning (no migration)
 
 - `scripts/voice-provision.sh <provider> [--apply]`: Keychain (`getshowups-<provider>-api-key`) → read-only check

@@ -14,7 +14,7 @@ import { VOICE_TOOL_NAMES } from '../server/voice/tools.js'
 import { startLabSession, endLabSession, loadLabSession } from '../server/voice/sessions.js'
 import { mintClientSecret, openaiSessionConfig, openaiVoice, OPENAI_CLIENT_SECRETS_URL, CLIENT_SECRET_TTL_SECONDS, CLIENT_SECRET_MAX_TTL_SECONDS } from '../server/voice/openai.js'
 import * as openaiApi from '../functions/api/platform/voice-lab/openai.js'
-import { createOpenAIAdapter, OPENAI_CALLS_URL, OPENAI_DATA_CHANNEL, MAX_RECONNECTS } from '../src/voice/openai.js'
+import { createOpenAIAdapter, OPENAI_CALLS_URL, OPENAI_DATA_CHANNEL, MAX_RECONNECTS, MIC_SILENT_MS } from '../src/voice/openai.js'
 import { summarizeMetrics, ADAPTER_EVENTS, METRIC_KEYS } from '../src/voice/adapter.js'
 
 const ORIGIN = 'https://getshowups.com'
@@ -267,7 +267,7 @@ function fakeRtc() {
   return { FakePC, made }
 }
 
-function harness({ mintStatus = 200, toolResult = { ok: true, served: true }, sdpOk = true } = {}) {
+function harness({ mintStatus = 200, toolResult = { ok: true, served: true }, sdpOk = true, audio = { play: () => Promise.resolve() }, document = null, AudioContext = null, MediaStream = null } = {}) {
   const calls = []
   const events = []
   const rtc = fakeRtc()
@@ -286,7 +286,7 @@ function harness({ mintStatus = 200, toolResult = { ok: true, served: true }, sd
     return sdpOk ? new Response('v=0 answer', { status: 200 }) : new Response('no', { status: 401 })
   }
   const timers = []
-  const adapter = createOpenAIAdapter({ api, fetch, RTCPeerConnection: rtc.FakePC, getUserMedia: async () => mic, now: () => t, setTimeout: (fn) => { timers.push(fn); return timers.length }, clearTimeout: () => {}, audio: { play: () => Promise.resolve() } })
+  const adapter = createOpenAIAdapter({ api, fetch, RTCPeerConnection: rtc.FakePC, getUserMedia: async () => mic, now: () => t, setTimeout: (fn) => { timers.push(fn); return timers.length }, clearTimeout: () => {}, audio, document, AudioContext, MediaStream })
   const onEvent = (name, payload) => events.push({ ...payload, name, ...(name === 'tool' ? { tool: payload.name } : {}) })
   const tick = (ms) => { t += ms }
   const flushTimers = async () => { for (const fn of timers.splice(0)) await fn() }
@@ -491,4 +491,89 @@ test('adapter interface: documented event names and metric summary', () => {
   assert.deepEqual(ADAPTER_EVENTS, ['status', 'transcript', 'tool', 'metrics', 'error'])
   assert.deepEqual(summarizeMetrics({ firstResponseMs: 500.4, responseTimes: [900, 500, 1500, 700], interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61.2, inputTokens: 10, outputTokens: 4 }), { firstResponseMs: 500, medianResponseMs: 700, p95ResponseMs: 1500, turns: 4, interruptions: 1, toolCalls: 2, toolFailures: 1, reconnects: 0, audioSeconds: 61, inputTokens: 10, outputTokens: 4 })
   assert.deepEqual(summarizeMetrics({}), { turns: 0, interruptions: 0, toolCalls: 0, toolFailures: 0, reconnects: 0, inputTokens: 0, outputTokens: 0 })
+})
+
+// ---- Audio, both ways: the element is created when none is injected, playback problems are reported, levels are measured ----
+function fakeDom() {
+  const body = { children: [], appendChild(el) { this.children.push(el) } }
+  const made = []
+  const document = {
+    body,
+    createElement(tag) {
+      const el = { tag, attrs: {}, style: {}, plays: 0, playResult: null, setAttribute(k, v) { this.attrs[k] = v }, play() { this.plays += 1; return this.playResult || Promise.resolve() } }
+      made.push(el)
+      return el
+    },
+  }
+  return { document, made, body }
+}
+// A Web Audio stand-in whose analyser reports the level the test sets per stream (128 = silence in byte time-domain data).
+function fakeAudioContext() {
+  const levels = new Map()
+  class FakeCtx {
+    constructor() { this.state = 'running'; this.closed = 0 }
+    createAnalyser() { return { fftSize: 512, _stream: null, getByteTimeDomainData: (buf) => { const amp = levels.get(this._stream) || 0; for (let i = 0; i < buf.length; i++) buf[i] = 128 + Math.round(amp * 127 * (i % 2 ? 1 : -1)) } } }
+    createMediaStreamSource(stream) { this._stream = stream; return { connect: (an) => { an._stream = stream; an.getByteTimeDomainData = (buf) => { const amp = levels.get(stream) || 0; for (let i = 0; i < buf.length; i++) buf[i] = 128 + Math.round(amp * 127 * (i % 2 ? 1 : -1)) } } } }
+    close() { this.closed += 1; return Promise.resolve() }
+  }
+  return { FakeCtx, levels }
+}
+
+test('audio: with no injected element the adapter creates a hidden <audio>, attaches the remote track and plays it; the remote level turns "AI audio: received"; a blocked autoplay is reported and resumeAudio() retries', async () => {
+  const dom = fakeDom()
+  const ac = fakeAudioContext()
+  const h = harness({ audio: null, document: dom.document, AudioContext: ac.FakeCtx })
+  await h.adapter.start({ ...session, onEvent: h.onEvent })
+  await settle()
+  assert.equal(h.adapter.state, 'connected')
+  assert.equal(dom.made.length, 1, 'one audio element created')
+  const el = dom.made[0]
+  assert.deepEqual([el.tag, el.attrs.playsinline, el.attrs['data-voice-lab-audio'], el.autoplay, dom.body.children.length], ['audio', '', 'openai', true, 1])
+  // The remote track arrives: attached and played.
+  const remote = { id: 'remote' }
+  h.pc().ontrack({ streams: [remote], track: { kind: 'audio' } })
+  await settle()
+  assert.equal(el.srcObject, remote)
+  assert.equal(el.plays, 1)
+  assert.ok(h.events.some((e) => e.name === 'status' && e.audio === 'playing'), JSON.stringify(h.events.filter((e) => e.name === 'status')))
+  // Sound actually arrives on the remote stream → "received"; before that only "playing".
+  ac.levels.set(remote, 0.2)
+  await h.flushTimers()
+  assert.ok(h.events.some((e) => e.name === 'status' && e.audio === 'received'))
+  assert.equal(h.adapter.diagnostics.audio, 'received')
+  // Autoplay blocked: reported as audio_blocked (not fatal); resumeAudio() plays again.
+  el.playResult = Promise.reject(new Error('NotAllowedError'))
+  h.adapter.resumeAudio()
+  await settle()
+  assert.ok(h.events.some((e) => e.name === 'error' && e.code === 'audio_blocked' && e.fatal === false))
+  assert.equal(h.adapter.diagnostics.audio, 'blocked')
+  el.playResult = null
+  h.adapter.resumeAudio()
+  await settle()
+  assert.equal(el.plays, 3)
+  assert.equal(h.adapter.state, 'connected', 'a playback problem never ends the call')
+  await h.adapter.stop()
+})
+
+test('audio: the microphone level is measured after connecting ("mic: live" on sound); a microphone silent for MIC_SILENT_MS is reported as mic_silent (not fatal); no element at all → audio_unavailable', async () => {
+  const ac = fakeAudioContext()
+  const h = harness({ audio: null, document: null, AudioContext: ac.FakeCtx })
+  await h.adapter.start({ ...session, onEvent: h.onEvent })
+  await settle()
+  assert.ok(h.events.some((e) => e.name === 'status' && e.state === 'connected' && e.mic === 'unknown'))
+  // Silence: the first meter tick + the silence timer → mic_silent.
+  await h.flushTimers()
+  assert.ok(h.events.some((e) => e.name === 'error' && e.code === 'mic_silent' && e.fatal === false), JSON.stringify(h.events))
+  assert.equal(h.adapter.diagnostics.mic, 'silent')
+  assert.equal(h.adapter.state, 'connected')
+  // Sound on the microphone stream → live.
+  ac.levels.set(h.mic, 0.1)
+  await h.flushTimers()
+  assert.equal(h.adapter.diagnostics.mic, 'live')
+  assert.ok(h.events.some((e) => e.name === 'status' && e.mic === 'live'))
+  // No document and no injected element: the remote track cannot be played and that is said.
+  h.pc().ontrack({ streams: [{ id: 'r' }], track: {} })
+  assert.ok(h.events.some((e) => e.name === 'error' && e.code === 'audio_unavailable'))
+  assert.ok(MIC_SILENT_MS >= 5000)
+  await h.adapter.stop()
 })

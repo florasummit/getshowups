@@ -47,7 +47,27 @@ const START_ERRORS = {
   adapter_unavailable: 'This provider’s adapter is not in this build.',
   popup_blocked: 'The browser blocked the new tab. Allow pop-ups for this site and try again.',
 }
-const CONNECTION = { idle: ['neutral', 'Not connected'], connecting: ['info', 'Connecting'], listening: ['ok', 'Listening'], speaking: ['ok', 'Speaking'], ended: ['neutral', 'Ended'], error: ['bad', 'Error'] }
+// Adapter states (src/voice/adapter.js): idle → connecting → connected (↔ reconnecting) → stopping → stopped | failed.
+const CONNECTION = { idle: ['neutral', 'Not connected'], connecting: ['info', 'Connecting'], connected: ['ok', 'Connected'], reconnecting: ['warn', 'Reconnecting'], stopping: ['neutral', 'Ending'], stopped: ['neutral', 'Ended'], failed: ['bad', 'Failed'], listening: ['ok', 'Listening'], speaking: ['ok', 'Speaking'], ended: ['neutral', 'Ended'], error: ['bad', 'Error'] }
+// Runtime problems the adapters report (codes only), in the admin's words. Never a credential, never conversation text.
+const ADAPTER_ERRORS = {
+  mic_denied: 'Microphone blocked. Allow the microphone for getshowups.com in the browser’s site settings, then start again.',
+  mic_silent: 'No sound from your microphone yet. Check the input device in System Settings → Sound and that nothing else holds it.',
+  audio_blocked: 'The browser blocked sound playback. Press “Enable sound”.',
+  audio_unavailable: 'This browser can’t play the call’s audio (no audio element).',
+  connect_failed: 'Couldn’t connect to the provider.',
+  sdp_failed: 'The provider refused the connection (network or WebRTC). Try again; if it repeats, try another network.',
+  secret_rejected: 'The provider rejected the session credential. The server’s provider key may be wrong or revoked.',
+  secret_expired: 'The session credential expired before the connection was made. Start again.',
+  connection_lost: 'The connection was lost and could not be restored.',
+  provider_error: 'The provider reported an error',
+  transcript_failed: 'The transcript could not be saved (the call continues).',
+  end_failed: 'The session could not be closed on the server.',
+  tool_failed: 'A tool could not run.',
+}
+const errorText = (code, detail) => `${ADAPTER_ERRORS[code] || `Adapter error: ${code || 'unknown'}`}${detail && code === 'provider_error' ? ` (${detail})` : ''}`
+const MIC_LABEL = { unknown: 'Mic: waiting for sound', live: 'Mic: live', silent: 'Mic: no sound detected' }
+const AUDIO_LABEL = { none: 'AI audio: none yet', playing: 'AI audio: playing (silence so far)', received: 'AI audio: received', blocked: 'AI audio: blocked by the browser' }
 const OUTCOME = { booked: 'Booked', coverage_request: 'Service-area request', callback: 'Callback requested', callback_urgent: 'Urgent callback requested', message: 'Message left', out_of_area: 'Outside the area', info: 'Questions answered', error: 'Error', handoff: 'Hand-off' }
 
 const adapterAvailable = (p) => Boolean(ADAPTERS[`../voice/${p}.js`])
@@ -162,11 +182,13 @@ export default function VoiceLab() {
   }, [])
 
   const onEvent = useCallback(
-    (ev) => {
+    (name, payload) => {
+      // Adapters emit (name, payload) (src/voice/adapter.js emitter); an object-style call is accepted too.
+      const ev = typeof name === 'string' ? { type: name, ...(payload && typeof payload === 'object' ? payload : {}) } : name
       if (!ev || typeof ev !== 'object') return
       if (ev.type === 'status') {
-        update(() => ({ connection: ev.state, connectionReason: ev.reason || null }))
-        if (ev.state === 'ended' && sessionRef.current) finish()
+        update((s) => ({ connection: ev.state || s.connection, connectionReason: ev.reason || null, mic: ev.mic || s.mic, audio: ev.audio || s.audio }))
+        if ((ev.state === 'ended' || ev.state === 'stopped' || ev.state === 'failed') && sessionRef.current && !finishingRef.current) finish()
       } else if (ev.type === 'transcript') {
         if (!(ev.who === 'customer' || ev.who === 'receptionist') || typeof ev.text !== 'string') return
         update((s) => {
@@ -186,7 +208,7 @@ export default function VoiceLab() {
           return { metrics }
         })
       } else if (ev.type === 'error') {
-        update(() => ({ error: `Adapter error: ${ev.code || 'unknown'}${ev.detail ? ` (${ev.detail})` : ''}` }))
+        update((s) => ({ error: errorText(ev.code, ev.detail), audioBlocked: ev.code === 'audio_blocked' ? true : ev.code === 'mic_silent' ? s.audioBlocked : s.audioBlocked }))
         if (ev.fatal && sessionRef.current) finish()
       }
     },
@@ -200,7 +222,7 @@ export default function VoiceLab() {
     sessionRef.current = null
     linesRef.current = []
     metricsRef.current = {}
-    update(() => ({ phase: 'starting', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null, connectionReason: null }))
+    update(() => ({ phase: 'starting', connection: 'idle', lines: [], tools: [], metrics: {}, error: null, summary: null, connectionReason: null, mic: 'unknown', audio: 'none', audioBlocked: false }))
     if (!adapterAvailable(provider)) return update(() => ({ phase: 'error', error: START_ERRORS.adapter_unavailable }))
     // Microphone first, inside the click: a blocked microphone is reported before any session or provider call exists.
     try {
@@ -361,6 +383,29 @@ export default function VoiceLab() {
                   {duration == null ? '—' : mins(duration)}
                 </span>
               </div>
+              {live && (
+                <div className="cc-actions" data-lab-diagnostics data-mic={session.mic || 'unknown'} data-audio={session.audio || 'none'}>
+                  <Badge tone={session.mic === 'live' ? 'ok' : session.mic === 'silent' ? 'bad' : 'neutral'} plain>
+                    {MIC_LABEL[session.mic] || MIC_LABEL.unknown}
+                  </Badge>
+                  <Badge tone={session.audio === 'received' ? 'ok' : session.audio === 'blocked' ? 'bad' : 'neutral'} plain>
+                    {AUDIO_LABEL[session.audio] || AUDIO_LABEL.none}
+                  </Badge>
+                  {session.audioBlocked && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-lab-enable-sound
+                      onClick={() => {
+                        adapterRef.current?.resumeAudio?.()
+                        update(() => ({ audioBlocked: false, error: null }))
+                      }}
+                    >
+                      Enable sound
+                    </button>
+                  )}
+                </div>
+              )}
               <Facts
                 items={[
                   ['First response', ms(m.firstResponseMs)],
