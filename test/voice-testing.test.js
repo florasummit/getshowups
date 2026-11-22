@@ -82,9 +82,9 @@ afterEach(() => {
   for (const r of responses) for (const s of SECRETS) assert.ok(!r.includes(s), 'a secret reached a response')
 })
 
-async function seed(id, { on = true, token = true, name = `${id} Co` } = {}) {
+async function seed(id, { on = true, token = true, name = `${id} Co`, zips = '29401,29403' } = {}) {
   const t = Date.now()
-  db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES (?, ?, 'UTC', '29401,29403', '00:00', '23:00', '0,1,2,3,4,5,6', ?, ?, ?)").run(id, name, t, t, t)
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES (?, ?, 'UTC', ?, '00:00', '23:00', '0,1,2,3,4,5,6', ?, ?, ?)").run(id, name, zips, t, t, t)
   db.sql.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?, ?, ?)').run(`owner@${id}.example`, id, t)
   db.sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES (?, '(843) 555-0199', 'Pool service', 'Family-run.', ?, ?, ?)").run(id, JSON.stringify([{ name: 'Weekly pool care', price: '$280/month' }]), JSON.stringify(['Charleston']), t)
   if (on) db.sql.prepare("INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES (?, 1, 'ai_first', ?, ?)").run(id, `Thanks for calling ${id} Co!`, t)
@@ -113,7 +113,7 @@ const admin = { email: ADMIN }
 // A finished session on `provider` on the customer path with audio both ways and both booking tools.
 const evidence = (id, provider, { test = true } = {}) => {
   const t = Date.now() - 60_000
-  db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES (?, ?, 'voice', ?, '[]', ?, ?)").run(`conv_${id}_${provider}_${t}`, id, JSON.stringify({ voice: { provider, startedAt: t - 90_000, endedAt: t, test, metrics: { micLive: 1, audioReceived: 1 } }, tools: [{ name: 'find_available_times', ok: true }, { name: 'book_appointment', ok: true, simulated: test }] }), t - 90_000, t)
+  db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES (?, ?, 'voice', ?, '[]', ?, ?)").run(`conv_${id}_${provider}_${t}`, id, JSON.stringify({ voice: { provider, startedAt: t - 90_000, endedAt: t, test, metrics: { micLive: 1, audioReceived: 1 } }, tools: [{ name: 'find_available_times', ok: true }, { name: 'book_appointment', ok: true, simulated: test }] }), Date.now(), t)
 }
 
 test('the chat page of a test business whose receptionist is OFF opens only for a signed-in platform admin’s ?test=<provider> (voice only, dry run, codes-only refusals for everyone else); customers see the same unavailable page as before and the receptionist stays off for them', async () => {
@@ -165,7 +165,7 @@ test('the console learns the test business and the verification of the current d
   markTest('tb-off')
   await seed('tb-nocal', { token: false, name: 'Calendarless Test' })
   markTest('tb-nocal')
-  assert.deepEqual(await eligibleTestBusinesses(env), [{ id: 'tb-off', name: 'Sandbox Pools', receptionist: false }])
+  assert.deepEqual(await eligibleTestBusinesses(env), [{ id: 'tb-off', name: 'Sandbox Pools', receptionist: false, zips: 2, zip: '29401' }])
   await seed('tb-on', { name: 'Live Test Pools' })
   markTest('tb-on')
   assert.deepEqual(
@@ -173,9 +173,14 @@ test('the console learns the test business and the verification of the current d
     ['tb-on', 'tb-off'],
     'receptionist-on first',
   )
+  // A test business without a service-area list comes first: nothing can send the receptionist down the coverage path.
+  await seed('tb-open', { on: false, name: 'Open Area Pools', zips: '' })
+  markTest('tb-open')
+  assert.deepEqual((await eligibleTestBusinesses(env)).map((b) => [b.id, b.zips, b.zip]), [['tb-open', 0, null], ['tb-on', 2, '29401'], ['tb-off', 2, '29401']])
   db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'tb-on'").run()
+  db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'tb-open'").run()
   assert.deepEqual((await eligibleTestBusinesses(env)).map((b) => b.id), ['tb-off'], 'suspended excluded')
-  assert.deepEqual(await testPageFor(env, 'elevenlabs'), { url: '/chat/tb-off?test=elevenlabs&from=admin', business: { id: 'tb-off', name: 'Sandbox Pools', receptionist: false }, provider: 'elevenlabs' })
+  assert.deepEqual(await testPageFor(env, 'elevenlabs'), { url: '/chat/tb-off?test=elevenlabs&from=admin', business: { id: 'tb-off', name: 'Sandbox Pools', receptionist: false, zips: 2, zip: '29401' }, provider: 'elevenlabs' })
   const el = env.ELEVENLABS_API_KEY
   delete env.ELEVENLABS_API_KEY
   assert.deepEqual(await testPageFor(env, 'elevenlabs'), { url: null, reason: 'not_configured' })
@@ -188,19 +193,29 @@ test('the console learns the test business and the verification of the current d
   const staged = await switchGlobalProvider(env, admin, { provider: 'elevenlabs', mode: 'staged', confirm: true, version: 0 })
   assert.equal(staged.ok, true, staged.error)
   let o = await globalOverview(env)
-  assert.deepEqual([o.current.provider, o.current.mode, o.counts.usingDefault, o.counts.pins], ['elevenlabs', 'staged', 0, 4])
-  assert.deepEqual(o.verification, { ok: false, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'] })
+  assert.deepEqual([o.current.provider, o.current.mode, o.counts.usingDefault, o.counts.pins], ['elevenlabs', 'staged', 0, 5])
+  assert.deepEqual(o.verification, { ok: false, sessions: 0, finished: 0, businesses: [], lastAt: null, missing: ['session', 'audio', 'tools', 'booking', 'clean_end'], latest: null })
   assert.deepEqual(o.testPage.url, '/chat/tb-off?test=elevenlabs&from=admin')
-  // A Lab-only or incomplete record does not verify; a session on another provider does not either.
+  // A Lab-only or incomplete record does not verify; a session on another provider does not either. The newest finished
+  // session is explained as a record: what it showed, what it did not, which tool failed and why (event codes).
   evidence('tb-off', 'retell')
   const t = Date.now() - 30_000
   db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('partial', 'tb-off', 'voice', ?, '[]', ?, ?)").run(JSON.stringify({ voice: { provider: 'elevenlabs', startedAt: t - 9000, endedAt: t, test: true, metrics: { micLive: 1, audioReceived: 0 } }, tools: [{ name: 'find_available_times', ok: true }] }), t - 9000, t)
   o = await globalOverview(env)
   assert.deepEqual([o.verification.ok, o.verification.finished, o.verification.missing], [false, 1, ['audio', 'tools', 'booking', 'clean_end']])
+  assert.deepEqual(o.verification.latest, { id: 'partial', customer: 'tb-off', startedAt: t - 9000, endedAt: t, durationSeconds: 9, test: true, audio: false, availability: true, booking: false, cleanEnd: true, outcome: null, tools: [{ name: 'find_available_times', ok: true }], failures: [], path: 'audio' })
+  // The production shape of 2026-11-22: audio both ways, a clean end, but the service-area path (check_service_area →
+  // request_coverage failed zip_missing) and never the booking tools → not verified, path 'area' with the failure code.
+  const t2 = Date.now() - 20_000
+  db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('areapath', 'tb-off', 'voice', ?, '[]', ?, ?)").run(JSON.stringify({ voice: { provider: 'elevenlabs', startedAt: t2 - 70_000, endedAt: t2, test: true, outcome: 'ended', metrics: { micLive: 1, audioReceived: 1, durationSeconds: 70 } }, tools: [{ name: 'check_service_area', ok: true }, { name: 'save_customer_details', ok: true }, { name: 'request_coverage', ok: false }] }), t2 - 10_000, t2)
+  db.sql.prepare("INSERT INTO receptionist_events (id, customer, conversation_id, kind, ok, detail, at) VALUES (901, 'tb-off', 'areapath', 'request_coverage', 0, 'zip_missing', ?)").run(t2 - 1000)
+  o = await globalOverview(env)
+  assert.deepEqual([o.verification.ok, o.verification.finished, o.verification.missing], [false, 2, ['audio', 'tools', 'booking', 'clean_end']])
+  assert.deepEqual([o.verification.latest.id, o.verification.latest.path, o.verification.latest.audio, o.verification.latest.cleanEnd, o.verification.latest.durationSeconds, o.verification.latest.failures], ['areapath', 'area', true, true, 70, [{ tool: 'request_coverage', code: 'zip_missing' }]])
   // The qualifying session: the overview and the GET route agree; the response carries no secret.
   evidence('tb-off', 'elevenlabs')
   o = await globalOverview(env)
-  assert.deepEqual([o.verification.ok, o.verification.finished, o.verification.businesses, o.verification.missing], [true, 2, ['tb-off'], []])
+  assert.deepEqual([o.verification.ok, o.verification.finished, o.verification.businesses, o.verification.missing, o.verification.latest.path], [true, 3, ['tb-off'], [], 'ok'])
   const staff = await session(ADMIN)
   const g = (await call(consoleApi, 'GET', '/api/platform/voice-provider', { cookie: staff })).json().global
   assert.deepEqual([g.verification.ok, g.testPage.business.id, g.current.provider], [true, 'tb-off', 'elevenlabs'])

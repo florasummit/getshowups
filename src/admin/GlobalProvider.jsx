@@ -1,35 +1,35 @@
-// Global voice provider (/admin/voice-providers): the provider every business without settings of its own follows.
-// One card: the provider, its rollout state, who uses it, and the ONE next action for the current situation:
-//   Choose provider (Change provider… → Review → Change, typed) → Test <provider> (a dry-run session on the customer
-//   page of a test business; the server records the evidence) → Promote to 100% (checklist → one confirmation, typed)
-//   → Rollout monitoring (records only) → Roll back (typed).
-// Everything else (versions, counts by kind, verification record, test business, storage) sits under Advanced details.
-// The server (server/voice/global.js) decides every state and checks the platform-admin list on every action; nothing
-// here changes a session in progress, and the promotion stays all-or-nothing with rollback.
-import { useState } from 'react'
+// Voice Lab → Provider: the global voice provider every business without settings of its own follows, as ONE card:
+//   Choose provider (the tiles: picking another configured provider stages it as the target: review → typed change)
+//   → Test <provider> (a dry-run session on the customer page of a test business; the server records the evidence and
+//     this card watches for the result) → Activate for all businesses (checklist → one typed confirmation) → Rollout
+//     monitoring (records only) → Roll back (typed).
+// The card shows the target, its real state, who uses it, the one next action and, when the last test did not verify
+// the provider, exactly what it missed and what to retry. Versions, counts by kind, the verification record and the
+// test business sit under Advanced details. The server (server/voice/global.js) decides every state and checks the
+// platform-admin list on every action; nothing here changes a session in progress; the promotion stays all-or-nothing.
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Badge, Facts, Section } from './control/ui.jsx'
 import { when } from './control/lib.js'
 import { BLOCKER } from '../dashboard/provider-control.js'
-import { nextAction, ROLLOUT_STATE, rolloutState } from './rollout-state.js'
+import { LAST_TEST, nextAction, ROLLOUT_STATE, rolloutState } from './rollout-state.js'
 
-const MODE = { all: 'promoted to 100%', staged: 'staged rollout', rollback: 'rollback' }
+const MODE = { all: 'activated for all businesses', staged: 'staged rollout', rollback: 'rollback' }
 const KIND = { inherited: 'follows the default', pin: 'still on the previous provider', override: 'business-specific settings' }
 const PROMO = { promote: ['ok', 'Switches'], blocked: ['bad', 'Blocked'], excluded: ['neutral', 'Untouched'] }
 const SWITCH = { switch: ['ok', 'Switches now'], pinned: ['warn', 'Stays (not verified)'], override: ['neutral', 'Untouched (business-specific)'] }
 const WARN = { unverified: 'no test session of its own', booking_not_ready: 'cannot book yet (any provider)', receptionist_off: 'receptionist off' }
-const NO_TEST = { no_test_business: 'No eligible test business: mark an active, bookable business as a test business in the console first.', not_configured: 'Not configured on the platform (credentials missing).', disabled: 'Switched off on the platform.', no_customer_path: 'No customer-facing voice path.' }
+const NO_TEST = { no_test_business: 'No eligible test business: mark an active, bookable business as a test business first.', not_configured: 'Not configured on the platform (credentials missing).', disabled: 'Switched off on the platform.', no_customer_path: 'No customer-facing voice path.' }
+const WATCH_MS = 15 * 60_000
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 'es'}`
 const usd = (micros) => (micros == null ? 'unavailable' : `$${(micros / 1e6).toFixed(micros < 100_000 ? 4 : 2)}`)
 const num = (v) => (v == null ? 'unavailable' : String(v))
 
-function TypedConfirm({ expected, title, children, action, busy, onConfirm, onCancel, disabled = false, kind, ...rest }) {
+function Typed({ expected, action, busy, disabled = false, onConfirm, onCancel }) {
   const [typed, setTyped] = useState('')
   const ok = typed.trim().toLowerCase() === expected
   return (
-    <div className="vp-card vp-card--confirm" role="group" aria-label="Confirm the global change" data-global-confirm={kind} {...rest}>
-      <p className="vp-card-title">{title}</p>
-      {children}
+    <>
       <label className="field">
         <span>Type {expected} to confirm</span>
         <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} aria-label="Type the provider id to confirm" placeholder={expected} />
@@ -42,47 +42,83 @@ function TypedConfirm({ expected, title, children, action, busy, onConfirm, onCa
           Cancel
         </button>
       </div>
-    </div>
+    </>
   )
 }
 
-export default function GlobalProvider({ global, reload, children }) {
-  const [target, setTarget] = useState('')
-  const [staging, setStaging] = useState(false) // "Change provider…" open
+export default function GlobalProvider({ global, businesses = [], reload }) {
+  const [target, setTarget] = useState('') // a provider picked as the next target (staging)
   const [check, setCheck] = useState(null)
   const [mode, setMode] = useState('staged')
-  const [promo, setPromo] = useState(null) // the promotion checklist (null = not reviewed)
+  const [promo, setPromo] = useState(null) // the activation checklist (null = not reviewed)
   const [includeOverrides, setIncludeOverrides] = useState(false)
   const [ack, setAck] = useState(false)
   const [confirming, setConfirming] = useState(null) // 'switch' | 'rollback'
   const [busy, setBusy] = useState(false)
   const [promoting, setPromoting] = useState(false)
   const [msg, setMsg] = useState('')
+  const [watching, setWatching] = useState(null) // { since, latestAt } after Test was opened: poll until a new session is recorded
+  const watchRef = useRef(null)
   const cur = global.current
+  const v = global.verification
+  const t = global.testPage
+  const r = global.rollout
   const nameOf = (id) => global.providers.find((p) => p.id === id)?.name || id
+  const businessName = (id) => businesses.find((b) => b.id === id)?.name || id
   const targetName = nameOf(target)
   const post = async (body) => {
     setBusy(true)
     setMsg('')
-    const r = await api('/api/platform/voice-provider', { method: 'POST', body })
+    const res = await api('/api/platform/voice-provider', { method: 'POST', body })
     setBusy(false)
-    return r
+    return res
   }
   const closeAll = () => {
     setPromo(null)
     setAck(false)
     setConfirming(null)
-    setStaging(false)
     setTarget('')
     setCheck(null)
   }
-  const pick = (p) => {
+
+  // Watch for the test result: after Test opened the customer page, poll the facts (and on focus) until a newer
+  // finished session is recorded or the provider is verified, for at most 15 minutes. Nothing is claimed from the
+  // click: the result comes from the record.
+  useEffect(() => {
+    watchRef.current = watching
+  }, [watching])
+  useEffect(() => {
+    if (!watching) return undefined
+    const latestAt = v?.latest?.endedAt || 0
+    if (v?.ok || latestAt > watching.latestAt) {
+      setWatching(null)
+      setMsg(v?.ok ? `Test recorded: ${cur.name} is verified on the production path.` : `Test recorded (${businessName(v.latest.customer)}, ${v.latest.durationSeconds ?? '?'} s): ${LAST_TEST[v.latest.path] || v.latest.path} See the retry note above.`)
+      return undefined
+    }
+    if (Date.now() - watching.since > WATCH_MS) {
+      setWatching(null)
+      return undefined
+    }
+    const tick = setInterval(reload, 8000)
+    const onFocus = () => reload()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      clearInterval(tick)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, v?.ok, v?.latest?.endedAt])
+  const openTest = () => setWatching({ since: Date.now(), latestAt: v?.latest?.endedAt || 0 })
+
+  const stage = async (p) => {
+    if (!p || p === cur.provider) return
+    setPromo(null)
+    setConfirming(null)
     setTarget(p)
     setCheck(null)
-    setConfirming(null)
-  }
-  const review = async () => {
-    const { status, data } = await post({ action: 'global_check', provider: target })
+    const { status, data } = await post({ action: 'global_check', provider: p })
     setCheck(status === 200 ? data.check : null)
     if (status !== 200) setMsg(`Couldn’t check (${data?.error || status}).`)
     else setMode(data.check.counts.pinned > 0 ? 'staged' : 'all')
@@ -91,26 +127,27 @@ export default function GlobalProvider({ global, reload, children }) {
     const { status, data } = await post({ action: 'global_switch', provider: target, confirmProvider: target, mode, confirm: true, version: cur.version })
     setConfirming(null)
     if (status === 200) {
-      setMsg(`${targetName} is now the global default: ${data.applied.switched} switched, ${data.applied.pinned} stay on ${cur.name} until promoted, ${data.applied.overrides} business-specific untouched.`)
+      setMsg(`${targetName} is now the target: ${data.applied.switched} switched, ${data.applied.pinned} stay on ${cur.name} until it is tested and activated, ${data.applied.overrides} business-specific untouched.`)
       closeAll()
       reload()
     } else {
-      setMsg(data?.error === 'stale' ? 'Changed elsewhere; reloaded.' : data?.error === 'blocked' ? (data.reason === 'unverified_businesses' ? 'Some businesses are not verified: choose the staged rollout or verify them first.' : 'Blocked by a platform check; see the checklist.') : `Not changed (${data?.error || status}).`)
+      setMsg(data?.error === 'stale' ? 'Changed elsewhere; reloaded.' : data?.error === 'blocked' ? (data.reason === 'unverified_businesses' ? 'Some businesses are not verified: choose the staged rollout or verify them first.' : 'Blocked by a platform check.') : `Not changed (${data?.error || status}).`)
       if (data?.check) setCheck(data.check)
       if (data?.error === 'stale') reload()
     }
   }
   const reviewPromotion = async (include = includeOverrides) => {
     setConfirming(null)
-    setStaging(false)
+    setTarget('')
+    setCheck(null)
     const { status, data } = await post({ action: 'global_promote_check', includeOverrides: include })
     setPromo(status === 200 ? data.check : null)
     setAck(false)
-    if (status !== 200) setMsg(`Couldn’t check the promotion (${data?.error || status}).`)
+    if (status !== 200) setMsg(`Couldn’t check the activation (${data?.error || status}).`)
   }
-  const toggleOverrides = (v) => {
-    setIncludeOverrides(v)
-    reviewPromotion(v)
+  const toggleOverrides = (val) => {
+    setIncludeOverrides(val)
+    reviewPromotion(val)
   }
   const doPromote = async () => {
     setPromoting(true)
@@ -118,11 +155,11 @@ export default function GlobalProvider({ global, reload, children }) {
     setPromoting(false)
     if (status === 200) {
       const d = data.distribution.byProvider
-      setMsg(`Promoted ${cur.name} to 100%: ${plural(data.applied.promoted, 'business')} promoted (${data.applied.pinsReleased} were still on the previous provider, ${data.applied.overridesReplaced} business-specific replaced), ${data.applied.excluded} untouched. Now: ${Object.entries(d).filter(([, n]) => n > 0).map(([p, n]) => `${nameOf(p)} ${n}`).join(' · ')}. Rollback is available.`)
+      setMsg(`${cur.name} activated for all businesses: ${plural(data.applied.promoted, 'business')} switched (${data.applied.pinsReleased} were still on the previous provider, ${data.applied.overridesReplaced} business-specific replaced), ${data.applied.excluded} untouched. Now: ${Object.entries(d).filter(([, n]) => n > 0).map(([p, n]) => `${nameOf(p)} ${n}`).join(' · ')}. Rollback is available.`)
       closeAll()
       reload()
     } else {
-      setMsg(data?.error === 'stale' ? 'Changed elsewhere (a business or the default moved since the review); nothing applied. Reloaded.' : data?.error === 'blocked' ? 'Blocked; nothing applied.' : data?.error === 'acknowledgement_required' ? 'Acknowledge the untested businesses first; nothing applied.' : `Not promoted (${data?.error || status}).`)
+      setMsg(data?.error === 'stale' ? 'Changed elsewhere (a business or the default moved since the review); nothing applied. Reloaded.' : data?.error === 'blocked' ? 'Blocked; nothing applied.' : data?.error === 'acknowledgement_required' ? 'Acknowledge the untested businesses first; nothing applied.' : `Not activated (${data?.error || status}).`)
       if (data?.check) setPromo(data.check)
       if (data?.error === 'stale') reload()
     }
@@ -147,31 +184,44 @@ export default function GlobalProvider({ global, reload, children }) {
   const remaining = total - global.counts.usingDefault
   const others = Object.entries(global.counts.byProvider || {})
     .filter(([p, n]) => p !== cur.provider && n > 0)
-    .map(([p, n]) => `${n} still using ${nameOf(p)}`)
-  const v = global.verification
-  const t = global.testPage
-  const r = global.rollout
+    .map(([p, n]) => `${n} on ${nameOf(p)}`)
   const monitorShown = Boolean(r) && cur.mode !== 'rollback' && (cur.mode === 'all' || cur.switched > 0)
   const next = nextAction(global, state)
   const promoReady = Boolean(promo?.ok) && promo.counts.promote > 0 && (promo.counts.unverified === 0 || ack)
-  const open = Boolean(promo || staging || confirming)
-  const rollbackConfirm = confirming === 'rollback' && (
-    <TypedConfirm kind="rollback" expected={cur.previous || ''} title={`Roll back to ${nameOf(cur.previous)}?`} action="Roll back" busy={busy} onConfirm={doRollback} onCancel={() => setConfirming(null)}>
+  const open = Boolean(promo || target || confirming)
+  const last = v?.latest
+  const retry = t?.url ? `Test ${cur.name} on ${t.business.name}: press the microphone, say hello${t.business.zip ? `, say you’re at ZIP ${t.business.zip} if asked where you are` : ''}, ask for available times, book one (dry run), end the call.` : ''
+  const rollbackCard = confirming === 'rollback' && (
+    <div className="vp-card vp-card--confirm" role="group" aria-label="Confirm the rollback" data-global-confirm="rollback">
+      <p className="vp-card-title">Roll back to {nameOf(cur.previous)}?</p>
       <p className="fine">Businesses this rollout switched go back to {nameOf(cur.previous)}; businesses it released or replaced get their previous settings back, unless changed since (reported). Conversations in progress are not interrupted.</p>
-    </TypedConfirm>
+      <Typed expected={cur.previous || ''} action="Roll back" busy={busy} onConfirm={doRollback} onCancel={() => setConfirming(null)} />
+    </div>
   )
   return (
     <>
-      <Section title="Global voice provider" id="vp-global" data-global-provider={cur.provider} data-global-state={state}>
+      <Section title="Provider" id="vp-global" data-global-provider={cur.provider} data-global-state={state}>
         <div className="cc-section-body">
           {!global.ready && <p className="cc-callout">Global default storage is not available yet (migration 0036). Every business follows Retell; nothing can be changed here.</p>}
+          <div className="vp-tiles" role="group" aria-label="Choose provider">
+            {global.providers.map((p) => {
+              const isTarget = p.id === cur.provider
+              const n = global.counts.byProvider?.[p.id] || 0
+              return (
+                <button key={p.id} type="button" className={`vp-tile${isTarget ? ' vp-tile--on' : ''}`} aria-pressed={isTarget} disabled={!global.ready || busy || (!isTarget && !p.configured)} onClick={() => stage(p.id)} data-target-provider={p.id} data-target-state={isTarget ? 'target' : p.configured ? 'available' : 'not_configured'}>
+                  <span className="vp-tile-name">{p.name}</span>
+                  <span className="vp-tile-sub">{isTarget ? ROLLOUT_STATE[state][1] : !p.configured ? 'Not configured' : !p.enabled ? 'Switched off' : n ? `${plural(n, 'business')} use it` : 'Available'}</span>
+                </button>
+              )
+            })}
+          </div>
           <div className="vp-hero" data-global-promotion data-global-promotion-pins={global.counts.pins}>
             <div className="vp-hero-head">
               <h3 className="vp-provider">{cur.name}</h3>
               <Badge tone={ROLLOUT_STATE[state][0]}>{ROLLOUT_STATE[state][1]}</Badge>
             </div>
             <p className="vp-line" data-global-counts>
-              {cur.version && cur.mode === 'staged' ? `Staged for ${plural(total, 'business')}` : `Default for ${plural(total, 'business')}`} · {global.counts.usingDefault} of {total} using it{others.length ? ` · ${others.join(' · ')}` : ''}
+              {global.counts.usingDefault} of {plural(total, 'business')} use it{others.length ? ` · ${others.join(' · ')}` : ''}
             </p>
             {global.ready && state !== 'not_configured' && (
               <p className="vp-next" data-global-verification={v?.ok ? 'ok' : 'missing'}>
@@ -179,30 +229,34 @@ export default function GlobalProvider({ global, reload, children }) {
                 {state === 'partial' ? ` ${plural(remaining, 'business')} with business-specific settings still use another provider.` : ''}
               </p>
             )}
-            {state === 'not_configured' && <p className="vp-next">Add {cur.name} credentials on the platform before it can be tested or promoted.</p>}
+            {state === 'not_configured' && <p className="vp-next">Add {cur.name} credentials on the platform before it can be tested or activated.</p>}
+            {!v?.ok && last && next === 'test' && (
+              <p className="fine" data-global-last-test={last.path}>
+                Last test ({businessName(last.customer)}, {last.durationSeconds ?? '?'} s, {when(last.endedAt)}): audio both ways {last.audio ? '✓' : '✗'} · availability lookup {last.availability ? '✓' : '✗'} · booking {last.booking ? '✓' : '✗'} · ended cleanly {last.cleanEnd ? '✓' : '✗'}. Not verified because {LAST_TEST[last.path] || last.path}
+                {last.failures.length ? ` Failed tool: ${last.failures.map((f) => `${f.tool} (${f.code})`).join(', ')}.` : ''}
+              </p>
+            )}
             {global.ready && !open && (
               <div className="vp-actions">
-                {next === 'test' && (t?.url ? (
-                  <a className="btn btn-primary btn-sm" href={t.url} target="_blank" rel="noreferrer" data-global-test>
-                    Test {cur.name}
-                  </a>
-                ) : (
-                  <span className="fine" data-global-test-missing={t?.reason || 'unknown'}>{NO_TEST[t?.reason] || 'No test page is available.'}</span>
-                ))}
+                {next === 'test' &&
+                  (t?.url ? (
+                    <a className="btn btn-primary btn-sm" href={t.url} target="_blank" rel="noreferrer" onClick={openTest} data-global-test>
+                      Test {cur.name}
+                    </a>
+                  ) : (
+                    <span className="fine" data-global-test-missing={t?.reason || 'unknown'}>
+                      {NO_TEST[t?.reason] || 'No test page is available.'}
+                    </span>
+                  ))}
                 {next === 'promote' && (
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => reviewPromotion()} disabled={busy} data-global-promote>
-                    Promote to 100%
+                    Activate for all businesses
                   </button>
                 )}
                 {next === 'promote' && t?.url && (
-                  <a className="btn btn-quiet btn-sm" href={t.url} target="_blank" rel="noreferrer" data-global-test>
+                  <a className="btn btn-quiet btn-sm" href={t.url} target="_blank" rel="noreferrer" onClick={openTest} data-global-test>
                     Test again
                   </a>
-                )}
-                {state !== 'not_configured' && (
-                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setStaging(true)} disabled={busy} data-global-stage>
-                    Change provider…
-                  </button>
                 )}
                 {cur.canRollBack && !monitorShown && (
                   <button type="button" className="link-btn" onClick={() => setConfirming('rollback')} disabled={busy} data-global-rollback>
@@ -211,22 +265,25 @@ export default function GlobalProvider({ global, reload, children }) {
                 )}
               </div>
             )}
-            {next === 'test' && t?.url && !open && <p className="fine">Opens the customer chat page of {t.business.name} (a test business) in a new tab. Press the microphone, say hello, ask for available times, book one (dry run), end the call. Come back here: the result is read from the recorded session.</p>}
+            {next === 'test' && t?.url && !open && (
+              <p className="fine" data-global-retry>
+                {retry} Opens in a new tab; the result is read from the recorded session.{watching ? ' Watching for the result…' : ''}
+              </p>
+            )}
           </div>
 
           {promo && (
-            <div className={`vp-card ${promo.ok ? 'vp-card--confirm' : 'vp-card--blocked'}`} role="group" aria-label="Promotion checklist" data-global-promote-check={promo.ok ? 'ok' : 'blocked'} data-global-confirm="promote">
+            <div className={`vp-card ${promo.ok ? 'vp-card--confirm' : 'vp-card--blocked'}`} role="group" aria-label="Activation checklist" data-global-promote-check={promo.ok ? 'ok' : 'blocked'} data-global-confirm="promote">
               <p className="vp-card-title">
-                {promo.ok ? (promo.summary.willChange > 0 ? `Ready to switch ${plural(promo.summary.willChange, 'business')} to ${cur.name}` : promo.counts.promote > 0 ? `Ready to promote ${cur.name}: ${plural(promo.counts.promote, 'business')} follow it from now on (already using it)` : `Nothing to promote: every business in scope already follows ${cur.name}`) : `Blocked: ${promo.summary.blocked > 0 ? `${plural(promo.summary.blocked, 'business')} need attention` : 'a platform check failed'}`}
+                {promo.ok ? (promo.summary.willChange > 0 ? `Activate ${cur.name} for all businesses: ${plural(promo.summary.willChange, 'business')} switch` : promo.counts.promote > 0 ? `Activate ${cur.name} for all businesses: ${plural(promo.counts.promote, 'business')} follow it from now on (already using it)` : `Nothing to activate: every business in scope already follows ${cur.name}`) : `Blocked: ${promo.summary.blocked > 0 ? `${plural(promo.summary.blocked, 'business')} need attention` : 'a platform check failed'}`}
               </p>
               <ul className="vp-list" data-global-promote-summary>
-                <li>Target: {cur.name}</li>
                 <li>
                   Businesses affected: {promo.counts.promote} of {promo.summary.total} ({promo.summary.willChange} change provider, {promo.summary.pinsToRelease} still on the previous provider, {promo.summary.overridesToReplace} business-specific replaced{promo.summary.overridesUntouched ? `, ${promo.summary.overridesUntouched} business-specific untouched` : ''}{promo.summary.suspended ? `, ${promo.summary.suspended} suspended excluded` : ''})
                 </li>
                 <li>Today: {Object.entries(global.counts.byProvider || {}).filter(([, n]) => n > 0).map(([p, n]) => `${nameOf(p)} ${n}`).join(' · ') || '—'}</li>
                 <li>Blocked: {promo.summary.blocked}</li>
-                <li>Rollback: available after the promotion</li>
+                <li>Rollback: available afterwards</li>
               </ul>
               {promo.checks
                 .filter((c) => !c.ok)
@@ -271,7 +328,7 @@ export default function GlobalProvider({ global, reload, children }) {
                   </tbody>
                 </table>
                 <details className="cc-details">
-                  <summary>What promoting does</summary>
+                  <summary>What activating does</summary>
                   <ul className="vp-list">
                     {promo.consequences.map((c) => (
                       <li key={c}>{c}</li>
@@ -292,7 +349,7 @@ export default function GlobalProvider({ global, reload, children }) {
                 </label>
               )}
               {promo.ok ? (
-                <TypedConfirmInline expected={cur.provider} action="Promote to 100%" busy={busy} disabled={!promoReady} onConfirm={doPromote} onCancel={closeAll} />
+                <Typed expected={cur.provider} action="Activate for all businesses" busy={busy} disabled={!promoReady} onConfirm={doPromote} onCancel={closeAll} />
               ) : (
                 <div className="vp-actions">
                   <button type="button" className="btn btn-quiet btn-sm" onClick={() => reviewPromotion()} disabled={busy}>
@@ -306,36 +363,12 @@ export default function GlobalProvider({ global, reload, children }) {
             </div>
           )}
 
-          {staging && !confirming && (
-            <div className="vp-card" role="group" aria-label="Change the global provider" data-global-staging>
-              <p className="vp-card-title">Change the global provider</p>
-              <label className="field">
-                <span>New default</span>
-                <select value={target} onChange={(e) => pick(e.target.value)} aria-label="Global provider" disabled={busy} data-global-target>
-                  <option value="">Select a provider…</option>
-                  {global.providers
-                    .filter((p) => p.id !== cur.provider)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                        {!p.configured ? ' (not configured)' : !p.enabled ? ' (switched off)' : ''}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <div className="vp-actions">
-                <button type="button" className="btn btn-quiet btn-sm" onClick={review} disabled={busy || !target} data-global-review>
-                  Review businesses
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => setConfirming('switch')} disabled={busy || !check?.ok || (mode === 'all' && check.counts.pinned > 0)} data-global-change>
-                  Change default…
-                </button>
-                <button type="button" className="btn btn-quiet btn-sm" onClick={closeAll} disabled={busy}>
-                  Cancel
-                </button>
-              </div>
+          {target && confirming !== 'switch' && (
+            <div className="vp-card" role="group" aria-label="Make this provider the target" data-global-staging={target}>
+              <p className="vp-card-title">Make {targetName} the target</p>
+              {!check && <p className="fine">Checking every business…</p>}
               {check && (
-                <div className="vp-stack" aria-label="Global checklist" data-global-check={check.ok ? 'ok' : 'blocked'}>
+                <div className="vp-stack" data-global-check={check.ok ? 'ok' : 'blocked'}>
                   {check.checks
                     .filter((c) => !c.ok)
                     .map((c) => (
@@ -346,9 +379,7 @@ export default function GlobalProvider({ global, reload, children }) {
                   {check.ok && (
                     <>
                       <p className="fine">
-                        <strong>
-                          {plural(check.counts.switch, 'business')} switch now · {plural(check.counts.pinned, 'business')} stay on {cur.name} until tested or promoted · {plural(check.counts.overrides, 'business')} with business-specific settings untouched.
-                        </strong>
+                        {plural(check.counts.switch, 'business')} switch now · {plural(check.counts.pinned, 'business')} stay on {cur.name} until {targetName} is tested and activated · {plural(check.counts.overrides, 'business')} with business-specific settings untouched.
                       </p>
                       <fieldset className="ui-group" disabled={busy}>
                         <legend>How to apply it</legend>
@@ -358,7 +389,7 @@ export default function GlobalProvider({ global, reload, children }) {
                         </label>
                         <label className="check">
                           <input type="radio" name="global-mode" checked={mode === 'staged'} onChange={() => setMode('staged')} />
-                          <span>Staged: verified businesses switch now, the others stay on {cur.name} until you test {targetName} and promote it to 100%.</span>
+                          <span>Staged: verified businesses switch now, the others stay on {cur.name} until you test {targetName} and activate it for all businesses.</span>
                         </label>
                       </fieldset>
                       <details className="cc-details">
@@ -390,7 +421,7 @@ export default function GlobalProvider({ global, reload, children }) {
                           </tbody>
                         </table>
                         <details className="cc-details">
-                          <summary>What changing the default does</summary>
+                          <summary>What changing the target does</summary>
                           <ul className="vp-list">
                             {check.consequences.map((c) => (
                               <li key={c}>{c}</li>
@@ -402,17 +433,31 @@ export default function GlobalProvider({ global, reload, children }) {
                   )}
                 </div>
               )}
+              <div className="vp-actions">
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setConfirming('switch')} disabled={busy || !check?.ok || (mode === 'all' && check.counts.pinned > 0)} data-global-change>
+                  Make {targetName} the target…
+                </button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => stage(target)} disabled={busy} data-global-review>
+                  Check again
+                </button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={closeAll} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
-
           {confirming === 'switch' && (
-            <TypedConfirm kind="switch" expected={target} title={`Change the global default to ${targetName} (${mode === 'all' ? 'all businesses at once' : 'staged rollout'})?`} action={`Change the default to ${targetName}`} busy={busy} onConfirm={doSwitch} onCancel={() => setConfirming(null)}>
+            <div className="vp-card vp-card--confirm" role="group" aria-label="Confirm the new target" data-global-confirm="switch">
+              <p className="vp-card-title">
+                Make {targetName} the target ({mode === 'all' ? 'all businesses at once' : 'staged rollout'})?
+              </p>
               <p className="fine">
                 {plural(check?.counts.switch || 0, 'business')} switch now; {plural(check?.counts.pinned || 0, 'business')} stay on {cur.name}; {plural(check?.counts.overrides || 0, 'business')} with business-specific settings are untouched. Conversations in progress are not interrupted.
               </p>
-            </TypedConfirm>
+              <Typed expected={target} action={`Make ${targetName} the target`} busy={busy} onConfirm={doSwitch} onCancel={() => setConfirming(null)} />
+            </div>
           )}
-          {!monitorShown && rollbackConfirm}
+          {!monitorShown && rollbackCard}
 
           {global.ready && (
             <details className="cc-details" data-global-advanced>
@@ -428,7 +473,8 @@ export default function GlobalProvider({ global, reload, children }) {
                   ['Business-specific settings', String(global.counts.independent)],
                   ['By provider', Object.entries(global.counts.byProvider || {}).map(([p, n]) => `${nameOf(p)} ${n}`).join(' · ') || '—'],
                   ['Verification record', v ? (v.ok ? `${v.finished} finished production-path session(s) on ${v.businesses.join(', ')}, last ${when(v.lastAt)}` : `${v.finished} finished, ${v.sessions} started; missing: ${v.missing.join(', ')}`) : 'unavailable'],
-                  ['Test business', t?.business ? `${t.business.name} (${t.business.id})${t.business.receptionist ? '' : ', receptionist off for customers'}` : NO_TEST[t?.reason] || 'none'],
+                  last ? ['Last session tools', last.tools.length ? last.tools.map((x) => `${x.name} ${x.ok ? '✓' : '✗'}`).join(', ') : 'none'] : null,
+                  ['Test business', t?.business ? `${t.business.name} (${t.business.id})${t.business.zips ? `, service area ${t.business.zips} ZIP(s), say ${t.business.zip}` : ', no service-area list'}${t.business.receptionist ? '' : ', receptionist off for customers'}` : NO_TEST[t?.reason] || 'none'],
                   r && !monitorShown ? ['Rollout status', `${nameOf(r.provider)} since ${when(r.since)}: ${r.sessions == null ? 'no session records' : `${r.sessions} sessions, ${num(r.connectionFailures)} connection failures, ${num(r.bookingFailures)} booking failures`}`] : null,
                 ]}
               />
@@ -441,7 +487,6 @@ export default function GlobalProvider({ global, reload, children }) {
           )}
         </div>
       </Section>
-      {children}
       {monitorShown && (
         <Section title="Rollout monitoring" id="vp-rollout" data-global-rollout={r.provider}>
           <div className="cc-section-body">
@@ -463,32 +508,10 @@ export default function GlobalProvider({ global, reload, children }) {
                 </button>
               </div>
             )}
-            {rollbackConfirm}
+            {rollbackCard}
           </div>
         </Section>
       )}
-    </>
-  )
-}
-
-// The typed confirmation inside the promotion card (same rule: the provider id typed back, one action).
-function TypedConfirmInline({ expected, action, busy, disabled, onConfirm, onCancel }) {
-  const [typed, setTyped] = useState('')
-  const ok = typed.trim().toLowerCase() === expected
-  return (
-    <>
-      <label className="field">
-        <span>Type {expected} to confirm</span>
-        <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} aria-label="Type the provider id to confirm" placeholder={expected} />
-      </label>
-      <div className="vp-actions">
-        <button type="button" className="btn btn-primary btn-sm" disabled={!ok || busy || disabled} onClick={onConfirm} data-global-confirm-action>
-          {action}
-        </button>
-        <button type="button" className="btn btn-quiet btn-sm" onClick={onCancel} disabled={busy}>
-          Cancel
-        </button>
-      </div>
     </>
   )
 }

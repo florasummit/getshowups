@@ -7,8 +7,8 @@ import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 
 test.describe.configure({ timeout: 90_000 })
-const TABS = ['Control Center', 'Business Review', 'Voice Lab', 'Voice providers', 'Growth', 'Overview']
-const ROOTS = { 'Voice providers': '[data-voice-providers]', 'Voice Lab': '[data-voice-lab]' }
+const TABS = ['Control Center', 'Business Review', 'Voice Lab', 'Growth', 'Overview']
+const ROOTS = { 'Voice Lab': '[data-voice-lab]' }
 
 // The width the section's content actually occupies versus the width the main column offers it, plus overflow.
 async function measure(page) {
@@ -37,22 +37,23 @@ test('every admin section fills the content column when reached by tab clicks wi
   await page.goto('/admin')
   await expectFullWidth(page, 'Overview')
   const nav = page.getByRole('navigation', { name: 'Admin' })
-  // Straight to Voice providers from the overview (the reported case), then every tab in order and in reverse.
-  await nav.getByRole('link', { name: 'Voice providers' }).click()
-  await expect(page).toHaveURL(/\/admin\/voice-providers$/)
-  await expect(page.locator(ROOTS['Voice providers'])).toBeVisible()
-  await expect(page.getByRole('heading', { level: 1, name: 'Voice providers' })).toBeVisible()
-  await expectFullWidth(page, 'Voice providers')
+  // Straight to the Voice Lab from the overview (the reported case: the voice page), then every tab in order and in reverse.
+  await nav.getByRole('link', { name: 'Voice Lab' }).click()
+  await expect(page).toHaveURL(/\/admin\/voice-lab$/)
+  await expect(page.locator(ROOTS['Voice Lab'])).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Voice Lab' })).toBeVisible()
+  await expectFullWidth(page, 'Voice Lab')
   for (const label of [...TABS, ...TABS.slice().reverse()]) {
     await nav.getByRole('link', { name: label, exact: true }).click()
     if (ROOTS[label]) await expect(page.locator(ROOTS[label])).toBeVisible()
     await expectFullWidth(page, label)
   }
-  // Direct links.
-  for (const [label, path] of [['Voice providers', '/admin/voice-providers'], ['Voice Lab', '/admin/voice-lab'], ['Control Center', '/admin/control']]) {
+  // Direct links (the former /admin/voice-providers address lands on the Voice Lab).
+  for (const [label, path] of [['Voice Lab', '/admin/voice-providers'], ['Control Center', '/admin/control']]) {
     await page.goto(path)
     if (ROOTS[label]) await expect(page.locator(ROOTS[label])).toBeVisible()
     await expectFullWidth(page, label)
+    if (path === '/admin/voice-providers') await expect(page).toHaveURL(/\/admin\/voice-lab$/)
   }
   // Back/forward keep the layout too.
   await page.goBack()

@@ -108,3 +108,220 @@
 .vl-readiness dt { font-weight: 600; color: var(--cc-ink, inherit); }
 .vl-readiness dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .vl-readiness > div { grid-template-columns: 1fr; } }
+.vp-hero {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border: 1px solid var(--cc-line);
+  border-radius: var(--radius);
+  background: var(--white);
+  min-width: 0;
+}
+.vp-hero-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+.vp-provider {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ink-950);
+  overflow-wrap: anywhere;
+}
+.vp-line {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-700);
+  overflow-wrap: anywhere;
+}
+.vp-next {
+  margin: 0;
+  font-weight: 650;
+  color: var(--ink-950);
+  overflow-wrap: anywhere;
+}
+.vp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+.vp-card {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--cc-line);
+  border-radius: var(--radius);
+  background: var(--white);
+  min-width: 0;
+}
+.vp-card--confirm {
+  background: var(--orange-50);
+  border-color: #ffd9c2;
+}
+.vp-card--blocked {
+  background: var(--bad-bg);
+  border-color: #f3c0c0;
+}
+.vp-card-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 750;
+  color: var(--ink-950);
+  overflow-wrap: anywhere;
+}
+.vp-stack {
+  display: grid;
+  gap: var(--s-2);
+}
+.vp-list {
+  margin: 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ink-700);
+}
+.vp-list li {
+  overflow-wrap: anywhere;
+}
+.vp-selected {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--cc-line);
+  border-radius: var(--radius);
+  background: var(--white);
+  min-width: 0;
+}
+.vp-selected-name {
+  margin: 0;
+  font-size: var(--fs-md);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  overflow-wrap: anywhere;
+}
+.vp-selected-name code {
+  font-size: var(--fs-sm);
+}
+.vp-states {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-2);
+}
+.vp-states li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.vp-history {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  table-layout: auto;
+}
+.vp-history th,
+.vp-history td {
+  text-align: left;
+  padding: var(--s-2) var(--s-2) var(--s-2) 0;
+  border-top: 1px solid var(--cc-line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.vp-history thead th {
+  border-top: 0;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.vp-table tr[aria-current='true'] td {
+  background: var(--ink-50);
+}
+.cc-details .vp-history,
+.cc-details .cc-facts {
+  margin-top: var(--s-2);
+}
+@media (max-width: 760px) {
+  .vp-history thead {
+    display: none;
+  }
+  .vp-history tr {
+    display: grid;
+    gap: 4px;
+    padding: var(--s-2) 0;
+    border-top: 1px solid var(--cc-line);
+  }
+  .vp-history th,
+  .vp-history td {
+    border: 0;
+    padding: 0;
+  }
+  .vp-hero {
+    padding: var(--s-4);
+  }
+}
+.vp-sub {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+/* Provider tiles (the target and the alternatives): buttons, same look as the Lab's provider cards. */
+.vp-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.vp-tile {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--cc-line);
+  border-radius: var(--radius);
+  background: var(--white);
+  cursor: pointer;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+}
+.vp-tile:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.vp-tile--on,
+.vp-tile--on:disabled {
+  border-color: var(--ink-900);
+  box-shadow: 0 0 0 1px var(--ink-900);
+  opacity: 1;
+}
+.vp-tile:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.vp-tile-name {
+  font-weight: 700;
+  color: var(--ink-950);
+}
+.vp-tile-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.vp-businesses > summary,
+[data-lab-call] > summary {
+  font-size: var(--fs-md);
+}
+.cc-details > .vp-stack {
+  margin-top: var(--s-3);
+}
