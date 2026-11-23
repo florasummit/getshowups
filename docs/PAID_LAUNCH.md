@@ -161,7 +161,7 @@ Run right after activation, inside the rollback window.
 - **Account:** a separate Google account of the founder's that is NOT a platform admin (admin accounts are sent to
   /admin) and a NEW business, e.g. "GetShowUps Launch Check". Not a test business (those can't reach live Stripe).
 - **Steps and what to verify:**
-  1. getshowups.com → Get started → sign in → business name → plan step shows "Start your founding plan".
+  1. getshowups.com → Get started → sign in → business name → plan step shows "Start your Growth plan".
   2. Pay $499 with the founder's own card. Return page: "Confirming your payment…" then onboarding continues.
   3. Stripe live Dashboard → Webhooks → endpoint: `checkout.session.completed`, `customer.subscription.created`,
      `invoice.paid` delivered with 200 (no retries).

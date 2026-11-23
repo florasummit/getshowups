@@ -2,6 +2,25 @@
 
 _Update at the end of every task. Newest first._
 
+## Homepage "Works with" strip (2026-11-23) — feat/integrations-strip
+
+- Plain-text names only, no third-party logos. Shown (production evidence 2026-11-23): Google Calendar (bookings),
+  Google sign-in (sessions), Claude and OpenAI (own key; website_generations rows on both), own domain (one connected).
+- Not shown: Google Ads (test accounts), Meta (no app), Stripe (test mode, not a customer integration), GoHighLevel
+  (off), texting. The FAQ labels these. Google's sensitive-scope review is pending, so Calendar's notice is in the FAQ.
+- Enterprise (PR #136) live: main 1240b40, deployment 861d8bbe-64e1-40c2-a5a5-2ff5acb25109, rollback 0f92732f.
+
+## Enterprise offering (2026-11-23) — feat/enterprise (no migration, no billing change)
+
+- Pricing shows Growth ($499/month; renamed in copy and plan step only, plan id `founding`, Stripe and onboarding
+  unchanged) and Enterprise (starting at $10,000/month, Contact sales, no checkout). The card says organization-wide
+  management is not live.
+- Contact sales form → POST /api/enterprise/inquiry → a lead of the `getshowups` business (source enterprise_inquiry):
+  signed token, trap field, rate limits, no automatic messages, owner notice through the launch gate, counted in the
+  admin sales funnel (test-marked excluded).
+- docs/ENTERPRISE_ORGANIZATIONS.md: design only. Today one sign-in email belongs to exactly one business.
+- Verified with mocks/local workerd; the stored path runs the real handlers over the real migrations in the browser test.
+
 ## Release blockers closed: migration 0037 applied, homepage copy, GAQL field fix (2026-11-23) — fix/gaql-fields
 
 - **Migration 0037 applied to production** 18:26 UTC (founder approval 2026-11-23). Pre-migration backup

@@ -385,7 +385,12 @@ export default function Appointments({ me, data, reload }) {
                     {!l.coverage && l.status === 'unqualified' && <span className="tag">Outside service area</span>}
                   </p>
                   <p className="row-sub">
-                    <a href={`tel:${l.phone}`}>{phoneText(l.phone)}</a> · <a href={`mailto:${l.email}`}>{l.email}</a>
+                    {l.phone && (
+                      <>
+                        <a href={`tel:${l.phone}`}>{phoneText(l.phone)}</a> ·{' '}
+                      </>
+                    )}
+                    <a href={`mailto:${l.email}`}>{l.email}</a>
                   </p>
                   {l.address && <p className="row-sub">{l.address}</p>}
                   <p className="row-note">{l.need}</p>

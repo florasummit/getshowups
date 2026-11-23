@@ -72,7 +72,7 @@ const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', r
 
 export function ownerNotice(kind, r, origin) {
   const name = clean(r.name, 80)
-  const contact = `Phone: ${clean(r.phone, 40)}\nEmail: ${clean(r.email, 120)}`
+  const contact = `${r.phone ? `Phone: ${clean(r.phone, 40)}\n` : ''}Email: ${clean(r.email, 120)}`
   if (kind === 'owner_booking') {
     const when = longWhen(r.start_at, r.timezone)
     return {

@@ -79,6 +79,8 @@ async function prefs(env, customer) {
 // New qualified lead. Website-form leads get an answer right away (acknowledge), booking-page leads (mid-booking) a
 // first nudge after 15 minutes; then a second nudge a day later. All skipped automatically once they book.
 export async function scheduleLeadMessages(env, customer, lead, now = Date.now()) {
+  // An enterprise inquiry (server/enterprise.js) is answered by a person: no automatic "pick a time" messages.
+  if (lead.source === 'enterprise_inquiry') return 0
   if (!customer.automations || !lead.qualified) return 0
   const p = await prefs(env, customer.id)
   // Before migration 0024 (no preferences, no conversations) every lead keeps the previous schedule.

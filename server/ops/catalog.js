@@ -537,6 +537,16 @@ registerCapability({
   verify: seen('conversation using published AI rules', 30, `SELECT max(e.at) AS at FROM receptionist_events e WHERE e.kind = 'rules' AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })
 registerCapability({
+  id: 'lead.enterprise_inquiry',
+  tier: 'optional',
+  name: 'Enterprise inquiries (pricing → Contact sales)',
+  journey: 'lead',
+  description: 'Stored as leads of the GetShowUps sales business; a person replies (server/enterprise.js).',
+  dependsOn: ['lead.capture'],
+  state: () => ({ mode: 'live', note: 'Needs the active "getshowups" business record' }),
+  verify: seen('enterprise inquiry', 60, `SELECT max(l.created_at) AS at FROM leads l JOIN lead_threads t ON t.lead_id = l.id WHERE t.source = 'enterprise_inquiry' AND ${REAL_LEAD}`),
+})
+registerCapability({
   id: 'crm.ghl',
   tier: 'later',
   name: 'GoHighLevel sync',
