@@ -77,6 +77,33 @@ server/ads/google.js and server/ads/campaigns.js: same OAuth, same campaign mode
   the Journey A browser test (6 leads, 4 charged, 1 credited, cost per charged lead $60 = $240 ÷ 4, no contact
   detail on the page, checklist only for businesses without one). Against Google's real API: nothing yet.
 
+## Step C: campaign templates (2026-11-23)
+
+- **Curated templates** (`server/ads/templates.js` TEMPLATES): pool cleaning, pool repair, HVAC maintenance, HVAC
+  repair, plumbing, electrical services, roofing. Each: high-intent keywords (phrase match), negative keywords (job
+  seekers, DIY, bargain hunters, parts), headlines ≤ 30 and descriptions ≤ 90 characters that pass the unapproved-claims
+  filter, a cautious starting daily budget ("a first-week floor, not a promise of results": no customer data backs
+  them yet), landing page = the business's booking page or published website, goals = the booking form lead and the
+  confirmed booking. `templateSpec` fits a template to the business: its name and "Serving <town>" as headlines, a
+  local keyword from the town on record, its ZIP codes as the area, its exclusions as extra negatives, the budget the
+  owner typed (floored at the platform minimum). `suggestTemplates` puts the trade's templates first.
+- **Imported campaign → template** (`normalizeImported`): keywords (valid characters, match type kept), negatives, the
+  first ad's headlines and descriptions (claims filtered, length fitted), the https landing page; never ad group,
+  location or ad ids; only this business's own imported Search campaign; refused for other types or too little text.
+  **Draft → template** (`saveFromDraft`) keeps the draft's words minus its attribution link. Saved templates live in
+  `ad_templates` (≤ 20 per business, removable).
+- **Flow**: Review your campaign → "Start with a template" (beside "Draft my plan") → picker with "Your templates"
+  and GetShowUps' templates (suggested first, searches and ad lines shown, daily budget editable) → one editable draft
+  (409 `draft_exists` while one is open) → the unchanged steps: edit, preview, approve (budget approval), create
+  paused, read back, explicit Start. Nothing is created or spent by a template.
+- **Route** `GET/POST /api/dashboard/ads/templates` (session business, Ads access, rate-limited, allowlisted errors).
+- **Verified**: unit `test/ads-templates.test.js` (every template valid for a real business and fitted to it; suggestion
+  by trade; one draft with the attributable booking link; second start refused; approve path unchanged; imported →
+  normalized template without identifiers, claims dropped, other business/type refused; draft → template; remove is
+  the owner's own; pre-0037 behaviour) and browser Journey B (`e2e-starter` / `-m`: details → Start with a template →
+  suggested HVAC templates first → draft from HVAC repair with the chosen budget, the business name and town, the ZIP
+  area, the attribution link; second start refused; nothing on Google) plus "Save as a template" in Journey A.
+
 ## Next steps (in order)
 
 - C: templates: curated industry templates through the existing spec/validateSpec path, imported campaign → draft

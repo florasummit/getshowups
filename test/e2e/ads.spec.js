@@ -684,8 +684,10 @@ test('Journey A: an established advertiser connects and the campaigns already in
   await expect(lsa.getByText(/phone call · Booked · charged/)).toBeVisible()
   await expect(lsa).not.toContainText('843') // never a contact detail
   await expect(imported.locator('[data-lsa-readiness]')).toHaveCount(0) // the checklist is for businesses without one
-  // Read only: no Start, Pause or budget controls on imported campaigns.
+  // Read only: no Start, Pause or budget controls on imported campaigns. The Search campaign can become a template.
   await expect(imported.getByRole('button', { name: /Start|Pause|Change daily budget|Approve/ })).toHaveCount(0)
+  await search.locator('[data-save-template]').click()
+  await expect(search.locator('[data-template-saved]')).toContainText('Saved as a template')
   // Period: 7 days → 7 × $21.
   await imported.getByRole('button', { name: '7 days' }).click()
   await expect(search.locator('summary')).toContainText('$147')
@@ -702,4 +704,58 @@ test('Journey A: an established advertiser connects and the campaigns already in
   const theirs = await (await o.request.get('/api/dashboard/ads/imported')).json()
   expect(theirs.campaigns.map((c) => c.externalId)).not.toContain('70000000001')
   await other.close()
+})
+
+test('Journey B: a business that never advertised saves its details, starts from the suggested template and gets ONE editable draft (nothing on Google, nothing spent) @mobile', async ({ page, context }, testInfo) => {
+  // One business per browser project: e2e-starter / e2e-starter-m (no ad account, no profile yet).
+  await useSession(context, testInfo.project.name === 'mobile' ? fixtures.E2E_STARTER_M_SESSION_TOKEN : fixtures.E2E_STARTER_SESSION_TOKEN)
+  await page.goto('/dashboard/ads')
+  await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
+  // Business details first (the template is filled from them).
+  await page.getByLabel('What kind of business?').fill('Heating & air')
+  await page.getByLabel(/^Services you want customers for/).fill('AC repair\nFurnace repair')
+  await page.getByLabel('ZIP codes you serve').fill('29403, 29401')
+  await page.getByLabel(/^Towns or cities/).fill('Charleston')
+  await page.getByLabel('Typical first job ($)').fill('250')
+  await page.getByLabel('Monthly ad budget ($)').fill('450')
+  await page.getByRole('button', { name: 'Save details' }).click()
+  await expect(page.getByText('Saved.')).toBeVisible()
+  // Review your campaign offers the template path first; the picker suggests the trade's templates.
+  const review = page.getByRole('region', { name: '3. Review your campaign' })
+  await review.locator('[data-start-template]').click()
+  const picker = page.getByRole('group', { name: 'Start with a template' })
+  await expect(picker.getByText('Starting budgets are a cautious first-week floor, not a promise of results.')).toBeVisible()
+  const rows = picker.locator('[data-template]')
+  await expect(rows.first()).toHaveAttribute('data-template', 'hvac_maintenance')
+  await expect(rows.nth(1)).toHaveAttribute('data-template', 'hvac_repair')
+  await expect(rows.first().locator('.chip')).toHaveText('Suggested')
+  await expect(rows).toHaveCount(7)
+  await expect(picker.locator('[data-template="hvac_repair"]')).toContainText('Searches like “ac repair”, “ac repair near me”, “air conditioner not cooling”.')
+  await picker.locator('[data-template="hvac_repair"] input').fill('20')
+  await picker.locator('[data-template-use="hvac_repair"]').click()
+  await expect(page.locator('[data-template-started]')).toContainText('Draft created from the HVAC repair template')
+  // The draft: the business name and town are in, the budget is the one chosen, the area is its ZIP codes; editable.
+  const c = page.locator('.campaign').first()
+  await expect(c.locator('.chip')).toHaveText('Draft')
+  await expect(c).toContainText('AC & Heating Repair')
+  await expect(c.locator('[data-where]')).toContainText('people in 2 ZIP codes (29403, 29401), searching on Google')
+  const s = await (await page.request.get('/api/dashboard/ads')).json()
+  const draft = s.campaigns.find((x) => !x.launched)
+  expect([draft.status, draft.platform, draft.dailyBudgetCents, draft.spec.template]).toEqual(['draft', 'google', 2000, { source: 'curated', id: 'hvac_repair' }])
+  expect(draft.spec.google.headlines.slice(0, 2)).toEqual(['E2E Coastal Air' + (testInfo.project.name === 'mobile' ? ' Mobile' : ''), 'AC & Heating Repair'])
+  expect(draft.spec.google.headlines).toContain('Serving Charleston')
+  expect(draft.spec.geo.zips).toEqual(['29403', '29401'])
+  expect(draft.spec.finalUrl).toMatch(new RegExp(`/book/e2e-starter(-m)?\\?utm_source=google&utm_medium=paid&utm_campaign=${draft.id}$`))
+  expect(draft.spec.google.negativeKeywords).toContain('jobs')
+  // One open draft: starting another template is refused; the picker says so.
+  await expect(review.locator('[data-start-template]')).toHaveCount(0)
+  const again = await page.evaluate(async () => {
+    const r = await fetch('/api/dashboard/ads/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start', templateId: 'roofing' }) })
+    return [r.status, (await r.json()).error]
+  })
+  expect(again).toEqual([409, 'draft_exists'])
+  // Nothing exists on Google, nothing spent: no account is even connected; the draft's buttons say what comes next.
+  expect(s.connections.google).toBeUndefined()
+  await expect(c.getByRole('button', { name: /Start ads/ })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
 })

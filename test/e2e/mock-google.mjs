@@ -151,7 +151,7 @@ const EXISTING = {
       id: '70000000001', name: 'Pool Cleaning – Charleston', status: 'ENABLED', servingStatus: 'SERVING', channel: 'SEARCH', bidding: 'TARGET_SPEND', amountMicros: '25000000', startDate: '2026-03-01',
       locations: ['1015360', '1015362'], languages: 1, negatives: ['jobs', 'diy'], groups: [{ id: '80000000001', name: 'Weekly cleaning' }],
       keywords: [{ text: 'pool cleaning charleston', match: 'PHRASE', group: '80000000001' }, { text: 'pool service near me', match: 'PHRASE', group: '80000000001' }, { text: 'weekly pool cleaning', match: 'EXACT', group: '80000000001' }],
-      ads: [{ id: '90000000001', group: '80000000001', headlines: ['Charleston Pool Cleaning', 'Weekly Pool Service', 'Book a Visit Online'], descriptions: ['Clear water every week. Pick a time that suits you.'], finalUrls: ['https://harborpool.example/book'] }],
+      ads: [{ id: '90000000001', group: '80000000001', headlines: ['Charleston Pool Cleaning', 'Weekly Pool Service', 'Book a Visit Online'], descriptions: ['Clear water every week. Pick a time that suits you.', 'Tell us about your pool and choose a visit that fits your week.'], finalUrls: ['https://harborpool.example/book'] }],
       goals: [{ category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE' }],
       spendPerDayMicros: 21000000, clicksPerDay: 9, conversionsPerDay: 0.5,
     },

@@ -2,6 +2,17 @@
 
 _Update at the end of every task. Newest first._
 
+## Google acquisition engine, step C: campaign templates (2026-11-23) — feat/ads-templates (uses 0037's ad_templates; curated templates work before it)
+
+- Seven curated Search templates (pool cleaning/repair, HVAC maintenance/repair, plumbing, electrical, roofing) that
+  pass the spec limits and the claims filter and are fitted to the business (name, town, ZIPs, exclusions, chosen
+  budget); the trade's templates are suggested first. "Start with a template" sits beside "Draft my plan" in Review
+  your campaign and produces ONE editable draft (one open draft per business; every later step unchanged). An imported
+  Search campaign or a draft can be saved as the business's own template (normalized: no account identifiers, claims
+  filtered; ≤ 20, removable). Route /api/dashboard/ads/templates. No performance is claimed for any template.
+- Verified: unit test/ads-templates.test.js (4), browser Journey B (first-time advertiser, both projects) and the
+  "Save as a template" step in Journey A. Nothing on Google, nothing spent.
+
 ## Google acquisition engine, steps A + B: existing campaigns and Local Services leads (2026-11-23) — feat/google-ads-import (migration 0037, NOT applied yet)
 
 - Step B (Local Services Ads): leads of an imported Local Services campaign are read from `local_services_lead` into
