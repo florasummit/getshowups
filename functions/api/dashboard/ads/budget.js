@@ -5,7 +5,7 @@ import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { approveBudget } from '../../../../server/ads/budget.js'
 import { logAction, enforceApproval } from '../../../../server/ads/campaigns.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { adsHold } from '../../../../server/ads/holds.js'
 import { currentApproval } from '../../../../server/ads/budget.js'
 
@@ -13,7 +13,7 @@ export async function onRequestPost({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const rl = await hit(env, 'adsWrite', session.customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const body = await request.json().catch(() => null)

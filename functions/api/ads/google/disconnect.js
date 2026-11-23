@@ -8,7 +8,7 @@ import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { getConnection, forgetConnection } from '../../../../server/ads/connections.js'
 import { setCampaignStatus, logAction } from '../../../../server/ads/campaigns.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { adsHold } from '../../../../server/ads/holds.js'
 
 export async function onRequestPost({ request, env }) {
@@ -16,7 +16,7 @@ export async function onRequestPost({ request, env }) {
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
   const customer = session.customer
-  if (!adsEnabledFor(env, customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, customer))) return json(404, { error: 'not_found' })
   const rl = await hit(env, 'adsWrite', customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const body = await request.json().catch(() => null)

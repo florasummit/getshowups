@@ -108,7 +108,7 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stripe.js          Checkout, portal, webhook signature + idempotent event handling, MRR normalization
   events.js          track(): deduplicated analytics events (no personal data)
   metrics.js         Platform customer rows, attention flags, growth metrics (null when no data)
-  ads/               access (who gets Ads: ADS_ENABLED + ADS_BUSINESSES), conversions (Data Manager feedback, flag), spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
+  ads/               access (who gets Ads: every business with active hosting, server/eligibility.js; ADS_ENABLED=false = off), conversions (Data Manager feedback, flag), spec (validation + claims), strategy (AI plan), budget (owner ceiling), campaigns (service),
                      optimizer (pause/recommend only), google, meta, creative, connections, attribution
   ghl.js             GoHighLevel one-way sync (contacts, pipeline stages, optional SMS workflow)
   landing.js         approvedClaimsFor() (owner-approved claims). Legacy landing_pages rows still render as websites
@@ -315,9 +315,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (approval). Only sk_test_/rk_test_ keys count as configured otherwise. Fails closed: billingMisconfigured(env) (a key
   set but billing unusable: live key without the flag, or no webhook secret) refuses NEW self-serve businesses (403
   signup_not_open, me.checkoutOpen false); existing businesses are unaffected. Never let a signup through unbilled.
-- Release switches (off unless exactly 'true'): ADS_ENABLED (master switch for the Ads tab + /api/dashboard/ads/* +
-  /api/ads/* connect) AND ADS_BUSINESSES (comma-separated business ids, no wildcard; empty = nobody). Both are checked
-  per business via adsEnabledFor() in server/ads/access.js after the session is loaded. ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
+- Self-service tools for EVERY eligible business (server/eligibility.js; owner decision 2026-11-22, no allowlists, no
+  platform-admin activation): Ads (adsAccess: hosting active, i.e. paid/trialing/past due, a never-billed pilot or a
+  complimentary account; a suspended business keeps the tab so the hold notice says why its ads are paused), Teach Your
+  AI and Website Studio (businessEligible: active business + hosting active). A self-serve sign-up before payment has
+  none. ADS_BUSINESSES and AI_STUDIO_BUSINESSES (the pilot allowlists) are ignored. Emergency off switches (default on):
+  ADS_ENABLED=false (Ads tab + /api/dashboard/ads/* + /api/ads/* connect), AI_STUDIO_ENABLED=false (Teach Your AI),
+  WEBSITE_STUDIO_ENABLED=false. Seeing a tool never spends or changes anything customer-facing: live use stays behind
+  ADS_LIVE_LAUNCH (real campaign create/resume) and AI_RULES_LIVE_BUSINESSES.
+- Release switches (off unless exactly 'true'): ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
   Website Studio (server/website-studio.js studioAccess(), owner decision 2026-11-16: every eligible business, no
   allowlist) = own Claude/OpenAI key, AI designer, website import (+ old-address redirects). Eligible: Studio not switched
   off (WEBSITE_STUDIO_ENABLED === 'false' is the emergency off switch; default on), business active (not suspended),
@@ -541,9 +547,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   contact/address, safety, no invented prices, caps, tenant isolation) are not configurable: validateConfig refuses
   them, Teach a Change answers "Not changed: <reason>". Teach a Change = fixed patterns first, Claude (json_schema ops
   from the same catalog) only for the rest; proposals are applied server-side to the CURRENT draft on approval. "Test
-  your AI" is a deterministic simulation (no model, no calendar, nothing stored). Gates: AI_STUDIO_BUSINESSES (owner
-  editing, customers unaffected), AI_RULES_LIVE_BUSINESSES (receptionist uses the PUBLISHED version; chat + Retell
-  voice through the same engine), AI_RULES_ENABLED=false kill switch; all empty = exactly the pre-rules behaviour.
+  your AI" is a deterministic simulation (no model, no calendar, nothing stored). Gates: owner editing for every
+  eligible business (server/eligibility.js; AI_STUDIO_ENABLED=false = off; customers unaffected, and the page says so
+  when the receptionist is off), AI_RULES_LIVE_BUSINESSES (receptionist uses the PUBLISHED version; chat + Retell
+  voice through the same engine), AI_RULES_ENABLED=false kill switch; live list empty = exactly the pre-rules behaviour.
   Retell needs no agent change (custom LLM served by our engine; providers.js is the adapter boundary).
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,

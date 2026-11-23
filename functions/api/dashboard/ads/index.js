@@ -6,7 +6,7 @@ import { adsHold, HOLD_REASONS, runningOnHold } from '../../../../server/ads/hol
 import { currentApproval, remainingDailyCents } from '../../../../server/ads/budget.js'
 import { dailyCeilingCents } from '../../../../server/ads/spec.js'
 import { imageConfigured, videoConfigured, usageThisMonth, QUOTA } from '../../../../server/ads/creative.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { internalEmails } from '../../../../server/testdata.js'
 import { listAssets } from '../../../../server/assets.js'
 import { isSandboxAdAccount } from '../../../../server/ads/meta.js'
@@ -15,7 +15,7 @@ export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const db = env.ONBOARDING_DB
   const id = session.customer.id
   try {

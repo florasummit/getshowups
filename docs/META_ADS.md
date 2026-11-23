@@ -89,7 +89,7 @@ can create, test-lead and start there with nothing delivered or charged.
    to the Page `leadgen` field with the webhook URL above (the handshake answers with the verify token).
 2. Create the app's sandbox ad account and set `META_SANDBOX_AD_ACCOUNTS=act_<id>` (approval). Keep
    `ADS_LIVE_LAUNCH` off.
-3. In the Ads tab of a test business (ADS_BUSINESSES): Connect → choose the sandbox account + a Page → draft → Approve
+3. In the Ads tab of a test business (every eligible business has the tab): Connect → choose the sandbox account + a Page → draft → Approve
    and create (paused) · sandbox account → read-back "Checked on Meta" → Send a test lead → the lead arrives marked
    as a test → Start (sandbox, no spend) → Pause. Compare with the app dashboard. (The test-lead API needs the app
    out of development mode; until then this step is skipped.)

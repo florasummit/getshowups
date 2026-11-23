@@ -1,17 +1,13 @@
-// Who gets the Ads feature. Two switches, both off by default, both production settings (approval):
-//   ADS_ENABLED === 'true'  master switch (off → every Ads route is 404 for everyone)
-//   ADS_BUSINESSES          comma-separated business ids that get Ads while the master switch is on.
-// No wildcard: each business is listed explicitly, so a controlled rollout is one business at a time.
-// Empty/unset → nobody. Live spending stays a separate switch (ADS_LIVE_LAUNCH).
-import { CUSTOMER_RE } from '../invites.js'
+// Who gets the Ads feature: every business whose hosting is active (server/eligibility.js hostingActive: a paid, trialing
+// or past-due subscription, a never-billed pilot or a complimentary account; not a self-serve sign-up before payment),
+// no per-business allowlist (owner decision 2026-11-22; ADS_BUSINESSES was the pilot allowlist before and is ignored
+// now). A suspended business keeps the tab: its ads are paused by the hold and the tab says why (server/ads/holds.js).
+//   ADS_ENABLED === 'false'  emergency off switch (default on): every Ads route is 404 for everyone.
+// Connecting an ad account and drafting never spends; live create/resume stays behind ADS_LIVE_LAUNCH, the owner's
+// budget approval and the subscription rule (server/ads/campaigns.js liveFor), and test businesses never go live.
+import { hostingActive } from '../eligibility.js'
 
-export const adsEnabled = (env) => env?.ADS_ENABLED === 'true'
+export const adsEnabled = (env) => env?.ADS_ENABLED !== 'false'
 
-export const adsBusinesses = (env) =>
-  String(env?.ADS_BUSINESSES || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => CUSTOMER_RE.test(s))
-
-export const adsEnabledFor = (env, customerId) =>
-  adsEnabled(env) && typeof customerId === 'string' && CUSTOMER_RE.test(customerId) && adsBusinesses(env).includes(customerId)
+// `customer`: the session's business (id + status), never client input.
+export const adsAccess = async (env, customer) => adsEnabled(env) && (await hostingActive(env, customer))

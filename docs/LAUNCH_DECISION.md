@@ -48,8 +48,8 @@ self-serve.
 | Founder alerts (calendar broken, booking page without times, delivery failures) | OFF | FOUNDER_ALERTS_ENABLED absent (verified 2026-11-20) | **Should be on for any pilot** (approval) |
 | AI receptionist chat | BUILT, per-business opt-in, real model | /chat/poolthru-llc 200 | Not advertised; reliability unproven with customers |
 | AI receptionist voice | OFF except poolthru-llc, bob-electrical | RECEPTIONIST_VOICE_BUSINESSES | Beta; owner decision 2026-11-19 |
-| Teach Your AI | gated: editing for poolthru-llc only; live rules for nobody | AI_STUDIO_BUSINESSES / AI_RULES_LIVE_BUSINESSES | Awaiting founder review |
-| Google Ads | SANDBOX (test account), Cloud project at Test level | ADS_ENABLED + allowlist, ADS_LIVE_LAUNCH unset | Explorer access + policy items before any spend |
+| Teach Your AI | editing for every eligible business (2026-11-22); live rules for nobody | server/eligibility.js / AI_RULES_LIVE_BUSINESSES | Awaiting founder review |
+| Google Ads | SANDBOX (test account), Cloud project at Test level | Ads tab for every eligible business (2026-11-22), ADS_LIVE_LAUNCH unset | Explorer access + policy items before any spend |
 | Meta ads | BUILT / OFF | mocked tests | App review |
 | Attribution (campaign → lead → booking) | BUILT + MOCKED | server/ads/funnel.js | Real data only after ads run |
 | Control Center, incidents, Business Review, audit log | LIVE | /api/platform/* 401 signed out; release records | — |

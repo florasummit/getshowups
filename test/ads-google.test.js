@@ -480,28 +480,39 @@ test('accounts: found automatically (direct + under managers), select only those
   assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie: salon, body: { accountId: ACCT } })).json().error, 'not_connected')
 })
 
-test('per-business flag: Google Ads connect + read routes only for businesses listed in ADS_BUSINESSES', async () => {
+test('Google Ads connect + read routes for every eligible business (no allowlist); hidden before payment or with ADS_ENABLED=false; the callback refuses when access was lost', async () => {
   const campaignsRoute = await import('../functions/api/ads/google/campaigns.js')
   const owner = await session('owner@pools.example')
   const get = async (mod, path) => (await call(mod, 'GET', path, { cookie: owner, headers: { 'Sec-Fetch-Site': 'same-origin' } })).status
   await connected()
-  for (const list of ['', 'salon', ' POOLS ', '*', 'pools-x', 'pool']) {
-    env.ADS_BUSINESSES = list
-    assert.equal(await get(start, '/api/ads/google/start'), 404, `start hidden for list ${JSON.stringify(list)}`)
-    assert.equal(await get(accounts, '/api/ads/google/accounts'), 404)
-    assert.equal(await get(campaignsRoute, '/api/ads/google/campaigns'), 404)
-    assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie: owner, body: { accountId: ACCT } })).status, 404)
+  const hidden = async (why) => {
+    assert.equal(await get(start, '/api/ads/google/start'), 404, `start hidden: ${why}`)
+    assert.equal(await get(accounts, '/api/ads/google/accounts'), 404, why)
+    assert.equal(await get(campaignsRoute, '/api/ads/google/campaigns'), 404, why)
+    assert.equal((await call(accounts, 'POST', '/api/ads/google/accounts', { cookie: owner, body: { accountId: ACCT } })).status, 404, why)
   }
-  env.ADS_BUSINESSES = 'salon, pools'
-  assert.equal(await get(accounts, '/api/ads/google/accounts'), 200)
-  assert.notEqual(await get(campaignsRoute, '/api/ads/google/campaigns'), 404, 'listed → route reachable')
+  // The old pilot allowlist neither grants nor hides anything.
+  for (const list of [undefined, '', 'salon', '*']) {
+    if (list === undefined) delete env.ADS_BUSINESSES
+    else env.ADS_BUSINESSES = list
+    assert.equal(await get(accounts, '/api/ads/google/accounts'), 200, `reachable with ADS_BUSINESSES ${JSON.stringify(list)}`)
+  }
+  assert.notEqual(await get(campaignsRoute, '/api/ads/google/campaigns'), 404, 'route reachable')
   assert.equal(await get(start, '/api/ads/google/start'), 302)
+  env.ADS_ENABLED = 'false'
+  await hidden('emergency off switch')
+  delete env.ADS_ENABLED
+  const unpaid = db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('pools', 'founding', 1)")
+  unpaid.run()
+  await hidden('self-serve sign-up before payment')
+  db.sql.prepare("DELETE FROM self_signups WHERE customer = 'pools'").run()
+  assert.equal(await get(accounts, '/api/ads/google/accounts'), 200)
 
-  // Removed from the list between start and callback: the callback refuses and stores nothing.
+  // Access lost between start and callback (here: the switch): the callback refuses and stores nothing.
   kv.clear()
   const cookie = await session('owner@pools.example')
   const s = await call(start, 'GET', '/api/ads/google/start', { cookie, headers: { 'Sec-Fetch-Site': 'same-origin' } })
-  env.ADS_BUSINESSES = 'salon'
+  unpaid.run()
   const cb = await call(callback, 'GET', `/api/ads/google/callback?code=c0de&state=${new URL(s.location).searchParams.get('state')}`, { cookie: `${cookie}; __Host-gsu_ads_google=${stateCookie(s.res)}` })
   assert.equal(cb.location, '/dashboard/ads?ads_error=not_configured')
   assert.equal(kv.size, 0, 'no token stored')

@@ -8,7 +8,7 @@ import { cookie, getSession } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { saveToken, upsertConnection } from '../../../../server/ads/connections.js'
 import { ADS_SCOPE, ADS_STATE_COOKIE, ADS_STATE_TTL_SECONDS, adsRedirectUri, describeAccountWithToken, listSelectableAccountsWithToken } from '../../../../server/ads/google.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { liveFor } from '../../../../server/ads/campaigns.js'
 
 function redirect(location) {
@@ -47,7 +47,7 @@ export async function onRequestGet({ request, env }) {
   }
   if (!session?.customer) return fail('unauthenticated')
   const customerId = session.customer.id
-  if (!adsEnabledFor(env, customerId)) return fail('not_configured')
+  if (!(await adsAccess(env, session.customer))) return fail('not_configured')
   if (saved.customer !== customerId || saved.email !== session.email) return fail('expired')
 
   let tokens

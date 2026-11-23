@@ -370,6 +370,9 @@ test('ads hold: a platform admin suspension pauses the running campaign on Googl
 
   await page.reload()
   await expect(page.locator('[data-ads-hold="suspended"]')).toContainText('Your ads are paused because GetShowUps paused this business')
+  // Suspended: the Ads tab stays (it explains the hold); the editing tools (Teach Your AI) are withdrawn until reactivation.
+  expect((await (await page.request.get('/api/dashboard/me')).json()).features).toMatchObject({ ads: true, teachAi: false })
+  expect((await page.request.get('/api/dashboard/ai-rules')).status()).toBe(404)
   await expect(c.locator('.chip')).toHaveText('Paused')
   await c.getByRole('button', { name: 'Check on Google' }).click()
   await expect(c.locator('[data-google-live]')).toContainText('Google reports: paused')
@@ -385,19 +388,49 @@ test('ads hold: a platform admin suspension pauses the running campaign on Googl
   await expect(c.locator('.chip')).toHaveText('Paused') // never restarted automatically
 })
 
-test('per-business flag: a business not listed in ADS_BUSINESSES has no Ads tab and no Ads routes', async ({ page, context, browser }) => {
-  await useSession(context, fixtures.E2E_OTHER_SESSION_TOKEN)
-  expect((await (await page.request.get('/api/dashboard/me')).json()).features.ads).toBe(false)
-  expect((await page.request.get('/api/dashboard/ads')).status()).toBe(404)
-  expect((await page.request.get('/api/ads/google/campaigns')).status()).toBe(404)
+test('Ads for every business with nothing to switch on: a business never listed anywhere opens the tab, sees both platforms disconnected, and an unconfigured Meta says so honestly @mobile', async ({ page, context, browser }) => {
+  // e2e-import: a paid business that no pilot list ever named and that has never touched Ads.
+  await useSession(context, fixtures.E2E_IMPORT_SESSION_TOKEN)
+  expect((await (await page.request.get('/api/dashboard/me')).json()).features).toMatchObject({ ads: true, teachAi: true })
+  expect((await page.request.get('/api/dashboard/ads')).status()).toBe(200)
   await page.goto('/dashboard')
-  await expect(page.getByRole('link', { name: 'Ads', exact: true })).toHaveCount(0)
-  await expect(page.locator('[data-ads-results]')).toHaveCount(0)
-  // Back from a refused ad sign-in (/dashboard/ads?ads_error=…): their normal dashboard, never a broken Ads page.
-  await page.goto('/dashboard/ads?ads_error=not_configured')
-  await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toHaveCount(0)
-  await expect(page.getByText('Couldn’t load ads.')).toHaveCount(0)
+  await page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name: 'Ads', exact: true }).click()
+  await expect(page).toHaveURL(/\/dashboard\/ads$/)
+  await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
+  const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
+  // Both platforms, disconnected, each with its own Connect (the Meta app is configured in this environment).
+  await expect(accounts.locator('[data-conn-status][data-platform="google"]')).toHaveAttribute('data-conn-status', 'none')
+  await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', 'none')
+  await expect(accounts.locator('[data-conn-status]')).toHaveText(['○Not connected', '○Not connected'])
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(2)
+  await expect(accounts.locator('[data-platform-unavailable]')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+  // Production today (no Meta app): the Meta row says the platform isn't set up, offers no Connect; Google is unaffected.
+  await page.route('**/api/dashboard/ads', async (route) => {
+    const res = await route.fetch()
+    const body = await res.json()
+    await route.fulfill({ response: res, json: { ...body, capabilities: { ...body.capabilities, meta: false } } })
+  })
+  await page.reload()
+  await expect(accounts.locator('[data-platform-unavailable="meta"]')).toContainText('Not available yet: GetShowUps’ Facebook & Instagram connection isn’t set up on the platform')
+  await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', 'none')
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(1)
+  await page.unroute('**/api/dashboard/ads')
+  // Back from a Meta sign-in that failed or was refused: a plain notice, nothing connected, the page still works.
+  for (const [code, text] of [['not_configured', 'Connecting isn’t available for this business right now'], ['transient', 'Meta didn’t respond.'], ['cancelled', 'Sign-in was cancelled.'], ['reconnect_required', 'Meta didn’t accept the sign-in.']]) {
+    await page.goto(`/dashboard/ads?ads_error=${code}`)
+    await expect(page.getByRole('alert')).toContainText(text)
+    await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', 'none')
+  }
+  // A business still in setup (no calendar yet) has its onboarding, never a broken Ads page.
+  const other = await browser.newContext()
+  await useSession(other, fixtures.E2E_OTHER_SESSION_TOKEN)
+  const p1 = await other.newPage()
+  await p1.goto('/dashboard/ads?ads_error=not_configured')
+  await expect(p1.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
+  await expect(p1.getByRole('heading', { name: 'Ads', level: 1 })).toHaveCount(0)
+  await expect(p1.getByText('Couldn’t load ads.')).toHaveCount(0)
+  await other.close()
 
   // A set-up business whose Ads feature is off (me stubbed to features.ads=false) gets the Overview.
   const ctx = await browser.newContext()

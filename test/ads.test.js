@@ -619,43 +619,50 @@ test('billing access rule: with Stripe configured, launch needs an active or tri
   assert.equal(db.sql.prepare('SELECT status FROM ad_campaigns WHERE id = ?').get(id).status, 'approved', 'still approved, nothing attempted')
 })
 
-test('per-business flag: with the master switch on, only businesses in ADS_BUSINESSES see Ads (default: nobody)', async () => {
+test('Ads for every eligible business: no allowlist and nothing to switch on; a self-serve sign-up before payment has none; ADS_ENABLED=false hides everything', async () => {
   const me = await import('../functions/api/dashboard/me.js')
   const onboarding = await import('../functions/api/dashboard/onboarding.js')
   const routes = [[adsIndex, 'GET'], [adsProfile, 'POST'], [adsPlan, 'POST'], [adsBudget, 'POST'], [adsCampaign, 'POST'], [adsCreative, 'POST'], [adsCreative, 'GET']]
   const pools = await owner()
   const salon = await cookieFor('owner@salon.example')
   const adsItem = async (cookie) => (await call(onboarding, 'GET', '/api/dashboard/onboarding', { cookie })).json.readiness.items.find((i) => i.id === 'ads')
-  delete env.ADS_BUSINESSES // default
+  delete env.ADS_ENABLED // default: on
+  delete env.ADS_BUSINESSES // the old pilot allowlist grants nothing and hides nothing
+  for (const cookie of [pools, salon]) {
+    assert.equal((await call(adsIndex, 'GET', '/x', { cookie })).status, 200)
+    assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie })).json.features.ads, true)
+    assert.deepEqual(await adsItem(cookie), { id: 'ads', state: 'pending', detail: 'connect_in_ads' })
+  }
+  assert.equal((await call(adsProfile, 'POST', '/x', { cookie: pools, body: PROFILE })).status, 200)
+
+  // A self-serve sign-up that hasn't paid yet (hosting 'unpaid'): no Ads, nothing written, whatever the old list says.
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('salon', 'founding', 1)").run()
+  env.ADS_BUSINESSES = 'salon'
+  for (const [mod, method] of routes) assert.equal((await call(mod, method, '/x', { cookie: salon, body: method === 'POST' ? PROFILE : undefined })).status, 404)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: salon })).json.features.ads, false)
+  assert.deepEqual(await adsItem(salon), { id: 'ads', state: 'off', detail: 'not_available_yet' })
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ad_profiles WHERE customer = 'salon'").get().n, 0, 'nothing written')
+  // Paid (the webhook records the subscription): Ads appears by itself.
+  db.sql.prepare("INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, currency, current_period_end, updated_at) VALUES ('salon', 'cus_s', 'sub_s', 'founding', 'active', 49900, 'usd', ?, ?)").run(Date.now() + DAY, Date.now())
+  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: salon })).status, 200)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: salon })).json.features.ads, true)
+
+  // Emergency off switch: everything 404, for everyone.
+  env.ADS_ENABLED = 'false'
   for (const [mod, method] of routes) assert.equal((await call(mod, method, '/x', { cookie: pools, body: method === 'POST' ? PROFILE : undefined })).status, 404)
   assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, false)
   assert.deepEqual(await adsItem(pools), { id: 'ads', state: 'off', detail: 'not_available_yet' })
-  assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ad_profiles').get().n, 0, 'nothing written')
-
-  env.ADS_BUSINESSES = 'pools'
-  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: pools })).status, 200)
-  assert.equal((await call(adsProfile, 'POST', '/x', { cookie: pools, body: PROFILE })).status, 200)
-  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, true)
-  assert.deepEqual(await adsItem(pools), { id: 'ads', state: 'pending', detail: 'connect_in_ads' })
-  // The unlisted business still sees nothing, and cannot write.
-  for (const [mod, method] of routes) assert.equal((await call(mod, method, '/x', { cookie: salon, body: method === 'POST' ? PROFILE : undefined })).status, 404)
-  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: salon })).json.features.ads, false)
-  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM ad_profiles WHERE customer = 'salon'").get().n, 0)
-  // Master switch off overrides the list.
-  env.ADS_ENABLED = 'false'
-  assert.equal((await call(adsIndex, 'GET', '/x', { cookie: pools })).status, 404)
-  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: pools })).json.features.ads, false)
 })
 
-test('release switch: without ADS_ENABLED every ads dashboard route is 404 and me reports ads off', async () => {
-  delete env.ADS_ENABLED
+test('emergency off: with ADS_ENABLED=false every ads dashboard route is 404 and me reports ads off (Teach Your AI unaffected)', async () => {
+  env.ADS_ENABLED = 'false'
   const c = await owner()
   for (const [mod, method] of [[adsIndex, 'GET'], [adsProfile, 'POST'], [adsPlan, 'POST'], [adsBudget, 'POST'], [adsCampaign, 'POST'], [adsCreative, 'POST'], [adsCreative, 'GET']]) {
     assert.equal((await call(mod, method, '/x', { cookie: c, body: method === 'POST' ? PROFILE : undefined })).status, 404)
   }
   assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ad_profiles').get().n, 0)
   const me = await import('../functions/api/dashboard/me.js')
-  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false, accountDeletion: false, teachAi: false })
+  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false, accountDeletion: false, teachAi: true })
 })
 
 test('ads hold: the Ads screen says why ads are paused (suspended / failed payment), per business only', async () => {

@@ -18,7 +18,7 @@ import { decide, coverageOf } from '../server/intelligence/decide.js'
 import { rulesInstructions, turnNote } from '../server/intelligence/compile.js'
 import { propose, ruleOps, applyOps, TEACH_SCHEMA } from '../server/intelligence/teach.js'
 import { simulate } from '../server/intelligence/simulate.js'
-import { rulesLiveFor, studioListed } from '../server/intelligence/access.js'
+import { rulesLiveFor, studioEnabled } from '../server/intelligence/access.js'
 import { retellAdapter } from '../server/intelligence/providers.js'
 import { anthropicSchemaProblems } from './schema-limits.js'
 import { respond, startConversation, loadConversation } from '../server/receptionist/engine.js'
@@ -384,15 +384,27 @@ const post = (cookie, body, origin) => call(rulesApi, 'POST', { cookie, body, or
 
 // ---------- 5. owner API ----------
 
-test('API: gated (allowlist + migration), session business only, same-origin, nothing for unlisted businesses', async () => {
+test('API: every eligible business (no allowlist, migration applied), session business only, same-origin; nothing before payment, when suspended, or switched off', async () => {
   await seed('alpha')
   await seed('gamma')
   const a = await session('owner@alpha.example')
   const g = await session('owner@gamma.example')
   assert.equal((await get()).status, 401)
-  assert.equal((await get(g)).status, 404, 'not in AI_STUDIO_BUSINESSES')
+  // gamma: a self-serve sign-up that hasn't paid (hosting 'unpaid'); the old pilot allowlist grants nothing.
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('gamma', 'founding', 1)").run()
+  env.AI_STUDIO_BUSINESSES = 'gamma'
+  assert.equal((await get(g)).status, 404, 'not paid yet')
   assert.equal((await call(meApi, 'GET', { cookie: g })).json().features.teachAi, false)
+  delete env.AI_STUDIO_BUSINESSES
   assert.equal((await call(meApi, 'GET', { cookie: a })).json().features.teachAi, true)
+  // Suspended: no editing tools; the emergency switch hides it for everyone.
+  db.sql.prepare("UPDATE customers SET status = 'suspended' WHERE id = 'alpha'").run()
+  assert.equal((await get(a)).status, 404, 'suspended')
+  db.sql.prepare("UPDATE customers SET status = 'active' WHERE id = 'alpha'").run()
+  env.AI_STUDIO_ENABLED = 'false'
+  assert.equal((await get(a)).status, 404, 'switched off')
+  assert.equal((await call(meApi, 'GET', { cookie: a })).json().features.teachAi, false)
+  delete env.AI_STUDIO_ENABLED
   const s = await get(a)
   assert.equal(s.status, 200)
   const body = s.json()
@@ -616,8 +628,9 @@ test('voice provider boundary: one adapter shape; Retell custom-LLM needs no age
   assert.deepEqual(plan.providerChanges, [])
   assert.ok(plan.notes.some((n) => /version 4 is used/.test(n)))
   assert.equal(retellAdapter.plan({}, { customerId: 'alpha', version: 1 }).live, false)
-  assert.equal(studioListed({ AI_STUDIO_BUSINESSES: 'alpha, beta' }, 'beta'), true)
-  assert.equal(studioListed({ AI_STUDIO_BUSINESSES: '*' }, 'beta'), false, 'no wildcard')
+  assert.equal(studioEnabled({}), true, 'Teach Your AI is on by default for every eligible business')
+  assert.equal(studioEnabled({ AI_STUDIO_ENABLED: 'false' }), false, 'emergency off switch')
+  assert.equal(rulesLiveFor({ AI_RULES_LIVE_BUSINESSES: '*' }, 'beta'), false, 'live use: no wildcard')
   assert.deepEqual(anthropicSchemaProblems(TEACH_SCHEMA), [])
 })
 
