@@ -2,6 +2,13 @@
 
 _Update at the end of every task. Newest first._
 
+## AI architecture efficiency (2026-11-23) — feat/ai-efficiency (no migration, no model or prompt change)
+
+- docs/AI_ARCHITECTURE.md: measured vs estimated review. Changed: receptionist record reads run together, conversation
+  history cached, dropped voice turns keep their cost, Teach Your AI model calls limited to 60/day and their cost stored.
+- Next (approval): merge and deploy (live receptionist of PoolThru), then read `voice_turn` timings and cost per turn.
+  Platform-wide AI ceiling and a Sonnet-vs-Opus eval are recommendations only.
+
 ## Homepage "Works with" strip (2026-11-23) — feat/integrations-strip
 
 - Plain-text names only, no third-party logos. Shown (production evidence 2026-11-23): Google Calendar (bookings),

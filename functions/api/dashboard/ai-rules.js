@@ -16,6 +16,7 @@ import { getSettings, receptionistReady } from '../../../server/receptionist/eng
 import { AFTER_HOURS, EMERGENCY_ACTIONS, ESCALATION_ACTIONS, ESCALATION_WHEN, INTAKE, PLATFORM_RULES, PRICING, STYLES, validateConfig } from '../../../server/intelligence/schema.js'
 import { loadRules, liveRules, publishDraft, resetDraft, rollbackTo, saveDraft } from '../../../server/intelligence/store.js'
 import { recordsFor, rulesLiveFor, studioAccess } from '../../../server/intelligence/access.js'
+import { track } from '../../../server/events.js'
 import { propose, applyOps, OP_KINDS } from '../../../server/intelligence/teach.js'
 import { simulate, SIM_LIMITS } from '../../../server/intelligence/simulate.js'
 import { recommendations } from '../../../server/intelligence/recommend.js'
@@ -95,7 +96,11 @@ export async function onRequestPost({ request, env }) {
     if (b.action === 'teach') {
       const text = typeof b.text === 'string' ? b.text.trim() : ''
       if (!text || text.length > 1200) return json(400, { error: 'invalid_request' })
-      const p = await propose(env, text, current.draft, records)
+      let asked = false
+      const started = Date.now()
+      const p = await propose(env, text, current.draft, records, { allowModel: async () => (asked = !(await hit(env, 'aiRulesTeachModel', customer.id)).limited) })
+      // Cost and latency of the model call (numbers and codes only; never what the owner typed).
+      if (asked && p.ok) await track(env, 'ai_teach_model', { customer: customer.id, props: { costMicros: p.costMicros, ms: Date.now() - started, ...(p.modelError ? { error: p.modelError } : {}) } })
       if (!p.ok) return json(400, { error: p.error })
       return json(200, { proposal: { source: p.source, ops: p.ops, changes: p.changes, notes: p.notes, refused: p.refused, conflicts: p.conflicts, warnings: p.warnings, notUnderstood: p.notUnderstood, approvable: p.approvable } })
     }

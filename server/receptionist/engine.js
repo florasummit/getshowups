@@ -688,7 +688,7 @@ function client(env, channel = 'chat') {
 // onFirstToken(): the model's first text delta arrived (time-to-first-token, before a whole sentence exists).
 // signal: aborts the request when the caller talked over this turn (Retell discards it), so the next turn starts
 // at once instead of waiting for an answer nobody will hear.
-async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart, onFirstToken, signal }) {
+async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart, onFirstToken, onUsage, signal }) {
   const stream = anthropic.messages.stream(params, signal ? { signal } : undefined)
   let buf = ''
   let emitted = ''
@@ -731,9 +731,10 @@ async function streamCall(anthropic, params, { emit, facts, isStale, onToolStart
     buf += delta
     flush(false)
   })
-  if (onToolStart) {
+  if (onToolStart || onUsage) {
     stream.on('streamEvent', (ev) => {
-      if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use' && !isStale?.()) onToolStart(ev.content_block.name)
+      if (ev?.type === 'message_start') onUsage?.(ev.message?.usage)
+      if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use' && !isStale?.()) onToolStart?.(ev.content_block.name)
     })
   }
   const message = await stream.finalMessage()
@@ -760,21 +761,26 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   const text = String(userText || '').trim().slice(0, LIMITS.textChars)
   if (!text) return { ok: false, error: 'empty_message' }
   if (conv.state.endedAt) return { ok: false, error: 'conversation_ended' }
-  const settings = await getSettings(db, customer.id)
-  const k0 = await knowledgeFor(env, customer, settings)
-  // The owner's PUBLISHED AI rules (Teach Your AI), only for businesses released in AI_RULES_LIVE_BUSINESSES. Without
-  // them everything below is exactly the pre-rules behaviour. A rules failure never stops the conversation.
-  const rules = await activeRules(env, customer, now).catch((err) => {
-    console.error('receptionist: rules unavailable:', err?.name)
-    return null
-  })
+  // Everything a turn needs from the records, read together: read one after another these added ~0.7 s of silence to
+  // every spoken turn (production, 2026-11-23).
+  const [k0, rules, spentSoFar, requests] = await Promise.all([
+    knowledgeFor(env, customer, getSettings(db, customer.id)),
+    // The owner's PUBLISHED AI rules (Teach Your AI), only for businesses released in AI_RULES_LIVE_BUSINESSES. Without
+    // them everything below is exactly the pre-rules behaviour. A rules failure never stops the conversation.
+    activeRules(env, customer, now).catch((err) => {
+      console.error('receptionist: rules unavailable:', err?.name)
+      return null
+    }),
+    spentToday(db, customer.id, now),
+    receptionistRequestsReady(db),
+  ])
   // "Never quote prices": the model doesn't see them, and any $ amount is then caught by the price check.
   const k = rules?.config.pricing === 'no_prices' ? { ...k0, services: k0.services.map((s) => ({ ...s, price: '' })), knowledge: String(k0.knowledge || '').replace(/\$\s?\d[\d,]*(\.\d{2})?/g, '') } : k0
   const facts = factText(k)
   const log = (who, t) => {
     conv.state.log = [...(conv.state.log || []), { who, text: t, channel, at: now }].slice(-LIMITS.log)
   }
-  if (conv.turns >= LIMITS.turnsPerConversation || conv.cost_micros >= LIMITS.conversationMicros || (await spentToday(db, customer.id, now)) >= dailyCap(env)) {
+  if (conv.turns >= LIMITS.turnsPerConversation || conv.cost_micros >= LIMITS.conversationMicros || spentSoFar >= dailyCap(env)) {
     await event(env, conv, 'limit', false, conv.turns >= LIMITS.turnsPerConversation ? 'turns' : 'cost', now)
     const reply = fallbackText(k, channel)
     opts.onText?.(reply)
@@ -806,7 +812,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     note('rules', true, [`v${rules.version}`, ...flags].join(';'))
   }
   if (notes.length) transcript.push({ role: 'system', content: notes.join('\n') })
-  const prompt = systemPrompt(k, channel, { requests: await receptionistRequestsReady(db) })
+  const prompt = systemPrompt(k, channel, { requests })
   const system = [{ type: 'text', text: rules ? `${prompt}\n\n${rulesInstructions(rules.config, rules.records)}` : prompt, cache_control: { type: 'ephemeral' } }]
   const tools = rules ? [...TOOLS, NOTE_ANSWER_TOOL] : TOOLS
   let spent = 0
@@ -815,7 +821,9 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   let blocked = null
   let held = null // voice holding line spoken while a slow tool ran (not an answer: no_reply still applies without one)
   const anthropic = client(env, channel)
-  const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, system, tools, messages: transcript })
+  // Two cache points: the per-business prompt (above) and, with the request-level one, the conversation so far, which is
+  // append-only: each model call re-reads it at the cache price instead of paying full input price again.
+  const params = () => ({ model: modelId(env, channel), max_tokens: 4096, output_config: { effort: 'low' }, cache_control: { type: 'ephemeral' }, system, tools, messages: transcript })
   // Per-turn timings (numbers only; voice records them as a voice_turn event). opts.timing is filled in place so the
   // caller has them on every return path, including a dropped (talked-over) turn. firstTokenMs = the model's first
   // text delta; firstTextMs = the first whole sentence handed to the caller; holdMs = when the holding line went out.
@@ -857,10 +865,20 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   const onToolStart = (name) => {
     if (!opts.isStale?.()) arm([name])
   }
+  // A turn that is dropped (talked over, or another turn finished first) is still billed by the provider: its cost stays
+  // on the conversation, so the per-conversation and daily limits see it. Never touches what the customer sees.
+  const keepSpend = async () => {
+    if (!spent) return
+    await db
+      .prepare('UPDATE receptionist_conversations SET cost_micros = cost_micros + ?3, updated_at = max(updated_at, ?4) WHERE id = ?1 AND customer = ?2')
+      .bind(conv.id, customer.id, spent, now)
+      .run()
+      .catch((err) => console.error('receptionist: dropped turn cost not recorded:', err?.name))
+  }
   const stale = async () => {
     disarm()
     note('turn', false, 'talked_over')
-    await Promise.all(pending)
+    await Promise.all([...pending, keepSpend()])
     return { ok: false, error: 'stale' }
   }
   for (let i = 0; i < LIMITS.modelCallsPerTurn; i++) {
@@ -871,9 +889,10 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     // Aborting is only allowed while the turn has done nothing; after a booking/request the answer is still produced.
     const signal = opts.signal && !ctx.committed ? opts.signal : undefined
     const tm = Date.now()
+    let startUsage = null // what the stream reported when it began: the known part of an aborted call's bill
     try {
       if (speak) {
-        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, onFirstToken, signal })
+        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, onFirstToken, onUsage: (u) => (startUsage = u), signal })
         res = s.message
         emitted = s.emitted
         if (s.problem) blocked = blocked || s.problem
@@ -881,6 +900,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     } catch (err) {
       timing.modelMs += Date.now() - tm
       timing.modelCalls++
+      spent += costMicros(startUsage)
       if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) return stale()
       failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
       break
@@ -952,7 +972,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     else conv.state.note = 'Your previous reply narrated a check ("let me check", "one moment", "thank you for providing"…); that sentence was not shown. Checks are silent: give the answer directly.'
   }
   if (opts.isStale?.() && !ctx.committed) {
-    await Promise.all(pending)
+    await Promise.all([...pending, keepSpend()])
     return { ok: false, error: 'stale' }
   }
   if (!conv.outcome && !failed) conv.outcome = 'info'
@@ -976,6 +996,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     // Another turn of this conversation finished first (e.g. typing during a call); its record wins, ours is dropped
     // unless this turn acted — then its result is recorded regardless.
     await event(env, conv, 'concurrent_turn', false, null, now)
+    await keepSpend()
     if (!ctx.committed) return { ok: false, error: 'busy' }
     await db
       .prepare('UPDATE receptionist_conversations SET status = ?3, outcome = ?4, lead_id = ?5, appointment_id = ?6, updated_at = ?7 WHERE id = ?1 AND customer = ?2')
