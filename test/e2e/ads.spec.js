@@ -406,11 +406,13 @@ test('Ads for every business with nothing to switch on: a business never listed 
   await expect(page).toHaveURL(/\/dashboard\/ads$/)
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
-  // Both platforms, disconnected, each with its own Connect (the Meta app is configured in this environment).
+  // Both ad platforms and the Business Profile, disconnected, each with its own Connect (the Meta app and the
+  // Business Profile access are configured in this environment).
   await expect(accounts.locator('[data-conn-status][data-platform="google"]')).toHaveAttribute('data-conn-status', 'none')
   await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', 'none')
-  await expect(accounts.locator('[data-conn-status]')).toHaveText(['○Not connected', '○Not connected'])
-  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(2)
+  await expect(accounts.locator('[data-conn-status][data-platform="gbp"]')).toHaveAttribute('data-conn-status', 'none')
+  await expect(accounts.locator('[data-conn-status]')).toHaveText(['○Not connected', '○Not connected', '○Not connected'])
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(3)
   await expect(accounts.locator('[data-platform-unavailable]')).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   // Production today (no Meta app): the Meta row says the platform isn't set up, offers no Connect; Google is unaffected.
@@ -422,7 +424,7 @@ test('Ads for every business with nothing to switch on: a business never listed 
   await page.reload()
   await expect(accounts.locator('[data-platform-unavailable="meta"]')).toContainText('Not available yet: GetShowUps’ Facebook & Instagram connection isn’t set up on the platform')
   await expect(accounts.locator('[data-conn-status][data-platform="meta"]')).toHaveAttribute('data-conn-status', 'none')
-  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(1)
+  await expect(accounts.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(2) // Google Ads and Business Profile
   await page.unroute('**/api/dashboard/ads')
   // Back from a Meta sign-in that failed or was refused: a plain notice, nothing connected, the page still works.
   for (const [code, text] of [['not_configured', 'Connecting isn’t available for this business right now'], ['transient', 'Meta didn’t respond.'], ['cancelled', 'Sign-in was cancelled.'], ['reconnect_required', 'Meta didn’t accept the sign-in.']]) {
