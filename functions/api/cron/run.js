@@ -78,6 +78,8 @@ export async function onRequestPost({ request, env }) {
       // Google Ads Developer Policies restrict unattended ("headless") changes: unless ADS_AUTOMATION_ENABLED is
       // exactly 'true' (approval), the optimizer only recommends; owners make every change themselves.
       optimizer: await adsStep('optimizer', () => runOptimizer(env, { pause: env.ADS_AUTOMATION_ENABLED === 'true' ? pauseForOptimizer : null })),
+      // The account's own campaigns: recommendation-only findings over Google's numbers (never a change by itself).
+      recommendImported: await adsStep('recommend imported', async () => (await import('../../../server/ads/recommend.js')).recommendImported(env)),
       videos: await adsStep('videos', () => pollVideos(env)),
     }
     const domains = await adsStep('domains', () => checkDueDomains(env))

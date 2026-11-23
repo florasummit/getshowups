@@ -131,6 +131,34 @@ server/ads/google.js and server/ads/campaigns.js: same OAuth, same campaign mode
   → linked "Verified" listing with missing website; the unavailable state and a Google account without a listing).
   Against Google's real API: nothing (access not applied for).
 
+## Step E: owner-approved changes, recommendations, KPIs (2026-11-23)
+
+- **Changes to the account's own campaigns** (`server/ads/changes.js`, `ad_change_requests`): status (pause / start)
+  and daily budget, the two fields the API lets anyone change on every campaign type. Propose → current value →
+  proposed value → the expected effect in plain words (mechanism, never a promise) → the owner's explicit approval
+  (confirm) → applied through `campaigns:mutate` / `campaignBudgets:mutate` on resources read fresh by id → read
+  back → our copy follows Google's answer → recorded (request, `ad_actions` kinds imported_pause / imported_resume /
+  imported_budget, the permanent audit log). Nothing changes on Google before the approval step. Starting a campaign
+  or raising a budget goes through the same serving guard as GetShowUps' campaigns (ADS_LIVE_LAUNCH, or a verified
+  Google Ads test account) and is refused on an ads hold; pausing and lowering always work. Shared budgets and removed
+  campaigns are refused; a newer proposal replaces an older one; proposals expire after 7 days.
+- **Recommendations** (`server/ads/recommend.js`, cron `recommend imported`): deterministic rules over Google's
+  numbers (14 days) and Local Services lead records, recommendation-only, minimum data, never more spend by itself:
+  stale numbers; clicks with nothing Google or GetShowUps can count as a lead; budget used up almost daily (only the
+  owner decides to raise); Display Network / search partners on; location targeting by interest; Local Services:
+  spend with no charged leads, cost per charged lead above half the first-job value. Each finding states what was
+  observed, the numbers, what to consider, why it should help, its confidence and limits, and that any change goes
+  through approval. Written once per campaign, rule and day.
+- **Attribution and KPIs**: a lead whose link carries `utm_source=google&utm_campaign=<Google campaign id>` of one of
+  the business's own campaigns is credited to that campaign (source `google_ads_imported`) and counted apart from
+  GetShowUps' campaigns in the funnel (`attribution.importedLeads`; never against GetShowUps campaign spend). The
+  results route adds `imported` (Google's spend, clicks, conversions for the account's own campaigns) and the Results
+  view states the definitions: cost each = GetShowUps campaign spend ÷ the stage count (lead, qualified, booking,
+  show-up, completed job), ROAS = paid revenue ÷ spend, Google's conversion counts and Local Services leads shown apart.
+- **Verified**: unit `test/ads-changes.test.js` (3) and `test/ads-recommend.test.js` (3); browser Journey A (cron
+  findings, propose pause → approve → "Google reports: paused", lower budget, results kept apart). Against Google's
+  real API: nothing (Test access).
+
 ## Next steps (in order)
 
 - C: templates: curated industry templates through the existing spec/validateSpec path, imported campaign → draft

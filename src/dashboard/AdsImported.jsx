@@ -83,6 +83,155 @@ function LocalServicesLeads({ leads }) {
   )
 }
 
+// Owner-approved changes to one of the account's own campaigns: status (pause / start) and daily budget, the fields
+// Google lets anyone change. Propose → see current → proposed and the expected effect → approve (confirm) → applied
+// through Google's API and read back. Nothing changes on Google before the approval step.
+const CHANGE_ERRORS = {
+  no_change: 'That is already the current value.',
+  shared_budget: 'This campaign uses a shared budget; change it in Google Ads.',
+  campaign_removed: 'This campaign was removed in Google Ads.',
+  request_expired: 'That proposal is older than a week. Propose it again.',
+  ads_on_hold: 'Ads are paused while there’s a problem with this account; starting or raising a budget waits until it’s fixed.',
+  test_account_required: 'Only a Google Ads test account can be started or raised right now.',
+  live_launch_disabled: 'Starting a campaign or raising a budget isn’t switched on for your account yet. Pausing and lowering work now.',
+  reconnect_required: 'Reconnect Google Ads; access has expired.',
+  transient: 'Google Ads didn’t respond. Try again in a minute.',
+  invalid_budget: 'Enter a daily budget of at least $5.',
+}
+const FIELD_LABEL = { status: 'Status', daily_budget: 'Daily budget' }
+const valueText = (field, v) => (field === 'status' ? (v.status === 'ENABLED' ? 'Running' : v.status === 'PAUSED' ? 'Paused' : v.status || '—') : v.dailyBudgetCents != null ? `${usd(v.dailyBudgetCents)}/day` : '—')
+function Changes({ c, changes, onChanged }) {
+  const [budget, setBudget] = useState(c.dailyBudgetCents != null ? String(c.dailyBudgetCents / 100) : '')
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState(null)
+  const [confirming, setConfirming] = useState(null)
+  const [applied, setApplied] = useState(null)
+  const post = async (body) => {
+    setErr(null)
+    const { status, data } = await api('/api/dashboard/ads/imported', { method: 'POST', body })
+    if (status === 200) {
+      onChanged(data)
+      return data
+    }
+    setErr(status === 429 ? 'Too many tries. Please wait a few minutes.' : CHANGE_ERRORS[data?.error] || 'That didn’t work. Try again in a moment.')
+    return null
+  }
+  const propose = async (field, value) => {
+    setBusy(field)
+    await post({ action: 'propose', importedId: c.id, field, value })
+    setBusy('')
+  }
+  const apply = async (id) => {
+    setBusy(`apply:${id}`)
+    setConfirming(null)
+    const data = await post({ action: 'apply', id, confirm: true })
+    setBusy('')
+    if (data?.google) setApplied(data.google)
+  }
+  const cancel = async (id) => {
+    setBusy(`cancel:${id}`)
+    await post({ action: 'cancel', id })
+    setBusy('')
+  }
+  const open = changes?.open || []
+  const recent = (changes?.recent || []).slice(0, 2)
+  const editable = c.status !== 'REMOVED' && !c.sharedBudget
+  return (
+    <div data-imported-changes>
+      <dt>Changes (your approval)</dt>
+      <dd>
+        {editable && !open.length && (
+          <div className="ai-change-controls">
+            <button type="button" className="btn btn-quiet btn-sm" disabled={Boolean(busy)} onClick={() => propose('status', c.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')} data-propose-status>
+              {c.status === 'ENABLED' ? 'Propose pausing' : 'Propose starting'}
+            </button>
+            <label className="field ai-budget-field">
+              <span>Daily budget ($)</span>
+              <input type="number" min="5" step="1" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value)} />
+            </label>
+            <button type="button" className="btn btn-quiet btn-sm" disabled={Boolean(busy) || !budget} onClick={() => propose('daily_budget', Math.round(Number(budget) * 100))} data-propose-budget>
+              Propose budget
+            </button>
+          </div>
+        )}
+        {c.sharedBudget && <span className="fine">Shared budget: change it in Google Ads.</span>}
+        {open.map((r) => (
+          <div key={r.id} className="ai-proposal" role="group" aria-label={`Proposed change: ${FIELD_LABEL[r.field]}`} data-change-request={r.id}>
+            <p>
+              <strong>{FIELD_LABEL[r.field]}:</strong> {valueText(r.field, r.current)} → <strong>{valueText(r.field, r.proposed)}</strong>
+            </p>
+            <p className="fine">{r.effect}</p>
+            {confirming === r.id ? (
+              <div className="ui-form-actions" role="group" aria-label="Confirm change">
+                <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy)} onClick={() => apply(r.id)} data-apply-change>
+                  {busy === `apply:${r.id}` ? 'Applying…' : 'Confirm: apply on Google'}
+                </button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirming(null)}>
+                  Back
+                </button>
+              </div>
+            ) : (
+              <div className="ui-form-actions">
+                <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy)} onClick={() => setConfirming(r.id)} data-approve-change>
+                  Approve and apply
+                </button>
+                <button type="button" className="link-btn" disabled={Boolean(busy)} onClick={() => cancel(r.id)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        {applied && (
+          <p className="fine" role="status" data-change-applied>
+            Applied. Google reports: {applied.status === 'ENABLED' ? 'running' : applied.status === 'PAUSED' ? 'paused' : applied.status || '—'}
+            {applied.dailyBudgetCents != null ? ` · ${usd(applied.dailyBudgetCents)}/day` : ''}.
+          </p>
+        )}
+        {recent.map((r) => (
+          <p key={r.id} className="fine" data-change-recent={r.status}>
+            {r.status === 'applied' ? 'Applied' : r.status === 'failed' ? 'Failed' : 'Cancelled'}: {FIELD_LABEL[r.field]} {valueText(r.field, r.current)} → {valueText(r.field, r.proposed)} ({when(r.appliedAt || r.createdAt)})
+            {r.status === 'failed' && r.result?.error ? ` · ${CHANGE_ERRORS[r.result.error] || r.result.error}` : ''}
+          </p>
+        ))}
+        {err && (
+          <span className="form-error" role="alert">
+            {err}
+          </span>
+        )}
+      </dd>
+    </div>
+  )
+}
+
+const LEVEL = { act: ['warn', 'Needs attention'], watch: ['info', 'Worth a look'], info: ['neutral', 'Note'] }
+// Recommendation-only findings over Google's numbers: what was seen, what to consider, why, how sure, the limits.
+function Recommendations({ items }) {
+  if (!items?.length) return null
+  return (
+    <div data-imported-recommendations>
+      <dt>What to look at</dt>
+      <dd>
+        <ul className="ai-recs">
+          {items.map((r) => {
+            const [tone, label] = LEVEL[r.level] || LEVEL.info
+            return (
+              <li key={r.rule}>
+                <p className="ar-finding-title">
+                  <Pill tone={tone}>{label}</Pill> {r.title}
+                </p>
+                <p className="fine">
+                  {r.observed} {r.suggestion} <em>Why:</em> {r.mechanism} <em>Confidence:</em> {r.confidence}. {r.limits} {r.approval}
+                </p>
+              </li>
+            )
+          })}
+        </ul>
+      </dd>
+    </div>
+  )
+}
+
 // One of the business's own imported Search campaigns → a saved template (keywords, negatives, ad text, landing page;
 // no account identifiers). Shown as a draft starting point under "Review your campaign".
 function SaveAsTemplate({ id }) {
@@ -111,12 +260,14 @@ function SaveAsTemplate({ id }) {
   )
 }
 
-function Settings({ c }) {
+function Settings({ c, changes, recommendations, onChanged }) {
   const s = c.settings || {}
   if (c.channelType !== 'SEARCH') {
     return (
       <dl className="ai-body">
         {c.channelType === 'LOCAL_SERVICES' && c.leads && <LocalServicesLeads leads={c.leads} />}
+        <Recommendations items={recommendations} />
+        <Changes c={c} changes={changes} onChanged={onChanged} />
         <div>
           <dt>What GetShowUps reads</dt>
           <dd>For {c.channelLabel} campaigns Google exposes status, budget and results here; settings stay in Google Ads.</dd>
@@ -134,6 +285,16 @@ function Settings({ c }) {
   const ad = (s.ads || [])[0]
   return (
     <dl className="ai-body">
+      <Recommendations items={recommendations} />
+      <Changes c={c} changes={changes} onChanged={onChanged} />
+      {c.gsuLeads != null && (
+        <div>
+          <dt>Leads recorded by GetShowUps</dt>
+          <dd data-imported-gsu-leads>
+            {c.gsuLeads ? `${c.gsuLeads} lead${c.gsuLeads === 1 ? '' : 's'} in the period reached GetShowUps from this campaign’s links.` : 'None yet in the period.'} Links carrying <code>utm_source=google&amp;utm_campaign={c.externalId}</code> are credited to it; GetShowUps’ own campaigns are counted in Results.
+          </dd>
+        </div>
+      )}
       <div>
         <dt>Where</dt>
         <dd>
@@ -273,7 +434,7 @@ export default function AdsImported() {
                         {num(c.metrics?.conversions ?? null)}
                       </span>
                     </summary>
-                    <Settings c={c} />
+                    <Settings c={c} changes={d.changes?.[c.id]} recommendations={d.recommendations?.[c.id]} onChanged={(data) => setD(data)} />
                   </details>
                 </li>
               )

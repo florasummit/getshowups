@@ -2,6 +2,18 @@
 
 _Update at the end of every task. Newest first._
 
+## Google acquisition engine, step E: owner-approved changes, recommendations, KPIs (2026-11-23) — feat/ads-optimize (uses 0037's ad_change_requests)
+
+- Changes to the account's own campaigns (status, daily budget): propose → current/proposed/effect → owner approval
+  (confirm) → applied through the API on resources read fresh → read back → recorded and audited; start/raise behind
+  the serving guard and the ads hold; pause/lower always; shared budgets and removed campaigns refused; 7-day expiry.
+- Recommendation-only findings for imported campaigns (cron `recommend imported`): stale numbers, clicks without
+  countable leads, budget-limited (owner decides), Display/partners on, interest targeting, Local Services charged
+  leads and cost per charged lead; each with observation, numbers, suggestion, mechanism, confidence, limits.
+- Leads from an imported campaign's own links are credited to it (source google_ads_imported) and counted apart in
+  the funnel; the results route adds Google's totals for the account's own campaigns; KPI definitions stated in
+  Results. Unit test/ads-changes.test.js + test/ads-recommend.test.js; Journey A browser test extended.
+
 ## Google acquisition engine, step D: Google Business Profile (2026-11-23) — feat/gbp-connect (uses 0037's gbp_connections; GBP_ENABLED off in production)
 
 - A separate Google consent (scope business.manage) behind `GBP_ENABLED` (approval: new scope + Google's Business

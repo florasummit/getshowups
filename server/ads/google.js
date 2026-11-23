@@ -675,6 +675,59 @@ export async function setDailyBudget(env, customerId, row, dailyCents) {
   })
 }
 
+// ---------- owner-approved changes to the account's own (imported) campaigns ----------
+
+// The campaign and budget resources of one of the account's own campaigns, read fresh (never from a stored id alone),
+// with Google's current status and budget so the owner's approval covers what is actually there.
+async function importedResources(env, token, conn, externalId) {
+  if (!/^\d{1,20}$/.test(String(externalId || ''))) return failure('invalid_request')
+  const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:search`, {
+    body: { query: `SELECT campaign.resource_name, campaign.id, campaign.status, campaign.campaign_budget, campaign.advertising_channel_type, campaign_budget.resource_name, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.id = ${String(externalId).replace(/\D/g, '')} LIMIT 1` },
+    loginCustomerId: login(conn),
+  })
+  if (!r.ok) return r
+  const row = r.data.results?.[0]
+  if (!row?.campaign?.resourceName) return failure('not_found')
+  return { ok: true, campaign: row.campaign.resourceName, status: row.campaign.status, channel: row.campaign.advertisingChannelType, budget: row.campaignBudget?.resourceName || row.campaign.campaignBudget || null, shared: row.campaignBudget?.explicitlyShared === true, dailyBudgetCents: row.campaignBudget?.amountMicros != null ? centsFromMicros(row.campaignBudget.amountMicros) : null }
+}
+
+// Pause or enable one of the account's own campaigns. Enabling goes through the same serving guard as our own
+// campaigns (live switch, or a verified test account); pausing is never blocked. Returns Google's status read back.
+export async function setImportedStatus(env, customerId, externalId, status) {
+  if (!['PAUSED', 'ENABLED'].includes(status)) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = await importedResources(env, token, conn, externalId)
+    if (!res.ok) return res
+    if (status === 'ENABLED') {
+      const blocked = await guardServing(env, token, conn, 0)
+      if (blocked) return blocked
+    }
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaigns:mutate`, { body: { operations: [{ update: { resourceName: res.campaign, status }, updateMask: 'status' }] }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const back = await importedResources(env, token, conn, externalId)
+    return { ok: true, status, google: back.ok ? { status: back.status, dailyBudgetCents: back.dailyBudgetCents } : null }
+  })
+}
+
+// Change the daily budget of one of the account's own campaigns (its own, non-shared budget only). A raise goes
+// through the serving guard; a reduction is always allowed. Returns Google's budget read back.
+export async function setImportedBudget(env, customerId, externalId, dailyCents) {
+  if (!Number.isInteger(dailyCents) || dailyCents < LIMITS.minDailyBudgetCents) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const res = await importedResources(env, token, conn, externalId)
+    if (!res.ok) return res
+    if (!res.budget || res.shared) return failure('shared_budget')
+    if (res.dailyBudgetCents != null && dailyCents > res.dailyBudgetCents) {
+      const blocked = await guardServing(env, token, conn, 0)
+      if (blocked) return blocked
+    }
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/campaignBudgets:mutate`, { body: { operations: [{ update: { resourceName: res.budget, amountMicros: String(dailyCents * 10000) }, updateMask: 'amountMicros' }] }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const back = await importedResources(env, token, conn, externalId)
+    return { ok: true, dailyBudgetCents: dailyCents, google: back.ok ? { status: back.status, dailyBudgetCents: back.dailyBudgetCents } : null }
+  })
+}
+
 // ---------- conversion tracking ----------
 
 // Makes sure the account has GetShowUps' upload-click conversion actions (found by name; only missing ones are

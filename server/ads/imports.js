@@ -171,6 +171,21 @@ const parse = (s) => {
   }
 }
 
+// Period totals of the account's own campaigns (Google's numbers) for the Results view: shown apart from
+// GetShowUps' campaigns, never mixed into their cost per lead. null fields = nothing recorded.
+export async function importedTotals(db, customerId, { days = 30, now = Date.now() } = {}) {
+  if (!(await importsReady(db))) return null
+  const since = day(now - days * DAY)
+  const t = await db
+    .prepare("SELECT count(DISTINCT m.imported_id) AS campaigns, coalesce(sum(m.spend_cents),0) AS spend, coalesce(sum(m.clicks),0) AS clicks, coalesce(sum(m.conversions),0) AS conversions, count(*) AS rows FROM ad_imported_metrics_daily m JOIN ad_imported_campaigns c ON c.id = m.imported_id WHERE m.customer = ?1 AND m.date >= ?2 AND c.status <> 'REMOVED'")
+    .bind(customerId, since)
+    .first()
+  const live = await db.prepare("SELECT count(*) AS n FROM ad_imported_campaigns WHERE customer = ?1 AND status <> 'REMOVED'").bind(customerId).first()
+  if (!Number(live?.n)) return null
+  const measured = Number(t?.rows) > 0
+  return { campaigns: Number(live.n), spendCents: measured ? t.spend : null, clicks: measured ? t.clicks : null, conversions: measured ? Math.round(t.conversions * 100) / 100 : null }
+}
+
 // What the Ads tab shows: each imported campaign with Google's settings snapshot and its totals for the period, the
 // period totals, and when the copy was last read. Numbers are Google's own (spend, clicks, Google conversions);
 // nothing here is a GetShowUps lead or booking.
@@ -183,6 +198,8 @@ export async function listImported(db, customerId, { days = 30, now = Date.now()
     db.prepare('SELECT synced_at, result FROM ad_import_state WHERE customer = ?1').bind(customerId).first(),
   ])
   const byId = new Map(totals.map((t) => [t.imported_id, t]))
+  // GetShowUps leads credited to an imported campaign through its own link parameters (never guessed).
+  const gsuLeads = new Map((await db.prepare("SELECT campaign_id, count(*) AS n FROM lead_attribution WHERE customer = ?1 AND source = 'google_ads_imported' AND created_at >= ?2 GROUP BY campaign_id").bind(customerId, now - days * DAY).all()).results.map((r) => [r.campaign_id, r.n]))
   const hasLsa = rows.some((r) => r.channel_type === 'LOCAL_SERVICES' && r.status !== 'REMOVED')
   const lsa = hasLsa ? await lsaSummary(db, customerId, { days, now }) : {}
   const campaigns = rows.map((r) => {
@@ -202,6 +219,7 @@ export async function listImported(db, customerId, { days = 30, now = Date.now()
       sharedBudget: settings.sharedBudget === true,
       settings,
       metrics: t ? { spendCents: t.spend, clicks: t.clicks, impressions: t.impressions, conversions: Math.round(t.conversions * 100) / 100, days: t.days } : null,
+      gsuLeads: gsuLeads.get(r.id) ?? 0,
       syncedAt: r.synced_at,
       firstSeenAt: r.first_seen_at,
     }

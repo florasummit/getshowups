@@ -5,6 +5,7 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { adsAccess } from '../../../server/ads/access.js'
 import { diagnose, funnel } from '../../../server/ads/funnel.js'
+import { importedTotals } from '../../../server/ads/imports.js'
 import { internalEmails } from '../../../server/testdata.js'
 
 export async function onRequestGet({ request, env }) {
@@ -16,7 +17,9 @@ export async function onRequestGet({ request, env }) {
   if (scope === 'ads' && !(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   try {
     const f = await funnel(env.ONBOARDING_DB, session.customer.id, { days, scope, internal: internalEmails(env) })
-    return json(200, { funnel: f, diagnostics: diagnose(f) })
+    // The business's own Google Ads campaigns (imported, read-only): Google's numbers, shown apart (ads scope only).
+    const imported = scope === 'ads' ? await importedTotals(env.ONBOARDING_DB, session.customer.id, { days }).catch(() => null) : null
+    return json(200, { funnel: f, diagnostics: diagnose(f), imported })
   } catch (err) {
     console.error('results failed:', err?.name)
     return json(503, { error: 'storage_error' })

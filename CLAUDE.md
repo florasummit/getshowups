@@ -297,6 +297,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Google's API access form) → read the account's listings, link one (auto or chosen from Google's list), Google's
   Voice of Merchant state is the ONLY verification claim; never create or edit a listing; token in KV ads:gbp:<id>,
   gbp_connections holds names + the verification snapshot (never contact details). Off = "Not available yet" + facts.
+  Changes to imported campaigns (server/ads/changes.js, ad_change_requests): status + daily budget only, propose →
+  effect → owner confirm → mutate on resources read fresh → read back → audited; start/raise behind the serving guard
+  + ads hold, pause/lower always. Recommendations (server/ads/recommend.js, cron) are findings only, never a change.
+  Leads from an imported campaign's own links are source google_ads_imported, counted apart from GetShowUps campaigns.
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).
