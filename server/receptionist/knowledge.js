@@ -50,12 +50,18 @@ export function playbookFor(text) {
   return { key: 'general', ...PLAYBOOKS.general }
 }
 
-// Verified facts for one business, as data (used for the prompt and for checking replies).
-export async function knowledgeFor(env, customer, settings) {
-  const facts = await businessFacts(env, customer)
-  const profile = await getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
+// Verified facts for one business, as data (used for the prompt and for checking replies). `settingsIn` may be a promise:
+// the records are read together (one D1 round trip's worth of waiting per turn, not five).
+export async function knowledgeFor(env, customer, settingsIn) {
+  const profileRead = getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
+  const [facts, profile, settings, stored] = await Promise.all([
+    businessFacts(env, customer, { profile: profileRead }),
+    profileRead,
+    settingsIn,
+    settingsIn?.voice ? null : getVoiceSettings(env.ONBOARDING_DB, customer.id),
+  ])
   // How the receptionist sounds (migration 0035; defaults before it): the personality preset shapes the prompt.
-  const voice = settings?.voice || (await getVoiceSettings(env.ONBOARDING_DB, customer.id))
+  const voice = settings?.voice || stored
   const days = (customer.workdays || []).map((d) => DAYS[d]).filter(Boolean)
   return {
     ...facts,

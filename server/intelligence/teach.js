@@ -316,7 +316,8 @@ async function modelOps(env, text) {
 
 // → { ok, source: 'rules' | 'ai' | 'partial', ops, proposed, changes[], notes[], refused[], conflicts[], warnings[],
 //     notUnderstood[], approvable }
-export async function propose(env, text, draft, records) {
+// allowModel(): asked only when the fixed patterns can't place something (the caller's daily limit on model use).
+export async function propose(env, text, draft, records, { allowModel } = {}) {
   const sentences = split(text)
   if (!sentences.length) return { ok: false, error: 'empty_request' }
   let ops = []
@@ -328,8 +329,10 @@ export async function propose(env, text, draft, records) {
   }
   let source = notUnderstood.length ? (ops.length ? 'partial' : 'none') : 'rules'
   let costMicros = 0
+  let modelError = null
   if (notUnderstood.length) {
-    const m = await modelOps(env, notUnderstood.join(' '))
+    const m = !allowModel || (await allowModel()) ? await modelOps(env, notUnderstood.join(' ')) : { ok: false, error: 'model_limit' }
+    if (m.error) modelError = m.error
     if (m.ok) {
       // Fixed-pattern refusals stand; the model only fills in what the patterns couldn't place.
       ops = [...ops, ...m.ops]
@@ -354,5 +357,6 @@ export async function propose(env, text, draft, records) {
     notUnderstood,
     approvable: errors.length === 0 && changes.length > 0,
     costMicros,
+    modelError,
   }
 }

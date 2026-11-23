@@ -249,6 +249,26 @@ test('barge-in: the stale answer is aborted at once, so the new turn does not wa
   assert.ok(!ev.some((e) => e.startsWith('model:')), 'an interruption is never recorded as a model failure')
   const turns = turnEvents(convId)
   assert.deepEqual(turns.map((e) => e.r), ['stale', 'ok'])
+  // The aborted call was billed (1000 input + 1 output tokens, as the stream reported): its cost is on the conversation with turn 2's.
+  assert.equal(db.sql.prepare('SELECT cost_micros FROM receptionist_conversations WHERE id = ?').get(convId).cost_micros, 4020 + 4000 + 40 * 20)
+})
+
+test('cost and latency shape of a turn: the conversation is cached as well as the prompt, and the record reads run together', async () => {
+  await seed('alpha')
+  const { s } = await callFor('alpha')
+  script.push(said('Weekly pool care is $280/month.', { firstMs: 1 }))
+  const prepare = db.prepare
+  // Production D1 takes ~90 ms per read; here 60 ms each. Read one after another the turn's eight reads took ~480 ms.
+  db.prepare = (q) => {
+    const wrap = (st) => ({ ...st, bind: (...x) => wrap(st.bind(...x)), first: async () => (await sleep(60), st.first()) })
+    return wrap(prepare(q))
+  }
+  const t = Date.now()
+  ask(s, 1, [{ role: 'agent', content: 'Hi' }, { role: 'user', content: 'how much is it' }])
+  assert.ok(await until(() => done(s, 1)), 'answered')
+  assert.ok(modelRequests[0].at - t < 300, `model asked after ${modelRequests[0].at - t} ms`)
+  const { body } = modelRequests[0]
+  assert.deepEqual([body.cache_control, body.system[0].cache_control], [{ type: 'ephemeral' }, { type: 'ephemeral' }])
 })
 
 // Changed with the conditional holding line (HOLD_AFTER_MS): a quick lookup is answered directly; the line is spoken

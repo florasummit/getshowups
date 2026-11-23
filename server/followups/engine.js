@@ -82,10 +82,10 @@ export async function markStage(env, customerId, leadId, stage, now = Date.now()
 
 // ---------- business facts (verified records only) ----------
 
-export async function businessFacts(env, customer) {
+// profile: an already-started getProfile read (the receptionist needs it too), so it is read once per turn.
+export async function businessFacts(env, customer, { profile: given } = {}) {
   const db = env.ONBOARDING_DB
-  const profile = await getProfile(db, customer.id).catch(() => null)
-  const pol = await policiesOrEmpty(db, customer.id)
+  const [profile, pol] = await Promise.all([given || getProfile(db, customer.id).catch(() => null), policiesOrEmpty(db, customer.id)])
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const hm = (m) => `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, '0')} ${m >= 720 ? 'PM' : 'AM'}`
   const hours = customer.hoursConfirmed && customer.workdays?.length ? `${customer.workdays.map((d) => days[d]).join(', ')} ${hm(customer.dayStart)}–${hm(customer.dayEnd)}` : ''
