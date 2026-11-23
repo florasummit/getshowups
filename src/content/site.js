@@ -25,7 +25,10 @@ export const enrollmentClosed = {
 
 export const hero = {
   eyebrow: 'For pool, HVAC and roofing businesses',
-  sub: 'Your AI receptionist answers every inquiry, checks your area and your rules, and books a real open time on your calendar.',
+  // Founder-approved 2026-11-23. Every clause is true today: the receptionist and booking page go live during
+  // onboarding (well under an hour hands-on); ads are drafted and approved here but delivered only once live ad
+  // delivery is switched on for customers (ADS_LIVE_LAUNCH). Reword when that changes.
+  sub: 'Get your AI receptionist and bookings running in under an hour, with your first ads drafted and ready to approve. One platform to attract customers, capture leads, and grow your business.',
 }
 
 // The friction GetShowUps removes, told as one example day (components/Story.jsx → Problem). Fictional, illustrative,
