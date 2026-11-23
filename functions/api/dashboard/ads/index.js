@@ -10,6 +10,7 @@ import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { internalEmails } from '../../../../server/testdata.js'
 import { listAssets } from '../../../../server/assets.js'
 import { isSandboxAdAccount } from '../../../../server/ads/meta.js'
+import { gbpEnabled, gbpReadiness, gbpStatus, refreshGbp } from '../../../../server/ads/gbp.js'
 
 export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -69,6 +70,8 @@ export async function onRequestGet({ request, env }) {
         // Google Ads access belongs to the Google Cloud project behind our OAuth client (no developer token).
         google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
         meta: Boolean(env.META_APP_ID && env.META_APP_SECRET),
+        // Google Business Profile: a separate Google scope and Google's API access approval (GBP_ENABLED).
+        gbp: gbpEnabled(env),
         liveLaunch: live,
         // Google Ads test account connected: campaigns can be created (paused), resumed and changed
         // there without the live switch. Re-verified with Google before every change.
@@ -77,6 +80,12 @@ export async function onRequestGet({ request, env }) {
         metaSandbox: !live && connections.meta?.status === 'connected' && connections.meta.sandboxAccount === true,
       },
       bookingUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${id}`,
+      // The linked Business Profile (names + Google's verification state, refreshed at most daily) and, without one,
+      // the facts-only checklist. Never tokens.
+      businessProfile: await refreshGbp(env, id)
+        .then(() => gbpStatus(env, id))
+        .catch(() => null),
+      businessProfileReadiness: gbpReadiness({ enabled: gbpEnabled(env), connected: false }),
     })
   } catch (err) {
     console.error('ads overview failed:', err?.message)

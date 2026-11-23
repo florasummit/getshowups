@@ -136,7 +136,7 @@ async function integrations(env, id) {
       if (token && (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID))) out.googleRevoked = true
     }
   }
-  for (const platform of ['google', 'meta']) {
+  for (const platform of ['google', 'meta', 'gbp']) {
     if (await kv.get(`ads:${platform}:${id}`)) out.ads.push(platform)
     await forgetConnection(env, platform, id)
   }
@@ -216,7 +216,7 @@ async function verify(env, id) {
   const name = await db.prepare('SELECT name FROM customers WHERE id = ?1').bind(id).first()
   if (name && name.name !== 'Deleted business') left.customers = 1
   const kv = env.GOOGLE_TOKENS
-  for (const key of [`google:${id}`, `ads:google:${id}`, `ads:meta:${id}`, `ghl:${id}`]) if (await kv.get(key)) left[key.split(':')[0] + (key.startsWith('ads') ? `:${key.split(':')[1]}` : '')] = 1
+  for (const key of [`google:${id}`, `ads:google:${id}`, `ads:meta:${id}`, `ads:gbp:${id}`, `ghl:${id}`]) if (await kv.get(key)) left[key.split(':')[0] + (key.startsWith('ads') ? `:${key.split(':')[1]}` : '')] = 1
   if ((await kv.list({ prefix: `google-archive:${id}:` })).keys.length) left['google-archive'] = 1
   const sub = await getSubscription(db, id)
   if (sub?.stripeSubscriptionId && stripeConfigured(env)) {

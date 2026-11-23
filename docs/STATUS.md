@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## Google acquisition engine, step D: Google Business Profile (2026-11-23) — feat/gbp-connect (uses 0037's gbp_connections; GBP_ENABLED off in production)
+
+- A separate Google consent (scope business.manage) behind `GBP_ENABLED` (approval: new scope + Google's Business
+  Profile API access application). Off: the Ads tab's third connection row says "Not available yet" honestly, no
+  Connect, facts-only checklist with Google's setup link. On: connect → the account's listings are read (names, places,
+  what is filled) → one is linked automatically or chosen from Google's list → Google's Voice of Merchant state is the
+  only verification claim (refreshed daily) → title, place, state chip, Maps link, missing fields shown. Read-only:
+  no listing created or edited; no eligibility API call (REST path unconfirmed). Local Services readiness reads the
+  link. Account deletion forgets the token. Unit test/ads-gbp.test.js (5); browser Journey B + a states test.
+
 ## Google acquisition engine, step C: campaign templates (2026-11-23) — feat/ads-templates (uses 0037's ad_templates; curated templates work before it)
 
 - Seven curated Search templates (pool cleaning/repair, HVAC maintenance/repair, plumbing, electrical, roofing) that

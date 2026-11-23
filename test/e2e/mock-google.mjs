@@ -618,6 +618,9 @@ createServer(async (req, res) => {
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     // ads-revoked: the sign-in worked once, then Google rejects the stored refresh token (expired/revoked access).
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-revoked-')) return send(res, 400, { error: 'invalid_grant' })
+    // gbp / gbp-none: a Business Profile grant (scope business.manage), with one listing or none.
+    const gbpVariant = String(p.get('refresh_token')).match(/^mock-(gbp|gbp-none)-refresh-/)?.[1]
+    if (p.get('grant_type') === 'refresh_token' && gbpVariant) return send(res, 200, { access_token: `mock-${gbpVariant}-access`, expires_in: 3600, scope: 'https://www.googleapis.com/auth/business.manage' })
     const variant = String(p.get('refresh_token')).match(/^mock-ads-(one|flaky|none|existing)-refresh-/)?.[1]
     if (p.get('grant_type') === 'refresh_token' && variant) return send(res, 200, { access_token: `mock-ads-${variant}-access`, expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     if (p.get('grant_type') === 'refresh_token') return send(res, 200, { access_token: `mock-access-${createHmac('sha256', 'cal').update(String(p.get('refresh_token'))).digest('hex').slice(0, 16)}`, expires_in: 3600, scope: SCOPE })
@@ -628,7 +631,38 @@ createServer(async (req, res) => {
     if (kind === 'ads-revoked') return send(res, 200, { access_token: 'mock-ads-revoked-access', refresh_token: `mock-ads-revoked-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads-one' || kind === 'ads-flaky' || kind === 'ads-none' || kind === 'ads-existing') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
+    if (kind === 'gbp' || kind === 'gbp-none') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/business.manage' })
     return send(res, 400, { error: 'invalid_grant' })
+  }
+
+  // Google Business Profile stand-in (GBP_API_MOCK_ORIGIN, paths /gbp/<host>/v1/…). MOCK DATA: the gbp sign-in reaches
+  // one account with one verified service-area listing (no website on it); gbp-none reaches an account with none.
+  if (url.pathname.startsWith('/gbp/')) {
+    const auth = String(req.headers.authorization || '')
+    const none = auth.includes('mock-gbp-none-access')
+    if (!auth.startsWith('Bearer mock-gbp')) return send(res, 401, { error: { code: 401, status: 'UNAUTHENTICATED' } })
+    if (url.pathname === '/gbp/mybusinessaccountmanagement/v1/accounts') return send(res, 200, { accounts: [{ name: 'accounts/111222333', accountName: none ? 'MOCK Empty Account' : 'MOCK Coastal Air', type: 'PERSONAL' }] })
+    if (url.pathname === '/gbp/mybusinessbusinessinformation/v1/accounts/111222333/locations') {
+      if (!url.searchParams.get('readMask')) return send(res, 400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'readMask required' } })
+      return send(res, 200, {
+        locations: none
+          ? []
+          : [
+              {
+                name: 'locations/987654321',
+                title: 'MOCK Coastal Air Heating & Cooling',
+                storefrontAddress: { regionCode: 'US', locality: 'Charleston', administrativeArea: 'SC', postalCode: '29403' },
+                phoneNumbers: { primaryPhone: '+1 843-555-0100' },
+                regularHours: { periods: [{ openDay: 'MONDAY', openTime: { hours: 8 }, closeDay: 'MONDAY', closeTime: { hours: 17 } }] },
+                categories: { primaryCategory: { name: 'categories/gcid:hvac_contractor', displayName: 'HVAC contractor' } },
+                serviceArea: { businessType: 'CUSTOMER_LOCATION_ONLY', regionCode: 'US' },
+                metadata: { hasVoiceOfMerchant: true, placeId: 'ChIJmockplace', mapsUri: 'https://maps.google.com/?cid=1' },
+              },
+            ],
+      })
+    }
+    if (url.pathname === '/gbp/mybusinessverifications/v1/locations/987654321/VoiceOfMerchantState') return send(res, 200, { hasVoiceOfMerchant: true, hasBusinessAuthority: true })
+    return send(res, 404, { error: { code: 404, status: 'NOT_FOUND' } })
   }
 
   // Google Ads API stand-in (GOOGLE_ADS_API_MOCK_ORIGIN). MOCK DATA, never shown as real results: the

@@ -104,6 +104,33 @@ server/ads/google.js and server/ads/campaigns.js: same OAuth, same campaign mode
   suggested HVAC templates first → draft from HVAC repair with the chosen budget, the business name and town, the ZIP
   area, the attribution link; second start refused; nothing on Google) plus "Save as a template" in Journey A.
 
+## Step D: Google Business Profile (2026-11-23)
+
+- **Switch**: `GBP_ENABLED=true` (approval: a new Google OAuth scope `business.manage` and Google's Business Profile
+  API access, which is an application form with 0 QPM until approved and no sandbox). Off (production today): the
+  connection row says "Not available yet", explains that Google must approve GetShowUps' access, offers no Connect
+  and shows the facts-only checklist (does a listing exist? eligibility, the owning Google account, Google's own
+  create/claim flow, Google's verification, then connect here) with Google's setup link.
+- **On**: `/api/ads/gbp/start` (business.manage only, PKCE, encrypted state cookie, same business re-checked) →
+  `/callback` (server-side exchange, scope and refresh token required, token encrypted in KV `ads:gbp:<customer>`) →
+  the account's listings are read (Account Management `GET /v1/accounts`, Business Information
+  `GET /v1/{account}/locations` with the required readMask, names/places/what-is-filled only; never contact details
+  stored) → one listing is linked automatically, several → the owner picks from Google's list (a typed name is refused)
+  → Google's **Voice of Merchant** state is the only verification claim (Verified · Verification pending · Needs
+  verification · Ownership conflict · Suspended/Disabled by Google · Being reviewed), refreshed at most daily →
+  `gbp_connections` (names, verification snapshot, what is missing: website, phone, hours, category). Read-only toward
+  the profile: GetShowUps never creates a listing (duplicates cause months of trouble) and never edits one in this step.
+- **Ads tab**: third row under "Connect your ad account": status in words, the linked listing (title, place, state
+  chip, Google Maps link, missing fields), Change business / Reconnect; the Local Services readiness checklist marks
+  "verified Business Profile" from this link.
+- **Not done, by design**: no location creation, no profile edits, no eligibility API call (CheckLocalServicesEligibility
+  needs the listing id and its REST path was not confirmed on an official page; it stays a documented follow-up).
+- **Verified**: unit `test/ads-gbp.test.js` (off switch, scope/PKCE/state, listing read with readMask, auto-link and
+  stored state, no tokens or phone numbers in rows or payloads, isolation, choice from several with a refused typed
+  name, Voice of Merchant states, error mapping, callback refusals, readiness, pre-0037) and browser (Journey B: Connect
+  → linked "Verified" listing with missing website; the unavailable state and a Google account without a listing).
+  Against Google's real API: nothing (access not applied for).
+
 ## Next steps (in order)
 
 - C: templates: curated industry templates through the existing spec/validateSpec path, imported campaign → draft

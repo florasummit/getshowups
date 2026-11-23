@@ -293,6 +293,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   against spec limits + claims filter, fitted to the business, suggested by industry; no performance claims) and the
   business's own saved templates (from its imported Search campaign or a draft, normalized: no account identifiers)
   only ever become ONE editable draft; approval, budget, paused creation, read-back and Start are unchanged.
+  Google Business Profile (server/ads/gbp.js, /api/ads/gbp/*): GBP_ENABLED=true (approval: scope business.manage +
+  Google's API access form) → read the account's listings, link one (auto or chosen from Google's list), Google's
+  Voice of Merchant state is the ONLY verification claim; never create or edit a listing; token in KV ads:gbp:<id>,
+  gbp_connections holds names + the verification snapshot (never contact details). Off = "Not available yet" + facts.
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).
