@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import Header from './components/Header.jsx'
 import Hero from './components/Hero.jsx'
 import Showcase from './components/Showcase.jsx'
+import WorksWith from './components/WorksWith.jsx'
 import { HowItWorks, Industries, Problem, TeachYourAI } from './components/Story.jsx'
 import Pricing from './components/Pricing.jsx'
 import BookDemo from './components/BookDemo.jsx'
@@ -24,6 +25,7 @@ export default function App() {
       <main id="main">
         <Hero />
         <Showcase />
+        <WorksWith />
         <Problem />
         <HowItWorks />
         <TeachYourAI />

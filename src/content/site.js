@@ -31,6 +31,15 @@ export const hero = {
   sub: 'Get your AI receptionist and bookings running in under an hour, with your first ads drafted and ready to approve. One platform to attract customers, capture leads, and grow your business.',
 }
 
+// Trademark rule: plain-text names only, no third-party logos, no word that implies partnership or endorsement. A name
+// is listed only while every eligible customer can use it in production (checked 2026-11-23, docs/STATUS.md); anything
+// limited, in testing or coming soon belongs in the FAQ, never here.
+export const integrations = {
+  title: 'Works with',
+  names: ['Google Calendar', 'Google sign-in', 'Claude', 'OpenAI', 'Your own domain'],
+  note: 'Claude and OpenAI use your own API key. No affiliation or endorsement implied.',
+}
+
 // The friction GetShowUps removes, told as one example day (components/Story.jsx → Problem). Fictional, illustrative,
 // not a measured result; the two columns use the same inquiry so the only difference is who answers.
 export const problem = {
@@ -135,8 +144,8 @@ export const enterprise = {
   period: 'month',
   badge: 'By agreement',
   audience: 'For agencies, franchises, entrepreneurship programs, universities and multi-location organizations.',
-  points: ['The same acquisition engine as Growth, delivered across your businesses', 'Account limits, support, onboarding and billing set by agreement', 'Ad spend and separately priced usage excluded unless contracted'],
-  today: 'Today each business runs as its own GetShowUps workspace, set up with you. Organization-wide management is in design, not live yet.',
+  points: ['The same acquisition engine as Growth, across your businesses', 'Limits, support, onboarding and billing by agreement', 'Ad spend and separately priced usage excluded unless contracted'],
+  today: 'Each business runs as its own workspace. Organization-wide management is not live yet.',
   cta: 'Contact sales',
   // Keys are validated by the server (server/enterprise.js ORG_TYPES); a test keeps the two lists identical.
   types: [
@@ -156,6 +165,7 @@ export const faqs = [
   { q: 'Can I control how it handles my customers?', a: 'Yes. Teach Your AI lets you set the order of questions, what’s required before times are offered, services you don’t do, which towns you serve completely, urgent situations, hand-offs and tone. Some protections can’t be switched off: the area check, the customer’s yes before a booking, and safety advice when danger is described.' },
   { q: 'What if someone asks for a person?', a: 'The AI says plainly that it can’t transfer the call, then records a callback request or a message with their name and number. It shows up in your dashboard under Needs attention. It never promises when someone will call.' },
   { q: 'Do I need any other software?', a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.' },
+  { q: 'Which integrations are limited or coming soon?', a: 'Google Calendar works today; while Google reviews our app, you may see a notice that Google hasn’t verified it when you connect. Google Ads: limited, test accounts only. Facebook and Instagram ads: coming soon. GoHighLevel: in testing. Text messaging: coming soon.' },
   { q: 'Can I use my own domain? What if I cancel?', a: 'Yes. Your website works on a free GetShowUps address, and you can connect a domain you own from your dashboard. Your domain always stays yours. If you cancel, your website stays online until the end of the period you paid for plus 14 days, you can download your text and photos, and you can point your domain anywhere else.' },
   { q: 'What does it cost?', a: 'Growth is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta. Enterprise, for organizations that run many businesses, starts at $10,000 a month and is priced by agreement: use Contact sales under Pricing.' },
   { q: 'When will text messages work?', a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, every booking is confirmed with a Google Calendar invitation.' },
