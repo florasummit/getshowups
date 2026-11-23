@@ -32,6 +32,14 @@ export async function recordAttribution(env, customerId, leadId, rawUtm, now = D
     if (row && row.platform === utm.source) {
       source = row.platform === 'google' ? 'google_ads' : 'meta_ad_click'
       campaignId = row.id
+    } else if (utm.source === 'google' && /^\d{1,20}$/.test(utm.campaign)) {
+      // A campaign the business runs itself in Google Ads (imported, read-only), when its links carry
+      // utm_campaign=<Google campaign id>. Counted separately from GetShowUps' campaigns (never against our spend).
+      const imported = await env.ONBOARDING_DB.prepare("SELECT id FROM ad_imported_campaigns WHERE customer = ?1 AND platform = 'google' AND external_id = ?2").bind(customerId, utm.campaign).first().catch(() => null)
+      if (imported) {
+        source = 'google_ads_imported'
+        campaignId = imported.id
+      }
     }
   }
   // Meta website clicks are 'meta_ad_click'; Meta instant-form leads ('meta_lead_form') come from the webhook.

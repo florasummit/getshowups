@@ -119,7 +119,7 @@ export async function listCampaigns(db, customer) {
 const getRow = (db, customer, id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(id) ? db.prepare('SELECT * FROM ad_campaigns WHERE id = ?1 AND customer = ?2').bind(id, customer).first() : null)
 
 // Changes to what runs or spends are also appended to the permanent audit log (reads/checks are not).
-const AUDITED_KINDS = ['approve', 'launch', 'resume', 'pause', 'budget', 'budget_approve', 'approval_reset', 'remove', 'disconnect', 'reconcile']
+const AUDITED_KINDS = ['approve', 'launch', 'resume', 'pause', 'budget', 'budget_approve', 'approval_reset', 'remove', 'disconnect', 'reconcile', 'imported_pause', 'imported_resume', 'imported_budget']
 const actorTypeOf = (actor) => (/^owner:/.test(actor) ? 'owner' : /^admin:/.test(actor) ? 'admin' : 'system')
 async function logAction(db, { customer, campaignId, actor, kind, status = 'applied', reason, details = {}, id = randomToken(12), platform = 'google', correlationId = null }, now = Date.now()) {
   await db

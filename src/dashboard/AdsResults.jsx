@@ -95,10 +95,15 @@ export default function AdsResults({ testAccount }) {
               <dd>{f.roas == null ? '—' : `$${f.roas.toFixed(2)}`}</dd>
             </div>
           </dl>
+          {r.imported && (
+            <p className="fine" data-imported-totals>
+              Your own Google Ads campaigns ({r.imported.campaigns}): Google reports {usd(r.imported.spendCents)} spend, {r.imported.clicks ?? '—'} clicks and {r.imported.conversions ?? '—'} conversions in this period. Those are Google’s counts, kept apart from the GetShowUps campaigns above; see “Your Google Ads campaigns”.
+            </p>
+          )}
           <p className="fine">
             {f.attribution.allLeads === 0
               ? 'No leads in this period.'
-              : `${f.attribution.adLeads} of ${f.attribution.allLeads} leads in this period came from your ads; ${f.attribution.unattributed} came from elsewhere or couldn’t be traced to an ad.`}{' '}
+              : `${f.attribution.adLeads} of ${f.attribution.allLeads} leads in this period came from your GetShowUps ads; ${f.attribution.importedLeads ? `${f.attribution.importedLeads} came from campaigns you run yourself in Google Ads; ` : ''}${f.attribution.unattributed} came from elsewhere or couldn’t be traced to an ad.`}{' '}
             “—” means it can’t be calculated yet. Money is what you recorded on each visit; GetShowUps doesn’t measure how much of it the ads caused.
           </p>
           {r.diagnostics.length > 0 && (
@@ -124,6 +129,8 @@ export default function AdsResults({ testAccount }) {
               <li>Booked, showed up and completed follow those same leads. Cancelled bookings aren’t counted as booked.</li>
               <li>Showed up and completed come from what you mark on each visit; a booking is never counted as a visit.</li>
               <li>Paid per $1 of ads uses only money you marked as paid, divided by ad spend.</li>
+              <li>Cost each = GetShowUps campaign spend in the period ÷ that row’s count: per lead, per qualified lead, per booking, per visit that showed up, per completed job. “—” when there is no spend recorded or nothing to divide by.</li>
+              <li>Leads are credited to a campaign only through the campaign’s own link parameters (never guessed); Google’s conversion counts and Local Services lead records are Google’s and are shown apart.</li>
               <li>Google’s daily budget is an average: it can spend up to twice that on a busy day, but no more than about 30 days’ worth in a month.</li>
             </ul>
           </details>

@@ -101,7 +101,7 @@ test('funnel: one cohort from spend to paid money; test leads, other periods and
   assert.deepEqual(f.revenue, { estimatedCents: 50000, estimatedJobs: 1, invoicedCents: 52000, invoicedJobs: 1, paidCents: 45000, paidJobs: 1 })
   assert.deepEqual(f.cost, { perLead: Math.round(40000 / 7), perQualified: Math.round(40000 / 6), perBooking: 8000, perAttended: 20000, perCompleted: 40000 })
   assert.equal(f.roas, 1.13, 'paid ÷ spend')
-  assert.deepEqual(f.attribution, { allLeads: 8, adLeads: 7, unattributed: 1 })
+  assert.deepEqual(f.attribution, { allLeads: 8, adLeads: 7, importedLeads: 0, unattributed: 1 })
   assert.deepEqual([f.spend.cents, f.spend.clicks, f.spend.stale], [40000, 120, false])
   // 'all' scope counts every lead, but costs need ad leads (spend is ad spend).
   const all = await funnel(db, 'pools', { days: 30, scope: 'all', now: NOW })

@@ -646,7 +646,7 @@ test('Journey A: an established advertiser connects and the campaigns already in
   // One business per browser project: desktop and phone runs connect at the same time.
   const mobile = testInfo.project.name === 'mobile'
   await useSession(context, mobile ? fixtures.E2E_ADVERTISER_M_SESSION_TOKEN : fixtures.E2E_ADVERTISER_SESSION_TOKEN)
-  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', `ads-existing:owner@e2e-advertiser${mobile ? '-m' : ''}.example`)
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', `ads-existing${mobile ? '-m' : ''}:owner@e2e-advertiser${mobile ? '-m' : ''}.example`)
   await page.goto('/dashboard/ads')
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
   await expect(page.locator('[data-imported]')).toHaveCount(0) // nothing to read before an account is connected
@@ -686,18 +686,49 @@ test('Journey A: an established advertiser connects and the campaigns already in
   await expect(lsa.getByText(/phone call · Booked · charged/)).toBeVisible()
   await expect(lsa).not.toContainText('843') // never a contact detail
   await expect(imported.locator('[data-lsa-readiness]')).toHaveCount(0) // the checklist is for businesses without one
-  // Read only: no Start, Pause or budget controls on imported campaigns. The Search campaign can become a template.
-  await expect(imported.getByRole('button', { name: /Start|Pause|Change daily budget|Approve/ })).toHaveCount(0)
+  // Nothing changes by itself: the only controls are proposals that need the owner's approval. The Search campaign
+  // can become a template.
+  await expect(imported.getByRole('button', { name: /^(Start ads|Pause|Change daily budget|Approve and create)/ })).toHaveCount(0)
   await search.locator('[data-save-template]').click()
   await expect(search.locator('[data-template-saved]')).toContainText('Saved as a template')
+  // Recommendations come from the cron, over Google's numbers, as findings only (search partners are on in the mock).
+  await page.request.post('/api/cron/run', { headers: { Authorization: `Bearer ${fixtures.E2E_CRON_SECRET}` } })
+  await page.reload()
+  await search.locator('summary').click()
+  await expect(search.locator('[data-imported-recommendations]')).toContainText('Search partners are switched on')
+  await expect(search.locator('[data-imported-recommendations]')).toContainText('nothing changes by itself')
+  // An owner-approved change: propose pausing → current → proposed with the effect → approve → confirm → applied on
+  // "Google" and read back; the row follows Google's answer.
+  await search.locator('[data-propose-status]').click()
+  const proposal = search.locator('[data-change-request]')
+  await expect(proposal).toContainText('Status: Running → Paused')
+  await expect(proposal).toContainText('Delivery stops within minutes')
+  await proposal.locator('[data-approve-change]').click()
+  await proposal.locator('[data-apply-change]').click()
+  await expect(search.locator('[data-change-applied]')).toContainText('Applied. Google reports: paused · $25/day.')
+  await expect(search.locator('summary')).toContainText('Paused')
+  // A lower budget: proposed with the effect in dollars, approved, read back.
+  await search.locator('.ai-budget-field input').fill('20')
+  await search.locator('[data-propose-budget]').click()
+  await expect(search.locator('[data-change-request]')).toContainText('Daily budget: $25/day → $20/day')
+  await expect(search.locator('[data-change-request]')).toContainText('Lowers the average daily budget from $25 to $20 (about $608 a month at most)')
+  await search.locator('[data-approve-change]').click()
+  await search.locator('[data-apply-change]').click()
+  await expect(search.locator('[data-change-applied]')).toContainText('$20/day')
+  await expect(search.locator('summary')).toContainText('$20/day')
+  // Results keep Google's numbers for the account's own campaigns apart from GetShowUps campaigns.
+  const res = await (await page.request.get('/api/dashboard/results?days=30&scope=ads')).json()
+  expect(res.imported).toMatchObject({ campaigns: 2 })
+  expect(res.funnel.attribution.importedLeads).toBe(0)
   // Period: 7 days → 7 × $21.
   await imported.getByRole('button', { name: '7 days' }).click()
   await expect(search.locator('summary')).toContainText('$147')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   // API: Google's numbers and settings only; never tokens; the period is bounded.
   const api = await (await page.request.get('/api/dashboard/ads/imported?days=90')).json()
-  expect(api.campaigns.map((c) => [c.externalId, c.state, c.channelType])).toEqual([['70000000001', 'running', 'SEARCH'], ['70000000002', 'paused', 'LOCAL_SERVICES'], ['70000000003', 'removed', 'SEARCH']].filter((x) => x[1] !== 'removed'))
-  expect(api.totals).toMatchObject({ campaigns: 2, running: 1, spendCents: 90 * (2100 + 800), clicks: 810 })
+  // (The owner paused the Search campaign above, so Google now reports it paused.)
+  expect(api.campaigns.map((c) => [c.externalId, c.state, c.channelType])).toEqual([['70000000001', 'paused', 'SEARCH'], ['70000000002', 'paused', 'LOCAL_SERVICES']])
+  expect(api.totals).toMatchObject({ campaigns: 2, running: 0, spendCents: 90 * (2100 + 800), clicks: 810 })
   expect(JSON.stringify(api)).not.toMatch(/mock-ads|refresh_token|access_token/)
   // Another business sees none of it.
   const other = await browser.newContext()

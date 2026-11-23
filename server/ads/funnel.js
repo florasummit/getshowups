@@ -33,13 +33,12 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
     )
     .bind(customerId, since, internal)
     .first()
-  // All leads in the period (regardless of scope), for attribution coverage.
-  const all = adsOnly
-    ? await db
-        .prepare(`SELECT count(*) AS n FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`)
-        .bind(customerId, since, internal)
-        .first()
-    : leads
+  // All leads in the period (regardless of scope), for attribution coverage; leads from campaigns the business runs
+  // itself in Google Ads (imported, read-only) are counted apart: their spend is not GetShowUps' campaign spend.
+  const all = await db
+    .prepare(`SELECT count(*) AS n, coalesce(sum(a.source = 'google_ads_imported'), 0) AS imported FROM leads l LEFT JOIN lead_attribution a ON a.lead_id = l.id AND a.customer = l.customer WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`)
+    .bind(customerId, since, internal)
+    .first()
   const withRevenue = await revenueReady(db)
   const cohortJoin = `FROM appointments p
          JOIN leads l ON l.id = p.lead_id AND l.customer = p.customer
@@ -110,7 +109,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
     cost: { perLead: per(stages.leads), perQualified: per(stages.qualified), perBooking: per(stages.booked), perAttended: per(stages.attended), perCompleted: per(stages.completed) },
     // Return on ad spend from money actually received; null without both.
     roas: adsOnly && measured && n(spend.s) > 0 && revenue.paidCents != null ? Math.round((revenue.paidCents / n(spend.s)) * 100) / 100 : null,
-    attribution: { allLeads: n(all?.n), adLeads: adsOnly ? stages.leads : n(leads?.from_ads), unattributed: n(all?.n) - (adsOnly ? stages.leads : n(leads?.from_ads)) },
+    attribution: { allLeads: n(all?.n), adLeads: adsOnly ? stages.leads : n(leads?.from_ads), importedLeads: n(all?.imported), unattributed: n(all?.n) - (adsOnly ? stages.leads : n(leads?.from_ads)) - n(all?.imported) },
     revenueTracking: withRevenue,
   }
 }
