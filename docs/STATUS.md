@@ -2,6 +2,35 @@
 
 _Update at the end of every task. Newest first._
 
+## Google acquisition engine, steps A + B: existing campaigns and Local Services leads (2026-11-23) — feat/google-ads-import (migration 0037, NOT applied yet)
+
+- Step B (Local Services Ads): leads of an imported Local Services campaign are read from `local_services_lead` into
+  `lsa_leads` (per business + Google lead id; type, status, charged, credit state, category, creation time; contact
+  details never selected), 90 days first then 30 days restated; the Ads tab shows leads by type, charged / credited /
+  booked in Google, cost per charged lead (campaign spend ÷ charged leads) and recent leads; a business without a
+  Local Services campaign gets a facts-only readiness checklist with Google's setup link (the API cannot create one).
+  Unit test/ads-lsa.test.js; Journey A browser test extended. Step A below.
+
+- Journey A (the business already advertises): the campaigns in the connected Google Ads account are read with GAQL
+  searches only into `ad_imported_campaigns` / `ad_imported_metrics_daily` (type, Google status + serving status,
+  budget, settings snapshot: locations by name, languages, schedules, negatives, ad groups, keywords, responsive search
+  ads, final URLs, conversion goals; Google's daily spend/clicks/impressions/conversions) and shown read-only in the
+  Ads tab ("Your Google Ads campaigns": period 7/30/90, status in words, each row opens its settings). GetShowUps'
+  own campaigns are skipped; removed campaigns are marked and kept; no mutate ever; no contact details.
+- Reads happen after the account choice (waitUntil), on Refresh, and by the cron `imports` step (20 h gap, failures
+  retried after 1 h, 5 businesses per run; `ad_import_state`). First read 90 days, later 3 days restated.
+- Migration 0037 creates these tables and the ones for steps B–E (`lsa_leads`, `ad_templates`, `gbp_connections`,
+  `ad_change_requests`); everything fails soft until it is applied (section hidden, route `{ ready: false }`, cron
+  `not_ready`). Account deletion erases the new tables (ERASED_TABLES). **Applying 0037 to production needs approval.**
+- Google facts verified 2026-11-23 (docs/GOOGLE_ACQUISITION.md): API v26.2; standalone Local Services campaigns
+  cannot be created through the API (status/budget mutable; leads read-only, no cost field); Business Profile API
+  access is an application to Google (0 QPM until approved) with its own OAuth scope.
+- Verified: unit 6 new tests (test/ads-imports.test.js) + full suite; browser "Journey A" (connect with the
+  ads-existing stand-in → auto-selected account → Refresh → two campaigns with status/budget/numbers → settings in
+  words → 7-day period → read-only → isolation). Against Google's real API: nothing (Test access).
+- Next: step B (Local Services leads + cost per charged lead), C (templates), D (Business Profile), E (edits with
+  approval, recommendations, KPIs).
+
 ## Product UX refinement after inspection (2026-11-23) — fix/ux-refinement (no migration)
 
 - Inspected the authenticated product on the seeded e2e server (desktop 1440, phone 390, 320): Overview, Appointments,

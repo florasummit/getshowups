@@ -69,6 +69,8 @@ export async function onRequestPost({ request, env }) {
       holds: await adsStep('holds', () => enforceAdsHolds(env)),
       metrics: await adsStep('metrics', () => syncMetrics(env)),
       verify: await adsStep('verify', () => verifyLaunched(env)),
+      // The account's own campaigns (Journey A): read-only copy refreshed about daily per business (migration 0037).
+      imports: await adsStep('imports', async () => (await import('../../../server/ads/imports.js')).syncAllImported(env)),
       // Meta long-lived tokens (~60 days) are renewed by re-exchange while still valid; expired → reconnect_required.
       metaTokens: await adsStep('meta tokens', async () => (await import('../../../server/ads/meta.js')).refreshMetaTokens(env)),
       clickIds: await adsStep('click ids', () => purgeClickIds(env)),

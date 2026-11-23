@@ -8,6 +8,7 @@ import { getConnection, markReconnect, upsertConnection } from '../../../../serv
 import { accessToken, billingStatusWithToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
 import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { liveFor, logAction } from '../../../../server/ads/campaigns.js'
+import { syncImportedCampaigns } from '../../../../server/ads/imports.js'
 
 const STATUS = { reconnect_required: 409, not_approved_for_production: 403, permission_denied: 403, quota_exhausted: 503, transient: 503 }
 const failed = (r) => json(STATUS[r.error] || 502, { error: r.error })
@@ -50,7 +51,7 @@ export async function onRequestGet({ request, env }) {
   })
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
@@ -93,5 +94,10 @@ export async function onRequestPost({ request, env }) {
     extra: { ...(pick.via ? { loginCustomerId: pick.via } : {}), testAccount: about.testAccount === true },
     status: 'connected',
   })
+  // The account's own campaigns: read into our copy right away (read-only; the cron keeps it fresh). Best effort,
+  // after the response when the runtime allows, never blocking the owner's choice.
+  const read = syncImportedCampaigns(env, customerId).catch(() => null)
+  if (typeof waitUntil === 'function') waitUntil(read)
+  else await read
   return json(200, { ok: true, accountId, status: 'connected', testAccount: about.testAccount === true })
 }

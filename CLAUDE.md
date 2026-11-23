@@ -279,6 +279,16 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   approvals of not-yet-created campaigns; a created campaign is never acted on in another account (account_changed).
   A lower budget approval lowers running campaigns on Google (enforceApproval) or pauses them. Bidding is Maximize
   clicks until conversions reach Google. The daily budget is an average (Google: up to 2×/day, ≤30.4×/month).
+- Existing Google Ads campaigns (server/ads/imports.js, docs/GOOGLE_ACQUISITION.md, migration 0037; 2026-11-23): the
+  campaigns already in a connected account are read with GAQL searches only into ad_imported_campaigns +
+  ad_imported_metrics_daily (Google's status, budget, settings snapshot, Google's daily numbers) and shown read-only
+  under the connection card ("Your Google Ads campaigns"); GetShowUps' own campaigns ([gsu:<id>]) are skipped, removed
+  campaigns are marked REMOVED and kept, no mutate is ever sent, no contact details are stored. Read after the account
+  choice, on Refresh, and by the cron `imports` step (20 h gap, failures after 1 h, 5 per run). Fail-soft before 0037.
+  Local Services Ads (server/ads/lsa.js): the API blocks creating standalone LSA campaigns (status + budget are the
+  mutable fields); leads are read-only into lsa_leads (per business + Google lead id; never contact details or notes),
+  cost per charged lead = the campaign's own spend ÷ charged leads; a business without one sees a facts-only readiness
+  checklist linking to Google's setup. Google Business Profile needs its own OAuth scope and Google's access approval.
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).

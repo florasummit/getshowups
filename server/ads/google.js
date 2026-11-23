@@ -291,6 +291,181 @@ export async function readCampaigns(env, customerId) {
   })
 }
 
+// ---------- import of the account's own campaigns (read-only) ----------
+
+const CHANNELS = ['SEARCH', 'LOCAL_SERVICES', 'PERFORMANCE_MAX', 'DISPLAY', 'VIDEO', 'SHOPPING', 'DEMAND_GEN', 'MULTI_CHANNEL', 'HOTEL', 'SMART', 'LOCAL', 'TRAVEL']
+const idList = (ids) => ids.map((x) => String(x).replace(/\D/g, '')).filter(Boolean).join(', ')
+const text = (v, n = 250) => (typeof v === 'string' ? v.slice(0, n) : '')
+const int = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+// Date-only strings from Google ("2026-11-23"); anything else → null.
+const ymd = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+
+// Every campaign in the connected account that is not removed, with the settings Google reports: type, status,
+// serving status, budget (null when shared or unreadable), bidding, networks, dates; for Search campaigns also
+// targeting (locations as geo target names when resolvable, languages, ad schedules), negative keywords, ad groups,
+// keywords, responsive search ads and their final URLs, and conversion goals. Read-only (search/searchStream only).
+// Detail queries are best effort: a failing one leaves `partial: true` and the campaign list still returns.
+// Our own campaigns (name tag [gsu:<id>]) are reported with gsuId so the caller can leave them out.
+export async function readAccountCampaigns(env, customerId, { maxDetail = 25 } = {}) {
+  return withAccount(env, customerId, async (token, conn) => {
+    const q = (query) => call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    const list = await q(
+      'SELECT campaign.id, campaign.name, campaign.status, campaign.serving_status, campaign.advertising_channel_type, campaign.advertising_channel_sub_type, campaign.bidding_strategy_type, campaign.start_date, campaign.end_date, campaign.network_settings.target_google_search, campaign.network_settings.target_search_network, campaign.network_settings.target_content_network, campaign.geo_target_type_setting.positive_geo_target_type, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != \'REMOVED\' ORDER BY campaign.id LIMIT 200',
+    )
+    if (!list.ok) return list
+    const campaigns = []
+    for (const x of rowsOf(list.data)) {
+      const c = x.campaign || {}
+      const id = String(c.id || '')
+      if (!/^\d{1,20}$/.test(id)) continue
+      const channel = CHANNELS.includes(c.advertisingChannelType) ? c.advertisingChannelType : 'OTHER'
+      const b = x.campaignBudget || {}
+      campaigns.push({
+        externalId: id,
+        name: text(c.name),
+        gsuId: text(c.name).match(/\[gsu:([A-Za-z0-9_-]{1,40})\]$/)?.[1] || null,
+        status: ['ENABLED', 'PAUSED', 'REMOVED'].includes(c.status) ? c.status : 'OTHER',
+        servingStatus: typeof c.servingStatus === 'string' ? c.servingStatus.slice(0, 40) : null,
+        channelType: channel,
+        channelSubType: typeof c.advertisingChannelSubType === 'string' && c.advertisingChannelSubType !== 'UNSPECIFIED' ? c.advertisingChannelSubType.slice(0, 60) : null,
+        bidding: typeof c.biddingStrategyType === 'string' ? c.biddingStrategyType.slice(0, 60) : null,
+        startDate: ymd(c.startDate),
+        endDate: ymd(c.endDate),
+        networks: { googleSearch: c.networkSettings?.targetGoogleSearch === true, searchPartners: c.networkSettings?.targetSearchNetwork === true, display: c.networkSettings?.targetContentNetwork === true },
+        geoTargetType: typeof c.geoTargetTypeSetting?.positiveGeoTargetType === 'string' ? c.geoTargetTypeSetting.positiveGeoTargetType : null,
+        dailyBudgetCents: b.amountMicros != null && b.explicitlyShared !== true ? centsFromMicros(b.amountMicros) : null,
+        sharedBudget: b.explicitlyShared === true,
+        locations: [],
+        locationIds: [],
+        languages: 0,
+        adSchedules: 0,
+        negativeKeywords: [],
+        adGroups: [],
+        keywords: [],
+        ads: [],
+        finalUrls: [],
+        conversionGoals: [],
+      })
+    }
+    let partial = false
+    // Details for the Search campaigns (the ones the owner can read like a draft), newest ids first, bounded.
+    const detail = campaigns.filter((c) => c.channelType === 'SEARCH').slice(0, maxDetail)
+    if (detail.length) {
+      const by = new Map(detail.map((c) => [c.externalId, c]))
+      const ids = idList(detail.map((c) => c.externalId))
+      const [crit, groups, kws, ads, goals] = await Promise.all([
+        q(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.negative, campaign_criterion.location.geo_target_constant, campaign_criterion.keyword.text, campaign_criterion.language.language_constant FROM campaign_criterion WHERE campaign.id IN (${ids}) AND campaign_criterion.status != 'REMOVED' LIMIT 2000`),
+        q(`SELECT campaign.id, ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE campaign.id IN (${ids}) AND ad_group.status != 'REMOVED' LIMIT 500`),
+        q(`SELECT campaign.id, ad_group.id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status FROM ad_group_criterion WHERE campaign.id IN (${ids}) AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED' LIMIT 5000`),
+        q(`SELECT campaign.id, ad_group.id, ad_group_ad.status, ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.policy_summary.approval_status FROM ad_group_ad WHERE campaign.id IN (${ids}) AND ad_group_ad.status != 'REMOVED' LIMIT 500`),
+        q(`SELECT campaign.id, campaign_conversion_goal.category, campaign_conversion_goal.origin, campaign_conversion_goal.biddable FROM campaign_conversion_goal WHERE campaign.id IN (${ids}) LIMIT 2000`),
+      ])
+      const cid = (x) => String(x.campaign?.id || '')
+      if (crit.ok) {
+        for (const x of rowsOf(crit.data)) {
+          const c = by.get(cid(x))
+          const k = x.campaignCriterion || {}
+          if (!c) continue
+          if (k.type === 'LOCATION' && !k.negative && k.location?.geoTargetConstant) c.locationIds.push(lastId(k.location.geoTargetConstant))
+          else if (k.type === 'KEYWORD' && k.negative && k.keyword?.text) c.negativeKeywords.push(text(k.keyword.text, 80).toLowerCase())
+          else if (k.type === 'LANGUAGE') c.languages++
+          else if (k.type === 'AD_SCHEDULE') c.adSchedules++
+        }
+      } else partial = true
+      if (groups.ok) {
+        for (const x of rowsOf(groups.data)) by.get(cid(x))?.adGroups.push({ id: String(x.adGroup?.id || ''), name: text(x.adGroup?.name, 120), status: text(x.adGroup?.status, 20) })
+      } else partial = true
+      if (kws.ok) {
+        for (const x of rowsOf(kws.data)) {
+          const c = by.get(cid(x))
+          const k = x.adGroupCriterion?.keyword
+          if (c && k?.text && c.keywords.length < 200) c.keywords.push({ text: text(k.text, 80).toLowerCase(), match: text(k.matchType, 12), adGroupId: String(x.adGroup?.id || '') })
+        }
+      } else partial = true
+      if (ads.ok) {
+        for (const x of rowsOf(ads.data)) {
+          const c = by.get(cid(x))
+          const ad = x.adGroupAd?.ad || {}
+          if (!c || c.ads.length >= 20) continue
+          const rsa = ad.responsiveSearchAd || {}
+          c.ads.push({ id: String(ad.id || ''), type: text(ad.type, 40), status: text(x.adGroupAd?.status, 20), approval: text(x.adGroupAd?.policySummary?.approvalStatus, 30), headlines: (rsa.headlines || []).map((t) => text(t.text, 30)).filter(Boolean), descriptions: (rsa.descriptions || []).map((t) => text(t.text, 90)).filter(Boolean), finalUrls: (ad.finalUrls || []).map((u) => text(u, 500)).filter(Boolean) })
+          for (const u of ad.finalUrls || []) if (typeof u === 'string' && !c.finalUrls.includes(u) && c.finalUrls.length < 10) c.finalUrls.push(u.slice(0, 500))
+        }
+      } else partial = true
+      if (goals.ok) {
+        for (const x of rowsOf(goals.data)) {
+          const c = by.get(cid(x))
+          const g = x.campaignConversionGoal || {}
+          if (c && g.biddable !== false && c.conversionGoals.length < 20) c.conversionGoals.push({ category: text(g.category, 40), origin: text(g.origin, 40) })
+        }
+      } else partial = true
+      // Location names (read-only constants): "Charleston, South Carolina, United States" instead of an id.
+      const geoIds = [...new Set(detail.flatMap((c) => c.locationIds))].slice(0, 200)
+      if (geoIds.length) {
+        const geo = await q(`SELECT geo_target_constant.id, geo_target_constant.name, geo_target_constant.canonical_name, geo_target_constant.target_type FROM geo_target_constant WHERE geo_target_constant.id IN (${idList(geoIds)})`)
+        if (geo.ok) {
+          const names = new Map(rowsOf(geo.data).map((x) => [String(x.geoTargetConstant?.id || ''), { name: text(x.geoTargetConstant?.canonicalName || x.geoTargetConstant?.name, 120), type: text(x.geoTargetConstant?.targetType, 30) }]))
+          for (const c of detail) c.locations = c.locationIds.map((id) => names.get(id) || { name: `Location ${id}`, type: '' })
+        } else partial = true
+      }
+    }
+    return { ok: true, testAccount: await testAccountOk(env, token, conn), campaigns, partial }
+  })
+}
+
+// Daily Google-reported metrics for several campaigns of the connected account (by Google campaign id).
+export async function fetchAccountMetrics(env, customerId, externalIds, sinceYmd, untilYmd) {
+  if (!YMD.test(sinceYmd) || !YMD.test(untilYmd) || sinceYmd > untilYmd) return failure('invalid_request')
+  const ids = idList(externalIds)
+  if (!ids) return { ok: true, rows: [] }
+  return withAccount(env, customerId, async (token, conn) => {
+    const query = `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id IN (${ids}) AND segments.date BETWEEN '${sinceYmd}' AND '${untilYmd}'`
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const rows = []
+    for (const x of rowsOf(r.data)) {
+      const date = String(x.segments?.date || '')
+      const id = String(x.campaign?.id || '')
+      if (!YMD.test(date) || !/^\d{1,20}$/.test(id)) continue
+      const m = x.metrics || {}
+      rows.push({ externalId: id, date, spendCents: centsFromMicros(m.costMicros), impressions: int(m.impressions), clicks: int(m.clicks), conversions: Number(m.conversions || 0) })
+    }
+    return { ok: true, rows }
+  })
+}
+
+// Local Services leads Google reports for the connected account (read-only; local_services_lead is a report resource
+// that returns data only when the account holds a Local Services campaign). Contact details are NOT selected.
+// creation_date_time is "YYYY-MM-DD HH:MM:SS" in the account time zone; we keep it as the account's calendar instant.
+const LEAD_TYPES = ['BOOKING', 'COUPON', 'MESSAGE', 'PHONE_CALL']
+const LEAD_STATUSES = ['NEW', 'ACTIVE', 'BOOKED', 'DECLINED', 'CONSUMER_DECLINED', 'EXPIRED', 'DISABLED', 'WIPED_OUT']
+export async function readLocalServicesLeads(env, customerId, sinceYmd, { limit = 500 } = {}) {
+  if (!YMD.test(sinceYmd)) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const query = `SELECT local_services_lead.id, local_services_lead.lead_type, local_services_lead.lead_status, local_services_lead.lead_charged, local_services_lead.credit_details.credit_state, local_services_lead.category_id, local_services_lead.creation_date_time, local_services_lead.campaign FROM local_services_lead WHERE local_services_lead.creation_date_time >= '${sinceYmd} 00:00:00' ORDER BY local_services_lead.creation_date_time DESC LIMIT ${Math.min(Math.max(1, limit), 1000)}`
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const leads = []
+    for (const x of rowsOf(r.data)) {
+      const l = x.localServicesLead || {}
+      const id = String(l.id || '')
+      const created = Date.parse(String(l.creationDateTime || '').replace(' ', 'T') + 'Z')
+      if (!/^\d{1,20}$/.test(id) || !Number.isFinite(created)) continue
+      leads.push({
+        id,
+        type: LEAD_TYPES.includes(l.leadType) ? l.leadType : 'UNKNOWN',
+        status: LEAD_STATUSES.includes(l.leadStatus) ? l.leadStatus : 'UNKNOWN',
+        charged: l.leadCharged === true,
+        creditState: ['CREDITED', 'PENDING'].includes(l.creditDetails?.creditState) ? l.creditDetails.creditState : null,
+        categoryId: text(l.categoryId, 80) || null,
+        campaignExternalId: lastId(l.campaign) || null,
+        createdAt: created,
+      })
+    }
+    return { ok: true, leads }
+  })
+}
+
 // ---------- launch ----------
 
 const tagged = (campaign) => `${campaign.spec.name} [gsu:${campaign.id}]`.slice(0, 250)
