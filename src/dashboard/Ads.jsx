@@ -1447,10 +1447,24 @@ export default function Ads() {
       )}
       {anyLaunched && <AdsResults testAccount={d.connections?.google?.testAccount === true} />}
 
-      <section className="card">
-        <h2 className="card-title">1. Your business</h2>
-        <ProfileForm profile={d.profile} onSaved={load} />
-      </section>
+      {anyLaunched && d.profile ? (
+        // A campaign exists: the details rarely change, so the facts stand in for the form and the campaign cards come sooner.
+        <details className="card profile-fold" data-profile-fold>
+          <summary>
+            <h2 className="card-title">1. Your business</h2>
+            <span className="fine">
+              {[d.profile.industry, plural(d.profile.services.length, 'service'), plural(d.profile.serviceArea.zips.length, 'ZIP code'), d.profile.monthlyBudgetCents != null ? `${money(d.profile.monthlyBudgetCents)}/month` : null].filter(Boolean).join(' · ')}
+            </span>
+            <span className="link-btn">Edit</span>
+          </summary>
+          <ProfileForm profile={d.profile} onSaved={load} />
+        </details>
+      ) : (
+        <section className="card">
+          <h2 className="card-title">1. Your business</h2>
+          <ProfileForm profile={d.profile} onSaved={load} />
+        </section>
+      )}
 
       {/* Connecting an account needs no business details first (it spends nothing); the status is shown from day one. */}
       <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />

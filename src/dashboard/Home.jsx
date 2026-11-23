@@ -393,7 +393,9 @@ function AdsResults({ ads }) {
         ))}
       </div>
       <p className="fine stats-note">
-        Last 30 days · — means not available yet{ads.spendCents === null ? ' (no ad spend recorded)' : ''}.
+        {ads.spendCents === null && !ads.leads && !ads.booked
+          ? 'Nothing recorded yet: connect an ad account in the Ads tab and spend, leads and cost per booking appear here. — means not available yet.'
+          : `Last 30 days · — means not available yet${ads.spendCents === null ? ' (no ad spend recorded)' : ''}.`}
         {ads.testAccount && ' Google Ads test account: no real ads ran, so these are test figures, not business results.'}
       </p>
     </section>

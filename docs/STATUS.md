@@ -2,6 +2,26 @@
 
 _Update at the end of every task. Newest first._
 
+## Product UX refinement after inspection (2026-11-23) — fix/ux-refinement (no migration)
+
+- Inspected the authenticated product on the seeded e2e server (desktop 1440, phone 390, 320): Overview, Appointments,
+  Follow-ups, Receptionist, Teach Your AI, Ads (fresh, connected, with campaigns), Settings, onboarding, sign-in.
+  Left unchanged on purpose: Appointments, Follow-ups, Settings, onboarding, sign-in, Teach Your AI (already compact,
+  the four-step strip answers knows → does → test → publish), the Ads editor/review/budget cards.
+- Four demonstrated problems fixed, smallest change each: (1) Overview "Needs your attention" rows on phones wrapped
+  the sentence into a three-word column beside the button → the action now sits beneath the sentence ≤560px;
+  (2) a business that never advertised saw seven dashes with "no ad spend recorded" → the note now says what to do
+  ("connect an ad account in the Ads tab …"), tiles unchanged; (3) Receptionist: the on/off switch, greeting and notes
+  sat under the voice card ("Turn it on below" pointed 1,400px down) → Settings now precedes Receptionist voice;
+  (4) Ads: with a campaign in place the nine-field business form pushed the campaign card below the fold → it folds to
+  one line of facts (industry · services · ZIPs · budget, "Edit" opens the form; `data-profile-fold`).
+- Homepage: NOT changed. The requested paragraph ("Get your ads, AI receptionist, and bookings running in under an
+  hour…") promises ads running, which no customer can do today (ADS_LIVE_LAUNCH off, Google Ads API at Test access,
+  no Meta app); hands-on setup of the receptionist, booking page and an ad draft in under an hour IS supported by the
+  journey runner. Alternative wording awaits the founder's approval (see the report).
+- Tests: browser assertions for all four changes (ads.spec fold + note, dashboard-receptionist.spec order,
+  tour.spec attention layout per project); unit 829.
+
 ## Self-service tools for every eligible business (2026-11-22) — feat/self-service-tools (no migration)
 
 - Owner decision: Ads and Teach Your AI are part of the product for every eligible business, with no per-business

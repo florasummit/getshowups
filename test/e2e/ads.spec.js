@@ -22,8 +22,8 @@ test('owner drafts, previews, edits and approves a budget; approval enforces it 
     await expect(adsRow.getByText(label, { exact: true })).toBeVisible()
   }
   await expect(adsRow.locator('.stat', { hasText: 'Ad spend' }).locator('.stat-value')).toHaveText('—')
+  await expect(adsRow.getByText('Nothing recorded yet: connect an ad account in the Ads tab')).toBeVisible()
   await expect(adsRow.locator('.stat', { hasText: 'Cost per show-up' }).locator('.stat-value')).toHaveText('—')
-  await expect(adsRow.getByText('no ad spend recorded')).toBeVisible()
   await page.getByRole('link', { name: 'Ads', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Ads', level: 1 })).toBeVisible()
 
@@ -302,6 +302,14 @@ test('Google Ads sandbox: production sign-in refused, recover, choose a test acc
   await c.getByRole('button', { name: 'Confirm: approve and create (paused)' }).click()
   // Read straight back from Google (MOCK API): budget, area, keywords, ad and landing page all match.
   await expect(c.locator('[data-verification="ok"]')).toHaveText('✓Checked on Google: budget, area, keywords and ad match')
+  // With a campaign in place the business details fold to one line of facts (the form opens on demand), so the
+  // campaign card is reached sooner.
+  const fold = page.locator('[data-profile-fold]')
+  await expect(fold).not.toHaveAttribute('open', '')
+  await expect(fold.locator('summary')).toContainText('Pool service · 1 service · 1 ZIP code · $300/month')
+  await expect(page.getByLabel('What kind of business?')).toBeHidden()
+  await fold.locator('summary').click()
+  await expect(page.getByLabel('What kind of business?')).toHaveValue('Pool service')
   // Results say where each number comes from; no spend data yet is shown as such, not as $0; a test account is labelled.
   const results = page.getByRole('region', { name: 'Ad results' })
   await expect(results.getByText('No ad spend reported by Google for this period yet.')).toBeVisible()
