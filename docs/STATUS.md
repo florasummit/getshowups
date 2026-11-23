@@ -2,7 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
-## Google acquisition engine, step A: existing campaigns read into GetShowUps (2026-11-23) — feat/google-ads-import (migration 0037, NOT applied yet)
+## Google acquisition engine, steps A + B: existing campaigns and Local Services leads (2026-11-23) — feat/google-ads-import (migration 0037, NOT applied yet)
+
+- Step B (Local Services Ads): leads of an imported Local Services campaign are read from `local_services_lead` into
+  `lsa_leads` (per business + Google lead id; type, status, charged, credit state, category, creation time; contact
+  details never selected), 90 days first then 30 days restated; the Ads tab shows leads by type, charged / credited /
+  booked in Google, cost per charged lead (campaign spend ÷ charged leads) and recent leads; a business without a
+  Local Services campaign gets a facts-only readiness checklist with Google's setup link (the API cannot create one).
+  Unit test/ads-lsa.test.js; Journey A browser test extended. Step A below.
 
 - Journey A (the business already advertises): the campaigns in the connected Google Ads account are read with GAQL
   searches only into `ad_imported_campaigns` / `ad_imported_metrics_daily` (type, Google status + serving status,

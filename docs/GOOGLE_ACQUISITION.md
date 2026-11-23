@@ -54,10 +54,31 @@ server/ads/google.js and server/ads/campaigns.js: same OAuth, same campaign mode
   cron due-selection and bounds) and browser (`test/e2e/ads.spec.js` "Journey A" against the Google Ads stand-in).
   Against Google's real API: **nothing yet** (Test access; the stand-in follows the documented GAQL shapes).
 
+## Step B: Local Services Ads (2026-11-23)
+
+- **Existing LSA customers**: a Local Services campaign in the account is imported like any other (status, budget,
+  Google's spend). Its leads are read from `local_services_lead` (type, status, `lead_charged`, credit state,
+  category, creation time, campaign; **contact details and notes are never selected or stored**) into `lsa_leads`
+  (keyed per business + Google lead id; 90 days the first time, the last 30 days restated afterwards because statuses
+  change). The Ads tab shows, per Local Services campaign and period: leads by type, charged / credited back / marked
+  booked in Google, **cost per charged lead = the campaign's Google-reported spend ÷ charged leads** (null without
+  both), and the recent leads (date, type, status, charged/credited). Google's lead counts stay Google's; GetShowUps'
+  own leads and bookings are in Results. Status and budget edits for these campaigns come with step E's change
+  requests (the only fields the API lets anyone change).
+- **New LSA customers**: a readiness checklist under the imported campaigns (`lsaReadiness`): eligible category
+  (likely / check from the industry on record), supported location (ZIP codes on record), Google account, verified
+  Business Profile (step D), background/license/insurance checks, billing in Google Ads, business phone; every item
+  is Google's and the owner's; the note says plainly that Google only creates Local Services campaigns in its own
+  setup and links to it. Nothing is created, verified or represented as active by GetShowUps.
+- **Not possible through the API** (documented): creating or removing a standalone Local Services campaign; ad
+  groups/ads; lead cost per lead (no field); eligibility check without a Business Profile listing id.
+- **Verified**: unit `test/ads-lsa.test.js` (read window and mapping, no contact details in the query or the rows,
+  status update on re-read, counts/CPL/period, nothing read without a Local Services campaign, readiness states) and
+  the Journey A browser test (6 leads, 4 charged, 1 credited, cost per charged lead $60 = $240 ÷ 4, no contact
+  detail on the page, checklist only for businesses without one). Against Google's real API: nothing yet.
+
 ## Next steps (in order)
 
-- B: Local Services Ads: leads (`local_services_lead`) into `lsa_leads`, cost per charged lead, status/budget edits
-  through change requests, eligibility checklist (API eligibility needs a GBP listing id).
 - C: templates: curated industry templates through the existing spec/validateSpec path, imported campaign → draft
   template (normalized, no account ids), "Start with a template" flow.
 - D: Google Business Profile: separate OAuth scope + Google access approval (founder), location list and link,

@@ -6,6 +6,7 @@
 // { ready: false } and the cron step does nothing.
 import { randomToken } from '../google-oauth.js'
 import { fetchAccountMetrics, readAccountCampaigns } from './google.js'
+import { lsaReadiness, lsaSummary, syncLsaLeads } from './lsa.js'
 
 const DAY = 86_400_000
 export const IMPORT_TABLES = ['ad_imported_campaigns', 'ad_imported_metrics_daily', 'ad_import_state']
@@ -126,7 +127,14 @@ export async function syncImportedCampaigns(env, customerId, { now = Date.now(),
       metricsRows++
     }
   }
-  const result = { ok: true, campaigns: seen.size, imported, updated, removed, metricsRows, partial: read.partial === true, ...(metricsError ? { metricsError } : {}), testAccount: read.testAccount === true }
+  // Local Services leads (only for businesses with a Local Services campaign; Google's leads, no contact details).
+  let lsaLeads = null
+  if (rows.length) {
+    const l = await syncLsaLeads(env, customerId, { now }).catch(() => ({ ok: false, error: 'storage_error' }))
+    lsaLeads = l.ok ? (l.skipped ? null : l.leads) : null
+    if (!l.ok) metricsError ||= l.error
+  }
+  const result = { ok: true, campaigns: seen.size, imported, updated, removed, metricsRows, partial: read.partial === true, ...(metricsError ? { metricsError } : {}), ...(lsaLeads != null ? { lsaLeads } : {}), testAccount: read.testAccount === true }
   await recordState(db, customerId, result, now)
   return result
 }
@@ -174,10 +182,13 @@ export async function listImported(db, customerId, { days = 30, now = Date.now()
     db.prepare('SELECT synced_at, result FROM ad_import_state WHERE customer = ?1').bind(customerId).first(),
   ])
   const byId = new Map(totals.map((t) => [t.imported_id, t]))
+  const hasLsa = rows.some((r) => r.channel_type === 'LOCAL_SERVICES' && r.status !== 'REMOVED')
+  const lsa = hasLsa ? await lsaSummary(db, customerId, { days, now }) : {}
   const campaigns = rows.map((r) => {
     const t = byId.get(r.id)
     const settings = parse(r.settings)
     return {
+      ...(r.channel_type === 'LOCAL_SERVICES' ? { leads: lsa[r.id] || { total: 0, charged: 0, credited: 0, booked: 0, byType: {}, byStatus: {}, spendCents: t?.spend ?? null, costPerChargedLeadCents: null, recent: [] } } : {}),
       id: r.id,
       externalId: r.external_id,
       name: r.name,
@@ -198,9 +209,19 @@ export async function listImported(db, customerId, { days = 30, now = Date.now()
   const sum = (k) => live.reduce((n, c) => n + (c.metrics?.[k] ?? 0), 0)
   const measured = live.some((c) => c.metrics)
   const result = parse(state?.result)
+  // Local Services readiness for a business without such a campaign (facts from its own records; Google decides).
+  let readiness = null
+  if (!hasLsa) {
+    const [profile, biz] = await Promise.all([
+      db.prepare('SELECT industry, phone FROM business_profiles WHERE customer = ?1').bind(customerId).first().catch(() => null),
+      db.prepare('SELECT service_zips FROM customers WHERE id = ?1').bind(customerId).first().catch(() => null),
+    ])
+    readiness = lsaReadiness({ industry: profile?.industry || '', zips: String(biz?.service_zips || '').split(',').filter(Boolean), profilePhone: Boolean(profile?.phone), hasLocalServicesCampaign: false, gbpConnected: null })
+  }
   return {
     ready: true,
     days,
+    localServices: { hasCampaign: hasLsa, readiness },
     syncedAt: state?.synced_at ?? null,
     lastResult: state ? { ok: result.ok !== false, error: result.error || null, partial: result.partial === true, metricsError: result.metricsError || null } : null,
     campaigns,

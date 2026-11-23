@@ -638,11 +638,13 @@ test('Meta sandbox: connect (mock Meta app), the one ad account + Page are chose
   await other.close()
 })
 
-test('Journey A: an established advertiser connects and the campaigns already in the account are read into GetShowUps read-only: list, status, budget, Google’s numbers, settings; period; refresh; isolation @mobile', async ({ page, context, browser }) => {
+test('Journey A: an established advertiser connects and the campaigns already in the account are read into GetShowUps read-only: list, status, budget, Google’s numbers, settings; period; refresh; isolation @mobile', async ({ page, context, browser }, testInfo) => {
   // MOCK DATA: the ads-existing sign-in reaches one Google Ads test account that already holds two campaigns (one
   // running Search campaign with keywords/ads, one paused Local Services campaign) and one removed campaign.
-  await useSession(context, fixtures.E2E_ADVERTISER_SESSION_TOKEN)
-  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', 'ads-existing:owner@e2e-advertiser.example')
+  // One business per browser project: desktop and phone runs connect at the same time.
+  const mobile = testInfo.project.name === 'mobile'
+  await useSession(context, mobile ? fixtures.E2E_ADVERTISER_M_SESSION_TOKEN : fixtures.E2E_ADVERTISER_SESSION_TOKEN)
+  await returnFromGoogle(page, '**/api/ads/google/start', 'GET', '/api/ads/google/callback', `ads-existing:owner@e2e-advertiser${mobile ? '-m' : ''}.example`)
   await page.goto('/dashboard/ads')
   const accounts = page.locator('.card', { has: page.getByRole('heading', { name: 'Connect your ad account' }) })
   await expect(page.locator('[data-imported]')).toHaveCount(0) // nothing to read before an account is connected
@@ -676,6 +678,12 @@ test('Journey A: an established advertiser connects and the campaigns already in
   for (const t of ['Charleston, South Carolina, United States', 'people in the area', 'pool cleaning charleston', '2 excluded searches', 'harborpool.example/book', 'Maximize clicks', 'submit lead form', 'Charleston Pool Cleaning | Weekly Pool Service']) await expect(search).toContainText(t)
   await lsa.locator('summary').click()
   await expect(lsa).toContainText('For Local Services campaigns Google exposes status, budget and results here')
+  // Google's Local Services leads for that campaign: counts, charged/credited, cost per CHARGED lead, recent ones.
+  await expect(lsa.locator('[data-lsa-leads]')).toContainText('6 leads (4 phone calls, 1 message, 1 booking) · 4 charged, 1 credited back · 1 marked booked in Google')
+  await expect(lsa.locator('[data-lsa-cpl]')).toContainText('$60 ($240 ÷ 4)')
+  await expect(lsa.getByText(/phone call · Booked · charged/)).toBeVisible()
+  await expect(lsa).not.toContainText('843') // never a contact detail
+  await expect(imported.locator('[data-lsa-readiness]')).toHaveCount(0) // the checklist is for businesses without one
   // Read only: no Start, Pause or budget controls on imported campaigns.
   await expect(imported.getByRole('button', { name: /Start|Pause|Change daily budget|Approve/ })).toHaveCount(0)
   // Period: 7 days → 7 × $21.
@@ -685,7 +693,7 @@ test('Journey A: an established advertiser connects and the campaigns already in
   // API: Google's numbers and settings only; never tokens; the period is bounded.
   const api = await (await page.request.get('/api/dashboard/ads/imported?days=90')).json()
   expect(api.campaigns.map((c) => [c.externalId, c.state, c.channelType])).toEqual([['70000000001', 'running', 'SEARCH'], ['70000000002', 'paused', 'LOCAL_SERVICES'], ['70000000003', 'removed', 'SEARCH']].filter((x) => x[1] !== 'removed'))
-  expect(api.totals).toMatchObject({ campaigns: 2, running: 1, spendCents: 90 * 2100, clicks: 810 })
+  expect(api.totals).toMatchObject({ campaigns: 2, running: 1, spendCents: 90 * (2100 + 800), clicks: 810 })
   expect(JSON.stringify(api)).not.toMatch(/mock-ads|refresh_token|access_token/)
   // Another business sees none of it.
   const other = await browser.newContext()

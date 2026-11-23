@@ -40,11 +40,55 @@ const ERRORS = {
 }
 const words = (xs, max = 6) => (xs.length <= max ? xs.join(', ') : `${xs.slice(0, max).join(', ')} and ${xs.length - max} more`)
 
+const LEAD_TYPE = { PHONE_CALL: 'phone call', MESSAGE: 'message', BOOKING: 'booking', COUNT: 'coupon', UNKNOWN: 'other' }
+const LEAD_STATUS = { NEW: 'New', ACTIVE: 'Active', BOOKED: 'Booked', DECLINED: 'Declined', CONSUMER_DECLINED: 'Customer declined', EXPIRED: 'Expired', DISABLED: 'Disabled', WIPED_OUT: 'Removed', UNKNOWN: 'Other' }
+const when = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+// Google's Local Services leads for one campaign: counts, cost per charged lead, the recent ones (no contact details).
+function LocalServicesLeads({ leads }) {
+  const types = Object.entries(leads.byType || {}).map(([t, n]) => `${n} ${LEAD_TYPE[t] || 'other'}${n === 1 ? '' : 's'}`)
+  return (
+    <>
+      <div>
+        <dt>Leads from Google</dt>
+        <dd data-lsa-leads>
+          {leads.total ? `${leads.total} lead${leads.total === 1 ? '' : 's'} (${types.join(', ')}) · ${leads.charged} charged${leads.credited ? `, ${leads.credited} credited back` : ''}${leads.booked ? ` · ${leads.booked} marked booked in Google` : ''}` : 'No leads reported by Google in this period.'}
+        </dd>
+      </div>
+      <div>
+        <dt>Cost per charged lead</dt>
+        <dd data-lsa-cpl>{leads.costPerChargedLeadCents != null ? `${usd(leads.costPerChargedLeadCents)} (${usd(leads.spendCents)} ÷ ${leads.charged})` : leads.spendCents != null && leads.spendCents > 0 ? `— (${usd(leads.spendCents)} spent, no charged lead yet)` : '— (no spend reported)'}</dd>
+      </div>
+      {leads.recent?.length > 0 && (
+        <div>
+          <dt>Recent leads</dt>
+          <dd>
+            <ul className="ai-leads">
+              {leads.recent.slice(0, 8).map((l) => (
+                <li key={l.id}>
+                  {when(l.createdAt)} · {LEAD_TYPE[l.type] || 'other'} · {LEAD_STATUS[l.status] || 'Other'}
+                  {l.charged ? ' · charged' : ''}
+                  {l.creditState === 'CREDITED' ? ' · credited' : l.creditState === 'PENDING' ? ' · credit pending' : ''}
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      )}
+      <div>
+        <dt>Note</dt>
+        <dd>These are Google’s lead records (who called or messaged through the ad). GetShowUps’ own leads and bookings are in Results.</dd>
+      </div>
+    </>
+  )
+}
+
 function Settings({ c }) {
   const s = c.settings || {}
   if (c.channelType !== 'SEARCH') {
     return (
       <dl className="ai-body">
+        {c.channelType === 'LOCAL_SERVICES' && c.leads && <LocalServicesLeads leads={c.leads} />}
         <div>
           <dt>What GetShowUps reads</dt>
           <dd>For {c.channelLabel} campaigns Google exposes status, budget and results here; settings stay in Google Ads.</dd>
@@ -212,6 +256,37 @@ export default function AdsImported() {
           </p>
         </>
       )}
+      {d.localServices?.readiness && <LocalServicesReadiness r={d.localServices.readiness} />}
     </section>
+  )
+}
+
+const READY_STATE = { done: ['ok', 'On record'], likely: ['ok', 'Likely'], check: ['warn', 'Check'], owner: ['neutral', 'You, with Google'] }
+// A business without Local Services Ads: what Google needs, as facts; the setup is Google's own.
+function LocalServicesReadiness({ r }) {
+  return (
+    <details className="ai-readiness" data-lsa-readiness>
+      <summary>Local Services Ads (pay per lead): what Google needs before you can run them</summary>
+      <ul className="ai-ready-list">
+        {r.items.map((i) => {
+          const [tone, label] = READY_STATE[i.state] || READY_STATE.owner
+          return (
+            <li key={i.id}>
+              <span className="ai-ready-main">
+                <strong>{i.label}</strong>
+                <span className="fine">{i.detail}</span>
+              </span>
+              <Pill tone={tone}>{label}</Pill>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="fine">
+        {r.note}{' '}
+        <a href={r.setupUrl} target="_blank" rel="noreferrer">
+          Start with Google
+        </a>
+      </p>
+    </details>
   )
 }

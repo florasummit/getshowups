@@ -155,11 +155,24 @@ const EXISTING = {
       goals: [{ category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE' }],
       spendPerDayMicros: 21000000, clicksPerDay: 9, conversionsPerDay: 0.5,
     },
-    { id: '70000000002', name: 'Service Area Leads', status: 'PAUSED', servingStatus: 'NONE', channel: 'LOCAL_SERVICES', bidding: 'MANUAL_CPA', amountMicros: '40000000', spendPerDayMicros: 0, clicksPerDay: 0, conversionsPerDay: 0 },
+    { id: '70000000002', name: 'Service Area Leads', status: 'PAUSED', servingStatus: 'NONE', channel: 'LOCAL_SERVICES', bidding: 'MANUAL_CPA', amountMicros: '40000000', spendPerDayMicros: 8000000, clicksPerDay: 0, conversionsPerDay: 0 },
     { id: '70000000003', name: 'Old Spring Promo', status: 'REMOVED', channel: 'SEARCH', amountMicros: '10000000' },
   ],
 }
 const GEO_NAMES = { 1015360: 'Charleston, South Carolina, United States', 1015362: 'Mount Pleasant, South Carolina, United States' }
+// Google's Local Services leads for the established advertiser's Local Services campaign (MOCK DATA, no contact
+// details are ever selected by GetShowUps): 6 leads in the last month, 4 charged, 1 credited back, 1 booked.
+const LSA_LEADS = [
+  { id: '60000000001', type: 'PHONE_CALL', status: 'BOOKED', charged: true, daysAgo: 2 },
+  { id: '60000000002', type: 'PHONE_CALL', status: 'ACTIVE', charged: true, daysAgo: 5 },
+  { id: '60000000003', type: 'MESSAGE', status: 'ACTIVE', charged: true, daysAgo: 9 },
+  { id: '60000000004', type: 'PHONE_CALL', status: 'DECLINED', charged: false, daysAgo: 12 },
+  { id: '60000000005', type: 'PHONE_CALL', status: 'EXPIRED', charged: true, credit: 'CREDITED', daysAgo: 20 },
+  { id: '60000000006', type: 'BOOKING', status: 'NEW', charged: false, daysAgo: 27 },
+]
+const leadRow = (acct, l) => ({
+  localServicesLead: { resourceName: `customers/${acct}/localServicesLeads/${l.id}`, id: l.id, leadType: l.type, leadStatus: l.status, leadCharged: l.charged, ...(l.credit ? { creditDetails: { creditState: l.credit } } : {}), categoryId: 'xcat:service_area_business_pool_cleaner', creationDateTime: `${ymdDaysAgo(l.daysAgo)} 10:15:00`, campaign: `customers/${acct}/campaigns/70000000002` },
+})
 const existingRow = (acct, c) => ({
   campaign: { resourceName: `customers/${acct}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, servingStatus: c.servingStatus, advertisingChannelType: c.channel, biddingStrategyType: c.bidding, startDate: c.startDate, networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } },
   campaignBudget: { amountMicros: c.amountMicros, explicitlyShared: false },
@@ -238,6 +251,10 @@ function adsRoute(path, raw, auth = '') {
     if (inIds && /FROM ad_group_criterion/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.keywords || []).map((k) => ({ campaign: { id: c.id }, adGroup: { id: k.group }, adGroupCriterion: { keyword: { text: k.text, matchType: k.match }, status: 'ENABLED' } }))) }]]
     if (inIds && /FROM ad_group_ad/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.ads || []).map((a) => ({ campaign: { id: c.id }, adGroup: { id: a.group }, adGroupAd: { status: 'ENABLED', policySummary: { approvalStatus: 'APPROVED' }, ad: { id: a.id, type: 'RESPONSIVE_SEARCH_AD', finalUrls: a.finalUrls, responsiveSearchAd: { headlines: a.headlines.map((text) => ({ text })), descriptions: a.descriptions.map((text) => ({ text })) } } } }))) }]]
     if (inIds && /FROM campaign_conversion_goal/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.goals || []).map((g) => ({ campaign: { id: c.id }, campaignConversionGoal: { category: g.category, origin: g.origin, biddable: true } }))) }]]
+    if (/FROM local_services_lead /.test(q)) {
+      const since = q.match(/creation_date_time >= '(\d{4}-\d{2}-\d{2})/)?.[1] || '0000-00-00'
+      return [200, [{ results: acct === '8880000000' ? LSA_LEADS.filter((l) => ymdDaysAgo(l.daysAgo) >= since).map((l) => leadRow(acct, l)) : [] }]]
+    }
     if (/FROM geo_target_constant/.test(q)) {
       const ids = q.match(/geo_target_constant\.id IN \(([^)]*)\)/)?.[1]?.split(',').map((s) => s.trim()) || []
       return [200, [{ results: ids.filter((g) => GEO_NAMES[g]).map((g) => ({ geoTargetConstant: { id: g, name: GEO_NAMES[g].split(',')[0], canonicalName: GEO_NAMES[g], targetType: 'City' } })) }]]

@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS ad_import_state (
 );
 
 CREATE TABLE IF NOT EXISTS lsa_leads (
-  id           TEXT PRIMARY KEY,
+  id           TEXT NOT NULL,
   customer     TEXT NOT NULL REFERENCES customers(id),
   imported_id  TEXT REFERENCES ad_imported_campaigns(id),
   lead_type    TEXT NOT NULL DEFAULT 'UNKNOWN',
@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS lsa_leads (
   category_id  TEXT,
   created_at   INTEGER NOT NULL,
   synced_at    INTEGER NOT NULL,
-  lead_id      TEXT REFERENCES leads(id)
+  lead_id      TEXT REFERENCES leads(id),
+  PRIMARY KEY (customer, id)
 );
 CREATE INDEX IF NOT EXISTS lsa_leads_customer ON lsa_leads (customer, created_at);
 

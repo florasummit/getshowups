@@ -434,6 +434,38 @@ export async function fetchAccountMetrics(env, customerId, externalIds, sinceYmd
   })
 }
 
+// Local Services leads Google reports for the connected account (read-only; local_services_lead is a report resource
+// that returns data only when the account holds a Local Services campaign). Contact details are NOT selected.
+// creation_date_time is "YYYY-MM-DD HH:MM:SS" in the account time zone; we keep it as the account's calendar instant.
+const LEAD_TYPES = ['BOOKING', 'COUPON', 'MESSAGE', 'PHONE_CALL']
+const LEAD_STATUSES = ['NEW', 'ACTIVE', 'BOOKED', 'DECLINED', 'CONSUMER_DECLINED', 'EXPIRED', 'DISABLED', 'WIPED_OUT']
+export async function readLocalServicesLeads(env, customerId, sinceYmd, { limit = 500 } = {}) {
+  if (!YMD.test(sinceYmd)) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const query = `SELECT local_services_lead.id, local_services_lead.lead_type, local_services_lead.lead_status, local_services_lead.lead_charged, local_services_lead.credit_details.credit_state, local_services_lead.category_id, local_services_lead.creation_date_time, local_services_lead.campaign FROM local_services_lead WHERE local_services_lead.creation_date_time >= '${sinceYmd} 00:00:00' ORDER BY local_services_lead.creation_date_time DESC LIMIT ${Math.min(Math.max(1, limit), 1000)}`
+    const r = await call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    if (!r.ok) return r
+    const leads = []
+    for (const x of rowsOf(r.data)) {
+      const l = x.localServicesLead || {}
+      const id = String(l.id || '')
+      const created = Date.parse(String(l.creationDateTime || '').replace(' ', 'T') + 'Z')
+      if (!/^\d{1,20}$/.test(id) || !Number.isFinite(created)) continue
+      leads.push({
+        id,
+        type: LEAD_TYPES.includes(l.leadType) ? l.leadType : 'UNKNOWN',
+        status: LEAD_STATUSES.includes(l.leadStatus) ? l.leadStatus : 'UNKNOWN',
+        charged: l.leadCharged === true,
+        creditState: ['CREDITED', 'PENDING'].includes(l.creditDetails?.creditState) ? l.creditDetails.creditState : null,
+        categoryId: text(l.categoryId, 80) || null,
+        campaignExternalId: lastId(l.campaign) || null,
+        createdAt: created,
+      })
+    }
+    return { ok: true, leads }
+  })
+}
+
 // ---------- launch ----------
 
 const tagged = (campaign) => `${campaign.spec.name} [gsu:${campaign.id}]`.slice(0, 250)
