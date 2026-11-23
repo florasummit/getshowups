@@ -35,6 +35,10 @@ test('owner (voice not released for this business): chat Active, browser voice "
   await expect(page).toHaveURL(/\/dashboard\/receptionist$/)
   await expect(page.getByRole('heading', { name: 'AI receptionist', level: 1 })).toBeVisible()
   await expectFullWidth(page, 'Receptionist')
+  // The on/off switch, greeting and notes come before the voice refinements.
+  const settingsY = (await page.getByRole('heading', { name: 'Settings', exact: true }).boundingBox()).y
+  const voiceY = (await page.getByRole('heading', { name: 'Receptionist voice' }).boundingBox()).y
+  expect(settingsY).toBeLessThan(voiceY)
   // The statuses, traced to the API's capability facts.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
   expect(me.capabilities).toMatchObject({ chat: true, voice: false, voiceStatus: 'testing', staffEmail: 'test_mode', phoneLine: false })

@@ -2334,6 +2334,14 @@
 .account-current { white-space: nowrap; }
 .more-options > summary { cursor: pointer; font-weight: 600; }
 .more-options[open] > summary { margin-bottom: 12px; }
+/* Business details folded once a campaign exists: the heading stays, the facts stand in for the form until opened. */
+.profile-fold > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; list-style: none; }
+.profile-fold > summary::-webkit-details-marker { display: none; }
+.profile-fold > summary .card-title { margin: 0; }
+.profile-fold > summary .fine { margin: 0; }
+.profile-fold > summary .link-btn { margin-left: auto; }
+.profile-fold[open] > summary { margin-bottom: 12px; }
+.profile-fold[open] > summary .fine { display: none; }
 
 /* ---------- Business Review (/admin/review) ---------- */
 .stack-lg { display: grid; gap: 16px; }
@@ -3868,6 +3876,17 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 
 .app .ui-attention-list li:has(.ui-pill--warn)::before {
   background: var(--warn-dot);
+}
+
+/* Phones: the sentence keeps its full width and the action sits beneath it (no three-word column beside a button). */
+@media (max-width: 560px) {
+  .app .ui-attention-list li {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+  .app .ui-attention-list li > .btn {
+    justify-self: start;
+  }
 }
 
 /* Sign-in, gates and setup: the same canvas and beam as the site, so the hand-off from the homepage is seamless. */

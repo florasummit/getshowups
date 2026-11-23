@@ -34,6 +34,14 @@ for (const [name, path, owner] of SCREENS) {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow, 'no sideways scrolling').toBeLessThanOrEqual(1)
     expect(errors).toEqual([])
+    if (name === 'overview') {
+      // Attention rows: on a phone the sentence keeps the full width and the action sits beneath it; on a desktop beside it.
+      const row = page.locator('.ui-attention-list li').first()
+      const text = await row.locator('.ui-attention-text').boundingBox()
+      const btn = await row.locator('.btn').boundingBox()
+      if (info.project.name === 'mobile') expect(btn.y, 'action below the sentence').toBeGreaterThanOrEqual(text.y + text.height - 1)
+      else expect(btn.x, 'action beside the sentence').toBeGreaterThan(text.x + text.width - 1)
+    }
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${info.project.name}-${name}.png`, fullPage: true, animations: 'disabled' })
     if (name === 'receptionist' && SHOTS) {
       const open = page.getByRole('button', { name: /Morgan Diaz/ }).first()

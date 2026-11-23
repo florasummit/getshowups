@@ -431,8 +431,6 @@ export default function Receptionist() {
         )}
       </Section>
 
-      {data.voice && <ReceptionistVoice voice={data.voice} admin={Boolean(data.admin)} providers={data.providers || null} reload={load} />}
-
       <Section title="Settings" label="Receptionist settings">
         <form className="ui-settings" onSubmit={save}>
           <fieldset className="ui-group">
@@ -504,6 +502,9 @@ export default function Receptionist() {
           </div>
         </form>
       </Section>
+
+      {/* Voice is a refinement of an answering receptionist, so it follows the on/off switch, greeting and notes. */}
+      {data.voice && <ReceptionistVoice voice={data.voice} admin={Boolean(data.admin)} providers={data.providers || null} reload={load} />}
     </div>
   )
 }
