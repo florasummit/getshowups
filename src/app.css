@@ -609,6 +609,35 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* Template picker: one row per template, its facts in one line, budget + action beside (stacked on phones). */
+.tpl-row {
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tpl-main {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: block;
+}
+.tpl-main .chip {
+  margin-left: 8px;
+  text-transform: none;
+}
+.tpl-meta {
+  display: block;
+  margin-top: 4px;
+}
+.tpl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.tpl-budget {
+  margin: 0;
+  width: 140px;
+}
 .ai-leads {
   margin: 4px 0 0;
   padding-left: 18px;

@@ -289,6 +289,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   mutable fields); leads are read-only into lsa_leads (per business + Google lead id; never contact details or notes),
   cost per charged lead = the campaign's own spend ÷ charged leads; a business without one sees a facts-only readiness
   checklist linking to Google's setup. Google Business Profile needs its own OAuth scope and Google's access approval.
+  Templates (server/ads/templates.js, /api/dashboard/ads/templates): curated Search templates per trade (validated
+  against spec limits + claims filter, fitted to the business, suggested by industry; no performance claims) and the
+  business's own saved templates (from its imported Search campaign or a draft, normalized: no account identifiers)
+  only ever become ONE editable draft; approval, budget, paused creation, read-back and Start are unchanged.
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).

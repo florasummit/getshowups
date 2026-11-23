@@ -83,6 +83,34 @@ function LocalServicesLeads({ leads }) {
   )
 }
 
+// One of the business's own imported Search campaigns → a saved template (keywords, negatives, ad text, landing page;
+// no account identifiers). Shown as a draft starting point under "Review your campaign".
+function SaveAsTemplate({ id }) {
+  const [state, setState] = useState({})
+  const save = async () => {
+    setState({ busy: true })
+    const { status, data } = await api('/api/dashboard/ads/templates', { method: 'POST', body: { action: 'save_from_imported', importedId: id } })
+    setState(status === 200 ? { done: true } : { error: data?.error === 'not_enough_to_copy' ? 'This campaign doesn’t have enough keywords and ad text to copy.' : data?.error === 'too_many_templates' ? 'You have the maximum number of saved templates.' : 'Couldn’t save it. Try again in a moment.' })
+  }
+  return (
+    <div>
+      <dt>Reuse</dt>
+      <dd>
+        {state.done ? (
+          <span role="status" data-template-saved>
+            Saved as a template. Find it under “Your templates” in Review your campaign.
+          </span>
+        ) : (
+          <button type="button" className="link-btn" onClick={save} disabled={state.busy} data-save-template>
+            {state.busy ? 'Saving…' : 'Save as a template for a new draft'}
+          </button>
+        )}
+        {state.error && <span className="form-error"> {state.error}</span>}
+      </dd>
+    </div>
+  )
+}
+
 function Settings({ c }) {
   const s = c.settings || {}
   if (c.channelType !== 'SEARCH') {
@@ -148,6 +176,7 @@ function Settings({ c }) {
           <dd>{[s.startDate, s.endDate ? `until ${s.endDate}` : null].filter(Boolean).join(' ')}</dd>
         </div>
       )}
+      <SaveAsTemplate id={c.id} />
     </dl>
   )
 }

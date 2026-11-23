@@ -1362,6 +1362,98 @@ function Creatives({ creatives, quota, capabilities, concepts, onChange }) {
   )
 }
 
+// "Start with a template": curated Search templates for the trades we serve (the ones that fit the business first)
+// and the business's own saved templates. Picking one creates ONE editable draft (nothing created on Google, nothing
+// spent); the normal draft → approve → create-paused → Start steps follow. Templates carry no performance claim.
+const TEMPLATE_ERRORS = {
+  draft_exists: 'You already have a draft. Edit it below, or remove it to start from a template.',
+  profile_required: 'Save your business details first.',
+  not_found: 'That template isn’t available any more.',
+  too_many_campaigns: 'You have the maximum number of campaigns. Remove one first.',
+  not_ready: 'Templates aren’t available yet.',
+}
+function TemplatePicker({ onStarted, onClose }) {
+  const [t, setT] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState(null)
+  const [daily, setDaily] = useState({})
+  const load = useCallback(() => api('/api/dashboard/ads/templates').then(({ status, data }) => setT(status === 200 ? data : { failed: true })), [])
+  useEffect(() => {
+    load()
+  }, [load])
+  const start = async (key, body) => {
+    setBusy(key)
+    setErr(null)
+    const dollars = daily[key]
+    const { status, data } = await api('/api/dashboard/ads/templates', { method: 'POST', body: { action: 'start', ...body, ...(dollars ? { dailyCents: Math.round(Number(dollars) * 100) } : {}) } })
+    setBusy('')
+    if (status === 200) onStarted(data)
+    else setErr(TEMPLATE_ERRORS[data?.error] || errorText(data?.error))
+  }
+  const remove = async (id) => {
+    setBusy(`rm:${id}`)
+    await api('/api/dashboard/ads/templates', { method: 'POST', body: { action: 'remove', id } })
+    setBusy('')
+    load()
+  }
+  if (!t) return <div className="ui-skeleton-block" aria-busy="true" />
+  if (t.failed)
+    return (
+      <p className="form-error" role="alert">
+        Couldn’t load templates. Try again in a moment.
+      </p>
+    )
+  const row = (key, { name, note, keywords, headlines, startingDailyCents, suggested, source, removable, body }) => (
+    <li key={key} className="row tpl-row" data-template={key}>
+      <span className="tpl-main">
+        <strong>{name}</strong>
+        {suggested && <span className="chip">Suggested</span>}
+        {source && <span className="chip">{source === 'imported' ? 'From your Google Ads' : 'Saved by you'}</span>}
+        <span className="fine tpl-meta">
+          {note}
+          {keywords?.length ? ` Searches like “${keywords.slice(0, 3).join('”, “')}”.` : ''}
+          {headlines?.length ? ` Ad: ${headlines.slice(0, 2).join(' | ')}.` : ''}
+        </span>
+      </span>
+      <span className="tpl-actions">
+        <label className="field tpl-budget">
+          <span>Daily budget ($)</span>
+          <input type="number" min="5" step="1" inputMode="numeric" value={daily[key] ?? (startingDailyCents ? startingDailyCents / 100 : '')} onChange={(e) => setDaily((d) => ({ ...d, [key]: e.target.value }))} />
+        </label>
+        <button type="button" className="btn btn-quiet" disabled={Boolean(busy)} onClick={() => start(key, body)} data-template-use={key}>
+          {busy === key ? 'Creating draft…' : 'Use this template'}
+        </button>
+        {removable && (
+          <button type="button" className="link-btn" disabled={Boolean(busy)} onClick={() => remove(key)}>
+            Remove
+          </button>
+        )}
+      </span>
+    </li>
+  )
+  return (
+    <div className="stack" role="group" aria-label="Start with a template" data-template-picker>
+      <p className="fine">A template becomes an editable draft: your business name, towns and ZIP codes are filled in, nothing is created on Google, and nothing spends. Starting budgets are a cautious first-week floor, not a promise of results.</p>
+      {t.saved.length > 0 && (
+        <>
+          <p className="ta-label">Your templates</p>
+          <ul className="rows tpl-list">{t.saved.map((s) => row(s.id, { name: s.name, note: '', keywords: s.keywords, headlines: s.headlines, startingDailyCents: s.dailyBudgetCents, source: s.source, removable: true, body: { savedId: s.id } }))}</ul>
+          <p className="ta-label">GetShowUps templates</p>
+        </>
+      )}
+      <ul className="rows tpl-list">{t.curated.map((c) => row(c.id, { name: c.name, note: `${c.industry}.`, keywords: c.keywords, headlines: c.headlines, startingDailyCents: c.startingDailyCents, suggested: c.suggested, body: { templateId: c.id } }))}</ul>
+      {err && (
+        <p className="form-error" role="alert">
+          {err}
+        </p>
+      )}
+      <button type="button" className="link-btn" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  )
+}
+
 export default function Ads() {
   const [returned] = useState(readReturn)
   useEffect(() => {
@@ -1371,6 +1463,8 @@ export default function Ads() {
   const [d, setD] = useState(null)
   const [error, setError] = useState(false)
   const [plan, setPlan] = useState({})
+  const [picking, setPicking] = useState(false)
+  const [started, setStarted] = useState(null) // { name } after a template became a draft
   const load = useCallback(
     () =>
       api('/api/dashboard/ads').then(({ status, data }) => {
@@ -1481,11 +1575,26 @@ export default function Ads() {
           {openGoogle.length === 0 ? (
             <>
               <p className="fine">
-                {d.capabilities.ai ? 'GetShowUps drafts a plan from your details.' : 'GetShowUps creates a starter draft from your details.'} Nothing runs until you approve it.
+                Start from a template for your trade, or let GetShowUps {d.capabilities.ai ? 'draft a plan' : 'create a starter draft'} from your details. Either way it is an editable draft; nothing runs until you approve it.
               </p>
-              <button type="button" className="btn btn-primary" disabled={plan.busy} onClick={makePlan}>
-                {plan.busy ? 'Drafting…' : 'Draft my plan'}
-              </button>
+              <div className="ui-form-actions">
+                <button type="button" className="btn btn-primary" disabled={plan.busy || picking} onClick={() => setPicking(true)} data-start-template>
+                  Start with a template
+                </button>
+                <button type="button" className="btn btn-quiet" disabled={plan.busy || picking} onClick={makePlan}>
+                  {plan.busy ? 'Drafting…' : 'Draft my plan'}
+                </button>
+              </div>
+              {picking && (
+                <TemplatePicker
+                  onClose={() => setPicking(false)}
+                  onStarted={(r) => {
+                    setPicking(false)
+                    setStarted(r.template)
+                    load()
+                  }}
+                />
+              )}
             </>
           ) : openGoogle.length > 1 ? (
             <p className="notice-info" role="status" data-duplicate-drafts>
@@ -1493,6 +1602,11 @@ export default function Ads() {
             </p>
           ) : null}
           {plan.error && <p className="form-error" role="alert">{plan.error}</p>}
+          {started && openGoogle.length > 0 && (
+            <p className="notice-info" role="status" data-template-started>
+              Draft created from the {started.name} template. Edit the words, area and budget below, then approve it.
+            </p>
+          )}
           {plan.result && (
             <div className="plan-notes" role="status">
               {plan.result.source === 'template' && <p className="fine">Starter draft (AI planning is not switched on).</p>}
