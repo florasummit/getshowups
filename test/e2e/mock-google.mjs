@@ -141,7 +141,30 @@ const ADS_ACCOUNTS = {
   6660000000: { name: 'MOCK test client', manager: false },
   // A NON-test account under the manager: never offered while ads are in testing (sandbox).
   7770000000: { name: 'MOCK non-test account', manager: false, test: false },
+  // An established advertiser (ads-existing sign-in): a test account that already holds campaigns of its own.
+  8880000000: { name: 'MOCK established advertiser', manager: false },
 }
+// Campaigns that already exist in the established advertiser's account (MOCK DATA): read-only import tests.
+const EXISTING = {
+  8880000000: [
+    {
+      id: '70000000001', name: 'Pool Cleaning – Charleston', status: 'ENABLED', servingStatus: 'SERVING', channel: 'SEARCH', bidding: 'TARGET_SPEND', amountMicros: '25000000', startDate: '2026-03-01',
+      locations: ['1015360', '1015362'], languages: 1, negatives: ['jobs', 'diy'], groups: [{ id: '80000000001', name: 'Weekly cleaning' }],
+      keywords: [{ text: 'pool cleaning charleston', match: 'PHRASE', group: '80000000001' }, { text: 'pool service near me', match: 'PHRASE', group: '80000000001' }, { text: 'weekly pool cleaning', match: 'EXACT', group: '80000000001' }],
+      ads: [{ id: '90000000001', group: '80000000001', headlines: ['Charleston Pool Cleaning', 'Weekly Pool Service', 'Book a Visit Online'], descriptions: ['Clear water every week. Pick a time that suits you.'], finalUrls: ['https://harborpool.example/book'] }],
+      goals: [{ category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE' }],
+      spendPerDayMicros: 21000000, clicksPerDay: 9, conversionsPerDay: 0.5,
+    },
+    { id: '70000000002', name: 'Service Area Leads', status: 'PAUSED', servingStatus: 'NONE', channel: 'LOCAL_SERVICES', bidding: 'MANUAL_CPA', amountMicros: '40000000', spendPerDayMicros: 0, clicksPerDay: 0, conversionsPerDay: 0 },
+    { id: '70000000003', name: 'Old Spring Promo', status: 'REMOVED', channel: 'SEARCH', amountMicros: '10000000' },
+  ],
+}
+const GEO_NAMES = { 1015360: 'Charleston, South Carolina, United States', 1015362: 'Mount Pleasant, South Carolina, United States' }
+const existingRow = (acct, c) => ({
+  campaign: { resourceName: `customers/${acct}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, servingStatus: c.servingStatus, advertisingChannelType: c.channel, biddingStrategyType: c.bidding, startDate: c.startDate, networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } },
+  campaignBudget: { amountMicros: c.amountMicros, explicitlyShared: false },
+})
+const ymdDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 let flakyListings = 0
 const faults = { invalidGrant: new Set(), freeBusy: new Set() } // /__faults (Control Center demo)
 const adsCampaigns = new Map() // account id → [{ id, name, status, budget, amountMicros }]
@@ -157,6 +180,8 @@ function adsRoute(path, raw, auth = '') {
   // fails (503, plus our one retry), as a brief outage during connect would.
   // ads-none: a Google sign-in with no Google Ads account at all.
   if (path === '/v26/customers:listAccessibleCustomers' && String(auth).includes('mock-ads-none-access')) return [200, { resourceNames: [] }]
+  // ads-existing: an established advertiser whose one test account already holds campaigns.
+  if (path === '/v26/customers:listAccessibleCustomers' && String(auth).includes('mock-ads-existing-access')) return [200, { resourceNames: ['customers/8880000000'] }]
   if (path === '/v26/customers:listAccessibleCustomers' && /mock-ads-(one|flaky)-access/.test(String(auth))) {
     if (String(auth).includes('mock-ads-flaky-access') && flakyListings++ < 2) return [503, { error: { code: 503, status: 'UNAVAILABLE', message: 'mock' } }]
     return [200, { resourceNames: ['customers/6660000000'] }] // the MOCK test client, reached directly
@@ -186,8 +211,39 @@ function adsRoute(path, raw, auth = '') {
     return [200, { results: list.filter((c) => c.name === name).map(row) }]
   }
   if (op === 'googleAds:searchStream') {
+    const q = body.query || ''
+    // Import of the account's own campaigns (readAccountCampaigns / fetchAccountMetrics): list, details by id set,
+    // daily metrics. Our created campaigns are listed too (tagged [gsu:<id>], so GetShowUps skips them).
+    const inIds = q.match(/campaign\.id IN \(([^)]*)\)/)?.[1]?.split(',').map((s) => s.trim())
+    const ex = (EXISTING[acct] || []).filter((c) => c.status !== 'REMOVED')
+    if (/FROM campaign WHERE campaign\.status != 'REMOVED' ORDER BY campaign\.id/.test(q)) {
+      return [200, [{ results: [...ex.map((c) => existingRow(acct, c)), ...list.map((c) => ({ ...existingRow(acct, { ...c, channel: c.channel, servingStatus: c.status === 'ENABLED' ? 'SERVING' : 'NONE' }), campaignBudget: { amountMicros: c.amountMicros, explicitlyShared: false } }))] }]]
+    }
+    if (inIds && /segments\.date BETWEEN '(\d{4}-\d{2}-\d{2})' AND '(\d{4}-\d{2}-\d{2})'/.test(q)) {
+      const [, since, until] = q.match(/segments\.date BETWEEN '(\d{4}-\d{2}-\d{2})' AND '(\d{4}-\d{2}-\d{2})'/)
+      const results = []
+      for (const c of ex.filter((x) => inIds.includes(x.id) && x.spendPerDayMicros)) {
+        for (let n = 1; n <= 120; n++) {
+          const date = ymdDaysAgo(n)
+          if (date < since || date > until) continue
+          results.push({ campaign: { id: c.id }, segments: { date }, metrics: { costMicros: String(c.spendPerDayMicros), impressions: String(c.clicksPerDay * 20), clicks: String(c.clicksPerDay), conversions: c.conversionsPerDay } })
+        }
+      }
+      return [200, [{ results }]]
+    }
+    if (inIds && /FROM campaign_criterion/.test(q)) {
+      return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => [...(c.locations || []).map((g) => ({ campaign: { id: c.id }, campaignCriterion: { type: 'LOCATION', negative: false, location: { geoTargetConstant: `geoTargetConstants/${g}` } } })), ...(c.negatives || []).map((t) => ({ campaign: { id: c.id }, campaignCriterion: { type: 'KEYWORD', negative: true, keyword: { text: t } } })), ...Array.from({ length: c.languages || 0 }, () => ({ campaign: { id: c.id }, campaignCriterion: { type: 'LANGUAGE', negative: false, language: { languageConstant: 'languageConstants/1000' } } }))]) }]]
+    }
+    if (inIds && /FROM ad_group WHERE/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.groups || []).map((g) => ({ campaign: { id: c.id }, adGroup: { id: g.id, name: g.name, status: 'ENABLED' } }))) }]]
+    if (inIds && /FROM ad_group_criterion/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.keywords || []).map((k) => ({ campaign: { id: c.id }, adGroup: { id: k.group }, adGroupCriterion: { keyword: { text: k.text, matchType: k.match }, status: 'ENABLED' } }))) }]]
+    if (inIds && /FROM ad_group_ad/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.ads || []).map((a) => ({ campaign: { id: c.id }, adGroup: { id: a.group }, adGroupAd: { status: 'ENABLED', policySummary: { approvalStatus: 'APPROVED' }, ad: { id: a.id, type: 'RESPONSIVE_SEARCH_AD', finalUrls: a.finalUrls, responsiveSearchAd: { headlines: a.headlines.map((text) => ({ text })), descriptions: a.descriptions.map((text) => ({ text })) } } } }))) }]]
+    if (inIds && /FROM campaign_conversion_goal/.test(q)) return [200, [{ results: ex.filter((c) => inIds.includes(c.id)).flatMap((c) => (c.goals || []).map((g) => ({ campaign: { id: c.id }, campaignConversionGoal: { category: g.category, origin: g.origin, biddable: true } }))) }]]
+    if (/FROM geo_target_constant/.test(q)) {
+      const ids = q.match(/geo_target_constant\.id IN \(([^)]*)\)/)?.[1]?.split(',').map((s) => s.trim()) || []
+      return [200, [{ results: ids.filter((g) => GEO_NAMES[g]).map((g) => ({ geoTargetConstant: { id: g, name: GEO_NAMES[g].split(',')[0], canonicalName: GEO_NAMES[g], targetType: 'City' } })) }]]
+    }
     // Read-back of one created campaign (verifyCampaign).
-    const byId = (body.query || '').match(/WHERE campaign\.id = (\d+)/)?.[1]
+    const byId = q.match(/WHERE campaign\.id = (\d+)/)?.[1]
     const c = byId && list.find((x) => x.id === byId)
     if (byId && !c) return [200, [{ results: [] }]]
     if (c && /FROM campaign_criterion/.test(body.query))
@@ -545,7 +601,7 @@ createServer(async (req, res) => {
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-prod-')) return send(res, 200, { access_token: 'mock-ads-prod-access', expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     // ads-revoked: the sign-in worked once, then Google rejects the stored refresh token (expired/revoked access).
     if (p.get('grant_type') === 'refresh_token' && String(p.get('refresh_token')).startsWith('mock-ads-revoked-')) return send(res, 400, { error: 'invalid_grant' })
-    const variant = String(p.get('refresh_token')).match(/^mock-ads-(one|flaky|none)-refresh-/)?.[1]
+    const variant = String(p.get('refresh_token')).match(/^mock-ads-(one|flaky|none|existing)-refresh-/)?.[1]
     if (p.get('grant_type') === 'refresh_token' && variant) return send(res, 200, { access_token: `mock-ads-${variant}-access`, expires_in: 3600, scope: 'https://www.googleapis.com/auth/adwords' })
     if (p.get('grant_type') === 'refresh_token') return send(res, 200, { access_token: `mock-access-${createHmac('sha256', 'cal').update(String(p.get('refresh_token'))).digest('hex').slice(0, 16)}`, expires_in: 3600, scope: SCOPE })
     const [kind, email] = String(p.get('code')).split(':')
@@ -553,7 +609,7 @@ createServer(async (req, res) => {
     if (kind === 'connect') return send(res, 200, { access_token: 'mock-access-token', refresh_token: `mock-refresh-${email}`, id_token: idToken(email), scope: SCOPE })
     if (kind === 'ads-prod') return send(res, 200, { access_token: 'mock-ads-prod-access', refresh_token: `mock-ads-prod-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads-revoked') return send(res, 200, { access_token: 'mock-ads-revoked-access', refresh_token: `mock-ads-revoked-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
-    if (kind === 'ads-one' || kind === 'ads-flaky' || kind === 'ads-none') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
+    if (kind === 'ads-one' || kind === 'ads-flaky' || kind === 'ads-none' || kind === 'ads-existing') return send(res, 200, { access_token: `mock-${kind}-access`, refresh_token: `mock-${kind}-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     if (kind === 'ads') return send(res, 200, { access_token: 'mock-ads-access', refresh_token: `mock-ads-refresh-${email}`, scope: 'https://www.googleapis.com/auth/adwords' })
     return send(res, 400, { error: 'invalid_grant' })
   }

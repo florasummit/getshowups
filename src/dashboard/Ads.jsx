@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import AdsResults from './AdsResults.jsx'
+import AdsImported from './AdsImported.jsx'
 
 const money = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: c % 100 ? 2 : 0 })}`)
 const toCents = (v) => (v === '' || v == null ? null : Math.round(Number(v) * 100))
@@ -1468,6 +1469,9 @@ export default function Ads() {
 
       {/* Connecting an account needs no business details first (it spends nothing); the status is shown from day one. */}
       <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />
+
+      {/* Already advertising: the campaigns in the connected account, read from Google (read-only). */}
+      {d.connections?.google?.status === 'connected' && <AdsImported />}
 
       {d.profile && (
         <section className="card" aria-labelledby="review-title">

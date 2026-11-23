@@ -534,6 +534,104 @@
     display: none;
   }
 }
+/* Imported Google Ads campaigns (the account's own, read-only): a compact list; each row opens its settings. */
+.ai-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ai-head,
+.ai-item > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, minmax(72px, auto));
+  gap: 4px 16px;
+  align-items: center;
+}
+.ai-head {
+  padding: 0 0 6px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ai-head span:not(:first-child),
+.ai-num {
+  text-align: right;
+}
+.ai-item {
+  border-top: 1px solid var(--surface-muted);
+}
+.ai-item > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 0;
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+}
+.ai-item > summary::-webkit-details-marker {
+  display: none;
+}
+.ai-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ai-name .chip {
+  text-transform: none;
+}
+.ai-num {
+  white-space: nowrap;
+}
+.ai-num small {
+  display: none;
+}
+.ai-body {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 14px;
+  font-size: var(--fs-sm);
+}
+.ai-body dt {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ai-body dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .ai-head {
+    display: none;
+  }
+  .ai-item > summary {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ai-name {
+    grid-column: 1 / -1;
+  }
+  .ai-num {
+    text-align: left;
+    white-space: normal;
+  }
+  .ai-num small {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+}
 .ar-money {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
