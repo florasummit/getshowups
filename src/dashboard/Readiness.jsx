@@ -5,7 +5,7 @@ import { api } from '../lib/api.js'
 
 const TEXT = {
   subscription: {
-    label: 'Founding plan',
+    label: 'Growth plan',
     active: 'Active',
     cancel_scheduled: 'Cancels at the end of this billing period',
     past_due: 'Payment failed. Update your card in billing.',

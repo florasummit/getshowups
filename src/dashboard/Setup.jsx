@@ -149,7 +149,7 @@ function NameStep({ onDone, plan }) {
   )
 }
 
-// ---------- 2. Founding plan checkout (Stripe-hosted) ----------
+// ---------- 2. Growth plan checkout (Stripe-hosted; plan id `founding`, unchanged) ----------
 function PaymentStep({ me, onDone }) {
   const params = new URLSearchParams(window.location.search)
   const returned = params.get('billing')
@@ -202,7 +202,7 @@ function PaymentStep({ me, onDone }) {
   return (
     <div className="form">
       <h1 id="step-title" className="title">
-        {billing === 'canceled' ? 'Reactivate your plan' : 'Start your founding plan'}
+        {billing === 'canceled' ? 'Reactivate your plan' : 'Start your Growth plan'}
       </h1>
       {returned === 'canceled' && (
         <p className="notice-soft" role="status">
@@ -215,7 +215,7 @@ function PaymentStep({ me, onDone }) {
         </p>
       )}
       <div className="plan-box">
-        <p className="plan-name">GetShowUps Founding</p>
+        <p className="plan-name">GetShowUps Growth</p>
         <p className="plan-price">
           $499<span>/month</span>
         </p>

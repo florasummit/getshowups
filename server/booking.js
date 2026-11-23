@@ -59,7 +59,7 @@ export const formatAddress = (a) => (a ? `${a.street}${a.unit ? `, ${a.unit}` : 
 // known US ZIP area → 'unknown_zip' unless the visitor confirmed it (body.zipConfirmed === true), then it is kept as
 // uncertain. lenientZip (plain website forms, which can't ask again without losing what was typed): never an error,
 // the lead is kept and the ZIP's state goes to the owner's coverage review. lead.zipCheck records the result.
-export function validateLead(body, mode = 'at_business', { requireEmail = true, lenientZip = false } = {}) {
+export function validateLead(body, mode = 'at_business', { requireEmail = true, requirePhone = true, lenientZip = false } = {}) {
   const lead = {
     name: clean(body?.name, 80),
     email: clean(body?.email, 254).toLowerCase(),
@@ -70,7 +70,8 @@ export function validateLead(body, mode = 'at_business', { requireEmail = true, 
   }
   if (lead.name.length < 2) return ['invalid_name']
   if ((requireEmail || lead.email) && !EMAIL_RE.test(lead.email)) return ['invalid_email']
-  if (!PHONE_RE.test(lead.phone) || lead.phone.replace(/\D/g, '').length < 7) return ['invalid_phone']
+  // requirePhone false (enterprise inquiries: nothing to schedule): an empty phone stays empty, a typed one is still checked.
+  if ((requirePhone || lead.phone) && (!PHONE_RE.test(lead.phone) || lead.phone.replace(/\D/g, '').length < 7)) return ['invalid_phone']
   if (lead.need.length < 2) return ['invalid_need']
   if (mode === 'at_customer') {
     const [error, address] = validateAddress(body?.address)

@@ -23,7 +23,7 @@ test('homepage renders headline, metadata, and all sections', async ({ page }) =
   }
 })
 
-test('one Get started action: every start link carries the founding plan to sign-up (enrollment open)', async ({ page }) => {
+test('one Get started action: every start link carries the Growth plan (id founding) to sign-up (enrollment open)', async ({ page }) => {
   // Go-live state (live billing on). The e2e server itself is sandbox-only, like production today.
   await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: true } }))
   await page.reload()
@@ -71,9 +71,9 @@ test('booking section is honest when no calendar is configured', async ({ page }
   await expect(section.locator('input, textarea, form')).toHaveCount(0)
 })
 
-test('pricing shows the founding plan, no trial, ad spend separate; FAQ expands', async ({ page }) => {
+test('pricing shows the Growth plan, no trial, ad spend separate; FAQ expands', async ({ page }) => {
   const pricing = page.locator('#pricing')
-  await expect(pricing.locator('.price-amount')).toContainText('$499/month')
+  await expect(pricing.locator('[data-plan="growth"] .price-amount')).toContainText('$499/month')
   await expect(pricing.getByText('No free trial', { exact: false })).toBeVisible()
   await expect(pricing.getByText('Ad spend is separate, paid directly to Google or Meta', { exact: false })).toBeVisible()
   const item = page.locator('#faq details').first()
