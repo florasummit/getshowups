@@ -782,7 +782,7 @@ test('Journey B: a business that never advertised saves its details, starts from
   expect(JSON.stringify(bp)).not.toMatch(/mock-gbp|843/)
 })
 
-test('Business Profile before Google approves GetShowUps’ access: the row says so honestly, no Connect, the facts stay; a Google account without a listing is told what to do @mobile', async ({ page, context }, testInfo) => {
+test('Business Profile before Google approves GetShowUps’ access: the row says so honestly, no Connect, the facts stay; a Google account without a listing is told what to do @mobile', async ({ page, context, browser }, testInfo) => {
   await useSession(context, fixtures.E2E_IMPORT_SESSION_TOKEN)
   // Production today: GBP_ENABLED is off → capability false (stubbed here since the e2e server has it on).
   await page.route('**/api/dashboard/ads', async (route) => {
@@ -800,13 +800,19 @@ test('Business Profile before Google approves GetShowUps’ access: the row says
   await expect(gbpRow.locator('.gbp-steps li')).toHaveCount(6)
   await expect(gbpRow.getByRole('link', { name: 'Create or claim it with Google' })).toHaveAttribute('href', 'https://business.google.com/create')
   await page.unroute('**/api/dashboard/ads')
-  // A Google account that manages no listing: the picker says so and points to Google's setup. One business, so
-  // only the desktop run connects (the phone run would find it already connected).
+  // A Google account that manages no listing: the picker says so and points to Google's setup. On the desktop run
+  // only, with the established advertiser's business (its Journey A test never looks at the Business Profile row),
+  // so the read-only business above stays untouched for the tests running beside this one.
   if (testInfo.project.name === 'mobile') return
-  await returnFromGoogle(page, '**/api/ads/gbp/start', 'GET', '/api/ads/gbp/callback', 'gbp-none:owner@e2e-import.example')
-  await page.goto('/dashboard/ads')
-  await gbpRow.getByRole('link', { name: 'Connect' }).click()
-  await page.waitForURL('**/dashboard/ads')
-  await expect(gbpRow).toHaveAttribute('data-gbp-state', 'needs_location')
-  await expect(gbpRow.getByText('This Google account manages no Business Profile listing yet.')).toBeVisible()
+  const ctx = await browser.newContext()
+  await useSession(ctx, fixtures.E2E_ADVERTISER_SESSION_TOKEN)
+  const p2 = await ctx.newPage()
+  await returnFromGoogle(p2, '**/api/ads/gbp/start', 'GET', '/api/ads/gbp/callback', 'gbp-none:owner@e2e-advertiser.example')
+  await p2.goto('/dashboard/ads')
+  const gbpRow2 = p2.locator('[data-gbp-state]')
+  await gbpRow2.getByRole('link', { name: 'Connect' }).click()
+  await p2.waitForURL('**/dashboard/ads')
+  await expect(gbpRow2).toHaveAttribute('data-gbp-state', 'needs_location')
+  await expect(gbpRow2.getByText('This Google account manages no Business Profile listing yet.')).toBeVisible()
+  await ctx.close()
 })
