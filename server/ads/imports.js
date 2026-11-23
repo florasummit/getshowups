@@ -7,6 +7,7 @@
 import { randomToken } from '../google-oauth.js'
 import { fetchAccountMetrics, readAccountCampaigns } from './google.js'
 import { lsaReadiness, lsaSummary, syncLsaLeads } from './lsa.js'
+import { gbpVerified } from './gbp.js'
 
 const DAY = 86_400_000
 export const IMPORT_TABLES = ['ad_imported_campaigns', 'ad_imported_metrics_daily', 'ad_import_state']
@@ -216,7 +217,8 @@ export async function listImported(db, customerId, { days = 30, now = Date.now()
       db.prepare('SELECT industry, phone FROM business_profiles WHERE customer = ?1').bind(customerId).first().catch(() => null),
       db.prepare('SELECT service_zips FROM customers WHERE id = ?1').bind(customerId).first().catch(() => null),
     ])
-    readiness = lsaReadiness({ industry: profile?.industry || '', zips: String(biz?.service_zips || '').split(',').filter(Boolean), profilePhone: Boolean(profile?.phone), hasLocalServicesCampaign: false, gbpConnected: null })
+    const gbp = await gbpVerified({ ONBOARDING_DB: db }, customerId).catch(() => null)
+    readiness = lsaReadiness({ industry: profile?.industry || '', zips: String(biz?.service_zips || '').split(',').filter(Boolean), profilePhone: Boolean(profile?.phone), hasLocalServicesCampaign: false, gbpConnected: gbp })
   }
   return {
     ready: true,

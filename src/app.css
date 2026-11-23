@@ -609,6 +609,20 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* Business Profile readiness: numbered facts under the connection row. */
+.gbp-readiness {
+  margin-top: 8px;
+}
+.gbp-steps {
+  margin: 8px 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.chip--plain {
+  background: var(--ink-100);
+}
 /* Template picker: one row per template, its facts in one line, budget + action beside (stacked on phones). */
 .tpl-row {
   align-items: flex-start;

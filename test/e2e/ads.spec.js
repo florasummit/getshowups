@@ -758,4 +758,53 @@ test('Journey B: a business that never advertised saves its details, starts from
   expect(s.connections.google).toBeUndefined()
   await expect(c.getByRole('button', { name: /Start ads/ })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+
+  // Google Business Profile (step D): before connecting, the row offers Connect and the facts; connecting with the
+  // gbp sign-in (mock) links the one listing the account manages and shows Google's verification state.
+  const gbpRow = page.locator('[data-gbp-state]')
+  await expect(gbpRow).toHaveAttribute('data-gbp-state', 'none')
+  await expect(gbpRow.locator('[data-gbp-readiness] summary')).toContainText('Don’t have a Business Profile yet?')
+  await returnFromGoogle(page, '**/api/ads/gbp/start', 'GET', '/api/ads/gbp/callback', `gbp:owner@e2e-starter${testInfo.project.name === 'mobile' ? '-m' : ''}.example`)
+  await gbpRow.getByRole('link', { name: 'Connect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(page.getByRole('status').filter({ hasText: 'Google Business Profile is connected.' })).toBeVisible()
+  await expect(gbpRow).toHaveAttribute('data-gbp-state', 'connected')
+  await expect(gbpRow.locator('[data-gbp-listing]')).toContainText('MOCK Coastal Air Heating & Cooling')
+  await expect(gbpRow.locator('[data-gbp-listing]')).toContainText('Charleston, SC')
+  await expect(gbpRow.locator('[data-gbp-verification]')).toHaveText('Verified')
+  await expect(gbpRow.locator('[data-gbp-missing]')).toContainText('Missing on the profile: website.')
+  await expect(gbpRow.getByRole('link', { name: 'Open on Google Maps' })).toHaveAttribute('href', 'https://maps.google.com/?cid=1')
+  await expect(gbpRow.locator('[data-gbp-readiness]')).toHaveCount(0)
+  const bp = (await (await page.request.get('/api/dashboard/ads')).json()).businessProfile
+  expect([bp.status, bp.verification.state, bp.missing]).toEqual(['connected', 'verified', ['website']])
+  expect(JSON.stringify(bp)).not.toMatch(/mock-gbp|843/)
+})
+
+test('Business Profile before Google approves GetShowUps’ access: the row says so honestly, no Connect, the facts stay; a Google account without a listing is told what to do @mobile', async ({ page, context }, testInfo) => {
+  await useSession(context, fixtures.E2E_IMPORT_SESSION_TOKEN)
+  // Production today: GBP_ENABLED is off → capability false (stubbed here since the e2e server has it on).
+  await page.route('**/api/dashboard/ads', async (route) => {
+    const res = await route.fetch()
+    const body = await res.json()
+    await route.fulfill({ response: res, json: { ...body, capabilities: { ...body.capabilities, gbp: false }, businessProfileReadiness: { ...body.businessProfileReadiness, available: false } } })
+  })
+  await page.goto('/dashboard/ads')
+  const gbpRow = page.locator('[data-gbp-state]')
+  await expect(gbpRow).toHaveAttribute('data-gbp-state', 'unavailable')
+  await expect(gbpRow.locator('[data-conn-status]')).toContainText('Not available yet')
+  await expect(gbpRow.getByText('Google must approve GetShowUps’ access to the Business Profile API first.')).toBeVisible()
+  await expect(gbpRow.getByRole('link', { name: 'Connect' })).toHaveCount(0)
+  await gbpRow.locator('[data-gbp-readiness] summary').click()
+  await expect(gbpRow.locator('.gbp-steps li')).toHaveCount(6)
+  await expect(gbpRow.getByRole('link', { name: 'Create or claim it with Google' })).toHaveAttribute('href', 'https://business.google.com/create')
+  await page.unroute('**/api/dashboard/ads')
+  // A Google account that manages no listing: the picker says so and points to Google's setup. One business, so
+  // only the desktop run connects (the phone run would find it already connected).
+  if (testInfo.project.name === 'mobile') return
+  await returnFromGoogle(page, '**/api/ads/gbp/start', 'GET', '/api/ads/gbp/callback', 'gbp-none:owner@e2e-import.example')
+  await page.goto('/dashboard/ads')
+  await gbpRow.getByRole('link', { name: 'Connect' }).click()
+  await page.waitForURL('**/dashboard/ads')
+  await expect(gbpRow).toHaveAttribute('data-gbp-state', 'needs_location')
+  await expect(gbpRow.getByText('This Google account manages no Business Profile listing yet.')).toBeVisible()
 })

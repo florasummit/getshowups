@@ -69,6 +69,19 @@ const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try ag
 const RETURNS = {
   google_connected: 'Google Ads is connected.',
   meta_connected: 'Facebook & Instagram is connected.',
+  gbp_connected: 'Google Business Profile is connected.',
+  gbp_cancelled: 'Sign-in was cancelled. Nothing was connected.',
+  gbp_expired: 'That sign-in timed out or was started in another tab. Click Connect to try again.',
+  gbp_scope_denied: 'Business Profile access wasn’t granted. Click Connect again and allow access to your Business Profile.',
+  gbp_no_refresh_token: 'Google didn’t grant lasting access. Click Connect again.',
+  gbp_failed: 'Sign-in didn’t finish. Please try again.',
+  gbp_unauthenticated: 'Sign in to GetShowUps first, then connect.',
+  gbp_not_configured: 'Business Profile connection isn’t available yet.',
+  gbp_permission_denied: 'Google didn’t let GetShowUps read Business Profile listings for this account. If Google hasn’t approved GetShowUps’ access yet, this is expected.',
+  gbp_quota_exhausted: 'Google’s Business Profile API is busy or GetShowUps’ access isn’t approved yet. Try again later.',
+  gbp_transient: 'Google didn’t respond. Nothing was connected; try again in a minute.',
+  gbp_reconnect_required: 'Google didn’t accept the sign-in. Click Connect to try again.',
+  gbp_rate_limited: 'Too many sign-in attempts in a short time. Wait a few minutes, then click Connect again.',
   cancelled: 'Sign-in was cancelled. Nothing was connected.',
   expired: 'That sign-in timed out or was started in another tab. Click Connect to try again.',
   scope_denied: 'Google Ads access wasn’t granted. Click Connect again and allow access to Google Ads.',
@@ -572,7 +585,7 @@ function DisconnectGoogle({ running, onDone, onCancel }) {
   )
 }
 
-function Connections({ connections, capabilities, running = 0, onChange }) {
+function Connections({ connections, capabilities, running = 0, onChange, businessProfile = null, businessProfileReadiness = null }) {
   const [disconnecting, setDisconnecting] = useState(false)
   const [done, setDone] = useState(null)
   const row = (platform, label) => {
@@ -653,8 +666,142 @@ function Connections({ connections, capabilities, running = 0, onChange }) {
       <ul className="rows">
         {row('google', 'Google Ads')}
         {row('meta', 'Facebook & Instagram')}
+        <BusinessProfileRow available={Boolean(capabilities.gbp)} profile={businessProfile} readiness={businessProfileReadiness} onChange={onChange} />
       </ul>
     </section>
+  )
+}
+
+// Google Business Profile: a separate Google product and consent. States: platform access not approved yet (facts +
+// Google's own setup), ready to connect, choose a location, connected (title, place, Google's verification state,
+// what is missing on the profile), reconnect required. GetShowUps reads and links; it never creates or edits a listing.
+const VERIFY_TONE = { verified: 'ok', pending_verification: 'info', waiting: 'info', needs_verification: 'warn', ownership_conflict: 'warn', suspended: 'bad', disabled: 'bad', guidelines: 'warn', unknown: 'neutral' }
+const MISSING_LABEL = { website: 'website', phone: 'phone number', hours: 'opening hours', category: 'category' }
+function BusinessProfileRow({ available, profile, readiness, onChange }) {
+  const [picker, setPicker] = useState(null) // { locations, selected } | { error } | { busy }
+  const state = !profile ? 'none' : profile.status === 'reconnect_required' ? 'reconnect_required' : profile.status === 'connected' ? 'connected' : 'needs_location'
+  const s = state === 'needs_location' ? { icon: '•', text: 'Choose your business', tone: 'info' } : CONN[state]
+  const openPicker = async () => {
+    setPicker({ busy: true })
+    const { status, data } = await api('/api/ads/gbp/locations')
+    setPicker(status === 200 ? data : { error: data?.error === 'reconnect_required' ? 'Reconnect Google Business Profile; access has expired.' : 'Couldn’t read your Business Profile listings. Try again in a minute.' })
+  }
+  const choose = async (locationName) => {
+    setPicker((p) => ({ ...p, busy: true }))
+    const { status, data } = await api('/api/ads/gbp/locations', { method: 'POST', body: { locationName } })
+    if (status === 200) {
+      setPicker(null)
+      onChange()
+    } else setPicker((p) => ({ ...p, busy: false, error: data?.error === 'location_not_accessible' ? 'That listing isn’t one your Google account manages.' : 'Couldn’t link that listing. Try again in a minute.' }))
+  }
+  useEffect(() => {
+    if (available && state === 'needs_location' && !picker) openPicker()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, state])
+  const v = profile?.verification
+  return (
+    <li className="row conn-row" data-gbp-state={available ? state : 'unavailable'}>
+      <div className="conn-main">
+        <strong>Google Business Profile</strong>
+        <p className={`conn-status conn-status--${available ? s.tone : 'off'}`} data-conn-status={available ? state : 'unavailable'} data-platform="gbp">
+          <span className="conn-icon" aria-hidden="true">
+            {available ? s.icon : '○'}
+          </span>
+          {available ? s.text : 'Not available yet'}
+        </p>
+        {state === 'connected' && (
+          <div className="stack" data-gbp-listing>
+            <p className="account-selected">
+              <strong>{profile.title || 'Your business'}</strong> {profile.place && <span className="fine">{profile.place}</span>}
+              {v && (
+                <span className={`chip chip--${VERIFY_TONE[v.state] === 'ok' ? 'active' : VERIFY_TONE[v.state] === 'bad' ? 'error' : 'plain'}`} data-gbp-verification={v.state}>
+                  {v.label}
+                </span>
+              )}
+            </p>
+            {v && !v.verified && <p className="fine">Google decides verification; until it says verified, this listing isn’t. Finish it in your Business Profile.</p>}
+            {profile.missing?.length > 0 && (
+              <p className="fine" data-gbp-missing>
+                Missing on the profile: {profile.missing.map((m) => MISSING_LABEL[m] || m).join(', ')}. Add them in Google Business Profile; GetShowUps doesn’t edit your listing.
+              </p>
+            )}
+            <p className="conn-links">
+              {profile.mapsUri && (
+                <a className="link-btn conn-secondary" href={profile.mapsUri} target="_blank" rel="noreferrer">
+                  Open on Google Maps
+                </a>
+              )}
+              {profile.choices > 1 && (
+                <button type="button" className="link-btn conn-secondary" onClick={openPicker}>
+                  Change business
+                </button>
+              )}
+              <a className="link-btn conn-secondary" href="/api/ads/gbp/start">
+                Reconnect
+              </a>
+            </p>
+          </div>
+        )}
+        {state === 'reconnect_required' && <p className="fine">The sign-in expired. Your listing is unchanged.</p>}
+        {available && picker && !picker.busy && picker.locations && (
+          <div className="stack" role="group" aria-label="Choose your Business Profile listing">
+            {picker.locations.length === 0 ? (
+              <p className="fine">This Google account manages no Business Profile listing yet. Create or claim one with Google, then reconnect.</p>
+            ) : (
+              <ul className="rows account-pick">
+                {picker.locations.map((l) => (
+                  <li key={l.name} className="row">
+                    <span>
+                      <strong>{l.title}</strong> <span className="fine">{l.place}</span>
+                      {l.verified && <span className="chip">Verified</span>}
+                      {l.duplicate && <span className="chip">Duplicate</span>}
+                    </span>
+                    {l.name === picker.selected ? (
+                      <span className="fine account-current">
+                        <span aria-hidden="true">✓</span> Linked
+                      </span>
+                    ) : (
+                      <button type="button" className="btn btn-quiet" onClick={() => choose(l.name)} aria-label={`Use ${l.title}`}>
+                        Use this listing
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {picker?.error && (
+          <p className="form-error" role="alert">
+            {picker.error}
+          </p>
+        )}
+        {!available && <span className="fine">Google must approve GetShowUps’ access to the Business Profile API first. Your listing itself is set up and verified with Google, not here.</span>}
+        {state !== 'connected' && readiness && (
+          <details className="more-options gbp-readiness" data-gbp-readiness>
+            <summary>{state === 'none' ? 'Don’t have a Business Profile yet? What Google needs' : 'What Google needs for a Business Profile'}</summary>
+            <ol className="gbp-steps">
+              {readiness.items.map((i) => (
+                <li key={i.id}>
+                  <strong>{i.label}</strong> <span className="fine">{i.detail}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="fine">
+              GetShowUps never creates a listing for you (a second listing causes months of trouble) and never calls one verified until Google does.{' '}
+              <a href={readiness.setupUrl} target="_blank" rel="noreferrer">
+                Create or claim it with Google
+              </a>
+            </p>
+          </details>
+        )}
+      </div>
+      {available && (state === 'none' || state === 'reconnect_required') && (
+        <a className="btn btn-primary" href="/api/ads/gbp/start">
+          {state === 'none' ? 'Connect' : 'Reconnect'}
+        </a>
+      )}
+    </li>
   )
 }
 
@@ -1562,7 +1709,7 @@ export default function Ads() {
       )}
 
       {/* Connecting an account needs no business details first (it spends nothing); the status is shown from day one. */}
-      <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />
+      <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} businessProfile={d.businessProfile || null} businessProfileReadiness={d.businessProfileReadiness || null} />
 
       {/* Already advertising: the campaigns in the connected account, read from Google (read-only). */}
       {d.connections?.google?.status === 'connected' && <AdsImported />}
