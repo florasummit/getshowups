@@ -2,6 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
+## Homepage "Works with" strip (2026-11-23) — feat/integrations-strip
+
+- Plain-text names only, no third-party logos. Shown (production evidence 2026-11-23): Google Calendar (bookings),
+  Google sign-in (sessions), Claude and OpenAI (own key; website_generations rows on both), own domain (one connected).
+- Not shown: Google Ads (test accounts), Meta (no app), Stripe (test mode, not a customer integration), GoHighLevel
+  (off), texting. The FAQ labels these. Google's sensitive-scope review is pending, so Calendar's notice is in the FAQ.
+- Enterprise (PR #136) live: main 1240b40, deployment 861d8bbe-64e1-40c2-a5a5-2ff5acb25109, rollback 0f92732f.
+
 ## Enterprise offering (2026-11-23) — feat/enterprise (no migration, no billing change)
 
 - Pricing shows Growth ($499/month; renamed in copy and plan step only, plan id `founding`, Stripe and onboarding
