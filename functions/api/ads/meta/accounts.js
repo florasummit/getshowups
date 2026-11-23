@@ -4,7 +4,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { getConnection, upsertConnection } from '../../../../server/ads/connections.js'
 import { listAccounts, metaConfigured } from '../../../../server/ads/meta.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 
 const statusFor = (r) => (r.reconnect ? 409 : r.error === 'rate_limited' || r.error === 'transient' ? 503 : 502)
 
@@ -13,7 +13,7 @@ export async function onRequestGet({ request, env }) {
   if (!metaConfigured(env)) return json(503, { error: 'not_configured' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const customer = session.customer.id
   const conn = await getConnection(env, customer, 'meta')
   if (!conn) return json(404, { error: 'not_connected' })
@@ -32,7 +32,7 @@ export async function onRequestPost({ request, env }) {
   if (!metaConfigured(env)) return json(503, { error: 'not_configured' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const body = await request.json().catch(() => null)
   const adAccountId = typeof body?.adAccountId === 'string' ? body.adAccountId : ''
   const pageId = typeof body?.pageId === 'string' ? body.pageId : ''

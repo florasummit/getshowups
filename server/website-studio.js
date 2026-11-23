@@ -10,8 +10,7 @@
 //   - the database has Studio's tables (migrations 0021–0023). Until they are applied Studio stays hidden instead of
 //     failing, so deploying this never requires the migration first.
 // Published content is never gated: a business losing access keeps its live website.
-import { CUSTOMER_RE } from './invites.js'
-import { hostingStatus } from './website.js'
+import { businessEligible } from './eligibility.js'
 
 export const studioEnabled = (env) => env?.WEBSITE_STUDIO_ENABLED !== 'false'
 
@@ -32,13 +31,11 @@ export async function studioSchemaReady(db) {
 }
 
 // `customer`: the session's business (session.customer: id + status). Fails closed: any lookup error → no access.
+// Eligibility is the shared rule in server/eligibility.js (the same one Ads and Teach Your AI use).
 export async function studioAccess(env, customer) {
   try {
-    if (!studioEnabled(env) || !customer || typeof customer.id !== 'string' || !CUSTOMER_RE.test(customer.id)) return false
-    if ((customer.status || 'active') !== 'active') return false
-    const db = env.ONBOARDING_DB
-    if ((await hostingStatus(db, customer.id, Date.now(), env)).status !== 'active') return false
-    return await studioSchemaReady(db)
+    if (!studioEnabled(env) || !(await businessEligible(env, customer))) return false
+    return await studioSchemaReady(env.ONBOARDING_DB)
   } catch (err) {
     console.error('studio access check failed:', err?.name)
     return false

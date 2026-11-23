@@ -161,6 +161,8 @@ test('routes: results need a session, and the Ads feature for ad scope; revenue 
   assert.equal((await call(results, 'GET', { path: '/api/dashboard/results' })).status, 401)
   const r = await call(results, 'GET', { cookie: c, path: '/api/dashboard/results?days=7&scope=ads' })
   assert.deepEqual([r.status, r.json.funnel.range.days, r.json.funnel.stages.leads, Array.isArray(r.json.diagnostics)], [200, 7, 1, true])
+  // salon: a self-serve sign-up before payment has no Ads feature → no ad results (its own funnel still works).
+  db.sql.prepare("INSERT INTO self_signups (customer, plan_id, created_at) VALUES ('salon', 'founding', 1)").run()
   assert.equal((await call(results, 'GET', { cookie: s, path: '/api/dashboard/results?scope=ads' })).status, 404, 'no Ads feature → no ad results')
   assert.equal((await call(results, 'GET', { cookie: s, path: '/api/dashboard/results?scope=all' })).json.funnel.stages.leads, 1)
   const appt = db.sql.prepare("SELECT id FROM appointments WHERE customer = 'pools'").get().id

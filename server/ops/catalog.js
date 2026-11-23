@@ -14,6 +14,7 @@ import { aiConfigured } from '../website-ai.js'
 import { studioEnabled, studioPublishAllowed, studioSchemaReady } from '../website-studio.js'
 import { providerConfigured } from '../domains.js'
 import { adsEnabled } from '../ads/access.js'
+import { studioEnabled as teachAiEnabled } from '../intelligence/access.js'
 import { liveLaunchEnabled } from '../ads/campaigns.js'
 import { metaConfigured } from '../ads/meta.js'
 import { conversionsEnabled } from '../ads/conversions.js'
@@ -527,10 +528,11 @@ registerCapability({
   description: 'Owners configure, test and publish versioned AI rules. Published rules reach real conversations only for AI_RULES_LIVE_BUSINESSES.',
   dependsOn: ['receptionist.chat'],
   state: (env) => {
-    const studio = String(env.AI_STUDIO_BUSINESSES || '').split(',').filter((s) => s.trim()).length
+    // Owner editing: every eligible business (server/eligibility.js) unless switched off; live use: the listed ones.
+    const studio = teachAiEnabled(env)
     const live = env.AI_RULES_ENABLED === 'false' ? 0 : String(env.AI_RULES_LIVE_BUSINESSES || '').split(',').filter((s) => s.trim()).length
-    if (!studio && !live) return { mode: 'disabled', note: 'No business released', approval: 'Migration 0033 + AI_STUDIO_BUSINESSES (owner editing) / AI_RULES_LIVE_BUSINESSES (live use)' }
-    return live ? { mode: 'sandbox', note: `Studio for ${studio}, live rules for ${live} business(es)`, approval: 'Pilot sign-off before wider release' } : { mode: 'sandbox', note: `Studio for ${studio} business(es); live use off`, approval: 'AI_RULES_LIVE_BUSINESSES' }
+    if (!studio && !live) return { mode: 'disabled', note: 'Owner editing switched off (AI_STUDIO_ENABLED=false); live use off' }
+    return live ? { mode: 'sandbox', note: `Editing for every eligible business; live rules for ${live} business(es)`, approval: 'Pilot sign-off before wider release' } : { mode: 'sandbox', note: 'Editing for every eligible business; live use off', approval: 'AI_RULES_LIVE_BUSINESSES' }
   },
   verify: seen('conversation using published AI rules', 30, `SELECT max(e.at) AS at FROM receptionist_events e WHERE e.kind = 'rules' AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })

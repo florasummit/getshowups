@@ -2,8 +2,9 @@
 
 GetShowUps owns the business intelligence; Retell executes the voice experience; businesses control their operating
 workflows. Code: `server/intelligence/` (engine), `functions/api/dashboard/ai-rules.js` (owner API),
-`src/dashboard/TeachAI.jsx` (owner UI), migration `0033_ai_rules.sql`. Status: built and tested; **not released to any
-business** (both allowlists empty; migration not applied to production).
+`src/dashboard/TeachAI.jsx` (owner UI), migration `0033_ai_rules.sql`. Status (2026-11-22): migration applied; **owner
+editing is on for every eligible business** (server/eligibility.js, no allowlist; `AI_STUDIO_ENABLED=false` switches it
+off); **live use for nobody** (`AI_RULES_LIVE_BUSINESSES` empty).
 
 ## 1. Verified Retell architecture (Phase 0 audit, 2026-11-20)
 
@@ -75,7 +76,7 @@ listed services; instruction-like text is refused), so a config can never become
 | Switch | Effect |
 | --- | --- |
 | Migration `0033_ai_rules.sql` | Creates the two tables. Until applied: tab hidden, API 404, receptionist unchanged. |
-| `AI_STUDIO_BUSINESSES` (ids, no wildcard) | The owner sees Teach Your AI and can edit, test, publish. **Customers are not affected.** |
+| Eligibility (server/eligibility.js: active business, hosting active) | Every eligible owner sees Teach Your AI and can edit, test, publish, from the first day. **Customers are not affected.** `AI_STUDIO_ENABLED=false` hides it for everyone (emergency). `AI_STUDIO_BUSINESSES` (the pilot allowlist) is ignored. |
 | `AI_RULES_LIVE_BUSINESSES` (ids) | The receptionist (chat + Retell voice) uses that business's PUBLISHED version. |
 | `AI_RULES_ENABLED=false` | Emergency off for live use everywhere (Studio stays usable). |
 
@@ -129,6 +130,6 @@ call, no tool call). Existing caps stay: $1/conversation, $5/business/day.
 - No real voice test has run with rules live. Latency: the rules add ~0 ms (one deterministic pass); the model remains
   the bottleneck (p50 first chunk 4.7 s in the one production session measured).
 
-Pilot (controlled): apply 0033 → add `poolthru-llc` to `AI_STUDIO_BUSINESSES` → owner configures, tests, publishes →
+Pilot (controlled): apply 0033 (done) → owner configures, tests, publishes (editing is on for every eligible business) →
 review the published version together → add to `AI_RULES_LIVE_BUSINESSES` → a few chat conversations, then a voice
 call (paid) → compare `rules` / `voice_turn` events and the owner's transcript → widen.

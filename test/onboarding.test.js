@@ -303,7 +303,7 @@ test('readiness is honest: messaging activating, SMS and ads not available, next
   assert.deepEqual(by.hours, ['action', null])
   assert.deepEqual(by.email, ['pending', 'activating'])
   assert.deepEqual(by.sms, ['off', 'not_available_yet'])
-  assert.deepEqual(by.ads, ['off', 'not_available_yet'])
+  assert.deepEqual(by.ads, ['pending', 'connect_in_ads'], 'a paid business has Ads from the start: connect an account in the Ads tab')
   assert.equal(r.next, 'hours')
   env.MESSAGES_LIVE = 'true'
   assert.deepEqual(Object.fromEntries((await call(onboarding, 'GET', { cookie })).json.readiness.items.map((i) => [i.id, i.state])).email, 'ok')

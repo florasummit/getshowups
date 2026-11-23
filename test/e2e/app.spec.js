@@ -175,7 +175,8 @@ test.describe('read-only pages @mobile', () => {
     await useSession(context, fixtures.E2E_SESSION_TOKEN)
     await page.goto('/dashboard')
     await expect(page.getByRole('heading', { level: 1, name: fixtures.E2E_CUSTOMER_NAME })).toBeVisible()
-    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Follow-ups', 'Receptionist', 'Website', 'Ads', 'Settings'])
+    // Every eligible business gets the same tabs, Teach Your AI and Ads included, with nothing switched on per business.
+    await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Overview', 'Appointments', 'Follow-ups', 'Receptionist', 'Teach Your AI', 'Website', 'Ads', 'Settings'])
     await expect(page.getByRole('region', { name: 'Your website' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat')).toHaveCount(3)
     // The plan promises direct help: reachable from every owner screen, not only when an account has a problem.

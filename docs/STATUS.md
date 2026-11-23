@@ -2,6 +2,41 @@
 
 _Update at the end of every task. Newest first._
 
+## Self-service tools for every eligible business (2026-11-22) — feat/self-service-tools (no migration)
+
+- Owner decision: Ads and Teach Your AI are part of the product for every eligible business, with no per-business
+  allowlist and no platform-admin activation; new businesses see both the moment their dashboard opens.
+- Root cause of "hidden": two pilot allowlists (`ADS_BUSINESSES`, `AI_STUDIO_BUSINESSES`, each empty = nobody) gated the
+  tabs and routes; production listed only the pilot businesses, so a new business, the GetShowUps workspace and most
+  test businesses had neither tab. Meta's missing Connect is a different cause: no Meta app exists (see below).
+- Change: ONE eligibility rule (server/eligibility.js): `hostingActive` (paid/trialing/past due, never-billed pilot,
+  complimentary account; not a self-serve sign-up before payment, not an ended subscription) for Ads (a suspended
+  business keeps the tab so the hold notice says why its ads are paused), `businessEligible` (+ active business) for
+  Teach Your AI and Website Studio (which already used this rule). The allowlists are ignored; emergency off switches
+  (default on): `ADS_ENABLED=false`, `AI_STUDIO_ENABLED=false`, `WEBSITE_STUDIO_ENABLED=false`. Live use is unchanged:
+  `ADS_LIVE_LAUNCH` (off), `AI_RULES_LIVE_BUSINESSES` (empty), test businesses never live, holds, budget approval,
+  subscription rule. The Ads tab shows the connection card from day one (no business details needed to connect);
+  the Meta row's "Not available yet" wording now says the platform isn't set up (there is no app to "approve"), and
+  every Meta sign-in outcome has a plain notice (not_configured, rate_limited, reconnect_required, transient,
+  permission_denied, app_not_approved, invalid_request, signin_required). Teach Your AI says when the receptionist is
+  off (rules can be prepared and tested meanwhile). Business Review's Teach Your AI state reads the new rule.
+- GetShowUps workspace: the `getshowups` business already exists in production (created 2026-11-22 by the console's
+  one-click sales setup; one member = the founder's platform-admin sign-in; receptionist on; profile and hours set; no
+  website, ad profile or AI rules yet; no billing rows, so hosting is 'active' as a never-billed pilot; excluded from
+  metrics as SALES_BUSINESS). With this release it gets Ads and Teach Your AI like PoolThru, nothing created or changed.
+- Verified: unit 829 (new test/eligibility.test.js: standing by billing status, suspended, switches, old allowlists
+  ignored, fail-closed; rewritten Ads/Google/Teach/overview/results/readiness gate tests), browser (see the PR):
+  every-business Ads tab with both platforms disconnected + the Meta-unconfigured row + sign-in outcome notices,
+  Teach Your AI first screen for a business that never set up its receptionist, the journey's paid business sees both
+  tabs, suspension keeps Ads and withdraws Teach Your AI, dashboard tab list, 320 px without sideways scroll.
+- Meta connection (investigated 2026-11-22, read-only): no Meta app exists anywhere (repo, docs, Keychain by name,
+  Cloudflare secrets/vars: `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_SANDBOX_AD_ACCOUNTS`
+  all absent); no Meta connection, campaign, lead event or audit row in D1; the live routes answer 503 not_configured
+  and the webhook handshake 403. Real OAuth cannot work until the founder creates the app (docs/META_ADS.md "Exact
+  next action"); nothing about Meta is verified against the real API.
+- Production: no secret or setting changed; `ADS_BUSINESSES` / `AI_STUDIO_BUSINESSES` stay set but are ignored (may be
+  removed at leisure). No Google campaign, voice, messaging or PoolThru setting touched.
+
 ## Meta Ads sandbox-to-launch workflow (2026-11-22) — feat/meta-ads-sandbox (no migration)
 
 - Already built before this task (PR feat/meta-ads-testing, 2026-11-21, mocked): Meta OAuth with state cookie and

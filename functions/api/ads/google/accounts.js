@@ -6,7 +6,7 @@ import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { getConnection, markReconnect, upsertConnection } from '../../../../server/ads/connections.js'
 import { accessToken, billingStatusWithToken, describeAccountWithToken, listSelectableAccountsWithToken, normalizeAccountId } from '../../../../server/ads/google.js'
-import { adsEnabled, adsEnabledFor } from '../../../../server/ads/access.js'
+import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { liveFor, logAction } from '../../../../server/ads/campaigns.js'
 
 const STATUS = { reconnect_required: 409, not_approved_for_production: 403, permission_denied: 403, quota_exhausted: 503, transient: 503 }
@@ -31,7 +31,7 @@ export async function onRequestGet({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env)
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const customerId = session.customer.id
   const conn = await getConnection(env, customerId, 'google')
   if (!conn) return json(404, { error: 'not_connected' })
@@ -54,7 +54,7 @@ export async function onRequestPost({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
   const { session, response } = await requireSession(request, env, { write: true })
   if (response) return response
-  if (!adsEnabledFor(env, session.customer.id)) return json(404, { error: 'not_found' })
+  if (!(await adsAccess(env, session.customer))) return json(404, { error: 'not_found' })
   const customerId = session.customer.id
   let body
   try {

@@ -122,7 +122,7 @@ recorded or transcribed (by us or Retell). Whether a disclosure is required is a
 ## 5. Voice release gate (owner decision 2026-11-19)
 
 `RECEPTIONIST_VOICE_BUSINESSES`: comma-separated business ids, no wildcard, empty/unset = nobody (parsed like
-ADS_BUSINESSES). Chat is not affected. Enforced in the public info route (`voice`, `voiceStatus`), the voice call
+AI_RULES_LIVE_BUSINESSES). Chat is not affected. Enforced in the public info route (`voice`, `voiceStatus`), the voice call
 route (403 `voice_not_available`, before any Retell call) and the Retell socket (a call of an unlisted business is
 closed). Owner dashboard: Beta label; "Browser voice: In testing, not available yet". Chat page: no talk button,
 "Talking by voice is in testing and not available yet."

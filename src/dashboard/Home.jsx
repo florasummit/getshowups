@@ -594,7 +594,8 @@ export default function Home({ me, reload }) {
   const billing = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()
-  // Optional tabs: Teach Your AI right after Receptionist (AI_STUDIO_BUSINESSES), Ads before Settings.
+  // Teach Your AI (after Receptionist) and Ads (before Settings) exist for every eligible business (server/eligibility.js);
+  // the API says when they don't (before payment, suspended, emergency switch) and the tab is then simply absent.
   const base = me.features?.teachAi ? TABS.flatMap((t) => (t[0] === 'receptionist' ? [t, ['teach', 'Teach Your AI']] : [t])) : TABS
   const tabs = me.features?.ads ? [...base.slice(0, -1), ['ads', 'Ads'], base.at(-1)] : base
   useEffect(() => {

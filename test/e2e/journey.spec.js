@@ -67,11 +67,14 @@ test('new customer: state-driven from sign-in to a bookable business; interrupti
   const again = await page.request.post('/api/dashboard/billing', { headers: { Origin: SITE }, data: { action: 'checkout', plan: 'founding' } })
   expect([again.status(), (await again.json()).error]).toEqual([409, 'use_portal'])
 
-  // 6. Feature gates for a business that is not allowlisted: Ads and Teach Your AI do not exist for it.
-  for (const path of ['/api/dashboard/ads', '/api/dashboard/ai-rules']) expect((await page.request.get(path)).status(), path).toBe(404)
+  // 6. A paid, set-up business has Ads and Teach Your AI by itself: no allowlist, no platform-admin step.
+  for (const path of ['/api/dashboard/ads', '/api/dashboard/ai-rules']) expect((await page.request.get(path)).status(), path).toBe(200)
   const me = await (await page.request.get('/api/dashboard/me')).json()
-  expect(me.features).toMatchObject({ ads: false, teachAi: false })
-  await expect(page.getByRole('link', { name: 'Ads' })).toHaveCount(0)
+  expect(me.features).toMatchObject({ ads: true, teachAi: true })
+  await page.goto('/dashboard')
+  const nav = page.getByRole('navigation', { name: 'Dashboard' })
+  await expect(nav.getByRole('link', { name: 'Ads', exact: true })).toHaveCount(1)
+  await expect(nav.getByRole('link', { name: 'Teach Your AI' })).toHaveCount(1)
 
   // 7. Invalid booking requests are refused with a reason; nothing is created.
   const lead = (p) => page.request.post(`/api/book/${business}/lead`, { headers: headers(), data: { name: 'Casey Customer', email: 'casey@example.net', phone: '(555) 010-0177', need: 'Weekly cleaning', zip: '29403', website: '', ...p } })

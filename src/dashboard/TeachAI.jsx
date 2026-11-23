@@ -165,6 +165,11 @@ export default function TeachAI() {
         What it knows, what it asks, what counts as urgent, when to hand off. Edits stay in your draft until you test and publish.
       </PageHeader>
       <Flow data={data} draft={draft} dirty={dirty} />
+      {!status.receptionistOn && (
+        <p className="fine" data-receptionist-state="off">
+          Your receptionist is off, so customers don’t talk to it yet. You can prepare and test its rules here now; turn it on in the Receptionist tab when you’re ready.
+        </p>
+      )}
       {msg && (
         <p className={`ui-callout ui-callout--${msg.tone === 'ok' ? 'ok' : msg.tone === 'warn' ? 'warn' : 'bad'}`} role={msg.tone === 'ok' ? 'status' : 'alert'}>
           {msg.text}

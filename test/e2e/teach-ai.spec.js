@@ -111,12 +111,25 @@ test('a page showing older rules can’t save over newer ones; refused requests 
   await expect(proposal.getByRole('button', { name: 'Add to my draft' })).toBeDisabled()
 })
 
-test('businesses not released for Teach Your AI don’t see it (tab, address and API)', async ({ page, context }) => {
+test('every eligible business has Teach Your AI, even one that never set up its receptionist: a useful first screen, nothing published, no model call @mobile', async ({ page, context }) => {
+  // e2e-pool: no pilot list ever named it and it has no receptionist settings at all.
   await useSession(context, fixtures.E2E_SESSION_TOKEN)
+  const modelCalls = []
+  page.on('request', (r) => /anthropic|retell/i.test(r.url()) && modelCalls.push(r.url()))
   await page.goto('/dashboard')
-  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name: 'Receptionist' })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Dashboard' }).getByRole('link', { name: 'Teach Your AI' })).toHaveCount(0)
-  await page.goto('/dashboard/teach')
-  await expect(page.getByRole('heading', { level: 1, name: 'Teach Your AI' })).toHaveCount(0)
-  expect((await page.request.get('/api/dashboard/ai-rules')).status()).toBe(404)
+  const nav = page.getByRole('navigation', { name: 'Dashboard' })
+  await expect(nav.getByRole('link', { name: 'Receptionist' })).toBeVisible()
+  await nav.getByRole('link', { name: 'Teach Your AI' }).click()
+  await expect(page).toHaveURL(/\/dashboard\/teach$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Teach Your AI' })).toBeVisible()
+  await expect(page.getByText('Not published yet').first()).toBeVisible()
+  // Honest state: the receptionist is off, the rules can still be prepared and tested.
+  await expect(page.locator('[data-receptionist-state="off"]')).toContainText('Your receptionist is off')
+  await expect(page.getByRole('navigation', { name: 'Teach Your AI steps' }).getByRole('link')).toHaveCount(4)
+  await expect(page.getByRole('region', { name: 'About your business' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Test your AI' })).toBeVisible()
+  const s = await (await page.request.get('/api/dashboard/ai-rules')).json()
+  expect([s.saved, s.liveVersion ?? null, s.status.receptionistOn, s.status.rulesLive]).toEqual([false, null, false, false])
+  expect(modelCalls).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
 })

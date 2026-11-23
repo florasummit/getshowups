@@ -74,6 +74,14 @@ const RETURNS = {
   no_refresh_token: 'Google didn’t grant lasting access. Click Connect again. If it repeats, remove GetShowUps under your Google Account’s third-party access, then connect.',
   failed: 'Sign-in didn’t finish. Please try again.',
   unauthenticated: 'Sign in to GetShowUps first, then connect.',
+  signin_required: 'Sign in to GetShowUps first, then connect.',
+  not_configured: 'Connecting isn’t available for this business right now, so nothing was connected.',
+  rate_limited: 'Too many sign-in attempts in a short time. Wait a few minutes, then click Connect again.',
+  reconnect_required: 'Meta didn’t accept the sign-in. Click Connect to try again.',
+  transient: 'Meta didn’t respond. Nothing was connected; try again in a minute.',
+  permission_denied: 'Meta didn’t grant GetShowUps access to your ad accounts and Pages. Click Connect again and allow access.',
+  app_not_approved: 'Meta hasn’t approved GetShowUps for this permission yet. Nothing was connected.',
+  invalid_request: 'Meta refused the sign-in. Nothing was connected; try again.',
 }
 function readReturn() {
   const q = new URLSearchParams(window.location.search)
@@ -623,7 +631,9 @@ function Connections({ connections, capabilities, running = 0, onChange }) {
         </div>
         {!available ? (
           <span className="fine" data-platform-unavailable={platform}>
-            {platform === 'meta' ? 'Not available yet: GetShowUps’ Facebook app is still being set up with Meta. You can draft and preview Facebook & Instagram ads now; connecting your Page and ad account comes when Meta approves the app.' : 'Coming soon'}
+            {platform === 'meta'
+              ? 'Not available yet: GetShowUps’ Facebook & Instagram connection isn’t set up on the platform. You can draft and preview Facebook & Instagram ads now; connecting your Page and ad account comes once it is. Nothing to do on your side.'
+              : 'Not available yet: Google Ads sign-in isn’t set up on the platform.'}
           </span>
         ) : (
           attention && (
@@ -1442,7 +1452,8 @@ export default function Ads() {
         <ProfileForm profile={d.profile} onSaved={load} />
       </section>
 
-      {d.profile && <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />}
+      {/* Connecting an account needs no business details first (it spends nothing); the status is shown from day one. */}
+      <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} />
 
       {d.profile && (
         <section className="card" aria-labelledby="review-title">
