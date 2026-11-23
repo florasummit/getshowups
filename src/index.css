@@ -2329,6 +2329,187 @@ svg {
   font-size: 0.85rem;
 }
 
+/* Two offerings: the Growth card above, Enterprise below it, the inquiry form under both (components/Pricing.jsx). */
+.price-grid {
+  display: grid;
+  gap: 20px;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.price-grid .price-card {
+  margin: 0;
+}
+
+.price-card--enterprise {
+  box-shadow: var(--shadow-card);
+}
+
+.price-card--enterprise::before {
+  background: linear-gradient(90deg, var(--lav-300), var(--sky-200));
+}
+
+.price-main--light {
+  background: var(--lav-50);
+  color: var(--text);
+}
+
+.price-main--light .price-name,
+.price-main--light .price-note,
+.price-main--light .price-period {
+  color: var(--gray-500);
+}
+
+.price-main--light .price-amount {
+  color: var(--ink-950);
+}
+
+.badge--lav {
+  background: rgb(91 71 199 / 0.12);
+  color: var(--lav-700);
+}
+
+.price-amount--from {
+  font-size: clamp(2.6rem, 5vw, 4rem);
+}
+
+.price-from {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-label);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+}
+
+.price-list--one {
+  grid-template-columns: 1fr;
+}
+
+/* Enterprise inquiry form (components/EnterpriseInquiry.jsx) */
+.enq-anchor {
+  max-width: 980px;
+  margin: 0 auto;
+  scroll-margin-top: 96px;
+}
+
+.enq {
+  margin-top: 20px;
+  padding: clamp(24px, 3vw, 36px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: var(--shadow-card);
+}
+
+.enq-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.enq-title {
+  margin-top: 6px;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.enq-sub,
+.enq-fine {
+  color: var(--gray-500);
+  font-size: 0.93rem;
+}
+
+.enq-sub {
+  margin-top: 4px;
+}
+
+.enq-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+}
+
+.enq-field {
+  display: grid;
+  gap: 6px;
+}
+
+.enq-field--wide {
+  grid-column: 1 / -1;
+}
+
+.enq-field label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.enq-opt {
+  font-weight: 400;
+  color: var(--gray-500);
+}
+
+.enq-field input,
+.enq-field select,
+.enq-field textarea {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--white);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.enq-field textarea {
+  resize: vertical;
+}
+
+.enq-field input:focus-visible,
+.enq-field select:focus-visible,
+.enq-field textarea:focus-visible {
+  outline: 2px solid var(--sky-700);
+  outline-offset: 1px;
+}
+
+.enq-trap {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.enq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.enq-status {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+}
+
+.enq-status--ok {
+  background: var(--mint-50);
+  color: var(--ink-900);
+}
+
+.enq-status--err {
+  background: #fff4f2;
+  color: #9a2a1a;
+}
+
 /* ============ Early access: what happens next ============ */
 .demo-copy .section-intro {
   margin-inline: 0;
@@ -2535,8 +2716,17 @@ svg {
     min-height: 0;
   }
 
-  .price-list {
+  .price-list,
+  .enq-form {
     grid-template-columns: 1fr;
+  }
+
+  .enq-head {
+    flex-direction: column;
+  }
+
+  .enq-actions .btn {
+    width: 100%;
   }
 
   .footer-cta .btn {

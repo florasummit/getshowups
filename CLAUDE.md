@@ -69,6 +69,9 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
   p/[customer]       Public website (server-rendered).  site-assets/[id]: website images.  _middleware.js: domain routing
   api/ads/google/     Google Ads connect: start, callback, accounts (+ billing status), disconnect.  api/ads/meta/: start, callback, accounts, webhook (leads)
+  api/enterprise/inquiry  Public Enterprise inquiry (GET form token, POST): a lead of the `getshowups` business (server/enterprise.js),
+                     no automatic messages. Enterprise is sold by agreement, never checkout; organizations are design only
+                     (docs/ENTERPRISE_ORGANIZATIONS.md). The $499 plan is named Growth in copy; its plan id stays `founding`
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
@@ -203,7 +206,7 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (it blocks all external network). Mock Google with `context.route`.
 - No new dependencies without a clear reason stated in the PR/summary.
 - Marketing copy: no testimonials, logos, or performance claims. Describe only what works today; label anything not live
-  as coming soon. Founding plan $499/month, no trial, ad spend separate. Get started → /dashboard?plan=founding.
+  as coming soon. Growth $499/month (plan id founding), no trial, ad spend separate; Enterprise from $10,000/month, Contact sales only. Get started → /dashboard?plan=founding.
 
 ## Security rules (non-negotiable)
 

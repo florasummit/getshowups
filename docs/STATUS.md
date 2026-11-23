@@ -2,6 +2,17 @@
 
 _Update at the end of every task. Newest first._
 
+## Enterprise offering (2026-11-23) — feat/enterprise (no migration, no billing change)
+
+- Pricing shows Growth ($499/month; renamed in copy and plan step only, plan id `founding`, Stripe and onboarding
+  unchanged) and Enterprise (starting at $10,000/month, Contact sales, no checkout). The card says organization-wide
+  management is not live.
+- Contact sales form → POST /api/enterprise/inquiry → a lead of the `getshowups` business (source enterprise_inquiry):
+  signed token, trap field, rate limits, no automatic messages, owner notice through the launch gate, counted in the
+  admin sales funnel (test-marked excluded).
+- docs/ENTERPRISE_ORGANIZATIONS.md: design only. Today one sign-in email belongs to exactly one business.
+- Verified with mocks/local workerd; the stored path runs the real handlers over the real migrations in the browser test.
+
 ## Google acquisition engine, step E: owner-approved changes, recommendations, KPIs (2026-11-23) — feat/ads-optimize (uses 0037's ad_change_requests)
 
 - Changes to the account's own campaigns (status, daily budget): propose → current/proposed/effect → owner approval

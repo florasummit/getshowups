@@ -1,5 +1,5 @@
 // The complete self-serve customer journey on the real Pages Functions (local workerd):
-// homepage → Get started → Google sign-in (mock) → business name → founding plan → Stripe Checkout
+// homepage → Get started → Google sign-in (mock) → business name → Growth plan → Stripe Checkout
 // (local Stripe stand-in that sends Stripe-signed webhooks) → guided onboarding → generated website →
 // address / own domain → preview → publish → booking → dashboard → billing portal cancellation. Runs on desktop and on a phone with separate accounts.
 import { test, expect } from './test.js'
@@ -30,7 +30,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('heading', { name: 'What’s your business called?' })).toBeVisible()
   await page.getByLabel('Business name').fill(name)
   await page.getByRole('button', { name: 'Continue to plan' }).click()
-  await expect(page.getByRole('heading', { name: 'Start your founding plan' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Start your Growth plan' })).toBeVisible()
   await expect(page.getByText('$499/month')).toBeVisible()
   await expect(page.getByText('No free trial', { exact: false })).toBeVisible()
   await noOverflow()
@@ -44,7 +44,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Back' }).click()
   await expect(page.getByText('Checkout was cancelled. You haven’t been charged.')).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Start your founding plan' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Start your Growth plan' })).toBeVisible()
   await page.getByRole('button', { name: 'Continue to secure checkout' }).click()
   await expect(page).toHaveURL(firstSession)
 
@@ -169,7 +169,7 @@ test('new customer: get started → pay → onboard → publish → book → man
   // Done: honest checklist (what's live, what's coming) → dashboard.
   await expect(page.getByRole('heading', { name: 'You’re all set' })).toBeVisible()
   const list = page.locator('.checklist')
-  await expect(list.locator('.checklist-item--ok', { hasText: 'Founding plan' })).toBeVisible()
+  await expect(list.locator('.checklist-item--ok', { hasText: 'Growth plan' })).toBeVisible()
   await expect(list.locator('.checklist-item--ok', { hasText: 'Website' })).toBeVisible()
   await expect(list.getByText('Activating soon', { exact: false })).toBeVisible()
   if (!mobile) {

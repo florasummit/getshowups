@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, phoneText } from '../lib/api.js'
 
 const STAGE = { new: 'New', contacted: 'Contacted', replied: 'Replied', booked: 'Booked', closed: 'Closed', opted_out: 'Opted out' }
-const SOURCE = { website_form: 'Website form', booking_page: 'Booking page', sms: 'Text message', google_ads: 'Google Ads', gbp: 'Google Business Profile', call: 'Phone call', other: 'Other' }
+const SOURCE = { website_form: 'Website form', booking_page: 'Booking page', sms: 'Text message', google_ads: 'Google Ads', gbp: 'Google Business Profile', call: 'Phone call', enterprise_inquiry: 'Enterprise inquiry', other: 'Other' }
 const NEEDS = {
   human_requested: 'Asked for a person',
   ai_unsure: 'The assistant wasn’t sure how to answer',

@@ -17,6 +17,8 @@ const NAMES = new Set([
   'conversation_finished', // { industry }
   'early_access_cta', // { location: 'header' | 'hero' | 'demo' | 'pricing' | 'footer' | 'mobile_nav' | 'sales_chat' }
   'early_access_open', // { how: 'embed_visible' | 'new_tab' }
+  'enterprise_cta', // { location: 'pricing' }
+  'enterprise_inquiry', // { outcome: 'sent' | 'error' | 'rate_limited' | 'unavailable' }
 ])
 const CODE = /^[a-z0-9_]{1,32}$/
 

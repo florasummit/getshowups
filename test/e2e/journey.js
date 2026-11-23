@@ -60,7 +60,7 @@ export function customerActions(who) {
     create_business: async (page) => {
       await page.getByLabel('Business name').fill(who.name)
       await page.getByRole('button', { name: 'Continue to plan' }).click()
-      await expect(page.getByRole('heading', { name: 'Start your founding plan' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Start your Growth plan' })).toBeVisible()
     },
     setup_payment: async (page) => {
       // Stripe-hosted checkout (local stand-in) with the sandbox test card; access follows the signed webhook.

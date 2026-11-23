@@ -118,7 +118,7 @@ function Metrics({ m }) {
           <div data-sales-funnel={m.sales ? 'on' : 'off'}>
             <dt>Sales funnel, acquisition and revenue scenarios</dt>
             <dd>
-              {m.sales ? `${m.sales.leads} prospects · ${m.sales.consultationsBooked} consultations booked · ${m.sales.consultationsAttended} attended (30 days). ` : 'The GetShowUps sales business is not set up yet. '}
+              {m.sales ? `${m.sales.leads} prospects · ${m.sales.consultationsBooked} consultations booked · ${m.sales.consultationsAttended} attended${m.sales.enterpriseInquiries == null ? '' : ` · ${m.sales.enterpriseInquiries} enterprise ${m.sales.enterpriseInquiries === 1 ? 'inquiry' : 'inquiries'}`} (30 days). ` : 'The GetShowUps sales business is not set up yet. '}
               <a href="/admin/growth">Open Growth</a> for samples, date ranges, the simulator and the next experiment.
             </dd>
           </div>

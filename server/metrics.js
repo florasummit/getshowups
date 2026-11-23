@@ -299,11 +299,15 @@ async function salesFunnel(db, since, internal) {
     .bind(SALES_BUSINESS, since, internal)
     .first()) || {}
   const requests = await db.prepare('SELECT count(*) AS n FROM receptionist_requests WHERE customer = ?1 AND created_at >= ?2').bind(SALES_BUSINESS, since).first().catch(() => null)
+  // Enterprise inquiries (pricing section → Contact sales, server/enterprise.js): leads of the sales business whose thread
+  // source says so (lead_threads, migration 0024; null before it, never a guess).
+  const enterprise = await db.prepare(`SELECT count(*) AS n FROM lead_threads t JOIN leads l ON l.id = t.lead_id WHERE t.customer = ?1 AND t.source = 'enterprise_inquiry' AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`).bind(SALES_BUSINESS, since, internal).first().catch(() => null)
   return {
     days: 30,
     leads: leads.total || 0,
     qualifiedLeads: leads.qualified || 0,
     callbackRequests: requests ? requests.n || 0 : null,
+    enterpriseInquiries: enterprise ? enterprise.n || 0 : null,
     consultationsBooked: appts.booked || 0,
     consultationsAttended: appts.attended || 0,
     consultationsMissed: appts.missed || 0,
