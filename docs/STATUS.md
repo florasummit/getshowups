@@ -21,6 +21,38 @@ _Update at the end of every task. Newest first._
 - docs/ENTERPRISE_ORGANIZATIONS.md: design only. Today one sign-in email belongs to exactly one business.
 - Verified with mocks/local workerd; the stored path runs the real handlers over the real migrations in the browser test.
 
+## Release blockers closed: migration 0037 applied, homepage copy, GAQL field fix (2026-11-23) — fix/gaql-fields
+
+- **Migration 0037 applied to production** 18:26 UTC (founder approval 2026-11-23). Pre-migration backup
+  `~/getshowups-backups/prod-20261123T182612Z-pre-0037.sql` (restored into scratch: integrity ok, 0 FK violations,
+  83 tables, counts = production); rehearsal applied twice on that copy (84 → 91 tables, existing rows unchanged,
+  audit triggers intact). Production after: 90 tables (the 7 new ones empty), customers 6 / leads 14 /
+  appointments 9 / ad_campaigns 7 / ad_connections 2 / audit_log 239 unchanged; post export fingerprint differs
+  from pre only by the 7 new tables. Recovery: older code ignores the tables; no drop needed.
+- **First cron run after 0037** (18:30 UTC): both connected Google test accounts (poolthru-llc,
+  gsu-stripe-test-pools) answered `invalid_request` to the campaign list query. Cause: it named
+  `campaign.start_date` / `campaign.end_date`, which do not exist in the v26 field reference (the fields are
+  `campaign.start_date_time` / `campaign.end_date_time`, 'yyyy-MM-dd HH:mm:ss'). The stand-in accepted any field,
+  so mocks could not catch it: exactly the "no production validation from mocks" caveat in the step A entry.
+  Fix: the real field names; the request-failed log line now carries Google's error-code enum names
+  (`queryError.UNRECOGNIZED_FIELD`, identifiers only, never the message) so the next refused query is diagnosable;
+  stand-in and unit tests updated (a test asserts the query text). The retry happens by itself: failed reads are
+  retried after 1 h by the cron `imports` step. No row was written to the new tables by the failed reads except
+  `ad_import_state` (ok:0), which the next successful read replaces.
+- **Homepage copy** (PR #134, main a432cbc, deployment 0f92732f-ad15-488a-8b3b-cacdd6e9b3e1): founder-approved hero
+  paragraph "Get your AI receptionist and bookings running in under an hour, with your first ads drafted and ready to
+  approve. One platform to attract customers, capture leads, and grow your business." Copy only; the homepage shell is
+  byte-identical apart from asset hashes. Reword to the founder's original ("ads … running") once live ad delivery is
+  on for customers.
+- Founder actions (verified on Google's pages 2026-11-23): Google Ads Explorer access = Cloud console →
+  Google Ads API overview → "Upgrade access level" → "Apply for access" (automatic review in most cases; a project on
+  the free trial or with a suspended billing account is refused). Business Profile API = request form
+  https://support.google.com/business/contact/api_default ("Application for Basic API Access"; a profile verified and
+  active 60+ days with a website; approval shows as quota 300 QPM), then enable the Business Profile APIs and set
+  GBP_ENABLED=true (approval).
+- Next: merge this fix (approval), confirm the next cron import of the two test accounts reads ok, then the
+  founder's Explorer application.
+
 ## Google acquisition engine, step E: owner-approved changes, recommendations, KPIs (2026-11-23) — feat/ads-optimize (uses 0037's ad_change_requests)
 
 - Changes to the account's own campaigns (status, daily budget): propose → current/proposed/effect → owner approval

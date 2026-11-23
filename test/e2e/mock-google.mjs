@@ -178,7 +178,7 @@ const leadRow = (acct, l) => ({
   localServicesLead: { resourceName: `customers/${acct}/localServicesLeads/${l.id}`, id: l.id, leadType: l.type, leadStatus: l.status, leadCharged: l.charged, ...(l.credit ? { creditDetails: { creditState: l.credit } } : {}), categoryId: 'xcat:service_area_business_pool_cleaner', creationDateTime: `${ymdDaysAgo(l.daysAgo)} 10:15:00`, campaign: `customers/${acct}/campaigns/70000000002` },
 })
 const existingRow = (acct, c) => ({
-  campaign: { resourceName: `customers/${acct}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, servingStatus: c.servingStatus, advertisingChannelType: c.channel, biddingStrategyType: c.bidding, startDate: c.startDate, campaignBudget: c.budget || `customers/${acct}/campaignBudgets/${c.id}`, networkSettings: c.network || { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } },
+  campaign: { resourceName: `customers/${acct}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, servingStatus: c.servingStatus, advertisingChannelType: c.channel, biddingStrategyType: c.bidding, startDateTime: c.startDate ? `${c.startDate} 00:00:00` : undefined, campaignBudget: c.budget || `customers/${acct}/campaignBudgets/${c.id}`, networkSettings: c.network || { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } },
   campaignBudget: { resourceName: c.budget || `customers/${acct}/campaignBudgets/${c.id}`, amountMicros: c.amountMicros, explicitlyShared: false },
 })
 const ymdDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)

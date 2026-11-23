@@ -247,7 +247,10 @@ test('mapError: allowlisted codes only, never the provider message', () => {
   ]
   for (const [status, b, error, retryable, reconnect] of cases) {
     const r = G.mapError(status, b)
-    assert.deepEqual(r, { ok: false, error, httpStatus: status, retryable, reconnect }, error)
+    const { codes, ...rest } = r
+    assert.deepEqual(rest, { ok: false, error, httpStatus: status, retryable, reconnect }, error)
+    // invalid_request carries Google's error-code enum names (identifiers only), nothing else does.
+    assert.ok(error === 'invalid_request' ? codes.every((c) => /^[A-Za-z]+\.[A-Z_]+$/.test(c)) : codes === undefined, error)
     assert.ok(!JSON.stringify(r).includes(LEAK))
   }
 })
@@ -713,9 +716,9 @@ test('invalid request maps to invalid_request without the provider message', asy
   await connected()
   ads = (path, body, h) => (/googleAds:mutate$/.test(path) ? adsError(400, 'INVALID_ARGUMENT', { campaignError: 'DUPLICATE_CAMPAIGN_NAME' }) : defaultAds(path, body, h))
   const r = remember(await G.launchCampaign(env, 'pools', campaign()))
-  assert.deepEqual(r, { ok: false, error: 'invalid_request', httpStatus: 400, retryable: false, reconnect: false })
+  assert.deepEqual(r, { ok: false, error: 'invalid_request', httpStatus: 400, retryable: false, reconnect: false, codes: ['campaignError.DUPLICATE_CAMPAIGN_NAME'] })
   assert.equal(adsCalls(/googleAds:mutate$/).length, 1)
-  assert.ok(logs.some((l) => l.includes('invalid_request')), 'the code is logged, not the message')
+  assert.ok(logs.some((l) => l.includes('invalid_request campaignError.DUPLICATE_CAMPAIGN_NAME')), 'the codes are logged, not the message')
 })
 
 // ---------- status, budget, metrics ----------
@@ -1440,4 +1443,14 @@ test('ads hold: an unreachable (orphaned) running campaign is escalated, never r
   assert.equal(await H.runningOnHold(env, 'pools'), null)
   assert.equal(db.sql.prepare("SELECT action FROM admin_audit ORDER BY id DESC LIMIT 1").get().action, 'ads.confirm_paused_externally')
   assert.match(db.sql.prepare("SELECT reason FROM ad_actions WHERE kind = 'pause' AND status = 'applied' ORDER BY at DESC LIMIT 1").get().reason, /Confirmed paused in Google Ads by admin \(GetShowUps has no access: account_changed\)/)
+})
+
+test('a refused query is logged with Google’s error-code enum names (never its message), so a bad field can be diagnosed from production logs', async () => {
+  await connected()
+  ads = (path) => (/searchStream$/.test(path) ? adsError(400, 'INVALID_ARGUMENT', { queryError: 'UNRECOGNIZED_FIELD' }) : defaultAds(path, {}))
+  const r = await G.readAccountCampaigns(env, 'pools')
+  assert.deepEqual([r.ok, r.error, r.codes], [false, 'invalid_request', ['queryError.UNRECOGNIZED_FIELD']])
+  const line = logs.find((l) => l.includes('Google Ads request failed:'))
+  assert.ok(line && line.includes('400 invalid_request queryError.UNRECOGNIZED_FIELD'), line)
+  assert.ok(!logs.join('\n').includes(LEAK) && !logs.join('\n').includes('Jane Doe'), 'Google’s message never reaches the logs')
 })

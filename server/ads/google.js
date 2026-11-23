@@ -83,7 +83,8 @@ export function mapError(httpStatus, body) {
   if (has('quotaError.') || httpStatus === 429 || status === 'RESOURCE_EXHAUSTED') return failure('quota_exhausted', { httpStatus, retryable: true })
   if (codes.some((c) => c.includes('CONCURRENT_MODIFICATION')) || status === 'ABORTED') return failure('concurrent_modification', { httpStatus, retryable: true })
   if (has('internalError.') || httpStatus === 0 || httpStatus >= 500) return failure('transient', { httpStatus, retryable: true })
-  return failure('invalid_request', { httpStatus })
+  // Google's error-code enum names (e.g. queryError.UNRECOGNIZED_FIELD): identifiers only, safe to log.
+  return { ...failure('invalid_request', { httpStatus }), codes: codes.filter((c) => /^[A-Za-z]+\.[A-Z_]+$/.test(c)).slice(0, 3) }
 }
 
 // ---------- tokens + requests ----------
@@ -128,7 +129,9 @@ async function call(env, token, method, path, { body, loginCustomerId, retry = t
       result = failure('transient', { httpStatus: 0, retryable: true })
     }
     if (result.ok || !result.retryable || !retry || attempt >= 1) {
-      if (!result.ok) console.error('Google Ads request failed:', method, path.split('?')[0].replace(/\d{6,}/g, '<id>'), result.httpStatus, result.error)
+      // Status, our code and Google's error-code enum names (never Google's message or the payload), so a refused
+      // query can be diagnosed from the logs: e.g. queryError.UNRECOGNIZED_FIELD.
+      if (!result.ok) console.error('Google Ads request failed:', method, path.split('?')[0].replace(/\d{6,}/g, '<id>'), result.httpStatus, result.error, ...(result.codes?.length ? [result.codes.slice(0, 2).join(' ')] : []))
       return result
     }
     await sleep(retryDelay(env))
@@ -310,7 +313,7 @@ export async function readAccountCampaigns(env, customerId, { maxDetail = 25 } =
   return withAccount(env, customerId, async (token, conn) => {
     const q = (query) => call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
     const list = await q(
-      'SELECT campaign.id, campaign.name, campaign.status, campaign.serving_status, campaign.advertising_channel_type, campaign.advertising_channel_sub_type, campaign.bidding_strategy_type, campaign.start_date, campaign.end_date, campaign.network_settings.target_google_search, campaign.network_settings.target_search_network, campaign.network_settings.target_content_network, campaign.geo_target_type_setting.positive_geo_target_type, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != \'REMOVED\' ORDER BY campaign.id LIMIT 200',
+      'SELECT campaign.id, campaign.name, campaign.status, campaign.serving_status, campaign.advertising_channel_type, campaign.advertising_channel_sub_type, campaign.bidding_strategy_type, campaign.start_date_time, campaign.end_date_time, campaign.network_settings.target_google_search, campaign.network_settings.target_search_network, campaign.network_settings.target_content_network, campaign.geo_target_type_setting.positive_geo_target_type, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != \'REMOVED\' ORDER BY campaign.id LIMIT 200',
     )
     if (!list.ok) return list
     const campaigns = []
@@ -329,8 +332,9 @@ export async function readAccountCampaigns(env, customerId, { maxDetail = 25 } =
         channelType: channel,
         channelSubType: typeof c.advertisingChannelSubType === 'string' && c.advertisingChannelSubType !== 'UNSPECIFIED' ? c.advertisingChannelSubType.slice(0, 60) : null,
         bidding: typeof c.biddingStrategyType === 'string' ? c.biddingStrategyType.slice(0, 60) : null,
-        startDate: ymd(c.startDate),
-        endDate: ymd(c.endDate),
+        // Google reports 'yyyy-MM-dd HH:mm:ss' in the account's time zone (campaign.start_date_time / end_date_time).
+        startDate: ymd(String(c.startDateTime || '').slice(0, 10)),
+        endDate: ymd(String(c.endDateTime || '').slice(0, 10)),
         networks: { googleSearch: c.networkSettings?.targetGoogleSearch === true, searchPartners: c.networkSettings?.targetSearchNetwork === true, display: c.networkSettings?.targetContentNetwork === true },
         geoTargetType: typeof c.geoTargetTypeSetting?.positiveGeoTargetType === 'string' ? c.geoTargetTypeSetting.positiveGeoTargetType : null,
         dailyBudgetCents: b.amountMicros != null && b.explicitlyShared !== true ? centsFromMicros(b.amountMicros) : null,

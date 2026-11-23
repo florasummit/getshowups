@@ -37,7 +37,7 @@ const ymd = (ms) => new Date(ms).toISOString().slice(0, 10)
 
 // The established advertiser's account (MOCK DATA): one running Search campaign with details, one paused Local
 // Services campaign, one of GetShowUps' own (tagged), one removed.
-const SEARCH = { id: '70000000001', name: 'Pool Cleaning – Charleston', status: 'ENABLED', servingStatus: 'SERVING', advertisingChannelType: 'SEARCH', biddingStrategyType: 'TARGET_SPEND', startDate: '2026-03-01', networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } }
+const SEARCH = { id: '70000000001', name: 'Pool Cleaning – Charleston', status: 'ENABLED', servingStatus: 'SERVING', advertisingChannelType: 'SEARCH', biddingStrategyType: 'TARGET_SPEND', startDateTime: '2026-03-01 00:00:00', networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false }, geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE' } }
 const LSA = { id: '70000000002', name: 'Service Area Leads', status: 'PAUSED', servingStatus: 'NONE', advertisingChannelType: 'LOCAL_SERVICES', biddingStrategyType: 'MANUAL_CPA' }
 const OURS = { id: '70000000009', name: 'Pools Co — Search [gsu:campaign00001]', status: 'PAUSED', advertisingChannelType: 'SEARCH' }
 let accountCampaigns
@@ -156,7 +156,11 @@ test('first read: the account’s own campaigns are imported read-only with sett
   assert.deepEqual(s.locations, [{ name: 'Charleston, South Carolina, United States', type: 'City' }])
   assert.deepEqual(s.negativeKeywords, ['jobs'])
   assert.deepEqual(s.keywords.map((k) => `${k.text}|${k.match}`), ['pool cleaning charleston|PHRASE', 'pool service near me|EXACT'])
-  assert.deepEqual([s.ads[0].headlines, s.ads[0].finalUrls, s.finalUrls, s.conversionGoals, s.bidding, s.languages, s.geoTargetType], [['Charleston Pool Cleaning', 'Book a Visit Online'], ['https://harborpool.example/book'], ['https://harborpool.example/book'], [{ category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE' }], 'TARGET_SPEND', 1, 'PRESENCE'])
+  assert.deepEqual([s.ads[0].headlines, s.ads[0].finalUrls, s.finalUrls, s.conversionGoals, s.bidding, s.languages, s.geoTargetType, s.startDate, s.endDate], [['Charleston Pool Cleaning', 'Book a Visit Online'], ['https://harborpool.example/book'], ['https://harborpool.example/book'], [{ category: 'SUBMIT_LEAD_FORM', origin: 'WEBSITE' }], 'TARGET_SPEND', 1, 'PRESENCE', '2026-03-01', null])
+  // The list query names only fields that exist in the v26 reference (campaign.start_date does not; the
+  // date-time fields do). Production refused the first version with queryError.UNRECOGNIZED_FIELD.
+  const listQuery = calls.find((c) => /FROM campaign WHERE campaign\.status/.test(c.body?.query || '')).body.query
+  assert.ok(listQuery.includes('campaign.start_date_time, campaign.end_date_time') && !/campaign\.start_date[, ]/.test(listQuery) && !/campaign\.end_date[, ]/.test(listQuery), listQuery)
   assert.equal(s.externalId, undefined, 'settings never duplicate identifiers kept in columns')
   // Metrics: 90 days requested for the new campaigns, one row per day for the Search campaign.
   const m = calls.find((c) => /segments\.date BETWEEN/.test(c.body?.query || '')).body.query
