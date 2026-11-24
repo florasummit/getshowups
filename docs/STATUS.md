@@ -2,6 +2,10 @@
 
 _Update at the end of every task. Newest first._
 
+## A–Z plan phases A–I (2026-11-24) — #141 to #145 + az/i-final
+
+- Record: docs/AZ_PROGRESS.md (evidence, deployments, rollback ids, owner items). Live main cbf2bf4 / 689a0549.
+
 ## Writing help in owner fields (2026-11-23) — feat/ai-writing (no migration)
 
 - Draft / Improve / Shorten under description, greeting, before-visit and cancellation text. Owner-pressed, one included
