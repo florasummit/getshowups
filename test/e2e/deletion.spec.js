@@ -25,8 +25,7 @@ test('owner permanently deletes the account: typed confirmation; site, booking a
   await expect(page.locator('[data-account-deleted]')).toContainText('Your account is being deleted')
 
   // At once: no access to the business, booking page and public API gone.
-  const me = await (await page.request.get('/api/dashboard/me')).json()
-  expect(me.customer).toBeNull()
+  expect((await page.request.get('/api/dashboard/me')).status()).toBe(401) // signed out everywhere
   expect((await page.request.get(`/api/book/${id}`)).status()).toBe(404)
 
   // The founder sees it under Deleted accounts with the completed record; billing ended (Stripe stand-in).
