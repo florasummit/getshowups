@@ -7,7 +7,7 @@
 // check is sent back once with the reason, then the looked-up records are shown without prose.
 import { HELP } from '../src/content/help.js'
 import { inventedNumbers } from './fact-numbers.js'
-import { chat, costOf, operatorModel } from './operator-model.js'
+import { chat, costOf, operatorModel, providerReason } from './operator-model.js'
 import { knownRecords, runTool, toolContext, TOOLS, whenText } from './operator-tools.js'
 
 export const BOUNDS = { rounds: 5, calls: 8, callMs: 25_000, totalMs: 40_000, tokens: 1200, answer: 1800, resultChars: 7000 }
@@ -115,7 +115,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
       reply = await chat(env, model, { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens }, Math.min(BOUNDS.callMs, left))
     } catch (err) {
       trace?.push({ error: String(err?.message).slice(0, 200) })
-      return { ok: false, reason: err?.message === 'ai_timeout' || /Timeout/.test(err?.name) ? 'timeout' : 'unavailable', looked: results.length > 0, ...base() }
+      return { ok: false, reason: providerReason(err), looked: results.length > 0, ...base() }
     }
     cost += costOf(model, reply.usage)
     trace?.push({ round, calls: reply.calls, text: reply.text, usage: reply.usage })

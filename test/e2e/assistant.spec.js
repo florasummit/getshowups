@@ -147,3 +147,29 @@ test('follow-up writing: a checked suggestion lands in the editable reply box; n
   await expect(box).toHaveValue('Edited by me.')
   expect(sent).toEqual([])
 })
+
+test('assistant: when the AI allowance is used up it says so, when it returns, and offers what still works @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+  const resumesAt = Date.parse('2026-11-25T00:00:00Z')
+  const asked = []
+  await page.route('**/api/dashboard/assist', (r) => {
+    const q = r.request().postDataJSON().question
+    asked.push(q)
+    // The refused question is stubbed; everything else is the real handler.
+    return q === 'Write me a poem' ? r.fulfill({ status: 503, json: { error: 'quota', resumesAt, try: ['What is this page for?'], days: 30 } }) : r.continue()
+  })
+  await page.goto('/dashboard/teach')
+  await page.getByRole('button', { name: 'Assistant' }).click()
+  const panel = panelOf(page)
+  await panel.getByRole('textbox').fill('Write me a poem')
+  await page.keyboard.press('Enter')
+  await expect(panel).toContainText('today’s shared AI allowance is used up')
+  await expect(panel).toContainText('They’re back')
+  await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+  await panel.getByRole('button', { name: 'What is this page for?' }).first().click()
+  await expect(panel).toContainText('This is Teach Your AI')
+  await panel.getByRole('textbox').fill('Where is my help button?')
+  await page.keyboard.press('Enter')
+  await expect(panel).toContainText('top of every dashboard page')
+  expect(await wide(page)).toBeLessThanOrEqual(0)
+})

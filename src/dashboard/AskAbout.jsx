@@ -12,7 +12,11 @@ const ERRORS = {
   empty_question: 'Type a question first.',
   too_long: 'Please ask in fewer words.',
   rate_limited: 'You’ve reached the question limit for now. Explanations on this page always work.',
-  unavailable: 'Answers aren’t available right now. Explanations on this page always work.',
+  unavailable: 'The AI couldn’t be reached just now. Try again in a minute.',
+  busy: 'The AI is busy just now. Try again in a minute.',
+  timeout: 'The AI took too long. Try again, or ask for one thing at a time.',
+  setup: 'AI answers are switched off until GetShowUps fixes its AI account. Trying again won’t help. Your pages and records work as usual.',
+  quota: 'AI answers are paused because today’s shared AI allowance is used up. Trying again won’t help.',
 }
 const OTHER = 'The answer included something we couldn’t confirm, so it wasn’t shown. Try asking differently.'
 const BLANK = 'Why isn’t this available yet?'
@@ -159,7 +163,7 @@ function Records({ list }) {
   )
 }
 
-function Entry({ e, retry, onState }) {
+function Entry({ e, retry, ask, onState }) {
   return (
     <div className="ask-entry">
       <p className="ask-q">
@@ -195,12 +199,27 @@ function Entry({ e, retry, onState }) {
       {e.error && (
         <p className="ask-error">
           {e.error}{' '}
+          {e.resumesAt && <>They’re back {new Date(e.resumesAt).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}. </>}
           {e.retry && (
             <button type="button" className="link-btn" onClick={retry}>
               Try again
             </button>
           )}
         </p>
+      )}
+      {e.error && e.tries?.length > 0 && (
+        <div data-ask-works>
+          <p className="fine">These work without AI:</p>
+          <ul className="ask-ideas">
+            {e.tries.map((x) => (
+              <li key={x}>
+                <button type="button" onClick={() => ask(x)}>
+                  {x}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {e.answer && (
         <div className="ask-answer">
@@ -249,7 +268,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const done =
       status === 200
         ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
-        : { error: code === 'refused' ? OTHER : ERRORS[code], retry: code === 'unavailable', evidence: data.evidence, days: data.days ?? ctx.days }
+        : { error: code === 'refused' ? OTHER : ERRORS[code], retry: ['unavailable', 'busy', 'timeout'].includes(code), resumesAt: code === 'quota' ? data.resumesAt : null, tries: data.try, evidence: data.evidence, days: data.days ?? ctx.days }
     setTalk((t) => t.map((e) => (e.id === key ? { ...entry, busy: false, ...done } : e)))
     if (status === 200 && fromBox) setQ((now) => (now === question ? '' : now))
   }
@@ -294,7 +313,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
       {!topic && !talk.length && <p className="fine">Ask in your own words. I look up your appointments, inquiries, numbers and settings, and get changes ready for you to approve.</p>}
       <div className="ask-live" ref={live} tabIndex={-1} role="log" aria-live="polite" aria-busy={busy}>
         {talk.map((e) => (
-          <Entry key={e.id} e={e} retry={() => send(e.q, { replace: e })} onState={onState} />
+          <Entry key={e.id} e={e} retry={() => send(e.q, { replace: e })} ask={suggest} onState={onState} />
         ))}
       </div>
       {ideas.length > 0 && !busy && (

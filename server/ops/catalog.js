@@ -561,7 +561,7 @@ registerCapability({
   name: 'Dashboard assistant',
   journey: 'onboarding',
   description: 'Owner questions from any dashboard page: curated help, own counts, general business questions, reviewed service-area changes (server/assist.js, proposals.js). Proactive insights are deterministic (server/insights.js).',
-  state: (env) => (env.AI_ASSIST_ENABLED === 'false' || env.AI_ASSIST_CHAT_ENABLED === 'false' ? { mode: 'disabled', note: 'Switched off' } : env.AI?.run ? { mode: 'live' } : { mode: 'missing', note: 'Workers AI binding missing' }),
+  state: (env) => (env.AI_ASSIST_ENABLED === 'false' || env.AI_ASSIST_CHAT_ENABLED === 'false' ? { mode: 'disabled', note: 'Switched off' } : env.OPERATOR_PROVIDER === 'claude' && !env.OPERATOR_ANTHROPIC_API_KEY && env.AI?.run ? { mode: 'live', note: 'OPERATOR_PROVIDER=claude but OPERATOR_ANTHROPIC_API_KEY is missing: using Workers AI (small shared daily allowance)' } : env.AI?.run || env.OPERATOR_ANTHROPIC_API_KEY ? { mode: 'live' } : { mode: 'missing', note: 'Workers AI binding missing' }),
   verify: seen('answered question', 30, `SELECT max(at) AS at FROM events e WHERE e.type = 'ai_ask' AND json_extract(e.props, '$.ok') = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })
 registerCapability({

@@ -239,7 +239,8 @@ test('outage, timeout, quota and garbage: the records still answer plain questio
     assert.deepEqual([plain.status, plain.body.kind, plain.body.records[0].name], [200, 'records', 'Jamie Rivera'])
     assert.equal((await post('alpha', { question: 'who hasnt been answered' })).body.records[0].name, 'Dana Fox')
     const other = await post('alpha', { question: 'write me a poem' })
-    assert.deepEqual([other.status, other.body.error], [503, 'unavailable'])
+    assert.deepEqual([other.status, other.body.error, other.body.resumesAt > Date.now()], [503, /4006/.test(err.message) ? 'quota' : 'timeout', /4006/.test(err.message)])
+    assert.ok(other.body.try.length)
     assert.doesNotMatch(JSON.stringify(other.body), /allocation|4006/)
   }
   db.sql.exec('DELETE FROM rate_limits')

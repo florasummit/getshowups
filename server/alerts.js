@@ -5,7 +5,7 @@
 //   availability  the booking page shows no times because lookups keep failing (not "no free time")
 //   comms         messages fail to deliver (one failed booking confirmation, or 3+ failures in an hour)
 //   incident      any other critical/high open incident (payments, messaging, receptionist, domains, background work)
-//   assistant     the dashboard assistant failed 3+ times in an hour and never succeeded
+//   assistant     the dashboard assistant failed 3+ times in an hour (or once because the AI allowance or account refused) and never succeeded
 // Not covered: the 5-minute job itself stopping (nothing would run to say so; check Business Review's last run).
 // OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Recipients: PLATFORM_ADMIN_EMAILS only, and only
 // those the launch gate would deliver to NOW (recipientAllowed: while MESSAGES_LIVE is off, MESSAGE_TEST_RECIPIENTS),
@@ -139,11 +139,11 @@ async function otherIncidents(db, now) {
     .catch(() => ({ results: [] }))
   for (const r of inc.results) out.push({ kind: 'incident', customer: r.customer || PLATFORM, key: r.id, facts: { feature: r.feature, error: r.code, firstSeen: r.first_seen, lastSeen: r.last_seen } })
   const a = await db
-    .prepare("SELECT coalesce(sum(json_extract(props, '$.ok') = 0 AND json_extract(props, '$.reason') IN ('unavailable','timeout')), 0) AS bad, coalesce(sum(json_extract(props, '$.ok') = 1), 0) AS good FROM events WHERE type = 'ai_ask' AND at >= ?1")
+    .prepare("SELECT coalesce(sum(json_extract(props, '$.ok') = 0 AND json_extract(props, '$.reason') IN ('unavailable','timeout','busy','quota','setup')), 0) AS bad, coalesce(sum(json_extract(props, '$.reason') IN ('quota','setup')), 0) AS down, max(CASE WHEN json_extract(props, '$.ok') = 0 THEN json_extract(props, '$.reason') END) AS reason, coalesce(sum(json_extract(props, '$.ok') = 1), 0) AS good FROM events WHERE type = 'ai_ask' AND at >= ?1")
     .bind(now - HOUR)
     .first()
     .catch(() => null)
-  if (a?.bad >= 3 && !a.good) out.push({ kind: 'assistant', customer: PLATFORM, key: `d${utcDay(now)}`, facts: { failedLastHourAssistant: a.bad } })
+  if ((a?.bad >= 3 || a?.down) && !a.good) out.push({ kind: 'assistant', customer: PLATFORM, key: `d${utcDay(now)}`, facts: { failedLastHourAssistant: a.bad, ...(a.down ? { error: a.reason } : {}) } })
   return out
 }
 

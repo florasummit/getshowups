@@ -107,6 +107,19 @@ async function claude(env, m, { system, messages, tools, allTools, maxTokens }, 
   return { calls: res.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input })), text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim(), usage, native: res.content }
 }
 
+// Why the provider refused, as a code (its message is never shown or stored):
+//   quota        the included model's daily free allowance is used up (Workers AI 4006); returns at 00:00 UTC
+//   setup        the provider refuses this account or key (auth, credit): needs the platform owner, retrying won't help
+//   timeout | busy | unavailable   may work in a moment
+export function providerReason(err) {
+  const m = String(err?.message || '')
+  if (/^4006\b|daily free allocation/i.test(m)) return 'quota'
+  if (m === 'ai_timeout' || /Timeout/.test(err?.name || '')) return 'timeout'
+  if ([401, 402, 403].includes(err?.status) || /credit balance|billing|spend(ing)? limit|usage limit/i.test(m) || /^(10000|5018)\b/.test(m)) return 'setup'
+  if (err?.status === 429 || err?.status === 529 || /^3040\b|capacity/i.test(m)) return 'busy'
+  return 'unavailable'
+}
+
 // → { calls, text, usage, native? }. Throws Error('ai_timeout') or a provider error.
 export const chat = (env, m, req, ms) => (m.provider === 'claude' ? claude : workers)(env, m, req, ms)
 export const costOf = (m, u) => u.in * m.price.in + u.out * m.price.out + u.read * m.price.read + u.write * m.price.write

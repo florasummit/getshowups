@@ -96,6 +96,12 @@ export async function hit(env, rule, subject, now = Date.now()) {
   return { limited: false }
 }
 
+// Gives one use back when it turned out to buy nothing (the provider refused the call). Never throws, never below zero.
+export async function unhit(env, rule, subject, now = Date.now()) {
+  const win = Math.floor(now / (RULES[rule].windowSec * 1000))
+  await env.ONBOARDING_DB.prepare('UPDATE rate_limits SET count = count - 1 WHERE key = ?1 AND win = ?2 AND count > 0').bind(`${rule}:${await sha256Hex(subject)}`, win).run().catch(() => null)
+}
+
 export const hitByIp = (env, rule, request) => hit(env, rule, clientIp(request))
 
 export const tooManyJson = (retryAfter) => {
