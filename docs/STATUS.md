@@ -2,6 +2,11 @@
 
 _Update at the end of every task. Newest first._
 
+## Assistant provider configured (2026-11-24)
+
+The owner set OPERATOR_PROVIDER and OPERATOR_ANTHROPIC_API_KEY in Cloudflare. They take effect on the deployment made after
+them. Spending limits unchanged ($2/day overall, $0.10/day per business, 20 questions/day and 5/minute per business).
+
 ## Operator, alerts, key rotation, deletion, backups (2026-11-24)
 
 docs/ASSISTANT_PROGRESS.md (evaluation), docs/KEY_ROTATION.md, docs/BACKUPS.md, docs/DATA_REQUESTS.md, docs/pilot/CUSTOMER_ZERO.md.
