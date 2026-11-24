@@ -465,7 +465,7 @@ test('"talk to a person": no live transfer is offered; a callback request is one
   assert.equal(rows.length, 1)
   // Overview: the open request is counted for the owner's "Needs your attention".
   const overviewApi = await import('../functions/api/dashboard/overview.js')
-  assert.deepEqual((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().requests, { open: 1, urgent: 1 })
+  assert.deepEqual((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().attention.items.map((i) => [i.id, i.total, i.urgent]), [['callbacks', 1, true]])
   assert.deepEqual([rows[0].kind, rows[0].phone, rows[0].urgent, rows[0].status, rows[0].held], ['callback', '+18435550142', 1, 'open', 0])
   // Owner: Needs attention. Messaging in test mode → nobody can be emailed → shown as not emailed (never "notified").
   const ownerCookie = await owner('alpha')
@@ -876,7 +876,7 @@ test('before migrations 0026/0027: nothing is offered; before 0027 alone, callba
   enable('alpha')
   assert.equal((await call(infoApi, 'GET', '/api/receptionist/alpha', { params: { customer: 'alpha' } })).json().callbacks, false)
   const overviewApi = await import('../functions/api/dashboard/overview.js')
-  assert.equal((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().requests, null, 'unavailable, never a fake 0')
+  assert.equal((await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie: await owner('alpha') })).json().attention.unread.join(), 'callbacks,messages', 'unavailable, never a fake 0')
   script.push((body) => (assert.match(body.system[0].text, /offer the business phone \(\(843\) 555-0199\)/), say('You can call (843) 555-0199.')))
   assert.equal((await chat('alpha', 'a person please')).status, 200)
   assert.deepEqual(await syncNote(env, 'alpha', 'lead1', 'k', 'note'), { ok: true, skipped: 'not_connected' })

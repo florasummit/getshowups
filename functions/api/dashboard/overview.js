@@ -8,6 +8,7 @@ import { overview } from '../../../server/booking.js'
 import { messageSummary } from '../../../server/messages.js'
 import { internalEmails } from '../../../server/testdata.js'
 import { adSummary } from '../../../server/ads/campaigns.js'
+import { attention, attentionCard } from '../../../server/attention.js'
 import { adsAccess } from '../../../server/ads/access.js'
 
 export async function onRequestGet({ request, env }) {
@@ -17,13 +18,9 @@ export async function onRequestGet({ request, env }) {
     const data = await overview(env.ONBOARDING_DB, session.customer.id, Date.now(), internalEmails(env))
     // Advertising results appear for every business with Ads (server/ads/access.js: eligible, switch not off).
     const ads = (await adsAccess(env, session.customer)) ? await adSummary(env.ONBOARDING_DB, session.customer.id, Date.now(), internalEmails(env)) : null
-    // Open receptionist callback requests / messages (null = not available, e.g. before migration 0027; never a fake 0).
-    const requests = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n, coalesce(sum(urgent), 0) AS urgent FROM receptionist_requests WHERE customer = ?1 AND status = 'open'")
-      .bind(session.customer.id)
-      .first()
-      .then((r) => ({ open: Number(r?.n) || 0, urgent: Number(r?.urgent) || 0 }))
-      .catch(() => null)
-    return json(200, { ...data, automation: await messageSummary(env, session.customer), ads, requests })
+    // "Needs your attention" (server/attention.js): the assistant answers from the same service.
+    const card = attentionCard(await attention(env, session.customer.id))
+    return json(200, { ...data, automation: await messageSummary(env, session.customer), ads, attention: card })
   } catch (err) {
     console.error('overview failed:', err?.message)
     return json(503, { error: 'storage_error' })

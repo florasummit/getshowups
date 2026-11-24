@@ -13,6 +13,7 @@
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
+import { resolveRequest } from '../../../../server/attention.js'
 import { recordEvent } from '../../../../server/auditlog.js'
 import { toE164 } from '../../../../server/sms.js'
 import { messagesLive } from '../../../../server/email.js'
@@ -126,8 +127,7 @@ export async function onRequestPost({ request, env }) {
   const now = Date.now()
   if (b?.action === 'resolve') {
     if (!(await receptionistRequestsReady(db)) || typeof b.requestId !== 'string') return json(400, { error: 'invalid_request' })
-    const r = await db.prepare("UPDATE receptionist_requests SET status = 'resolved', resolved_at = ?3, updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'open'").bind(b.requestId, session.customer.id, now).run()
-    if (!(r?.meta?.changes > 0)) return json(404, { error: 'not_found' })
+    if (!(await resolveRequest(db, session.customer.id, b.requestId, now))) return json(404, { error: 'not_found' })
     await recordEvent(db, { type: 'receptionist.request_resolved', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist_request', id: b.requestId }, outcome: 'success' }).catch(() => {})
     return json(200, { ok: true })
   }

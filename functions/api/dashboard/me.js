@@ -6,6 +6,7 @@ import { signupPlan } from '../../../server/onboarding.js'
 import { billingMisconfigured, listPlans, sandboxCheckoutAllowed, stripeConfigured } from '../../../server/stripe.js'
 import { adsAccess } from '../../../server/ads/access.js'
 import { deletionEnabled } from '../../../server/deletion.js'
+import { testStatus } from '../../../server/testbusiness.js'
 import { studioAccess } from '../../../server/intelligence/access.js'
 
 export async function onRequestGet({ request, env }) {
@@ -22,6 +23,8 @@ export async function onRequestGet({ request, env }) {
     checkoutOpen: stripeConfigured(env) ? await sandboxCheckoutAllowed(env, customer?.id || null, email) : billingMisconfigured(env) ? false : null,
     email,
     customer,
+    // Admin-marked test business: browser acceptance (scripts/acceptance) refuses to run anywhere else. Unreadable = not confirmed.
+    testBusiness: customer ? await testStatus(env, customer.id).then((t) => t.test === true && !t.unreadable) : false,
     progress: await progress(env, customer),
     bookingUrl: customer ? `${siteOrigin(env)}/book/${customer.id}` : null,
     // Ads and Teach Your AI: every eligible business (server/eligibility.js), nothing to switch on per business.

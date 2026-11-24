@@ -39,15 +39,16 @@ export function validateQuestion(b) {
   if (!Array.isArray(h) || h.length > 20) return ['invalid_request']
   const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 1300) }))
   const named = periodIn(question)
-  const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[AL]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
-  const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L } : {}
+  const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[ALR]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
+  const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L, R: b.refs.R } : {}
   const looked = (Array.isArray(b.looked) ? b.looked : []).slice(0, 5).filter((x) => REPEATABLE.includes(x?.name) && x.args && typeof x.args === 'object' && !Array.isArray(x.args) && JSON.stringify(x.args).length < 400).map((x) => ({ name: x.name, args: x.args }))
-  return [null, { topic, view, question, history, pending, refs, looked, days: named ?? b.days ?? 30, results: b.days !== undefined }]
+  const selected = typeof b.selected === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(b.selected) ? b.selected : null
+  return [null, { topic, view, question, history, pending, refs, looked, selected, days: named ?? b.days ?? 30, results: b.days !== undefined }]
 }
 
 // "What is a qualified lead?" is answered from the curated help, word for word, without a model.
 export function helpFor(question) {
-  const m = /^(?:what(?:['’]s| is| are| does| do)|explain|define)\s+(?:an? |the |my |your )?(.+?)(?: mean(?:s)?)?\s*[?.!]*$/i.exec(question)
+  const m = /^(?:what(?:['’]s| is| are| does| do)|explain|define)\s+(?:an? |the )?(.+?)(?: mean(?:s)?)?\s*[?.!]*$/i.exec(question)
   if (!m) return null
   const want = m[1].toLowerCase()
   const hit = Object.entries(HELP).find(([, t]) => t.title.toLowerCase() === want)

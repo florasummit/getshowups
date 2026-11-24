@@ -6,26 +6,32 @@ import { useEffect, useId, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { HELP } from '../content/help.js'
-import { setDraft } from './assistant-store.js'
+import { getSelected, setDraft } from './assistant-store.js'
 
 const ERRORS = {
   empty_question: 'Type a question first.',
   too_long: 'Please ask in fewer words.',
-  rate_limited: 'You’ve reached the question limit for now. Explanations on this page always work.',
+  rate_limited: 'Too many requests just now. Try again in a few minutes.',
   unavailable: 'The AI couldn’t be reached just now. Try again in a minute.',
   busy: 'The AI is busy just now. Try again in a minute.',
   timeout: 'The AI took too long. Try again, or ask for one thing at a time.',
   setup: 'AI answers are switched off until GetShowUps fixes its AI account. Trying again won’t help. Your pages and records work as usual.',
   quota: 'AI answers are paused because today’s shared AI allowance is used up. Trying again won’t help.',
 }
+// Which limit it was: never one message for all of them.
+const LIMIT = {
+  minute: 'That’s a lot of questions in one minute. Try again in a moment.',
+  answers: 'You’ve used today’s AI answers. They’re back tomorrow.',
+  attempts: 'There were too many tries today, so AI answers are paused until tomorrow.',
+  spending: 'Today’s AI budget is used up, so AI answers are paused until tomorrow.',
+  shared: 'Today’s shared AI answers are used up. They’re back tomorrow.',
+}
 const NOT_READ = {
-  rate_limited: 'You’ve reached today’s AI answers, so this is straight from your records, without analysis.',
   unchecked: 'The AI’s wording didn’t match your records, so only the records are shown.',
 }
 const OUT = 'The AI isn’t available, so this is only a list from your records, without analysis or advice.'
 const OTHER = 'The answer included something we couldn’t confirm, so it wasn’t shown. Try asking differently.'
 const BLANK = 'Why isn’t this available yet?'
-const TAG = { general: 'General information', help: 'From the help text', prepared: 'Prepared for you', records: 'From your records' }
 const IDEAS = {
   overview: ['What should I fix first?', 'What’s coming up?'],
   appointments: ['What’s on this week?', 'Which visits still need an outcome?'],
@@ -79,17 +85,17 @@ function Proposal({ p, onState }) {
     // A form open on the page still holds the old values; saving it later would undo this.
     if (document.querySelector('.app-main form[data-dirty]')) return setState({ error: 'Save or discard what you’re editing on this page first.' })
     setState({ busy: true })
-    const body = p.type === 'outcome' ? { type: p.type, id: p.id, outcome: p.outcome, before: p.before, confirm: true } : { type: p.type, before: p.before, after: p.after, confirm: true }
+    const body = p.type === 'call_back_done' ? { type: p.type, id: p.id, confirm: true } : p.type === 'outcome' ? { type: p.type, id: p.id, outcome: p.outcome, before: p.before, confirm: true } : { type: p.type, before: p.before, after: p.after, confirm: true }
     const { status, data } = await api('/api/dashboard/proposal', { method: 'POST', body })
     if (status !== 200)
-      return setState({ error: status === 409 ? 'This changed since it was prepared, so nothing was saved. Ask again for a fresh one.' : status === 404 ? 'That appointment isn’t there any more. Nothing was saved.' : status === 429 ? 'Too many changes at once. Try again in a few minutes.' : 'This wasn’t saved. Please try again.', stale: [404, 409].includes(status) })
+      return setState({ error: status === 409 ? 'This changed since it was prepared, so nothing was saved. Ask again for a fresh one.' : status === 404 ? 'That isn’t there any more. Nothing was saved.' : status === 429 ? 'Too many changes at once. Try again in a few minutes.' : 'This wasn’t saved. Please try again.', stale: [404, 409].includes(status) })
     setState({ saved: data.already ? 'It was already saved.' : zips ? `Saved. Your ZIP codes are now ${data.serviceZips.join(', ')}.` : `Saved: ${data.state}.` })
     onState(p, 'saved')
     window.dispatchEvent(new CustomEvent('gsu:changed'))
   }
   return (
     <div className="ask-proposal" data-proposal={state.saved ? 'saved' : 'review'}>
-      <p className="ask-proposal-title">{zips ? 'Service area ZIP codes' : p.type === 'hours' ? 'Booking hours' : `Outcome: ${p.name || 'appointment'}`}</p>
+      <p className="ask-proposal-title">{zips ? 'Service area ZIP codes' : p.type === 'hours' ? 'Booking hours' : p.type === 'call_back_done' ? `${p.kind === 'message' ? 'Message' : 'Call back'}: ${p.name}` : `Outcome: ${p.name || 'appointment'}`}</p>
       {p.when && <p className="fine">{p.when}</p>}
       <dl>
         <div>
@@ -149,7 +155,7 @@ function Records({ list }) {
           <details>
             <summary>
               <strong>{r.name}</strong>
-              <span>{r.kind === 'appointment' ? r.when : `asked ${r.when}`}</span>
+              <span>{r.kind === 'appointment' ? r.when : `${r.kind === 'callback' ? 'call back, asked' : r.kind === 'message' ? 'message,' : 'asked'} ${r.when}`}</span>
             </summary>
             <p>{r.what}</p>
             <p className="fine">{r.state}</p>
@@ -159,7 +165,7 @@ function Records({ list }) {
               </a>
             ))}
             <button type="button" className="link-btn" onClick={() => goTo(r.go)}>
-              Open in {r.go === 'appointments' ? 'Appointments' : 'Follow-ups'}
+              Open in {VIEW[r.go]}
             </button>
           </details>
         </li>
@@ -228,7 +234,6 @@ function Entry({ e, retry, ask, onState }) {
       )}
       {e.answer && (
         <div className="ask-answer">
-          {TAG[e.kind] && <p className="help-tag">{TAG[e.kind]}</p>}
           <p className="ask-text">{e.answer}</p>
           {e.records?.length > 0 && <Records list={e.records} />}
           {e.proposals?.map((p) => (
@@ -242,11 +247,10 @@ function Entry({ e, retry, ask, onState }) {
           {e.note && <p className="fine">{e.note}</p>}
           {e.aiOut && (
             <p className="fine" data-ai-out>
-              {NOT_READ[e.aiOut] || OUT}
+              {LIMIT[e.limit] ? `${LIMIT[e.limit]} This is straight from your records, without analysis.` : NOT_READ[e.aiOut] || OUT}
               {e.resumesAt && <> AI answers are back {new Date(e.resumesAt).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.</>}
             </p>
           )}
-          {e.kind === 'business' && <p className="fine">From your records. The wording is AI and can be wrong.</p>}
         </div>
       )}
     </div>
@@ -272,16 +276,16 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}` }))
     const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
-    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending } })
+    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending, ...(view === 'followups' && getSelected() ? { selected: getSelected() } : {}) } })
     if (data.refs) refs.current = data.refs
     if (data.lookups) looked.current = data.lookups
-    if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state ? p : { ...p, state: 'withdrawn' })) })))
+    if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state || (Array.isArray(data.withdraw) && !data.withdraw.includes(p.ref)) ? p : { ...p, state: 'withdrawn' })) })))
     if (status === 404) setOff(true)
     const code = status === 429 ? 'rate_limited' : ERRORS[data.error] ? data.error : status === 422 ? 'refused' : 'unavailable'
     const done =
       status === 200
-        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, aiOut: data.aiOut, resumesAt: data.resumesAt, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
-        : { error: code === 'refused' ? OTHER : ERRORS[code], retry: ['unavailable', 'busy', 'timeout'].includes(code), resumesAt: code === 'quota' ? data.resumesAt : null, tries: data.try, evidence: data.evidence, days: data.days ?? ctx.days }
+        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, limit: data.limit, aiOut: data.aiOut, resumesAt: data.resumesAt, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
+        : { error: code === 'refused' ? OTHER : (code === 'rate_limited' && LIMIT[data.limit]) || ERRORS[code], retry: ['unavailable', 'busy', 'timeout'].includes(code), resumesAt: code === 'quota' ? data.resumesAt : null, tries: data.try, evidence: data.evidence, days: data.days ?? ctx.days }
     setTalk((t) => t.map((e) => (e.id === key ? { ...entry, busy: false, ...done } : e)))
     if (status === 200 && fromBox) setQ((now) => (now === question ? '' : now))
   }
@@ -316,7 +320,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
       </p>
     )
   const pool = topic ? (missing ? [BLANK] : HELP[topic].ask || []) : IDEAS[view] || IDEAS.overview
-  const recent = talk.filter((e) => e.about === (title || VIEW[view]) && e.ctx.days === days).map((e) => e.q)
+  const recent = talk.map((e) => e.q)
   const ideas = pool.filter((x) => !recent.includes(x)).slice(0, 2)
   return (
     <section className="ask" aria-label="Conversation" data-ask data-ask-talking={talk.length || q ? '' : undefined}>
@@ -368,7 +372,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
         </button>
       </form>
       <p className="fine">
-        Need a person? <a href="mailto:hello@getshowups.com?subject=GetShowUps%20help">Email us</a>
+        {talk.some((e) => e.kind === 'business') && 'Answers are AI, from your records, and can be wrong. '}Need a person? <a href="mailto:hello@getshowups.com?subject=GetShowUps%20help">Email us</a>
       </p>
     </section>
   )

@@ -36,7 +36,7 @@ const PLACES = [
 ]
 const PAGE_WORDS = [['overview', /\boverview\b|\bhome page\b/], ['appointments', /\bappointments?\b|\bbookings?\b|\bvisits?\b/], ['followups', /\bfollow ?ups?\b|\bleads?\b|\binquir(y|ies)\b/], ['teach', /\bteach( your ai)?\b/], ['receptionist', /\breceptionist\b/], ['website', /\bwebsite\b|\bmy site\b/], ['ads', /\bads?\b|\badvertising\b/], ['settings', /\bsettings?\b/]]
 const WHERE = /^ (where (is|are|s|do i|can i|would i)|wheres|how (do|can) i (find|open|get to|go to|see|access|change|edit|update|connect|add|mark|record|reach)|(take|bring) me to|go to|open|show me (the )?(settings|website|ads|help|overview)( page)?) /
-const THIS_PAGE = /^ (what (is|does|can i do (on|with|in))|explain|hows?|how does) (this|here|the) ?(page|screen|tab|section)? ?(for|do|work|about|mean)? $|^ what (is|can i do|do i do) (here|on this page) $|^ what is this $/
+const THIS_PAGE = /^ (what (is|does|can i do (on|with|in))|explain|hows?|how does) (this|the) (page|screen|tab) ?(for|do|work|about|mean)? $|^ what (is|can i do|do i do) (here|on this page) $/
 
 // "Where is the help button?", "How do I change my hours?", "What is this page for?". Never reads records.
 export function placeAnswer({ question, view, topic }) {
