@@ -456,10 +456,18 @@ createServer(async (req, res) => {
     if (/^You answer text messages/.test(JSON.parse(raw).messages[0].content)) {
       return send(res, 200, { response: { intent: 'question', answerable: true, reply: 'Yes, we can help with that in Charleston.' }, usage: { prompt_tokens: 500, completion_tokens: 20 } })
     }
-    // Ask about this (server/assist.js): "secret" in the question → an invented number and a claimed action (refused).
-    if (/^You explain one part of a booking dashboard/.test(JSON.parse(raw).messages[0].content)) {
-      const q = JSON.parse(raw).messages[1].content
-      return send(res, 200, { response: { answerable: true, answer: /secret/.test(q) ? 'I changed your hours and 9,731 people will come.' : 'Start by checking the appointment length in Settings.' }, usage: { prompt_tokens: 600, completion_tokens: 40 } })
+    // Dashboard assistant (server/assist.js): "secret" in the question → an invented number and a claimed action (refused).
+    if (/^You are the assistant inside GetShowUps/.test(JSON.parse(raw).messages[0].content)) {
+      events.push({ type: 'ai.assist' })
+      const q = JSON.parse(raw).messages[1].content.split('QUESTION\n').pop()
+      const r = /secret/.test(q)
+        ? { kind: 'business', answer: 'I changed your hours and 9,731 people will come.' }
+        : /LLC/.test(q)
+          ? { kind: 'general', answer: 'No. Being untruthful about a company can void contracts and expose you to fraud claims. Use accurate records, and ask a lawyer how to correct anything already filed.' }
+          : /weather/.test(q)
+            ? { kind: 'out_of_scope', answer: 'x' }
+            : { kind: 'business', answer: 'Start by checking the appointment length in Settings.' }
+      return send(res, 200, { response: r, usage: { prompt_tokens: 600, completion_tokens: 40 } })
     }
     // Writing help (server/writing.js): "lighthouse" in the owner's text → an invented fact, which must be refused.
     if (/^You help a small business owner/.test(JSON.parse(raw).messages[0].content)) {

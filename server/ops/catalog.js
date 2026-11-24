@@ -558,9 +558,9 @@ registerCapability({
 registerCapability({
   id: 'assist.ask',
   tier: 'optional',
-  name: 'Ask about this (help panel)',
+  name: 'Dashboard assistant',
   journey: 'onboarding',
-  description: 'One owner question about one help topic, read-only, included model (server/assist.js).',
+  description: 'Owner questions from any dashboard page: curated help, own counts, general business questions, reviewed service-area changes (server/assist.js, proposals.js). Proactive insights are deterministic (server/insights.js).',
   state: (env) => (env.AI_ASSIST_ENABLED === 'false' || env.AI_ASSIST_CHAT_ENABLED === 'false' ? { mode: 'disabled', note: 'Switched off' } : env.AI?.run ? { mode: 'live' } : { mode: 'missing', note: 'Workers AI binding missing' }),
   verify: seen('answered question', 30, `SELECT max(at) AS at FROM events e WHERE e.type = 'ai_ask' AND json_extract(e.props, '$.ok') = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })

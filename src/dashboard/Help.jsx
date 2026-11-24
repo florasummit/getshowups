@@ -1,29 +1,16 @@
-// Explanations beside numbers and settings. Two ways in, ONE panel (docked beside the page on wide screens, bottom sheet
+// The assistant and the explanations beside numbers and settings. ONE panel (docked beside the page on wide screens, bottom sheet
 // below that): a metric is its own button (useMetric: the whole card or row is highlighted while it is explained), a
 // setting has a small HelpTip. Text is curated (content/help.js); opening makes no request (AskAbout.jsx: only when the
 // owner asks). Keyboard: the panel takes focus, Escape or Close closes it and focus returns to what opened it.
 // Mounted once per dashboard (HelpPanel); never put a HelpTip inside a <label>.
-import { useEffect, useId, useRef, useSyncExternalStore } from 'react'
-import AskAbout from './AskAbout.jsx'
+import { useEffect, useId, useRef } from 'react'
+import Assistant from './AskAbout.jsx'
 import Icon from '../components/Icon.jsx'
 import { HELP } from '../content/help.js'
+import { close, getOpen, openAssistant, set, talking, useOpen, useView } from './assistant-store.js'
 
 const KIND = { measured: 'Measured from your records', reported: 'Reported by Google', recorded: 'Recorded by you', estimated: 'Includes estimates' }
 const PANEL_ID = 'help-panel'
-
-// What is open: { key, topic, from, label?, value?, sub?, kind?, missing?, note?, days?, loading? }. Only one thing at a time.
-let open = null
-const subs = new Set()
-const set = (next) => {
-  open = next
-  subs.forEach((f) => f())
-}
-const useOpen = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => open)
-const close = () => {
-  const from = open?.from
-  set(null)
-  from?.focus({ preventScroll: true })
-}
 
 // Shared by tips and metrics: toggles the panel, keeps the shown value current, closes when its owner leaves the page.
 function useTopic(info) {
@@ -32,16 +19,27 @@ function useTopic(info) {
   const selected = useOpen()?.key === key
   const json = JSON.stringify(info)
   useEffect(() => {
-    if (open?.key === key) set({ key, from: open.from, ...JSON.parse(json) })
+    if (getOpen()?.key === key) set({ key, from: getOpen().from, ...JSON.parse(json) })
   }, [key, json])
   useEffect(
     () => () => {
-      if (open?.key === key) set(null)
+      // Its page went away: a conversation stays open without the selection, otherwise the panel closes.
+      if (getOpen()?.key === key) set(talking() ? { key: 'global', quiet: true, from: null } : null)
     },
     [key],
   )
   const toggle = () => (selected ? close() : set({ key, from: ref.current, ...info }))
   return { selected, toggle, button: { ref, type: 'button', 'aria-expanded': selected, 'aria-controls': selected ? PANEL_ID : undefined, 'data-help': info.topic, onClick: toggle } }
+}
+
+export function AssistantButton() {
+  const on = useOpen()?.key === 'global'
+  return (
+    <button type="button" className="assist-btn" aria-expanded={on} aria-controls={on ? PANEL_ID : undefined} aria-label="Assistant" onClick={() => (on ? close() : openAssistant())} data-assistant>
+      <Icon name="sparkles" size={17} />
+      <span>Assistant</span>
+    </button>
+  )
 }
 
 export function HelpTip({ id }) {
@@ -109,7 +107,7 @@ function usePlacement(cur) {
     const root = document.documentElement
     root.classList.toggle('help-open', !!cur)
     if (!cur) return
-    const target = cur.from?.closest('.metric, .metric-row, .title-help') || cur.from
+    const target = cur.key === 'global' ? null : cur.from?.closest('.metric, .metric-row, .title-help') || cur.from
     const el = document.getElementById(PANEL_ID)
     const place = () => {
       const vv = window.visualViewport
@@ -155,53 +153,58 @@ export function HelpPanel() {
   usePlacement(cur)
   useEffect(() => {
     if (!key) return
-    panel.current?.focus({ preventScroll: true })
+    if (!getOpen()?.quiet) panel.current?.focus({ preventScroll: true })
     const onKey = (e) => e.key === 'Escape' && !e.defaultPrevented && close()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [key])
+  const at = useView()
   if (!cur) return null
-  const t = HELP[cur.topic]
-  const kind = cur.kind || t.kind
+  const t = cur.topic ? HELP[cur.topic] : null
+  const kind = cur.kind || t?.kind
   return (
-    <aside className="help-panel" id={PANEL_ID} role="dialog" aria-labelledby="help-title" tabIndex={-1} ref={panel} data-help-panel={cur.topic}>
-      <div className="help-scroll" key={key}>
+    <aside className="help-panel" id={PANEL_ID} role="dialog" aria-labelledby="help-title" tabIndex={-1} ref={panel} data-help-panel={cur.topic || 'assistant'}>
+      <div className="help-scroll">
         <div className="help-head">
-          <h2 id="help-title">{cur.label || t.title}</h2>
+          <h2 id="help-title">{cur.label || t?.title || 'Assistant'}</h2>
           <button type="button" className="help-close" aria-label="Close" onClick={close}>
             <Icon name="close" size={18} />
           </button>
         </div>
-        {cur.value !== undefined ? (
-          <div className="help-fact" data-missing={cur.missing ? '' : undefined}>
-            <p className="help-value">
-              <strong>{cur.missing ? 'Not available yet' : cur.value}</strong>
-              {cur.sub && !cur.missing && <span>{cur.sub}</span>}
-            </p>
-            <p className="help-kind">{cur.loading ? 'Updating…' : [cur.missing || KIND[kind], cur.days && `Last ${cur.days} days`].filter(Boolean).join(' · ')}</p>
-            {cur.note && <p className="help-kind">{cur.note}</p>}
+        {t && (
+          <div className="help-topic" key={key}>
+            {cur.value !== undefined ? (
+              <div className="help-fact" data-missing={cur.missing ? '' : undefined}>
+                <p className="help-value">
+                  <strong>{cur.missing ? 'Not available yet' : cur.value}</strong>
+                  {cur.sub && !cur.missing && <span>{cur.sub}</span>}
+                </p>
+                <p className="help-kind">{cur.loading ? 'Updating…' : [cur.missing || KIND[kind], cur.days && `Last ${cur.days} days`].filter(Boolean).join(' · ')}</p>
+                {cur.note && <p className="help-kind">{cur.note}</p>}
+              </div>
+            ) : (
+              kind && <p className="help-kind">{KIND[kind]}</p>
+            )}
+            <p className="help-what">{t.what}</p>
+            <dl className="help-parts">
+              <div>
+                <dt>Why it matters</dt>
+                <dd>{t.why}</dd>
+              </div>
+              <div className="help-next">
+                <dt>Next step</dt>
+                <dd>{t.next}</dd>
+              </div>
+            </dl>
+            <details className="help-example">
+              <summary>See an example</summary>
+              <p>
+                <span className="help-tag">Example, not your numbers</span> {t.example}
+              </p>
+            </details>
           </div>
-        ) : (
-          kind && <p className="help-kind">{KIND[kind]}</p>
         )}
-        <p className="help-what">{t.what}</p>
-        <dl className="help-parts">
-          <div>
-            <dt>Why it matters</dt>
-            <dd>{t.why}</dd>
-          </div>
-          <div className="help-next">
-            <dt>Next step</dt>
-            <dd>{t.next}</dd>
-          </div>
-        </dl>
-        <details className="help-example">
-          <summary>See an example</summary>
-          <p>
-            <span className="help-tag">Example, not your numbers</span> {t.example}
-          </p>
-        </details>
-        <AskAbout topic={cur.topic} title={cur.label || t.title} missing={!!cur.missing} days={cur.days} loading={!!cur.loading} />
+        <Assistant topic={cur.topic} title={cur.label || t?.title} missing={!!cur.missing} days={cur.days} loading={!!cur.loading} view={at} first={cur.ask} onSent={cur.ask ? () => set({ ...getOpen(), ask: undefined }) : undefined} />
       </div>
     </aside>
   )

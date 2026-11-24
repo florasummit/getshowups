@@ -9,6 +9,12 @@ delete their information. There is no self-service tool: requests are handled ma
 > until verified, and audited (docs/DATA_RETENTION.md, docs/OPERATIONS.md). The steps below remain for **one person's**
 > data (a lead asking to be forgotten), which is not automated yet.
 
+> **These SQL steps are incomplete (2026-11-24).** They predate newer tables. Before telling anyone a deletion is done,
+> also cover every table in `ERASED_TABLES` (server/deletion.js) that holds their rows (for one person at least:
+> thread_messages, lead_threads, receptionist_conversations/events/calls/requests, coverage_requests, revenue_entries,
+> lead_attribution, message_optouts) and, for a business, the KV records `google:<id>`, `ads:google:<id>`, `ads:gbp:<id>`,
+> `ads:meta:<id>`. Old copies remain in D1 Time Travel and in the local pre-release backups.
+
 Rules
 - Verify the requester first: reply to the address on record (or have the business owner confirm) before sharing or
   deleting anything. Never send someone else's data to a new address.

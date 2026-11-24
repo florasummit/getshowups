@@ -15,6 +15,7 @@ import { assistantConfigured, PRICE, runModel } from './followups/assistant.js'
 export const FIELDS = {
   description: { max: 400, draft: true, what: 'a short description of the business for its website and booking page (one or two sentences)' },
   greeting: { max: 240, draft: true, what: 'the first line a customer sees in the website chat: a short friendly greeting that invites them to say what they need (one or two sentences)' },
+  reply: { max: 600, draft: true, what: 'a short, friendly reply to someone who asked about the business and has not booked: thank them, say they can pick a time online, and ask what they need (two or three sentences, no greeting by name, no link)' },
   beforeVisit: { max: 300, draft: false, what: 'instructions for the customer before the appointment' },
   cancellation: { max: 300, draft: false, what: 'the cancellation policy shown to customers' },
 }

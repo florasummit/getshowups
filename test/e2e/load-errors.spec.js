@@ -56,14 +56,3 @@ test('booking page: times that fail to load offer a retry; each step moves focus
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.getByLabel('What do you need?')).toBeVisible()
 })
-
-test('overview shows one finding worth acting on, and nothing when there is none', async ({ page }) => {
-  let diagnostics = [{ id: 'info', level: 'info', title: 'Note', detail: 'x' }, { id: 'outcomes_missing', level: 'act', title: 'Visits aren’t being marked', detail: '4 of 6 past visits have no outcome.', sample: '6 past visits' }]
-  await page.route('**/api/dashboard/results?**', (r) => r.fulfill({ json: { diagnostics } }))
-  await page.goto('/dashboard')
-  await expect(page.locator('[data-finding]')).toHaveText(/Visits aren’t being marked.*4 of 6/s)
-  diagnostics = diagnostics.slice(0, 1)
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Needs your attention' })).toBeVisible()
-  await expect(page.locator('[data-finding]')).toHaveCount(0)
-})

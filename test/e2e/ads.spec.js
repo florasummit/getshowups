@@ -810,7 +810,7 @@ test('Journey B: a business that never advertised saves its details, starts from
   await expect(gbpRow.locator('[data-gbp-readiness]')).toHaveCount(0)
   const bp = (await (await page.request.get('/api/dashboard/ads')).json()).businessProfile
   expect([bp.status, bp.verification.state, bp.missing]).toEqual(['connected', 'verified', ['website']])
-  expect(JSON.stringify(bp)).not.toMatch(/mock-gbp|843/)
+  expect(JSON.stringify(bp)).not.toMatch(/mock-gbp|\(843\)|843[-. ]\d/) // not a bare 843: timestamps contain it at random
 })
 
 test('Business Profile before Google approves GetShowUps’ access: the row says so honestly, no Connect, the facts stay; a Google account without a listing is told what to do @mobile', async ({ page, context, browser }, testInfo) => {

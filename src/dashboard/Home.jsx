@@ -8,7 +8,10 @@ import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
-import { MetricCard, MetricHint, TitleHelp } from './Help.jsx'
+import { AssistantButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
+import { setAssistantView } from './assistant-store.js'
+import Insight from './Insight.jsx'
+import { useInsights } from './insights-data.js'
 import { LoadError, Pill } from './ui.jsx'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
@@ -18,13 +21,14 @@ const FollowUps = lazyPage(() => import('./FollowUps.jsx'))
 const Receptionist = lazyPage(() => import('./Receptionist.jsx'))
 const TeachAI = lazyPage(() => import('./TeachAI.jsx'))
 
-export function SignOut({ email, label = 'Sign out', to = '/dashboard' }) {
+export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = null }) {
   const signOut = async () => {
     await api('/api/auth/logout', { method: 'POST' })
     location.replace(to)
   }
   return (
     <div className="header-user">
+      {extra}
       {/* Owner pages only (not /admin): the plan promises direct help from the founding team, so it is reachable from
           every owner screen, including onboarding, not just when an account has a problem. */}
       {to === '/dashboard' && (
@@ -361,29 +365,6 @@ function Attention({ data, go }) {
   )
 }
 
-// The one finding worth acting on, from the same rules as the Ads results (server/ads/funnel.js diagnose: minimum samples,
-// every lead counted once). Nothing to say → nothing shown.
-function Finding() {
-  const [d, setD] = useState(null)
-  useEffect(() => {
-    let live = true
-    api('/api/dashboard/results?days=30&scope=all').then(({ status, data }) => live && status === 200 && setD(data.diagnostics?.find((x) => x.level === 'act') || null))
-    return () => {
-      live = false
-    }
-  }, [])
-  if (!d) return null
-  return (
-    <section className="card" aria-label="Worth a look" data-finding={d.id}>
-      <h2 className="card-title">{d.title}</h2>
-      <p className="fine">
-        {d.detail}
-        {d.sample ? ` Based on ${d.sample}.` : ''}
-      </p>
-    </section>
-  )
-}
-
 // Whole dollars when exact, cents otherwise; '—' when unavailable (never an estimate).
 const money = (cents) => {
   if (cents === null || cents === undefined) return '—'
@@ -422,7 +403,7 @@ function AdsResults({ ads }) {
   )
 }
 
-function Overview({ me, data, reload, go, site }) {
+function Overview({ me, data, reload, go, site, insight }) {
   const tz = me.customer.timezone
   const visit = me.customer.appointmentMode === 'at_customer'
   return (
@@ -436,7 +417,7 @@ function Overview({ me, data, reload, go, site }) {
         <div className="enter ui-overview">
           <Attention data={data} go={go} />
           <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.length} />
-          <Finding />
+          {insight}
           {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">
@@ -556,7 +537,7 @@ function Settings({ me, reload, billing }) {
       <h1 className="title title--page">Settings</h1>
       <section className="card">
         <TitleHelp help="service_area">Business</TitleHelp>
-        <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} />
+        <BusinessForm key={c.serviceZips.join()} customer={c} submitLabel="Save business" onSaved={reload} />
       </section>
       <section className="card">
         <TitleHelp help="website_details">Details on your website</TitleHelp>
@@ -617,6 +598,7 @@ export default function Home({ me, reload }) {
   const [requested, setView] = useState(tabFromPath)
   // /dashboard/ads (or /teach) for a business without that feature (e.g. back from a refused ad sign-in) → Overview.
   const view = (requested === 'ads' && !me.features?.ads) || (requested === 'teach' && !me.features?.teachAi) ? 'overview' : requested
+  const [found, dropInsight] = useInsights(view)
   const billing = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()
@@ -629,6 +611,11 @@ export default function Home({ me, reload }) {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  useEffect(() => setAssistantView(view), [view])
+  useEffect(() => {
+    window.addEventListener('gsu:changed', reload)
+    return () => window.removeEventListener('gsu:changed', reload)
+  }, [reload])
   // On narrow screens the tab bar scrolls: keep the current tab in view.
   useEffect(() => {
     document.querySelector('.tabs [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
@@ -645,7 +632,7 @@ export default function Home({ me, reload }) {
     <div className={`app${view === 'website' || view === 'followups' || view === 'teach' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
-        <SignOut email={me.email} />
+        <SignOut email={me.email} extra={<AssistantButton />} />
       </header>
       <nav className="tabs" aria-label="Dashboard">
         {tabs.map(([id, label]) => (
@@ -668,11 +655,12 @@ export default function Home({ me, reload }) {
         onInput={(e) => e.target.closest?.('form')?.setAttribute('data-dirty', '')}
         onSubmit={(e) => e.target.removeAttribute?.('data-dirty')}
       >
+        {view !== 'overview' && <Insight view={view} list={found} drop={dropInsight} go={go} />}
         {view === 'overview' && (
           <>
             <h1 className="ui-page-title ui-page-title--top">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} />
-            <Overview me={me} data={data} reload={loadOverview} go={go} site={site} />
+            <Overview me={me} data={data} reload={loadOverview} go={go} site={site} insight={<Insight view="overview" list={found} drop={dropInsight} go={go} covered={data?.followUp?.some((l) => !l.test && l.status === 'new') ? ['unanswered'] : []} />} />
           </>
         )}
         {view === 'appointments' && <Appointments me={me} data={data} reload={loadOverview} />}

@@ -151,7 +151,7 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
     const b = r.request().postDataJSON()
     asked.push(b.days)
     if (hold?.answer) await hold.answer
-    await r.fulfill({ json: { answer: `Answer about ${b.days} days.`, days: b.days } }).catch(() => {})
+    await r.fulfill({ json: { kind: 'business', answer: `Answer about ${b.days} days.`, days: b.days } }).catch(() => {})
   })
   await page.goto('/dashboard/ads')
   const ar = page.getByRole('region', { name: 'Ad results' })
@@ -163,10 +163,10 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
     await ar.getByRole('button', { name: `${days} days` }).click()
     await expect(panel.locator('.help-fact')).toContainText(`Last ${days} days`)
     await expect(panel.locator('.help-fact')).toContainText(`$${days * 10}`)
-    await expect(panel.getByText(/^Answer about/)).toHaveCount(0) // the previous period's answer is gone
     await idea.click()
     await expect(panel).toContainText(`Answer about ${days} days.`)
     await expect(panel).toContainText(`the last ${days} days of results`)
+    await expect(panel.locator('.ask-entry').last().locator('.ask-q small')).toHaveText(`Ad spend · last ${days} days`) // every answer names its period
   }
   expect(asked).toEqual([30, 7, 90])
   // After switching periods and reading answers the selected row is still in the open.
@@ -184,7 +184,7 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
   go()
   await expect(panel.locator('.help-fact')).toContainText('Last 7 days')
   await expect(panel.getByRole('textbox')).toHaveValue('How is it going?')
-  // An answer still on its way when the period changes is dropped.
+  // An answer still on its way when the period changes stays labelled with the period it was asked for.
   let answer
   hold = { answer: new Promise((d) => (answer = d)) }
   await panel.getByRole('button', { name: 'Send question' }).click()
@@ -192,7 +192,7 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
   await ar.getByRole('button', { name: '30 days' }).click()
   await expect(panel.locator('.help-fact')).toContainText('Last 30 days')
   answer()
-  await page.waitForTimeout(400)
-  await expect(panel.getByText(/^Answer about/)).toHaveCount(0)
+  await expect(panel.locator('.ask-entry').last()).toContainText('Answer about 7 days.')
+  await expect(panel.locator('.ask-entry').last().locator('.ask-q small')).toHaveText('Ad spend · last 7 days')
   expect(await size(page)).toBeLessThanOrEqual(0)
 })

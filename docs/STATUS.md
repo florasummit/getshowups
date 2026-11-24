@@ -2,6 +2,10 @@
 
 _Update at the end of every task. Newest first._
 
+## Dashboard assistant, proactive suggestions, privacy policy (2026-11-24)
+
+See docs/ASSISTANT_PROGRESS.md (checklist, limits, cost) and docs/GOOGLE_PRIVACY_RESUBMISSION.md (evidence, resubmission).
+
 ## Metrics explain themselves (2026-11-23, branch ux/kpi-assist)
 
 Results and Overview figures are the buttons (MetricCard / MetricRow in src/dashboard/Help.jsx): the whole card or row is

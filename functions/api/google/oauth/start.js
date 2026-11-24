@@ -43,7 +43,7 @@ function confirmPage(invite, customer, purpose, { status = 200, error = '' } = {
     `<form method="post" action="/api/google/oauth/start">` +
     `<input type="hidden" name="invite" value="${escapeHtml(invite)}">` +
     `<p><label><input type="checkbox" name="confirm" value="yes" required> I confirm I'm authorized to connect a Google Calendar for <strong>${name}</strong>.</label></p>` +
-    `<button type="submit">Continue to Google</button></form>`
+    `<button type="submit">Continue to Google</button></form><p><a href="/privacy">Privacy policy</a></p>`
   return page(
     status,
     isReconnect ? 'Reconnect your Google Calendar' : 'Connect your Google Calendar',

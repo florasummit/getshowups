@@ -2,6 +2,7 @@
 // The owner can take over from the assistant, reply, pause automatic messages, adjust a few preferences, and see
 // (and prepare) texting setup. No workflow graphs, prompts or technical settings.
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AiWrite from './AiWrite.jsx'
 import { HelpTip } from './Help.jsx'
 import { LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
@@ -301,10 +302,11 @@ function Conversation({ id, onBack, onChanged }) {
           if (await act('reply', { text })) setText('')
         }}
       >
-        <label htmlFor="fu-reply" className="sr-only">
-          Your reply
+        <label className="fu-reply">
+          <span className="sr-only">Your reply</span>
+          <textarea id="fu-reply" rows={3} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Write to ${t.name.split(' ')[0]}…`} />
         </label>
-        <textarea id="fu-reply" rows={3} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Write to ${t.name.split(' ')[0]}…`} />
+        <AiWrite field="reply" draft />
         <div className="fu-compose-row">
           <span className="fine">{canText ? 'Sends as a text when texting is set up, otherwise by email.' : t.email ? 'Sends by email.' : 'No way to reach this person by message.'} Replying takes over from automatic replies.</span>
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !text.trim()}>
