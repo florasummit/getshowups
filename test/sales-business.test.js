@@ -21,7 +21,7 @@ function d1() {
   const sql = new DatabaseSync(':memory:')
   for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) sql.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
   const stmt = (q, args = []) => ({ q, args, bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => ({ meta: { changes: sql.prepare(q).run(...args).changes } }) })
-  return { sql, prepare: (q) => stmt(q), batch: async (list) => { for (const s of list) sql.prepare(s.q).run(...s.args) } }
+  return { sql, prepare: (q) => stmt(q), batch: async (list) => list.map((s) => ({ meta: { changes: Number(sql.prepare(s.q).run(...s.args).changes) } })) }
 }
 let env, db, kv
 const cookieFor = async (email) => {
@@ -64,7 +64,10 @@ test('admin creates the sales business once: Software playbook, hours, the liste
   const k = await knowledgeFor(env, customer, settings)
   assert.equal(k.playbook.key, 'sales')
   assert.match(systemPrompt(k, 'chat'), /sales assistant for GetShowUps/)
-  assert.match(systemPrompt(k, 'chat'), /Founding plan: \$499\/month/)
+  assert.match(systemPrompt(k, 'chat'), /Growth plan: \$499\/month\n- Enterprise plan: Starting at \$10,000\/month/)
+  assert.doesNotMatch(SALES_NOTES, /Founding/)
+  assert.match(SALES_NOTES, /one login across businesses, shared reporting and one invoice are not live/)
+  assert.equal((await call(api, 'GET', '/api/platform/sales-business', { cookie: staff })).json().sales.answers.current, true)
   // Second click: reported, not changed.
   const again = await call(api, 'POST', '/api/platform/sales-business', { cookie: staff, body: { kind: 'sales', confirm: true } })
   assert.deepEqual([again.json().created, again.json().status.exists], [false, true])
@@ -88,4 +91,28 @@ test('the Lab test business is admin-marked, offered by the Voice Lab status, an
   assert.deepEqual(st.json().businesses.map((b) => b.id), ['getshowups-lab'])
   assert.equal((await call(api, 'GET', '/api/platform/sales-business', { cookie: staff })).json().sales.exists, false)
   assert.equal((await call(api, 'POST', '/api/platform/sales-business', { cookie: staff, body: { kind: 'other', confirm: true } })).status, 400)
+})
+
+test('approved answers: shown when outdated, applied only by a confirmed admin with the current version; nothing else changes; audited', async () => {
+  const staff = await cookieFor('staff@getshowups.com')
+  const owner = await cookieFor('someone@else.example')
+  const post = (body, cookie = staff, origin) => call(api, 'POST', '/api/platform/sales-business', { cookie, ...(origin ? { origin } : {}), body: { kind: 'sales', action: 'refresh_answers', ...body } })
+  assert.equal((await post({ version: 'x', confirm: true })).status, 404)
+  await call(api, 'POST', '/api/platform/sales-business', { cookie: staff, body: { kind: 'sales', confirm: true } })
+  db.sql.exec("UPDATE receptionist_settings SET knowledge = 'Old notes', enabled = 0, greeting = 'Hey', updated_at = 5 WHERE customer = 'getshowups'")
+  db.sql.exec(`UPDATE business_profiles SET services = '[{"name":"Founding plan","price":"$499/month"}]', phone = '+18435550100', updated_at = 7 WHERE customer = 'getshowups'`)
+  const st = (await call(api, 'GET', '/api/platform/sales-business', { cookie: staff })).json().sales.answers
+  assert.deepEqual([st.current, st.stored.notes, st.version], [false, 'Old notes', '7:5'])
+  assert.equal((await post({ version: st.version })).status, 400)
+  assert.equal((await post({ version: st.version, confirm: true }, owner)).status, 403)
+  assert.equal((await post({ version: st.version, confirm: true }, staff, 'https://evil.example')).status, 403)
+  assert.equal((await post({ version: '7:4', confirm: true })).status, 409)
+  assert.equal(db.sql.prepare("SELECT knowledge FROM receptionist_settings WHERE customer = 'getshowups'").get().knowledge, 'Old notes')
+  const r = await post({ version: st.version, confirm: true })
+  assert.deepEqual([r.status, r.json().changed, r.json().status.answers.current], [200, true, true])
+  const row = db.sql.prepare("SELECT enabled, greeting, knowledge FROM receptionist_settings WHERE customer = 'getshowups'").get()
+  assert.deepEqual([row.enabled, row.greeting, row.knowledge], [0, 'Hey', SALES_NOTES])
+  assert.equal(db.sql.prepare("SELECT phone FROM business_profiles WHERE customer = 'getshowups'").get().phone, '+18435550100')
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM admin_audit WHERE action = 'sales_business.answers_refreshed'").get().n, 1)
+  assert.equal((await call(api, 'POST', '/api/platform/sales-business', { cookie: staff, body: { kind: 'sales', action: 'other', confirm: true } })).status, 400)
 })
