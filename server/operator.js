@@ -42,6 +42,7 @@ HOW YOU WORK
 TRUTH
 - Every figure, date and time about this business must come from a tool result in this conversation turn or the records below. Compute nothing beyond simple counts of what a tool listed. If something isn't recorded, say exactly that and give what is known. "Not recorded" and "I couldn't read it" are different; say which.
 - Never claim a cause the records don't show (that something is closed or missing is not why a given person didn't book, why it is quiet, or why someone has no message), and don't foretell what a fix will bring. Payments traced to ads are not money the ads made: give the recorded amounts and say the ads' own effect isn't measured. No ROI.
+- Who waited longest, is oldest or newest: compare the times given, never assume that the urgent one is also the longest.
 - Keep apart what the records show, what you conclude from it ("that suggests"), and what isn't recorded.
 - The records below are the authority. If the owner's words or your earlier answer differ from them, say what the records show now, plainly.
 - Keep people apart: never connect one person's request, message or visit with another person's unless a record does. A note that names no visit or customer is only about the person who left it: don't guess which visit or address it affects. A statement about several people must be true of each. Use they/them for customers unless the owner used another pronoun for that person.
@@ -85,10 +86,12 @@ ${JSON.stringify(pending)}` : ''}`,
 }
 
 // ---------- checks ----------
-const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(marked|recorded|updated|changed|set|sent|emailed|texted|messaged|booked|rescheduled|cancell?ed|saved|charged|refunded|paused|started|launched|published|deleted)\b|\b(has|have) been (marked|updated|changed|sent|saved|cancell?ed|refunded) (as|to|for|successfully|now)\b|\b(is|are) now (marked|saved|updated)\b/i
+const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(marked|recorded|updated|changed|set|sent|emailed|texted|messaged|booked|rescheduled|cancell?ed|saved|charged|refunded|paused|started|launched|published|deleted|opened)\b|\b(has|have) been (marked|updated|changed|sent|saved|cancell?ed|refunded) (as|to|for|successfully|now)\b|\b(is|are) now (marked|saved|updated)\b/i
 const NOT_DONE = /\b(not|never|no|hasn['’]?t|haven['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|nothing|none|once|if|until|when)\b/i
 const NOBODY = /\b(nobody|no one|no customers?|no-one) (else )?(is|are|seems?|appears?)( \w+)? (waiting|needing|in need)( (on|for) you)?\s*(right now|at the moment|today|currently)?[.!]?$|\b(all caught up|nothing needs (you|your attention))\b/i
-const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more)\b/i
+const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more|will (keep|continue to) grow\w*)\b/i
+// How it works is never part of an answer, nor is doubting an answer nobody questioned.
+const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups)\b( (says?|shows?|returned|found|reports?))|\b(funnel tool|lookup)\b|\bmy (earlier|last|previous) (reply|answer|message) was (wrong|incorrect|mistaken)\b|\bI (shouldn['’]t|should not) have (said|linked|told)\b/i
 const CREDITED = /\b(ads?|advertising|campaigns?) (have |has )?(generated|earned|produced|brought in|made|drove|caused|returned)\b[^.]*\$|\$[\d,.]+[^.]*\b(generated|earned|produced|caused|driven) (by|from|through) (your |the )?(ads?|advertising|campaigns?)\b|\b(ROI|ROAS|return on (ad spend|investment))\b[^.]*\d/i
 
 // → null | what is wrong, in words the model can act on
@@ -107,6 +110,7 @@ export function problemWith(text, { facts, looked, refs, waiting = null }) {
   // The card on screen says someone is waiting: no answer may say the opposite.
   if (waiting?.some((n) => n > 0) && sentences.some((x) => NOBODY.test(x))) return 'WAITING NOW shows people waiting, so do not say that nobody is waiting or all is caught up. Say which kind of waiting is meant.'
   if (sentences.some((x) => DONE.test(x) && !NOT_DONE.test(x))) return 'It says something was done. You cannot save or send anything: say what is prepared, or what the records show happened, without "I" having done it.'
+  if (INSIDE.test(text)) return 'It talks about how you work, or calls an earlier answer wrong. Say only what the records show now. An owner may have approved something since: that does not make an earlier answer wrong.'
   if (PROMISE.test(text)) return 'It promises or predicts a result. Remove that.'
   if (sentences.some((x) => CREDITED.test(x) && !NOT_DONE.test(x))) return 'It credits money to ads or gives a return. Say what was recorded for jobs traced to ads, and that the ads’ effect isn’t measured.'
   const bare = text.replace(/\[[ALR]\d{1,3}\]/g, ' ').replace(/^\s*\d+[.)]\s/gm, ' ')
@@ -149,7 +153,12 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   let again = false
   const looked = [] // repeated next turn, so "why?" reasons over the same evidence
   const base = () => ({ refs: c.refs.book, lookups: looked.length ? looked.slice(-5) : req.looked || [], records: [...c.shown.values()].slice(0, 12), proposals: c.proposals, withdraw: c.withdraw, go: c.go, tools, usage, costMicros: Math.round(cost), ms: Date.now() - started })
-  const fillNames = (t) => t.replace(/\[([ALR]\d{1,3})\]/g, (m, r) => squash(c.shown.get(r)?.name) || 'that person')
+  // "Vera [R1]" (the owner's word, then the reference) must not become "Vera Vera Stone".
+  const fillNames = (t) =>
+    t.replace(/(?:([\p{L}'’-]+) )?\[([ALR]\d{1,3})\]/gu, (m, word, r) => {
+      const name = squash(c.shown.get(r)?.name) || 'that person'
+      return word && !name.toLowerCase().split(' ').includes(word.toLowerCase()) ? `${word} ${name}` : name
+    })
   for (let round = 0; round <= BOUNDS.rounds; round++) {
     const left = BOUNDS.totalMs - (Date.now() - started)
     if (left < 1500) break

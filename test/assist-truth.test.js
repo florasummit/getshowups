@@ -155,3 +155,12 @@ test('a denial of waiting people is only a problem while someone is waiting', ()
   }
   for (const t of ['Nobody is waiting for a written reply, but one person wants a call.', 'Someone is waiting.']) assert.equal(at([1], t), null)
 })
+
+test('names are never doubled; opening, inner workings and self-doubt are refused; an approval is told to the next turn', async () => {
+  callBack('alpha', 'rq1')
+  script = [say('The call for Rosa [R1] is still open, and the note from [R1] says why.')]
+  assert.equal((await ask('alpha', 'what is open there')).body.answer, 'The call for Rosa Vance is still open, and the note from Rosa Vance says why.')
+  const bad = (t) => problemWith(t, { facts: '', looked: true, refs: new Map() })
+  for (const t of ['I’ve opened the Appointments page for you.', 'The funnel tool says rates matter.', 'My earlier reply was wrong.', 'This will keep growing.']) assert.ok(bad(t), t)
+  for (const t of ['The button below opens Settings.', 'You can open Appointments below.', 'Bring the right tool for the filter.']) assert.equal(bad(t), null, t)
+})

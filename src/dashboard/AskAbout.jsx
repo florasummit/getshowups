@@ -273,7 +273,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const ctx = replace?.ctx ?? { topic, view, days }
     const entry = { id: key, ctx, q: question, about: replace ? replace.about : title || VIEW[view], days: ctx.days, busy: true }
     // A question the AI couldn't answer still counts as said, and a bare list is never replayed as the AI's own reading.
-    const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}` }))
+    const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}${(e.proposals || []).some((p) => p.state === 'saved') ? ' (Since then the owner approved it: saved.)' : ''}` }))
     const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
     const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending, ...(view === 'followups' && getSelected() ? { selected: getSelected() } : {}) } })

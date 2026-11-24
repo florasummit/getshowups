@@ -32,7 +32,8 @@ export const FRESH = [
     { q: 'record hugo as paid 200', any: true, never: [/(is|has been) (recorded|saved)/i] },
   ] },
   { biz: 'busy', name: 'fresh', turns: [
-    { view: 'overview', q: 'go through that list at the top one by one', long: true, must: [/Vera Stone/, /Walt Ames/] },
+    { view: 'overview', q: 'go through that list at the top one by one', long: true, must: [/Vera Stone/, /Walt Ames/], never: [/Vera[^.]{0,60}longest/] },
+    { q: 'vera or walt, who waited longer', must: [/Walt Ames/] },
     { q: 'the outside one, where are they', must: [/29464/] },
     { q: 'add that zip then', proposal: 'service_zips' },
     { q: 'hmm no dont', pending: 0 },

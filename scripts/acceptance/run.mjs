@@ -33,6 +33,9 @@ function rules(text, others = [], long = false) {
   if (/\bON SCREEN\b|WAITING NOW|no_lookup|[Ll]ookup|my instructions|[Oo]nly match|I found one match|shouldn’t have|shouldn't have/.test(text)) bad.push('talks about how it works')
   if (!/[.!?)’”"]$/.test(text.trim()) && !/\n- /.test(text)) bad.push('unfinished sentence')
   for (const o of others) if (text.includes(o)) bad.push(`names another business’s record: ${o}`)
+  if (/\b([A-Z][a-z]+) \1\b/.test(text)) bad.push('doubled word')
+  if (/\bI(’|')?(ve| have)? (just )?opened\b/.test(text)) bad.push('claims it opened something')
+  if (/\btool\b|earlier (reply|answer) was (wrong|incorrect)/i.test(text)) bad.push('talks about how it works or doubts itself')
   if (text.split(/\s+/).length > (long ? 340 : 200)) bad.push('too long')
   return bad
 }

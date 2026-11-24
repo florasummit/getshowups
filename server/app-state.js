@@ -43,6 +43,7 @@ export async function waitingNow(c) {
     call_backs_waiting: kind(a.callbacks),
     receptionist_messages_waiting: kind(a.messages),
     call_back_and_message_people: people,
+    ...(Array.isArray(people) && people.length > 1 ? { waiting_longest_for_call_back_or_message: people.reduce((x, y) => (y.hours_ago > x.hours_ago ? y : x)).ref } : {}),
     conversations_needing_the_owner: kind(a.replies),
     ...(replies.length ? { conversation_people: replies } : {}),
     asked_but_not_booked_last_30_days: kind(a.unbooked),
