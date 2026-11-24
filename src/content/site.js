@@ -130,7 +130,7 @@ export const pricing = {
     'Show-up and no-show tracking',
     'Direct help from the founding team',
   ],
-  excludes: 'Ad spend is paid directly to Google or Meta. Texting, email reminders and ad management: coming soon.',
+  excludes: 'Ad spend is separate, paid directly to Google or Meta. Texting, email reminders and ad management: coming soon.',
 }
 
 // Capacity only: up to 25 separate business accounts. Organization-level management (one login over many workspaces,

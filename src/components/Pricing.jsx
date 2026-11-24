@@ -21,7 +21,7 @@ export default function Pricing() {
   return (
     <section id="pricing" className="section pricing" aria-labelledby="pricing-title">
       <div className="container">
-        <SectionHeading id="pricing-title" eyebrow="Pricing" title="One business, or many" intro="Ad spend is separate." />
+        <SectionHeading id="pricing-title" eyebrow="Pricing" title="One business, or many" />
         <div className="price-grid">
           <div className="price-card" data-plan="growth">
             <div className="price-main">
