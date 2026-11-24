@@ -2347,22 +2347,15 @@ svg {
   font-size: 0.85rem;
 }
 
-/* Works with: plain-text integration names (components/WorksWith.jsx). Moves only when motion is welcome. */
+/* Works with: one still monochrome row of names (components/WorksWith.jsx). */
 .ww {
-  padding: clamp(28px, 4vw, 44px) 0;
+  padding: clamp(32px, 4vw, 48px) 0;
   border-block: 1px solid var(--line);
   background: var(--white);
+  text-align: center;
 }
 
-.ww-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.ww-title,
-.ww-pause {
+.ww-title {
   font-family: var(--font-label);
   font-size: 0.74rem;
   font-weight: 600;
@@ -2371,91 +2364,25 @@ svg {
   color: var(--gray-500);
 }
 
-.ww-pause {
-  display: none;
-  min-height: 32px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.ww-pause:hover {
-  color: var(--ink-900);
-}
-
-.ww-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
-
-.ww-window {
-  margin: 16px 0 14px;
-  overflow: hidden;
-}
-
-.ww-group {
+.ww-names {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px clamp(32px, 5vw, 64px);
-  margin: 0;
+  justify-content: center;
+  gap: 14px clamp(28px, 6vw, 80px);
+  margin: 20px 0 18px;
   padding: 0;
   list-style: none;
   color: var(--ink-700);
-  font-size: clamp(1.05rem, 1.6vw, 1.3rem);
+  font-size: clamp(1.1rem, 1.8vw, 1.4rem);
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 
-.ww-copy {
-  display: none;
-}
-
 .ww-note {
+  margin-inline: auto;
   color: var(--gray-500);
-  font-size: 0.82rem;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .ww-pause {
-    display: block;
-  }
-
-  .ww-window {
-    mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
-  }
-
-  .ww-track {
-    display: flex;
-    width: max-content;
-    min-width: 200%;
-    animation: ww-move 36s linear infinite;
-  }
-
-  .ww-group,
-  .ww-copy {
-    display: flex;
-    flex: 1 0 50%;
-    flex-wrap: nowrap;
-    justify-content: space-around;
-    padding-right: clamp(32px, 5vw, 64px);
-  }
-
-  .ww-window:hover .ww-track,
-  .ww[data-works-with='paused'] .ww-track {
-    animation-play-state: paused;
-  }
-}
-
-@keyframes ww-move {
-  to {
-    transform: translateX(-50%);
-  }
+  font-size: 0.8rem;
 }
 
 /* Two offerings: the Growth card above, Enterprise below it, the inquiry form under both (components/Pricing.jsx). */

@@ -126,5 +126,6 @@ test('booking-page leads still need a phone', () => {
 test('pricing: exactly Growth at $499 and Enterprise from $10,000; form types match the server', () => {
   assert.deepEqual([pricing.name, pricing.price, enterprise.name, enterprise.lead, enterprise.price], ['Growth', 499, 'Enterprise', 'Starting at', '10,000'])
   assert.deepEqual(Object.fromEntries(enterprise.types), ORG_TYPES)
-  assert.ok(!/25 accounts|consolidated|centralized/i.test(JSON.stringify(enterprise)))
+  assert.match(enterprise.points[0], /^Up to 25 business accounts/)
+  assert.ok(!/consolidated|centralized|one login|by agreement/i.test(JSON.stringify(enterprise)))
 })
