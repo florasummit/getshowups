@@ -18,6 +18,11 @@ const ERRORS = {
   setup: 'AI answers are switched off until GetShowUps fixes its AI account. Trying again won’t help. Your pages and records work as usual.',
   quota: 'AI answers are paused because today’s shared AI allowance is used up. Trying again won’t help.',
 }
+const NOT_READ = {
+  rate_limited: 'You’ve reached today’s AI answers, so this is straight from your records, without analysis.',
+  unchecked: 'The AI’s wording didn’t match your records, so only the records are shown.',
+}
+const OUT = 'The AI isn’t available, so this is only a list from your records, without analysis or advice.'
 const OTHER = 'The answer included something we couldn’t confirm, so it wasn’t shown. Try asking differently.'
 const BLANK = 'Why isn’t this available yet?'
 const TAG = { general: 'General information', help: 'From the help text', prepared: 'Prepared for you', records: 'From your records' }
@@ -235,7 +240,12 @@ function Entry({ e, retry, ask, onState }) {
             </button>
           )}
           {e.note && <p className="fine">{e.note}</p>}
-          {e.limited && <p className="fine">You’ve reached today’s AI answers, so this is straight from your records.</p>}
+          {e.aiOut && (
+            <p className="fine" data-ai-out>
+              {NOT_READ[e.aiOut] || OUT}
+              {e.resumesAt && <> AI answers are back {new Date(e.resumesAt).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.</>}
+            </p>
+          )}
           {e.kind === 'business' && <p className="fine">From your records. The wording is AI and can be wrong.</p>}
         </div>
       )}
@@ -257,7 +267,8 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const key = replace?.id ?? `${Date.now()}-${talk.length}`
     const ctx = replace?.ctx ?? { topic, view, days }
     const entry = { id: key, ctx, q: question, about: replace ? replace.about : title || VIEW[view], days: ctx.days, busy: true }
-    const history = talk.filter((e) => e.answer && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.raw || e.answer }))
+    // A question the AI couldn't answer still counts as said, and a bare list is never replayed as the AI's own reading.
+    const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}` }))
     const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
     const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, pending } })
@@ -267,7 +278,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const code = status === 429 ? 'rate_limited' : ERRORS[data.error] ? data.error : status === 422 ? 'refused' : 'unavailable'
     const done =
       status === 200
-        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
+        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, aiOut: data.aiOut, resumesAt: data.resumesAt, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
         : { error: code === 'refused' ? OTHER : ERRORS[code], retry: ['unavailable', 'busy', 'timeout'].includes(code), resumesAt: code === 'quota' ? data.resumesAt : null, tries: data.try, evidence: data.evidence, days: data.days ?? ctx.days }
     setTalk((t) => t.map((e) => (e.id === key ? { ...entry, busy: false, ...done } : e)))
     if (status === 200 && fromBox) setQ((now) => (now === question ? '' : now))

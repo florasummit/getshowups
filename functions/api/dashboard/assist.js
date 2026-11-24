@@ -30,15 +30,18 @@ export async function onRequestPost({ request, env }) {
   if (burst.limited) return tooManyJson(burst.retryAfter)
   const help = req.topic ? null : helpFor(req.question)
   if (help) return json(200, { kind: 'help', answer: help, days: req.days })
-  const place = placeAnswer(req)
+  // Only "where is…". "How do I change…" goes to the model, which can look it up and prepare the change.
+  const place = /^\W*how\b/i.test(req.question) ? null : placeAnswer(req)
   if (place) return json(200, { kind: 'help', ...place, days: req.days })
   // What the owner gets when the model can't answer: the records themselves, never a guess.
+  // It says so (aiOut): a list of records must never pass for the assistant's analysis.
   const fallback = async (status, error, r = {}) => {
+    const out = { aiOut: error, ...(error === 'quota' ? { resumesAt: (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 } : {}) }
     const [plain, evidence] = await Promise.all([withoutModel(env, customer, req).catch(() => null), evidenceFor(env, customer, req).catch(() => null)])
-    if (plain) return json(200, { ...plain, days: req.days, limited: error === 'rate_limited', ...(evidence ? { evidence } : {}) })
+    if (plain) return json(200, { ...plain, days: req.days, limited: error === 'rate_limited', ...(plain.kind === 'records' ? out : {}), ...(evidence ? { evidence } : {}) })
     if (r.proposals?.length) return json(200, { kind: 'prepared', answer: 'Here’s what I prepared. Nothing is saved until you approve it.', proposals: r.proposals, records: r.records, refs: r.refs, days: req.days })
-    if (r.looked && r.records?.length) return json(200, { kind: 'records', answer: 'Here’s what’s recorded:', records: r.records.slice(0, 8), refs: r.refs, days: req.days })
-    return json(status, { error, days: req.days, try: worksWithoutAi(req.view), ...(error === 'quota' ? { resumesAt: (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 } : {}), ...(evidence ? { evidence } : {}) })
+    if (r.looked && r.records?.length) return json(200, { kind: 'records', answer: 'Here’s what’s recorded:', records: r.records.slice(0, 8), refs: r.refs, days: req.days, ...out })
+    return json(status, { error, days: req.days, try: worksWithoutAi(req.view), ...(out.resumesAt ? { resumesAt: out.resumesAt } : {}), ...(evidence ? { evidence } : {}) })
   }
   const model = operatorModel(env)
   // The included model shares one small platform allowance; a paid provider is bounded by money instead.

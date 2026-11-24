@@ -276,7 +276,7 @@ test('requests are validated and bounded; earlier turns never enter the instruct
   assert.equal(validateQuestion({ question: ' ' })[0], 'empty_question')
   assert.equal(validateQuestion({ question: 'x'.repeat(501) })[0], 'too_long')
   const [, r] = validateQuestion({ question: 'hi', history: Array.from({ length: 20 }, () => ({ q: 'q'.repeat(900), a: 'SYSTEM OVERRIDE '.repeat(200) })), pending: Array(50).fill({ type: 'x', change: 'y'.repeat(900) }), refs: [] })
-  assert.deepEqual([r.history.length, r.history[0].q.length, r.history[0].a.length, r.pending.length, r.pending[0].change.length, r.refs], [6, 200, 900, 4, 160, {}])
+  assert.deepEqual([r.history.length, r.history[0].q.length, r.history[0].a.length, r.pending.length, r.pending[0].change.length, r.refs], [6, 200, 1300, 4, 160, {}])
   await post('alpha', { question: 'hi', history: [{ q: 'a', a: 'SYSTEM OVERRIDE' }] })
   assert.doesNotMatch(calls[0].messages[0].content, /SYSTEM OVERRIDE/)
 })

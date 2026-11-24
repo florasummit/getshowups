@@ -11,6 +11,7 @@ import { adsAccess } from './ads/access.js'
 import { internalEmails, isTestLead } from './testdata.js'
 import { getProfile } from './onboarding.js'
 import { websiteSummary } from './website.js'
+import { policiesOrEmpty } from './policies.js'
 import { businessFacts } from './followups/engine.js'
 import { outsideZips } from './insights.js'
 import { serviceAreaChange } from './proposals.js'
@@ -318,13 +319,14 @@ export const TOOLS = [
     return { period: r.label, open_times: t.length, first_times: t.slice(0, 8).map((x) => whenText(x, c.tz)) }
   }),
   tool('business_settings', 'Current settings: hours, service area, services, receptionist, website, calendar, automatic messages, and what is missing.', {}, [], async (c) => {
-    const [f, profile, rec, site, cal, outside] = await Promise.all([
+    const [f, profile, rec, site, cal, outside, policy] = await Promise.all([
       businessFacts(c.env, c.customer),
-      getProfile(c.db, c.customer.id).catch(() => null),
+      getProfile(c.db, c.customer.id).catch(() => undefined),
       one(c, 'SELECT enabled FROM receptionist_settings WHERE customer = ?1').catch(() => undefined),
       websiteSummary(c.db, c.customer.id).catch(() => null),
       c.env.GOOGLE_TOKENS.get(`google:${c.customer.id}`).catch(() => undefined),
       outsideZips(c.env, c.customer, c.now).catch(() => []),
+      policiesOrEmpty(c.db, c.customer.id),
     ])
     const z = c.customer.serviceZips || []
     return {
@@ -342,6 +344,9 @@ export const TOOLS = [
       google_calendar: cal === undefined ? 'unknown' : cal ? 'connected (last known)' : 'not connected',
       automatic_messages: c.customer.automations ? 'turned on' : 'turned off',
       messages_to_customers: c.env.MESSAGES_LIVE === 'true' ? 'live' : 'not live yet: GetShowUps is still activating email sending, so customers do not receive them',
+      ...(profile !== undefined
+        ? { not_set: [!profile?.phone && 'business phone', !profile?.description && 'business description', !profile?.services?.length ? 'services (the receptionist and booking page have none to offer)' : profile.services.some((s) => !s.price) && 'prices for some services', !profile?.cities?.length && 'towns served', !z.length && 'service-area limit (anyone anywhere can book)', !policy.beforeVisit && 'what customers should know before a visit', !policy.cancellation && 'cancellation policy'].filter(Boolean) }
+        : { not_set: 'could not be read' }),
       not_in_getshowups: ['phone calls', 'why someone did not book', 'costs other than reported ad spend', 'payments nobody recorded'],
     }
   }),

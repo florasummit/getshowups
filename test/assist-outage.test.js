@@ -129,3 +129,28 @@ test('retry: one, only for a refusal that can pass; never for quota, setup or ti
     assert.equal(calls, n, e.message)
   }
 })
+
+test('a list shown because the AI is out says so; it never passes for analysis, and "how do I" questions reach the model', async () => {
+  lead('alpha', 'Green pool')
+  const r = await ask('what is going on with appointments', { view: 'overview' })
+  assert.deepEqual([r.body.kind, r.body.aiOut], ['records', 'quota'])
+  assert.ok(r.body.resumesAt > Date.now())
+  assert.equal((await ask('Where is my help button?')).body.aiOut, undefined)
+  const before = calls
+  await ask('How do I change my hours?')
+  assert.equal(calls, before + 1)
+})
+
+test('business_settings says what is not set, so "what am I missing" has evidence; unreadable is said, not guessed', async () => {
+  const { runTool, toolContext } = await import('../server/operator-tools.js')
+  const customer = { id: 'alpha', name: 'alpha co', timezone: 'America/New_York', serviceZips: [], slotMinutes: 60, workdays: [1], dayStart: '09:00', dayEnd: '17:00' }
+  sql.exec("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('alpha', '8435550100', 'Pool', 'x', '[{\"name\":\"Weekly\",\"price\":\"\"}]', '[]', 1)")
+  const r = await runTool(toolContext(env, customer, {}), 'business_settings', {})
+  assert.deepEqual(r.not_set, ['prices for some services', 'towns served', 'service-area limit (anyone anywhere can book)', 'what customers should know before a visit', 'cancellation policy'])
+  assert.doesNotMatch(JSON.stringify(r), /8435550100/)
+  sql.exec("DELETE FROM business_profiles")
+  assert.equal((await runTool(toolContext(env, customer, {}), 'business_settings', {})).not_set[0], 'business phone')
+  sql.exec('DROP TABLE business_profiles')
+  const gone = await runTool(toolContext(env, customer, {}), 'business_settings', {})
+  assert.ok(gone.error || gone.not_set === 'could not be read')
+})

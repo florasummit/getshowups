@@ -154,7 +154,8 @@ test('assistant: when the AI allowance is used up it says so, when it returns, a
   const asked = []
   await page.route('**/api/dashboard/assist', (r) => {
     const q = r.request().postDataJSON().question
-    asked.push(q)
+    asked.push(r.request().postDataJSON())
+    if (q === 'What is going on with appointments?') return r.fulfill({ json: { kind: 'records', answer: 'Here’s what’s recorded:', aiOut: 'quota', resumesAt, days: 30 } })
     // The refused question is stubbed; everything else is the real handler.
     return q === 'Write me a poem' ? r.fulfill({ status: 503, json: { error: 'quota', resumesAt, try: ['What is this page for?'], days: 30 } }) : r.continue()
   })
@@ -168,9 +169,16 @@ test('assistant: when the AI allowance is used up it says so, when it returns, a
   await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0)
   await panel.getByRole('button', { name: 'What is this page for?' }).first().click()
   await expect(panel).toContainText('This is Teach Your AI')
+  // A bare list says it is not analysis, and neither it nor a refused question is replayed as the AI's own answer.
+  await panel.getByRole('textbox').fill('What is going on with appointments?')
+  await page.keyboard.press('Enter')
+  await expect(panel.locator('[data-ai-out]')).toContainText('without analysis or advice')
   await panel.getByRole('textbox').fill('Where is my help button?')
   await page.keyboard.press('Enter')
   await expect(panel).toContainText('top of every dashboard page')
+  const sent = asked.at(-1).history.map((h) => h.a)
+  expect(sent[0]).toContain('not answered')
+  expect(sent.at(-1)).toContain('only listed')
   expect(await wide(page)).toBeLessThanOrEqual(0)
 })
 

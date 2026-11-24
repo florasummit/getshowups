@@ -36,7 +36,7 @@ export function validateQuestion(b) {
   if (b.days !== undefined && !PERIODS.includes(b.days)) return ['invalid_request']
   const h = b.history === undefined ? [] : b.history
   if (!Array.isArray(h) || h.length > 20) return ['invalid_request']
-  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 900) }))
+  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 1300) }))
   const named = periodIn(question)
   const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[AL]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
   const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L } : {}
