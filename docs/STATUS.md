@@ -2,6 +2,13 @@
 
 _Update at the end of every task. Newest first._
 
+## Assistant and dashboard read one truth (2026-11-24)
+
+Cause: no assistant tool read receptionist_requests, so it denied the call back Overview showed. server/attention.js is now the
+one definition (Overview card + assistant); server/app-state.js gives the assistant the page on screen and who is waiting, every
+turn; page_state reads any page. Call backs can be prepared as dealt with. Browser acceptance: scripts/acceptance/run.mjs
+(--local: synthetic businesses, real model; --deployed: signed-in test business only, after login.mjs once).
+
 ## Assistant provider configured (2026-11-24)
 
 The owner set OPERATOR_PROVIDER and OPERATOR_ANTHROPIC_API_KEY in Cloudflare. They take effect on the deployment made after

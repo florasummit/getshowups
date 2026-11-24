@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import AiWrite from './AiWrite.jsx'
 import { HelpTip } from './Help.jsx'
-import { takeDraft } from './assistant-store.js'
+import { setSelected, takeDraft } from './assistant-store.js'
 import { LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
 
@@ -70,6 +70,10 @@ export default function FollowUps() {
   useEffect(() => {
     api('/api/dashboard/followups').then(({ status, data: d }) => setData((prev) => (status === 200 ? d : prev && !prev.failed ? prev : { failed: true })))
   }, [tick])
+  useEffect(() => {
+    setSelected(open)
+    return () => setSelected(null)
+  }, [open])
   useEffect(() => {
     const on = () => setOpen(takeDraft()?.leadId ?? null)
     window.addEventListener('gsu:draft', on)

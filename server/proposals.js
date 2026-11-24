@@ -7,6 +7,7 @@ import { outsideZips } from './insights.js'
 import { validateBusiness, validateHours } from './customers.js'
 import { setOutcome } from './booking.js'
 import { syncStage } from './ghl.js'
+import { resolveRequest, requestById } from './attention.js'
 import { hoursText, OUTCOMES } from './operator-tools.js'
 
 const MAX_ADD = 10
@@ -120,6 +121,17 @@ export async function applyHours(env, session, body, now = Date.now()) {
   return { ok: true, state: hoursText(after) }
 }
 
+// Marks a call-back request or message as dealt with, like Mark done on the Receptionist page.
+export async function applyCallBackDone(env, session, body, now = Date.now()) {
+  if (body?.confirm !== true || typeof body.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(body.id)) return { ok: false, error: 'invalid_request', status: 400 }
+  const db = env.ONBOARDING_DB
+  const cur = await requestById(db, session.customer.id, body.id)
+  if (!cur) return { ok: false, error: 'not_found', status: 404 }
+  if (!(await resolveRequest(db, session.customer.id, body.id, now))) return { ok: true, already: true, state: 'dealt with' }
+  await recordEvent(db, { type: 'receptionist.request_resolved', actor: `owner:${session.email}`, customer: session.customer.id, capability: 'receptionist', outcome: 'success', resource: { type: 'receptionist_request', id: body.id }, details: { via: 'assistant' } }).catch(() => {})
+  return { ok: true, state: 'dealt with' }
+}
+
 export function applyProposal(env, session, body) {
-  return body?.type === 'outcome' ? applyOutcome(env, session, body) : body?.type === 'hours' ? applyHours(env, session, body) : applyServiceArea(env, session, body)
+  return body?.type === 'call_back_done' ? applyCallBackDone(env, session, body) : body?.type === 'outcome' ? applyOutcome(env, session, body) : body?.type === 'hours' ? applyHours(env, session, body) : applyServiceArea(env, session, body)
 }

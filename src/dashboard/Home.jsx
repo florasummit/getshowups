@@ -329,18 +329,7 @@ function Stats({ stats, visit, upcoming }) {
 
 // What needs the owner, most urgent first. Each item has one obvious action. Empty → "All caught up".
 function Attention({ data, go }) {
-  const items = []
-  const r = data.requests
-  if (r?.open)
-    items.push({
-      tone: r.urgent ? 'bad' : 'warn',
-      tag: r.urgent ? 'Urgent' : 'Callback',
-      text: `${r.open} ${r.open === 1 ? 'customer is' : 'customers are'} waiting for a call back`,
-      action: ['Open receptionist', 'receptionist'],
-    })
-  const unbooked = data.followUp.filter((l) => !l.test && l.status === 'new').length
-  if (unbooked)
-    items.push({ tone: 'warn', tag: 'Follow up', text: `${unbooked} ${unbooked === 1 ? 'person asked' : 'people asked'} but ${unbooked === 1 ? 'hasn’t' : 'haven’t'} booked yet`, action: ['Review', 'appointments'] })
+  const { items, unread } = data.attention
   return (
     <section className="card ui-attention" aria-label="Needs your attention">
       <h2 className="card-title">Needs your attention</h2>
@@ -349,19 +338,20 @@ function Attention({ data, go }) {
           {items.map((i) => (
             <li key={i.text}>
               <span className="ui-attention-text">
-                <Pill tone={i.tone}>{i.tag}</Pill> {i.text}
+                <Pill tone={i.urgent ? 'bad' : 'warn'}>{i.tag}</Pill> {i.text}
               </span>
-              <button type="button" className="btn btn-sm btn-quiet" onClick={() => go(i.action[1])}>
-                {i.action[0]}
+              <button type="button" className="btn btn-sm btn-quiet" onClick={() => go(i.page)}>
+                {i.label}
               </button>
             </li>
           ))}
         </ul>
-      ) : (
+      ) : unread.length ? null : (
         <p className="ui-all-clear">
           <Pill tone="ok">All caught up</Pill> Nobody is waiting on you.
         </p>
       )}
+      {unread.length > 0 && <p className="fine">Some of this couldn’t be checked just now.</p>}
     </section>
   )
 }
@@ -417,7 +407,7 @@ function Overview({ me, data, reload, go, site, insight }) {
       {data && !data.failed && (
         <div className="enter ui-overview">
           <Attention data={data} go={go} />
-          <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.length} />
+          <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.filter((a) => !a.test).length} />
           {insight}
           <Scorecard />
           {data.ads && <AdsResults ads={data.ads} />}

@@ -43,3 +43,10 @@ export const takeDraft = (leadId) => {
   if (leadId) draft = null
   return d
 }
+
+// The conversation open on Follow-ups, so "this one" means it.
+let selected = null
+export const setSelected = (leadId) => {
+  selected = leadId || null
+}
+export const getSelected = () => selected

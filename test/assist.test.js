@@ -168,7 +168,7 @@ test('outcome: prepared, not saved; approval re-checks tenant and state, runs on
   const past = appt('alpha', 'Pat Lee', -20 * HOUR)
   const future = appt('alpha', 'Lena Ortiz', 20 * HOUR)
   const status = () => db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(past).status
-  script = [pick(['list_appointments', { state: 'needs_outcome' }]), pick(['prepare_outcome', { ref: 'A1', outcome: 'completed' }]), say('[A1] is ready to approve as completed.')]
+  script = [pick(['list_appointments', { state: 'needs_outcome' }]), pick(['prepare_outcome', { ref: 'A2', outcome: 'completed' }]), say('[A2] is ready to approve as completed.')]
   const r = await post('alpha', { question: 'mark pat done' })
   const p = r.body.proposals[0]
   assert.deepEqual([p.type, p.id, p.outcome, p.before, status()], ['outcome', past, 'completed', { status: 'booked', work: null }, 'booked'])
@@ -222,11 +222,11 @@ test('answers are checked: claims of having done something, invented numbers and
 
 test('a failed check is corrected at most twice, then the records are shown without prose; nothing invented reaches the owner', async () => {
   appt('alpha', 'Jamie Rivera', 20 * HOUR)
-  script = [pick(['list_appointments', {}]), say('You have 48 appointments.'), say('You have 49 appointments.'), say('You have 47 appointments.')]
+  script = [pick(['list_appointments', {}]), say('You have 748 appointments.'), say('You have 749 appointments.'), say('You have 747 appointments.')]
   const r = await post('alpha', { question: 'what is coming up' })
   assert.deepEqual([r.status, r.body.kind, r.body.records[0].name], [200, 'records', 'Jamie Rivera'])
-  assert.doesNotMatch(JSON.stringify(r.body), /47|48|49/)
-  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 49/)
+  assert.doesNotMatch(JSON.stringify(r.body), /74[789]/)
+  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 749/)
 })
 
 test('outage, timeout, quota and garbage: the records still answer plain questions, otherwise a code; a broken tool is said, not guessed', async () => {

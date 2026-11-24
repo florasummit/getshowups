@@ -16,6 +16,8 @@ import { businessFacts } from './followups/engine.js'
 import { outsideZips } from './insights.js'
 import { serviceAreaChange } from './proposals.js'
 import { validateHours } from './customers.js'
+import { findRequests, NEEDS_OWNER, requestById } from './attention.js'
+import { PAGE_IDS, pageState, waitingNow } from './app-state.js'
 
 const DAY = 86_400_000
 const LIST = 12
@@ -65,19 +67,22 @@ export function rangeOf({ period, from, to }, tz, now) {
 }
 
 // ---------- records ----------
-const tidy = (v) =>
-  String(v ?? '')
+// Cut text says so: a request that ends early must not read as one that asks for nothing.
+const tidy = (v) => {
+  const t = String(v ?? '')
     .replace(/\p{Cc}/gu, ' ')
     .replace(/\S+@\S+/g, '[email removed]')
     .replace(/(?:https?:\/\/|www\.)\S+/gi, '[link removed]')
     .replace(/\+?\d[\d\s().-]{6,}\d/g, '[number removed]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 100)
+  return t.length > 400 ? `${t.slice(0, 400)} (text continues)` : t
+}
 
 const APPT = `SELECT a.id, a.start_at, a.status, a.lead_id, l.name, l.need, l.zip, l.phone, l.email, ao.work,
     (SELECT source FROM lead_attribution la WHERE la.lead_id = l.id AND la.customer = l.customer) AS source,
-    EXISTS (SELECT 1 FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed
+    EXISTS (SELECT 1 FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed,
+    (SELECT x.amount_cents FROM revenue_entries x WHERE x.appointment_id = a.id AND x.customer = a.customer AND x.kind = 'paid' ORDER BY x.id DESC LIMIT 1) AS paid
   FROM appointments a JOIN leads l ON l.id = a.lead_id AND l.customer = a.customer
   LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer`
 const LEAD = `SELECT l.id, l.name, l.need, l.zip, l.status, l.created_at, l.email, l.phone, t.stage, t.last_outbound_at, t.needs_owner, r.status AS coverage,
@@ -91,11 +96,11 @@ const apptState = (r, now) =>
   r.status === 'showed' ? (r.work === 'completed' ? 'happened, job completed' : r.work === 'not_completed' ? 'happened, job not finished' : 'happened') : r.status === 'no_show' ? 'no-show' : r.status === 'cancelled' ? 'cancelled' : r.start_at > now ? 'upcoming' : 'past, outcome not recorded'
 const SOURCE = { google_ads: 'your Google ad', meta_ad_click: 'your Meta ad', meta_lead_form: 'your Meta ad', google_ads_imported: 'a Google campaign you run yourself' }
 
-// References: A = appointment, L = inquiry. The map lives in the conversation (the browser holds it); an id in it is
+// References: A = appointment, L = inquiry, R = a call-back request or message left with the receptionist. The map lives in the conversation (the browser holds it); an id in it is
 // only ever used in a query that also names the session's business.
 export function refBook(given) {
-  const book = { A: [], L: [] }
-  for (const k of ['A', 'L']) for (const id of Array.isArray(given?.[k]) ? given[k].slice(0, 60) : []) book[k].push(typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : '')
+  const book = { A: [], L: [], R: [] }
+  for (const k of ['A', 'L', 'R']) for (const id of Array.isArray(given?.[k]) ? given[k].slice(0, 60) : []) book[k].push(typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : '')
   return {
     book,
     ref(kind, id) {
@@ -104,7 +109,7 @@ export function refBook(given) {
       return `${kind}${i + 1}`
     },
     id(ref) {
-      const m = /^\[?([AL])(\d{1,3})\]?$/i.exec(String(ref ?? '').trim())
+      const m = /^\[?([ALR])(\d{1,3})\]?$/i.exec(String(ref ?? '').trim())
       return m ? { kind: m[1].toUpperCase(), id: book[m[1].toUpperCase()][Number(m[2]) - 1] || null } : { kind: null, id: null }
     },
   }
@@ -115,13 +120,13 @@ export function toolContext(env, customer, given, now = Date.now(), days = 30) {
   return { days, env, db: env.ONBOARDING_DB, customer, tz: customer.timezone, now, refs: refBook(given), shown: new Map(), proposals: [], withdraw: false, go: null, internal: internalEmails(env) }
 }
 
-const apptOut = (c, r) => {
+export const apptOut = (c, r) => {
   const ref = c.refs.ref('A', r.id)
   c.shown.set(ref, { ref, kind: 'appointment', leadId: r.lead_id, name: r.name, when: whenText(r.start_at, c.tz), what: r.need, state: apptState(r, c.now), contact: [r.phone, r.email].filter(Boolean), go: 'appointments' })
-  return { ref, when: whenText(r.start_at, c.tz), asked_for: tidy(r.need), zip: r.zip || null, state: apptState(r, c.now), confirmed_by_customer: !!r.confirmed, came_from: SOURCE[r.source] || 'not traced to an ad', inquiry: c.refs.ref('L', r.lead_id) }
+  return { ref, when: whenText(r.start_at, c.tz), asked_for: tidy(r.need), zip: r.zip || null, state: apptState(r, c.now), confirmed_by_customer: !!r.confirmed, came_from: SOURCE[r.source] || 'not traced to an ad', ...(r.status === 'showed' ? { paid_recorded: r.paid == null ? 'none recorded' : usd(r.paid) } : {}), inquiry: c.refs.ref('L', r.lead_id) }
 }
 const leadState = (r) => (r.status === 'unqualified' ? `outside the service area (${r.coverage || 'kept'})` : r.status === 'booked' ? 'booked' : r.no_shows > 0 && !r.showed ? 'booked before, did not show up, not rebooked' : 'not booked')
-const leadOut = (c, r) => {
+export const leadOut = (c, r) => {
   const ref = c.refs.ref('L', r.id)
   const state = leadState(r)
   c.shown.set(ref, { ref, kind: 'inquiry', leadId: r.id, name: r.name, when: whenText(r.created_at, c.tz), what: r.need, state, contact: [r.phone, r.email].filter(Boolean), go: 'followups' })
@@ -133,12 +138,19 @@ const leadOut = (c, r) => {
     zip: r.zip || null,
     state,
     in_service_area: r.status !== 'unqualified',
-    message_sent_by_getshowups: r.last_outbound_at ? whenText(r.last_outbound_at, c.tz) : 'none',
-    waiting_for_owner: !!r.needs_owner,
+    message_sent_through_getshowups: r.last_outbound_at ? `${whenText(r.last_outbound_at, c.tz)} (who sent it, the owner or an automatic message, is not shown)` : 'none',
+    waiting_for_owner: r.needs_owner ? NEEDS_OWNER[r.needs_owner] || 'yes' : false,
     appointments: { booked: Number(r.booked), showed: Number(r.showed), no_show: Number(r.no_shows) },
     can_be_reached_by: [r.email && 'email', r.phone && 'phone'].filter(Boolean),
     came_from: SOURCE[r.source] || 'not traced to an ad',
   }
+}
+export const requestOut = (c, r) => {
+  const ref = c.refs.ref('R', r.id)
+  const callback = r.kind === 'callback'
+  const state = r.status === 'open' ? (callback ? 'waiting for a call back' : 'message waiting for the owner') : 'marked done'
+  c.shown.set(ref, { ref, kind: callback ? 'callback' : 'message', name: r.name || 'A customer', when: whenText(r.created_at, c.tz), what: r.note || '', state: r.urgent ? `${state}, urgent` : state, contact: [r.phone, r.email].filter(Boolean), go: 'receptionist' })
+  return { ref, kind: callback ? 'asked the receptionist for a call back' : 'left a message with the receptionist', state, urgent: !!r.urgent, received: whenText(r.created_at, c.tz), hours_ago: Math.max(0, Math.round((c.now - r.created_at) / 3_600_000)), asked_for: tidy(r.note) || 'nothing written', can_be_reached_by: [r.phone && 'phone', r.email && 'email'].filter(Boolean), ...(r.lead_id ? { same_person_inquiry: c.refs.ref('L', r.lead_id) } : {}) }
 }
 const all = async (c, sql, ...a) => (await c.db.prepare(sql).bind(c.customer.id, ...a).all()).results
 const one = async (c, sql, ...a) => c.db.prepare(sql).bind(c.customer.id, ...a).first()
@@ -148,16 +160,34 @@ const MISSING = { error: 'not_found', note: 'That record is not in this business
 async function apptByRef(c, ref) {
   const { kind, id } = c.refs.id(ref)
   if (!id) return null
+  if (kind === 'R') {
+    const l = await leadByRef(c, ref)
+    return l ? one(c, `${APPT} WHERE a.customer = ?1 AND a.lead_id = ?2 AND a.status <> 'pending' ORDER BY a.start_at DESC LIMIT 1`, l.id) : null
+  }
   // An inquiry reference means its newest appointment.
   return kind === 'A' ? one(c, `${APPT} WHERE a.customer = ?1 AND a.id = ?2 AND a.status <> 'pending'`, id) : one(c, `${APPT} WHERE a.customer = ?1 AND a.lead_id = ?2 AND a.status <> 'pending' ORDER BY a.start_at DESC LIMIT 1`, id)
 }
 async function leadByRef(c, ref) {
   const { kind, id } = c.refs.id(ref)
   if (!id) return null
+  if (kind === 'R') {
+    const r = await requestById(c.db, c.customer.id, id)
+    return r?.lead_id ? one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, r.lead_id) : null
+  }
   if (kind === 'L') return one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, id)
   const a = await one(c, 'SELECT lead_id FROM appointments WHERE customer = ?1 AND id = ?2', id)
   return a ? one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, a.lead_id) : null
 }
+
+const requestByRef = (c, ref) => {
+  const { kind, id } = c.refs.id(ref)
+  return kind === 'R' && id ? requestById(c.db, c.customer.id, id) : null
+}
+export const leadByRefId = async (c, id) => {
+  const r = await one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, id)
+  return r && leadOut(c, r)
+}
+export const apptRefs = async (c, list) => (await Promise.all(list.map((x) => one(c, `${APPT} WHERE a.customer = ?1 AND a.id = ?2`, x.id)))).filter(Boolean).map((r) => apptOut(c, r))
 
 // Counts by the date things happened (inquiries by when they came in, visits by when they took place).
 export async function rangeStats(c, r) {
@@ -214,7 +244,7 @@ export const TOOLS = [
       if (W) return { state: a.state, ...listed(await q(W, c.now - 400 * DAY, far, a.state === 'upcoming' ? 'ASC' : 'DESC'), (x) => apptOut(c, x)) }
       return {
         upcoming: listed(await q("a.status = 'booked'", c.now, far, 'ASC'), (x) => apptOut(c, x)),
-        outcome_not_recorded: listed(await q("a.status = 'booked'", c.now - 90 * DAY, c.now, 'DESC'), (x) => apptOut(c, x)),
+        outcome_not_recorded: listed(await q("a.status = 'booked'", 0, c.now, 'DESC'), (x) => apptOut(c, x)),
       }
     },
   ),
@@ -228,8 +258,8 @@ export const TOOLS = [
   }),
   tool(
     'list_leads',
-    'Inquiries (leads). recent = all; unanswered = not booked and nothing was sent to them; not_booked; booked; booked_no_show = booked but did not show up; outside_area = not in the service area; qualified = in the service area. unanswered also means waiting for a reply.',
-    { which: { type: 'string', enum: ['recent', 'unanswered', 'not_booked', 'booked', 'booked_no_show', 'outside_area', 'qualified'] }, days: { type: 'integer', description: 'How far back, default 30, at most 365' } },
+    'Inquiries (leads). Not call-back requests: those are in who_is_waiting. recent = all; unanswered = not booked and nothing was sent to them; not_booked; booked; booked_no_show = booked but did not show up; outside_area = not in the service area; qualified = in the service area. needs_owner = their written conversation is waiting for the owner.',
+    { which: { type: 'string', enum: ['recent', 'unanswered', 'not_booked', 'booked', 'booked_no_show', 'outside_area', 'qualified', 'needs_owner'] }, days: { type: 'integer', description: 'How far back, default 30, at most 365' } },
     ['which'],
     async (c, a) => {
       const days = Math.min(365, Math.max(1, Number.isInteger(a.days) ? a.days : 30))
@@ -241,10 +271,11 @@ export const TOOLS = [
         booked_no_show: "EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status = 'no_show')",
         outside_area: "l.status = 'unqualified'",
         qualified: "l.status <> 'unqualified'",
+        needs_owner: 't.needs_owner IS NOT NULL',
       }[a.which]
       if (!W) return { error: 'invalid_filter' }
       const rows = await all(c, `${LEAD} WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')} AND ${W} ORDER BY l.created_at DESC LIMIT 60`, c.now - days * DAY, c.internal)
-      return { which: a.which, last_days: days, ...listed(rows, (x) => leadOut(c, x)), ...(a.which === 'unanswered' ? { note: 'Phone calls made outside GetShowUps are not recorded.' } : {}) }
+      return { which: a.which, last_days: days, ...listed(rows, (x) => leadOut(c, x)), ...(a.which === 'unanswered' ? { note: 'Phone calls made outside GetShowUps are not recorded. This list does not include call-back requests (who_is_waiting).' } : {}) }
     },
   ),
   tool('get_lead', 'One inquiry in full.', { ref: REF }, ['ref'], async (c, a) => {
@@ -253,11 +284,12 @@ export const TOOLS = [
     const appts = await all(c, `${APPT} WHERE a.customer = ?1 AND a.lead_id = ?2 AND a.status <> 'pending' ORDER BY a.start_at DESC LIMIT 5`, r.id)
     return { ...leadOut(c, r), appointment_history: appts.map((x) => apptOut(c, x)) }
   }),
-  tool('find_person', "Find inquiries and appointments by a customer name the owner typed. Returns references, not names.", { name: { type: 'string' } }, ['name'], async (c, a) => {
+  tool('find_person', "Find inquiries, appointments, call-back requests and receptionist messages by a customer name the owner typed. Returns references, not names.", { name: { type: 'string' } }, ['name'], async (c, a) => {
     const q = String(a.name || '').replace(/[%_\\]/g, '').trim().slice(0, 60)
     if (q.length < 2) return { error: 'name_too_short' }
     const rows = await all(c, `${LEAD} WHERE l.customer = ?1 AND l.name LIKE ?2 ORDER BY l.created_at DESC LIMIT 6`, `%${q}%`)
-    return { matches: rows.length, items: rows.map((x) => leadOut(c, x)) }
+    const req = await findRequests(c.db, c.customer.id, `%${q}%`).catch(() => [])
+    return { matches: rows.length + req.length, items: [...rows.map((x) => leadOut(c, x)), ...req.map((x) => requestOut(c, x))] }
   }),
   tool('business_numbers', 'Counts for one period, by the date things happened: inquiries, bookings, visits, no-shows, payments recorded, ad spend.', { period: PERIOD, from: D8, to: D8 }, [], async (c, a) => {
     const r = rangeOf(a.period || a.from ? a : { period: 'last_30_days' }, c.tz, c.now)
@@ -350,7 +382,7 @@ export const TOOLS = [
       ...(profile !== undefined
         ? {
             not_set: [
-              !profile?.services?.length && 'services (Settings): the receptionist has none to describe',
+              !profile?.services?.length && 'services (Settings): the receptionist has none to describe; the booking page works without them',
               profile?.services?.length && profile.services.some((s) => !s.price) && `price for ${profile.services.filter((s) => !s.price).map((s) => s.name).join(', ')} (Settings); all other listed services have one`,
               !profile?.phone && 'business phone (Settings): not shown to customers; online booking works without it',
               !profile?.description && 'business description (Settings)',
@@ -364,7 +396,21 @@ export const TOOLS = [
       not_in_getshowups: ['phone calls', 'why someone did not book', 'costs other than reported ad spend', 'payments nobody recorded'],
     }
   }),
+  tool('who_is_waiting', 'Everyone and everything waiting for the owner, by kind, exactly as the Needs your attention card counts it: call-back requests and messages left with the receptionist, conversations needing the owner, people who asked but have not booked, outside-area requests to decide, visits without an outcome. Use before saying who or how many are waiting, or that nobody is.', {}, [], (c) => waitingNow(c)),
+  tool('page_state', 'What a dashboard page shows right now (any page, whichever one the owner is on): its sections, tiles, alerts, statuses and what can be done there.', { page: { type: 'string', enum: PAGE_IDS } }, ['page'], (c, a) => pageState(c, a.page)),
+  tool('get_call_back', 'One call-back request or receptionist message in full.', { ref: REF }, ['ref'], async (c, a) => {
+    const r = await requestByRef(c, a.ref)
+    return r ? requestOut(c, r) : MISSING
+  }),
   // ---------- prepare (nothing is saved) ----------
+  tool('prepare_call_back_done', 'Prepare marking a call-back request or receptionist message as dealt with, for the owner to approve. Only when the owner says they called or answered that person, or asks to clear it.', { ref: REF }, ['ref'], async (c, a) => {
+    const r = await requestByRef(c, a.ref)
+    if (!r) return MISSING
+    const out = requestOut(c, r)
+    if (r.status !== 'open') return { already: true, state: out.state }
+    c.proposals.push({ type: 'call_back_done', id: r.id, ref: out.ref, name: r.name || 'A customer', when: whenText(r.created_at, c.tz), kind: r.kind, from: out.state, to: 'Dealt with', effects: ['It leaves Needs your attention. Nothing is sent to the customer.'] })
+    return { prepared: true, for: out, note: 'Shown to the owner with an Approve button. Not saved.' }
+  }),
   tool(
     'prepare_outcome',
     'Prepare recording what happened at a past appointment, for the owner to approve. completed = happened and the job is done; happened_not_finished; happened; no_show; undo = back to not recorded.',
@@ -400,9 +446,11 @@ export const TOOLS = [
     { ref: REF, message: { type: 'string', description: 'The draft, two to four short sentences' } },
     ['ref', 'message'],
     async (c, a) => {
+      const asked = await requestByRef(c, a.ref)
       const r = await leadByRef(c, a.ref)
+      if (!r && asked) return { error: 'no_conversation', note: 'This person only left a call-back request or message, so there is no written conversation to draft into. Suggest in your answer what to say on the call; their phone or email is on the card.' }
       if (!r) return MISSING
-      const text = String(a.message || '').replace(/\p{Cc}/gu, ' ').replace(/\[?\b[AL]\d{1,3}\b\]?/g, '').replace(/\s+/g, ' ').trim()
+      const text = String(a.message || '').replace(/\p{Cc}/gu, ' ').replace(/\[?\b[ALR]\d{1,3}\b\]?/g, '').replace(/\s+/g, ' ').trim()
       if (text.length < 20 || text.length > 600) return { error: 'message_length', note: 'Two to four short sentences.' }
       if (/https?:|www\.|[$%<>{}]|\b(guarantee\w*|discount|free)\b/i.test(text) || /\d/.test(text)) return { error: 'message_content', note: 'Rewrite without numbers, prices, links, discounts or guarantees.' }
       if (!r.email && !r.phone) return { error: 'no_contact', note: 'No email or phone is on record for this person.' }
@@ -432,9 +480,13 @@ export const TOOLS = [
       return { prepared: true, before: hoursText(cur), after: hoursText(after), note: 'Shown to the owner with an Approve button. Not saved.' }
     },
   ),
-  tool('withdraw_prepared', 'Withdraw the changes prepared earlier that are still waiting for approval, when the owner does not want them.', {}, [], async (c) => {
-    c.withdraw = true
-    c.proposals.length = 0
+  tool('withdraw_prepared', 'Withdraw what was prepared earlier and is still waiting for approval, when the owner does not want it. With ref: only what was prepared for that person ("scrap that" means the latest one). Without: everything.', { ref: REF }, [], async (c, a) => {
+    const m = /^\[?([ALR]\d{1,3})\]?$/i.exec(a.ref || '')
+    const ref = m ? m[1].toUpperCase() : null
+    if (a.ref && !ref) return { error: 'invalid_arguments', field: 'ref' }
+    if (ref && c.withdraw !== true) c.withdraw = [...(c.withdraw || []), ref]
+    else c.withdraw = true
+    c.proposals.splice(0, c.proposals.length, ...c.proposals.filter((p) => ref && p.ref !== ref))
     return { withdrawn: true, note: 'Nothing was changed.' }
   }),
   tool('no_lookup_needed', 'Only when nothing about this business has to be read: a greeting, a general business question, a needed clarification, or something already in the records discussed.', { why: { type: 'string', enum: ['greeting', 'general_question', 'clarify', 'already_have_it', 'unrelated'] } }, ['why'], async () => ({ ok: true })),
@@ -487,21 +539,21 @@ export async function runTool(c, name, args) {
 // The newest ones, and every one the conversation still names (said: the earlier turns' text).
 export async function knownRecords(c, said = '', limit = 10) {
   const out = []
-  for (const k of ['A', 'L']) {
+  for (const k of ['A', 'L', 'R']) {
     const n = c.refs.book[k].length
-    const named = new Set([...said.matchAll(/\[([AL]\d{1,3})\]/g)].map((m) => m[1]).slice(-24))
+    const named = new Set([...said.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]).slice(-24))
     for (let i = 0; i < n; i++) {
       const ref = `${k}${i + 1}`
       if (i < n - limit && !named.has(ref)) continue
-      const r = k === 'A' ? await apptByRef(c, ref) : await leadByRef(c, ref)
-      out.push(r ? (k === 'A' ? apptOut(c, r) : leadOut(c, r)) : { ref, state: 'no longer exists' })
+      const r = k === 'A' ? await apptByRef(c, ref) : k === 'R' ? await requestByRef(c, ref) : await leadByRef(c, ref)
+      out.push(r ? (k === 'A' ? apptOut : k === 'R' ? requestOut : leadOut)(c, r) : { ref, state: 'no longer exists' })
     }
   }
   return out
 }
 
 // Lookups whose results a follow-up question needs again. Only these are ever repeated: reads of our own records.
-export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings']
+export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings', 'page_state', 'get_call_back']
 export async function repeatLookups(c, list) {
   return Promise.all(list.map(async (x) => ({ tool: x.name, args: x.args, result: await runTool(c, x.name, x.args) })))
 }

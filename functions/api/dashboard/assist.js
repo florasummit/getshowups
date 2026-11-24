@@ -28,28 +28,31 @@ export async function onRequestPost({ request, env }) {
   if (error) return json(400, { error })
   const burst = await hit(env, 'assistMessage', customer.id)
   if (burst.limited) return tooManyJson(burst.retryAfter)
-  const help = req.topic ? null : helpFor(req.question)
+  // Without a conversation only: inside one, the same words refer to what was said or shown.
+  const help = req.topic || req.history.length ? null : helpFor(req.question)
   if (help) return json(200, { kind: 'help', answer: help, days: req.days })
   // Only "where is…". "How do I change…" goes to the model, which can look it up and prepare the change.
   const place = /^\W*how\b/i.test(req.question) ? null : placeAnswer(req)
   if (place) return json(200, { kind: 'help', ...place, days: req.days })
   // What the owner gets when the model can't answer: the records themselves, never a guess.
   // It says so (aiOut): a list of records must never pass for the assistant's analysis.
-  const fallback = async (status, error, r = {}) => {
-    const out = { aiOut: error, ...(error === 'quota' ? { resumesAt: (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 } : {}) }
+  const fallback = async (status, error, r = {}, limit = null) => {
+    const out = { aiOut: error, ...(limit ? { limit } : {}), ...(error === 'quota' ? { resumesAt: (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 } : {}) }
     const [plain, evidence] = await Promise.all([withoutModel(env, customer, req).catch(() => null), evidenceFor(env, customer, req).catch(() => null)])
     if (plain) return json(200, { ...plain, days: req.days, limited: error === 'rate_limited', ...(plain.kind === 'records' ? out : {}), ...(evidence ? { evidence } : {}) })
     if (r.proposals?.length) return json(200, { kind: 'prepared', answer: 'Here’s what I prepared. Nothing is saved until you approve it.', proposals: r.proposals, records: r.records, refs: r.refs, days: req.days })
     if (r.looked && r.records?.length) return json(200, { kind: 'records', answer: 'Here’s what’s recorded:', records: r.records.slice(0, 8), refs: r.refs, days: req.days, ...out })
-    return json(status, { error, days: req.days, try: worksWithoutAi(req.view), ...(out.resumesAt ? { resumesAt: out.resumesAt } : {}), ...(evidence ? { evidence } : {}) })
+    return json(status, { error, ...(limit ? { limit } : {}), days: req.days, try: worksWithoutAi(req.view), ...(out.resumesAt ? { resumesAt: out.resumesAt } : {}), ...(evidence ? { evidence } : {}) })
   }
   const model = operatorModel(env)
   // The included model shares one small platform allowance; a paid provider is bounded by money instead.
-  if ((await overBudget(env, customer.id)) || (await answersUsedUp(env, customer.id))) return fallback(429, 'rate_limited')
+  // Each limit says which one it is, so the owner is never told the wrong reason.
+  if (await overBudget(env, customer.id)) return fallback(429, 'rate_limited', {}, 'spending')
+  if (await answersUsedUp(env, customer.id)) return fallback(429, 'rate_limited', {}, 'answers')
   const limits = [['aiAskBurst', customer.id], ['aiAttempt', customer.id], ...(model.provider === 'workers' ? [['aiAskAll', 'all']] : [])]
   for (const [rule, key] of limits) {
     const rl = await hit(env, rule, key)
-    if (rl.limited) return fallback(429, 'rate_limited')
+    if (rl.limited) return fallback(429, 'rate_limited', {}, { aiAskBurst: 'minute', aiAttempt: 'attempts', aiAskAll: 'shared' }[rule])
   }
   const record = (props) => track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, view: req.view, ...props, model: model.model } })
   let r
@@ -62,7 +65,7 @@ export async function onRequestPost({ request, env }) {
     return fallback(503, 'unavailable')
   }
   // Codes, tool names and numbers only; never the question, the answer or a record.
-  await record({ ok: r.ok, tools: r.tools.slice(0, 8), ...(r.ok ? {} : { reason: r.reason }), proposals: r.proposals.map((p) => p.type), costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, ms: r.ms })
+  await record({ ok: r.ok, tools: r.tools.slice(0, 8), lookups: r.tools.filter((t) => !/^(no_lookup_needed|show_page|prepare_|withdraw)/.test(t)).length, ...(r.ok ? {} : { reason: r.reason }), proposals: r.proposals.map((p) => p.type), costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, usage: r.usage, ms: r.ms })
   // A refusal before any model work doesn't count as an attempt either.
   if (['quota', 'setup'].includes(r.reason) && !r.costMicros) for (const [rule, key] of limits) if (rule !== 'aiAskBurst') await unhit(env, rule, key)
   if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason, r)
