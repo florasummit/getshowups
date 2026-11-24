@@ -13,7 +13,7 @@ export const MODELS = {
   workers: { provider: 'workers', model: ASSISTANT_MODEL, price: { in: PRICE.inputPerM, out: PRICE.outputPerM, read: PRICE.inputPerM, write: PRICE.inputPerM } },
   claude: { provider: 'claude', model: 'claude-haiku-5-5', effort: 'medium', price: { in: 0.1, out: 0.5, read: 0.01, write: 0.125 } },
 }
-export const operatorModel = (env) => (env.OPERATOR_PROVIDER === 'claude' && env.OPERATOR_ANTHROPIC_API_KEY ? MODELS.claude : MODELS.workers)
+export const operatorModel = (env) => (String(env.OPERATOR_PROVIDER ?? '').trim().toLowerCase() === 'claude' && env.OPERATOR_ANTHROPIC_API_KEY ? MODELS.claude : MODELS.workers)
 export const operatorConfigured = (env) => operatorModel(env).provider === 'claude' || Boolean(env.AI?.run) || Boolean(mockOf(env))
 
 // Money limits for a paid provider (Anthropic's own workspace limit is the outer guard). Both configurable; unset, zero or
@@ -32,6 +32,20 @@ export async function overBudget(env, customerId, now = Date.now()) {
       .bind(now - (now % 86_400_000), customerId)
       .first()
     return r.a >= day * 1e6 || r.b >= business * 1e6
+  } catch {
+    return true
+  }
+}
+
+// The owner's daily allowance is successful answers, counted from the records: a question the AI failed to answer costs none
+// (money limits, the minute limit and aiAttempt still bound failures). Unreadable → treated as used up.
+export const ANSWERS_PER_DAY = 20
+export async function answersUsedUp(env, customerId, now = Date.now()) {
+  try {
+    const r = await env.ONBOARDING_DB.prepare("SELECT count(*) AS n FROM events WHERE type = 'ai_ask' AND customer = ?1 AND at >= ?2 AND json_extract(props, '$.ok') = 1")
+      .bind(customerId, now - (now % 86_400_000))
+      .first()
+    return r.n >= ANSWERS_PER_DAY
   } catch {
     return true
   }
@@ -85,7 +99,7 @@ async function workers(env, m, { system, messages, tools, mustLook, maxTokens },
 }
 
 async function claude(env, m, { system, messages, tools, allTools, maxTokens }, ms) {
-  const anthropic = env.ANTHROPIC_CLIENT || new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY, maxRetries: 1, timeout: ms })
+  const anthropic = env.ANTHROPIC_CLIENT || new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY.trim(), maxRetries: 1, timeout: ms })
   const out = messages.map((x) =>
     x.role === 'tool'
       ? { role: 'user', content: x.results.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.text })) }

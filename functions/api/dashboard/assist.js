@@ -11,7 +11,7 @@ import { track } from '../../../server/events.js'
 import { chatAccess, evidenceFor, helpFor, isSensitive, SENSITIVE_NOTE, validateQuestion, withoutModel } from '../../../server/assist.js'
 import { placeAnswer, worksWithoutAi } from '../../../server/assist-plain.js'
 import { operate } from '../../../server/operator.js'
-import { MIN_CHARGE_MICROS, operatorModel, overBudget } from '../../../server/operator-model.js'
+import { answersUsedUp, MIN_CHARGE_MICROS, operatorModel, overBudget } from '../../../server/operator-model.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
@@ -45,22 +45,25 @@ export async function onRequestPost({ request, env }) {
   }
   const model = operatorModel(env)
   // The included model shares one small platform allowance; a paid provider is bounded by money instead.
-  if (await overBudget(env, customer.id)) return fallback(429, 'rate_limited')
-  const limits = [['aiAskBurst', customer.id], ['aiAsk', customer.id], ...(model.provider === 'workers' ? [['aiAskAll', 'all']] : [])]
+  if ((await overBudget(env, customer.id)) || (await answersUsedUp(env, customer.id))) return fallback(429, 'rate_limited')
+  const limits = [['aiAskBurst', customer.id], ['aiAttempt', customer.id], ...(model.provider === 'workers' ? [['aiAskAll', 'all']] : [])]
   for (const [rule, key] of limits) {
     const rl = await hit(env, rule, key)
     if (rl.limited) return fallback(429, 'rate_limited')
   }
+  const record = (props) => track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, view: req.view, ...props, model: model.model } })
   let r
   try {
     r = await operate(env, customer, req)
   } catch (err) {
     console.error('assist failed:', err?.name)
+    // Recorded like any failure: the provider may have billed it, so the money limits must see it.
+    await record({ ok: false, reason: 'unavailable', tools: [], proposals: [], costMicros: model.provider === 'claude' ? MIN_CHARGE_MICROS : 0 })
     return fallback(503, 'unavailable')
   }
   // Codes, tool names and numbers only; never the question, the answer or a record.
-  await track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, view: req.view, ok: r.ok, tools: r.tools.slice(0, 8), ...(r.ok ? {} : { reason: r.reason }), proposals: r.proposals.map((p) => p.type), model: model.model, costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, ms: r.ms } })
-  // A refusal before any model work isn't one of the owner's questions for the day.
+  await record({ ok: r.ok, tools: r.tools.slice(0, 8), ...(r.ok ? {} : { reason: r.reason }), proposals: r.proposals.map((p) => p.type), costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, ms: r.ms })
+  // A refusal before any model work doesn't count as an attempt either.
   if (['quota', 'setup'].includes(r.reason) && !r.costMicros) for (const [rule, key] of limits) if (rule !== 'aiAskBurst') await unhit(env, rule, key)
   if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason, r)
   return json(200, { kind: r.looked || r.records.length ? 'business' : 'general', answer: r.answer, raw: r.raw, lookups: r.lookups, records: r.records, proposals: r.proposals, withdraw: r.withdraw, go: r.go, refs: r.refs, days: req.days, ...(isSensitive(req.question) && !r.records.length ? { note: SENSITIVE_NOTE } : {}) })

@@ -65,12 +65,12 @@ test('refusals are told apart, actionable, recorded as codes, and cost the owner
   assert.ok(r.body.resumesAt > Date.now() && r.body.resumesAt - Date.now() <= 864e5)
   assert.doesNotMatch(JSON.stringify(r.body), /4006|neurons|upgrade/i)
   const used = Object.fromEntries(sql.prepare('SELECT key, count FROM rate_limits').all().map((x) => [x.key.split(':')[0], x.count]))
-  assert.deepEqual([used.aiAsk, used.aiAskAll, used.aiAskBurst], [0, 0, 1])
+  assert.deepEqual([used.aiAttempt, used.aiAskAll, used.aiAskBurst], [0, 0, 1])
   assert.equal(JSON.parse(sql.prepare("SELECT props FROM events WHERE type = 'ai_ask'").get().props).reason, 'quota')
   fail = () => Object.assign(new Error('bad key'), { status: 401 })
   assert.equal((await ask('write me a poem')).body.error, 'setup')
   fail = () => new Error('socket')
-  assert.deepEqual([(await ask('write me a poem')).body.error, sql.prepare("SELECT count FROM rate_limits WHERE key LIKE 'aiAsk:%'").get().count], ['unavailable', 1])
+  assert.deepEqual([(await ask('write me a poem')).body.error, sql.prepare("SELECT count FROM rate_limits WHERE key LIKE 'aiAttempt:%'").get().count], ['unavailable', 1])
   for (const [e, want] of [[new Error(REFUSED), 'quota'], [new Error('ai_timeout'), 'timeout'], [Object.assign(new Error('x'), { status: 429 }), 'busy'], [Object.assign(new Error('Your credit balance is too low'), { status: 400 }), 'setup'], [undefined, 'unavailable']]) assert.equal(providerReason(e), want)
 })
 
@@ -187,4 +187,38 @@ test('an answer written beside a page button is the answer when nothing follows 
   const customer = { id: 'alpha', name: 'alpha co', timezone: 'America/New_York', serviceZips: [], slotMinutes: 60, workdays: [1], dayStart: '09:00', dayEnd: '17:00' }
   const r = await operate(env, customer, { question: 'where', view: 'overview', days: 30, refs: {}, history: [] }, { model: { provider: 'claude', model: 'm', price: { in: 0, out: 0, read: 0, write: 0 } } })
   assert.deepEqual([r.ok, r.answer, r.go, n], [true, 'Settings is where the calendar is connected.', 'settings', 2])
+})
+
+test('failed questions never use up the day’s answers: PoolThru 2026-11-24 (24 counted, 7 answered) can ask again; limits hold', async () => {
+  const put = (id, c, ok, at = Date.now(), costMicros = 0) => sql.prepare("INSERT INTO events (id, type, customer, at, props) VALUES (?, 'ai_ask', ?, ?, ?)").run(id, c, at, JSON.stringify({ ok, costMicros }))
+  const win = Math.floor(Date.now() / 864e5)
+  sql.prepare('INSERT INTO rate_limits (key, win, count, expires_at) VALUES (?, ?, 24, ?)').run(`aiAsk:${await sha256Hex('alpha')}`, win, (win + 1) * 864e5)
+  for (let i = 0; i < 13; i++) put(`bad${i}`, 'alpha', false)
+  for (let i = 0; i < 7; i++) put(`ok${i}`, 'alpha', true)
+  let sent = 0
+  Object.assign(env, { OPERATOR_PROVIDER: 'claude\n', OPERATOR_ANTHROPIC_API_KEY: 'k', ANTHROPIC_CLIENT: { messages: { create: async () => (sent++, Promise.reject(new Error('socket'))) } } })
+  assert.equal((await ask('write me a poem')).body.error, 'unavailable')
+  assert.ok(sent >= 1, 'the old counter no longer blocks the provider')
+  // Twenty successful answers today: refused before the provider; other businesses and other days never count.
+  for (let i = 7; i < 19; i++) put(`ok${i}`, 'alpha', true)
+  for (let i = 0; i < 30; i++) put(`x${i}`, i % 2 ? 'beta' : 'alpha', true, i % 2 ? Date.now() : Date.now() - 864e5)
+  let before = sent
+  assert.equal((await ask('write me a poem')).body.error, 'unavailable')
+  assert.ok(sent > before)
+  put('ok19', 'alpha', true)
+  before = sent
+  assert.deepEqual([(await ask('write me a poem')).body.error, sent], ['rate_limited', before])
+  // Failures are still bounded: by money, and by attempts.
+  sql.exec("DELETE FROM events")
+  put('spent', 'alpha', false, Date.now(), 1e5)
+  assert.deepEqual([(await ask('write me a poem')).body.error, sent], ['rate_limited', before])
+  sql.exec("DELETE FROM events; UPDATE rate_limits SET count = 60 WHERE key LIKE 'aiAttempt:%'; DELETE FROM rate_limits WHERE key LIKE 'aiAskBurst:%'")
+  assert.deepEqual([(await ask('write me a poem')).body.error, sent], ['rate_limited', before])
+})
+
+test('an unexpected failure is recorded with a minimum charge, so the money limits see it', async () => {
+  Object.assign(env, { OPERATOR_PROVIDER: 'claude', OPERATOR_ANTHROPIC_API_KEY: 'k', ANTHROPIC_CLIENT: { messages: { create: async () => ({ get content() { throw new Error('odd') } }) } } })
+  assert.equal((await ask('write me a poem')).body.error, 'unavailable')
+  const ev = JSON.parse(sql.prepare("SELECT props FROM events WHERE type = 'ai_ask'").get().props)
+  assert.deepEqual([ev.ok, ev.model, ev.costMicros >= 1000], [false, 'claude-haiku-5-5', true])
 })

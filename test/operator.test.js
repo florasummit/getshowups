@@ -168,7 +168,7 @@ test('a definition needs no model and no allowance', async () => {
   assert.deepEqual([r.status, r.body.kind], [200, 'help'])
   assert.equal(helpFor('What is the weather?'), null)
   assert.equal(calls.length, 0)
-  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM rate_limits WHERE key LIKE 'aiAsk:%'").get().n, 0)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM rate_limits WHERE key LIKE 'aiAttempt:%'").get().n, 0)
 })
 
 test('service area: grounded proposal, nothing changes until approved, stale and forged approvals refused, audited', async () => {
