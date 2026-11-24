@@ -5,7 +5,8 @@ import { HELP } from '../src/content/help.js'
 import { diagnose, funnel } from './ads/funnel.js'
 import { adsAccess } from './ads/access.js'
 import { serviceAreaProposal, wantsServiceArea } from './proposals.js'
-import { runTool, toolContext } from './operator-tools.js'
+import { plainAnswer } from './assist-plain.js'
+import { REPEATABLE } from './operator-tools.js'
 import { operatorConfigured } from './operator-model.js'
 import { businessEligible } from './eligibility.js'
 import { internalEmails } from './testdata.js'
@@ -36,11 +37,12 @@ export function validateQuestion(b) {
   if (b.days !== undefined && !PERIODS.includes(b.days)) return ['invalid_request']
   const h = b.history === undefined ? [] : b.history
   if (!Array.isArray(h) || h.length > 20) return ['invalid_request']
-  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 900) }))
+  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 1300) }))
   const named = periodIn(question)
   const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[AL]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
   const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L } : {}
-  return [null, { topic, view, question, history, pending, refs, days: named ?? b.days ?? 30, results: b.days !== undefined }]
+  const looked = (Array.isArray(b.looked) ? b.looked : []).slice(0, 5).filter((x) => REPEATABLE.includes(x?.name) && x.args && typeof x.args === 'object' && !Array.isArray(x.args) && JSON.stringify(x.args).length < 400).map((x) => ({ name: x.name, args: x.args }))
+  return [null, { topic, view, question, history, pending, refs, looked, days: named ?? b.days ?? 30, results: b.days !== undefined }]
 }
 
 // "What is a qualified lead?" is answered from the curated help, word for word, without a model.
@@ -78,42 +80,12 @@ export function funnelEvidence(f) {
 }
 
 // Useful without any model: shown when the model can't be reached, is at its limit, or its answer failed the checks.
-// Understands the plain, misspelled essentials (appointments, inquiries, money, bookings, ZIPs); never pretends more.
-const near = (word, want) => {
-  if (Math.abs(word.length - want.length) > 3 || word.length < 4) return false
-  const row = Array.from({ length: want.length + 1 }, (_, i) => i)
-  for (let i = 1; i <= word.length; i++) {
-    let prev = row[0]
-    row[0] = i
-    for (let j = 1; j <= want.length; j++) {
-      const t = row[j]
-      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (word[i - 1] === want[j - 1] ? 0 : 1))
-      prev = t
-    }
-  }
-  return row[want.length] <= 3
-}
-const mentions = (q, words) => {
-  const t = q.toLowerCase().replace(/[^a-z ]/g, '')
-  const parts = [...t.split(/\s+/), t.replace(/\s+/g, '')]
-  return words.some((w) => parts.some((p) => p === w || (w.length > 6 && near(p, w))))
-}
 export async function withoutModel(env, customer, req) {
   if (wantsServiceArea(req.question)) {
     const p = await serviceAreaProposal(env, customer, req.question)
     return { kind: 'prepared', answer: p.text, ...(p.proposal ? { proposals: [p.proposal] } : {}) }
   }
-  const c = toolContext(env, customer, req.refs)
-  const list = async (name, args, text) => {
-    const r = await runTool(c, name, args)
-    if (r.error) return null
-    const n = r.total ?? r.upcoming.total + r.outcome_not_recorded.total
-    return { kind: 'records', answer: n ? text : 'Nothing like that is recorded right now.', records: [...c.shown.values()].slice(0, 8), refs: c.refs.book }
-  }
-  if (mentions(req.question, ['appointment', 'appointments', 'schedule', 'visits', 'calendar'])) return list('list_appointments', /\btomorrow|tmrw\b/i.test(req.question) ? { period: 'tomorrow' } : /\btoday\b/i.test(req.question) ? { period: 'today' } : {}, 'Here’s what’s recorded:')
-  if (mentions(req.question, ['unanswered', 'answered', 'waiting'])) return list('list_leads', { which: 'unanswered' }, 'Nothing has been sent to these people yet:')
-  if (mentions(req.question, ['leads', 'lead', 'inquiry', 'inquiries'])) return list('list_leads', { which: 'recent' }, 'Your latest inquiries:')
-  return null
+  return plainAnswer(env, customer, req)
 }
 
 export const wantsMoney = (q) => /\b(revenue|income|earn\w*|made|make|paid|payments?|money|profit\w*|roi|roas|return on)\b/i.test(q) && /\b(ads?|advertis\w*|campaigns?|google|revenue|paid|payments?)\b/i.test(q)
@@ -145,4 +117,3 @@ export async function evidenceFor(env, customer, req) {
   if (!wantsFunnel(req.question)) return null
   return funnelEvidence(await funnel(env.ONBOARDING_DB, customer.id, { days: req.days, scope: req.results ? 'ads' : 'all', internal: internalEmails(env) }))
 }
-

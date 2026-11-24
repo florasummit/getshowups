@@ -57,6 +57,7 @@ export const RULES = {
   aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
   aiRulesTeachModel: { limit: 60, windowSec: 86400 }, // teach requests that reach the model (per business and day; cost cap)
   aiRulesTeach: { limit: 30, windowSec: 3600 }, //   POST /api/dashboard/ai-rules teach (per business; may call the model)
+  health: { limit: 60, windowSec: 600 }, //          GET /api/health (per IP)
   qaIngest: { limit: 30, windowSec: 600 }, //        POST /api/qa/runs (per IP; bearer QA_INGEST_TOKEN)
   qaWrite: { limit: 600, windowSec: 600 }, //        POST /api/platform/qa (per admin; guided human QA)
   supportDiagnose: { limit: 6, windowSec: 600 }, //  POST /api/platform/inspector calendar diagnosis (per business)
@@ -94,6 +95,12 @@ export async function hit(env, rule, subject, now = Date.now()) {
     console.error('rate limit unavailable:', rule, err?.message)
   }
   return { limited: false }
+}
+
+// Gives one use back when it turned out to buy nothing (the provider refused the call). Never throws, never below zero.
+export async function unhit(env, rule, subject, now = Date.now()) {
+  const win = Math.floor(now / (RULES[rule].windowSec * 1000))
+  await env.ONBOARDING_DB.prepare('UPDATE rate_limits SET count = count - 1 WHERE key = ?1 AND win = ?2 AND count > 0').bind(`${rule}:${await sha256Hex(subject)}`, win).run().catch(() => null)
 }
 
 export const hitByIp = (env, rule, request) => hit(env, rule, clientIp(request))

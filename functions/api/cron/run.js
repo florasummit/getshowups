@@ -26,6 +26,7 @@ import { dailyReconciliation } from '../../../server/reconcile.js'
 import { recordChanges } from '../../../server/ops/changes.js'
 import { runOptimizer } from '../../../server/ads/optimizer.js'
 import { pollVideos } from '../../../server/ads/creative.js'
+import { beat } from '../../../server/heartbeat.js'
 import { checkDueDomains } from '../../../server/domains.js'
 
 // Ads work runs after messages and never fails the run (each step reports its own error code).
@@ -104,6 +105,7 @@ export async function onRequestPost({ request, env }) {
     // QA history retention (migration 0032; no-op before it): automated 90 days, human 365 days.
     const sessions = await adsStep('expired sessions', () => purgeExpiredSessions(env))
     await adsStep('qa retention', () => purgeQa(env.ONBOARDING_DB))
+    await adsStep('heartbeat', () => beat(env.ONBOARDING_DB))
     return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit, sessions })
   } catch (err) {
     console.error('cron run failed:', err?.message)

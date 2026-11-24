@@ -147,3 +147,53 @@ test('follow-up writing: a checked suggestion lands in the editable reply box; n
   await expect(box).toHaveValue('Edited by me.')
   expect(sent).toEqual([])
 })
+
+test('assistant: when the AI allowance is used up it says so, when it returns, and offers what still works @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+  const resumesAt = Date.parse('2026-11-25T00:00:00Z')
+  const asked = []
+  await page.route('**/api/dashboard/assist', (r) => {
+    const q = r.request().postDataJSON().question
+    asked.push(r.request().postDataJSON())
+    if (q === 'What is going on with appointments?') return r.fulfill({ json: { kind: 'records', answer: 'Here’s what’s recorded:', aiOut: 'quota', resumesAt, days: 30 } })
+    // The refused question is stubbed; everything else is the real handler.
+    return q === 'Write me a poem' ? r.fulfill({ status: 503, json: { error: 'quota', resumesAt, try: ['What is this page for?'], days: 30 } }) : r.continue()
+  })
+  await page.goto('/dashboard/teach')
+  await page.getByRole('button', { name: 'Assistant' }).click()
+  const panel = panelOf(page)
+  await panel.getByRole('textbox').fill('Write me a poem')
+  await page.keyboard.press('Enter')
+  await expect(panel).toContainText('today’s shared AI allowance is used up')
+  await expect(panel).toContainText('They’re back')
+  await expect(panel.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+  await panel.getByRole('button', { name: 'What is this page for?' }).first().click()
+  await expect(panel).toContainText('This is Teach Your AI')
+  // A bare list says it is not analysis, and neither it nor a refused question is replayed as the AI's own answer.
+  await panel.getByRole('textbox').fill('What is going on with appointments?')
+  await page.keyboard.press('Enter')
+  await expect(panel.locator('[data-ai-out]')).toContainText('without analysis or advice')
+  await panel.getByRole('textbox').fill('Where is my help button?')
+  await page.keyboard.press('Enter')
+  await expect(panel).toContainText('top of every dashboard page')
+  const sent = asked.at(-1).history.map((h) => h.a)
+  expect(sent[0]).toContain('not answered')
+  expect(sent.at(-1)).toContain('only listed')
+  expect(await wide(page)).toBeLessThanOrEqual(0)
+})
+
+test('overview: results in full open on demand and fit the screen @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+  const asked = []
+  page.on('request', (r) => r.url().includes('/api/dashboard/results') && asked.push(r.url()))
+  await page.goto('/dashboard')
+  const card = page.locator('[data-scorecard]')
+  await expect(card).toBeVisible()
+  expect(asked.filter((u) => u.includes('scope=all'))).toEqual([])
+  await card.locator('summary').click()
+  await expect(card.getByRole('rowheader', { name: 'Time to first message or booking' })).toBeVisible()
+  await expect(card).toContainText('too few to judge')
+  await card.getByRole('button', { name: '90 days' }).click()
+  await expect(card).toContainText('last 90 days')
+  expect(await wide(page)).toBeLessThanOrEqual(0)
+})

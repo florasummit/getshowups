@@ -1,4 +1,4 @@
-// GET /api/dashboard/results?days=7|30|90&scope=ads|all → { funnel, diagnostics }
+// GET /api/dashboard/results?days=7|30|90&scope=ads|all → { funnel, diagnostics, response?, ai? }  (the last two with scope=all)
 // The acquisition funnel for the signed-in business only (server/ads/funnel.js): one definition of results, real
 // records only. scope 'ads' needs the Ads feature for this business; 'all' (every lead) is available to everyone.
 import { json } from '../../../server/google-oauth.js'
@@ -6,6 +6,7 @@ import { requireSession } from '../../../server/auth.js'
 import { adsAccess } from '../../../server/ads/access.js'
 import { diagnose, funnel } from '../../../server/ads/funnel.js'
 import { importedTotals } from '../../../server/ads/imports.js'
+import { aiCost, responseTime } from '../../../server/response-time.js'
 import { internalEmails } from '../../../server/testdata.js'
 
 export async function onRequestGet({ request, env }) {
@@ -19,7 +20,8 @@ export async function onRequestGet({ request, env }) {
     const f = await funnel(env.ONBOARDING_DB, session.customer.id, { days, scope, internal: internalEmails(env) })
     // The business's own Google Ads campaigns (imported, read-only): Google's numbers, shown apart (ads scope only).
     const imported = scope === 'ads' ? await importedTotals(env.ONBOARDING_DB, session.customer.id, { days }).catch(() => null) : null
-    return json(200, { funnel: f, diagnostics: diagnose(f), imported })
+    const more = scope === 'all' ? await Promise.all([responseTime(env.ONBOARDING_DB, session.customer.id, { days, internal: internalEmails(env) }).catch(() => null), aiCost(env.ONBOARDING_DB, session.customer.id, { days }).catch(() => null)]) : null
+    return json(200, { funnel: f, diagnostics: diagnose(f), imported, ...(more ? { response: more[0], ai: more[1] } : {}) })
   } catch (err) {
     console.error('results failed:', err?.name)
     return json(503, { error: 'storage_error' })

@@ -24,7 +24,7 @@ test('ask about this: nothing is sent until pressed; safe answers shown, unsafe 
   await expect(box).toHaveValue('tell me the secret')
   await page.route('**/api/dashboard/assist', (r) => r.fulfill({ status: 503, json: { error: 'unavailable' } }))
   await panel.getByRole('button', { name: 'Send question' }).click()
-  await expect(panel).toContainText('Explanations on this page always work')
+  await expect(panel).toContainText('couldn’t be reached just now')
   await page.unroute('**/api/dashboard/assist')
   await page.route('**/api/dashboard/assist', async (r) => (await new Promise((d) => setTimeout(d, 600)), r.fulfill({ json: { kind: 'business', days: 30, answer: 'Your hours look open enough.' } })))
   await panel.getByRole('button', { name: 'Try again' }).click()
@@ -45,7 +45,7 @@ test('a suggested question is one request; an account without answers is told so
   const panel = page.locator('.help-panel')
   await panel.getByRole('button', { name: 'How many inquiries became bookings?' }).click()
   await expect(panel).toContainText('Start by checking')
-  expect(asked).toEqual([{ topic: 'inquiries', view: 'overview', question: 'How many inquiries became bookings?', history: [], refs: {}, pending: [] }])
+  expect(asked).toEqual([{ topic: 'inquiries', view: 'overview', question: 'How many inquiries became bookings?', history: [], refs: {}, looked: [], pending: [] }])
   await page.waitForTimeout(700)
   const [tag, sheet] = [await panel.getByText('Start by checking').boundingBox(), await panel.boundingBox()]
   expect(tag.y).toBeGreaterThan(sheet.y)

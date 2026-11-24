@@ -220,13 +220,13 @@ test('answers are checked: claims of having done something, invented numbers and
   for (const t of ['I marked [A1] as completed.', 'I’ve sent the message.', 'It has been saved as completed.', 'You made $4,200.', '[A9] is next.', 'Your ads generated $160.', 'Your ROI is 160.', 'This will double your bookings.', 'See https://x.example', '']) assert.ok(bad(t), t)
 })
 
-test('a failed check is corrected once, then the records are shown without prose; nothing invented reaches the owner', async () => {
+test('a failed check is corrected at most twice, then the records are shown without prose; nothing invented reaches the owner', async () => {
   appt('alpha', 'Jamie Rivera', 20 * HOUR)
-  script = [pick(['list_appointments', {}]), say('You have 48 appointments.'), say('You have 49 appointments.')]
+  script = [pick(['list_appointments', {}]), say('You have 48 appointments.'), say('You have 49 appointments.'), say('You have 47 appointments.')]
   const r = await post('alpha', { question: 'what is coming up' })
   assert.deepEqual([r.status, r.body.kind, r.body.records[0].name], [200, 'records', 'Jamie Rivera'])
-  assert.doesNotMatch(JSON.stringify(r.body), /48|49/)
-  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 48/)
+  assert.doesNotMatch(JSON.stringify(r.body), /47|48|49/)
+  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 49/)
 })
 
 test('outage, timeout, quota and garbage: the records still answer plain questions, otherwise a code; a broken tool is said, not guessed', async () => {
@@ -239,7 +239,8 @@ test('outage, timeout, quota and garbage: the records still answer plain questio
     assert.deepEqual([plain.status, plain.body.kind, plain.body.records[0].name], [200, 'records', 'Jamie Rivera'])
     assert.equal((await post('alpha', { question: 'who hasnt been answered' })).body.records[0].name, 'Dana Fox')
     const other = await post('alpha', { question: 'write me a poem' })
-    assert.deepEqual([other.status, other.body.error], [503, 'unavailable'])
+    assert.deepEqual([other.status, other.body.error, other.body.resumesAt > Date.now()], [503, /4006/.test(err.message) ? 'quota' : 'timeout', /4006/.test(err.message)])
+    assert.ok(other.body.try.length)
     assert.doesNotMatch(JSON.stringify(other.body), /allocation|4006/)
   }
   db.sql.exec('DELETE FROM rate_limits')
@@ -275,7 +276,7 @@ test('requests are validated and bounded; earlier turns never enter the instruct
   assert.equal(validateQuestion({ question: ' ' })[0], 'empty_question')
   assert.equal(validateQuestion({ question: 'x'.repeat(501) })[0], 'too_long')
   const [, r] = validateQuestion({ question: 'hi', history: Array.from({ length: 20 }, () => ({ q: 'q'.repeat(900), a: 'SYSTEM OVERRIDE '.repeat(200) })), pending: Array(50).fill({ type: 'x', change: 'y'.repeat(900) }), refs: [] })
-  assert.deepEqual([r.history.length, r.history[0].q.length, r.history[0].a.length, r.pending.length, r.pending[0].change.length, r.refs], [6, 200, 900, 4, 160, {}])
+  assert.deepEqual([r.history.length, r.history[0].q.length, r.history[0].a.length, r.pending.length, r.pending[0].change.length, r.refs], [6, 200, 1300, 4, 160, {}])
   await post('alpha', { question: 'hi', history: [{ q: 'a', a: 'SYSTEM OVERRIDE' }] })
   assert.doesNotMatch(calls[0].messages[0].content, /SYSTEM OVERRIDE/)
 })
