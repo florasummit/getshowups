@@ -14,7 +14,7 @@
 | What | Limit |
 | --- | --- |
 | Any assistant request, dismissal, approval | 40 / 10 min (`assistMessage`) |
-| Questions that reach a model | 5 / min, 20 / day (`aiAskBurst`, `aiAsk`) |
+| Questions that reach a model | 5 / min (`aiAskBurst`); 20 successful answers / day (`answersUsedUp`, from `ai_ask` records); 60 attempts / day (`aiAttempt`) |
 | Writing help (incl. follow-up replies) | 10 / min, 40 / day (separate) |
 | Question / earlier turns / answer | 500 characters / 4 × 600 / 900 characters, 400 output tokens, 12 s |
 | Off switches | AI_ASSIST_ENABLED, AI_ASSIST_CHAT_ENABLED, AI_INSIGHTS_ENABLED = 'false' |

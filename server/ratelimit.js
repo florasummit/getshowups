@@ -51,7 +51,7 @@ export const RULES = {
   aiRulesWrite: { limit: 240, windowSec: 600 }, //   POST /api/dashboard/ai-rules save/simulate/publish/rollback (per business)
   assistMessage: { limit: 40, windowSec: 600 }, //  POST /api/dashboard/assist, insights, proposal (per business; no model needed)
   aiAskBurst: { limit: 5, windowSec: 60 }, //       POST /api/dashboard/assist (per business)
-  aiAsk: { limit: 20, windowSec: 86400 }, //        POST /api/dashboard/assist (per business and day; cost cap)
+  aiAttempt: { limit: 60, windowSec: 86400 }, //    POST /api/dashboard/assist attempts that may reach a model (per business and day; abuse ceiling: the 20 answers a day are counted from successful ones)
   aiAskAll: { limit: 25, windowSec: 86400 }, //     the same, all businesses together: the included model shares one small daily allowance (docs/ASSISTANT_PROGRESS.md)
   aiWriteBurst: { limit: 10, windowSec: 60 }, //    POST /api/dashboard/write (per business)
   aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
