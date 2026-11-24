@@ -11,7 +11,7 @@ chmodSync(PROFILE, 0o700)
 const page = ctx.pages()[0] || (await ctx.newPage())
 await page.goto('https://getshowups.com/dashboard')
 console.log('Sign in with the test business’s Google account in the window that opened. It closes by itself.')
-for (let i = 0; i < 300; i++) {
+for (let i = 0; i < 1800; i++) {
   await new Promise((r) => setTimeout(r, 2000))
   const me = await ctx.request.get('https://getshowups.com/api/dashboard/me').then((r) => r.json()).catch(() => ({}))
   if (me.customer) {

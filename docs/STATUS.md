@@ -2,6 +2,12 @@
 
 _Update at the end of every task. Newest first._
 
+## Intelligence foundation (2026-11-24)
+
+docs/INTELLIGENCE.md governs. New: server/claims.js (statements checked against records), proposal-set.js (prepared changes have
+ids), fit.js (whole records), operator-instructions.js (2,040 to about 1,040 words), same_contact, unpaid, word-based names, feedback codes. Model
+comparison: Sonnet 5.5 (low) about 18 times the cost, not better on the same scenarios; Haiku 5.5 stays. Known failures: --set known.
+
 ## Assistant and dashboard read one truth (2026-11-24)
 
 Cause: no assistant tool read receptionist_requests, so it denied the call back Overview showed. server/attention.js is now the

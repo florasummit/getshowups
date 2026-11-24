@@ -14,9 +14,11 @@ import { websiteSummary } from './website.js'
 import { policiesOrEmpty } from './policies.js'
 import { businessFacts } from './followups/engine.js'
 import { outsideZips } from './insights.js'
+import { keep } from './fit.js'
+import { addProposal, withdrawProposals } from './proposal-set.js'
 import { serviceAreaChange } from './proposals.js'
 import { validateHours } from './customers.js'
-import { findRequests, NEEDS_OWNER, requestById } from './attention.js'
+import { findRequests, NEEDS_OWNER, requestById, UNANSWERED } from './attention.js'
 import { pageState, waitingNow } from './app-state.js'
 
 const DAY = 86_400_000
@@ -76,16 +78,19 @@ const tidy = (v) => {
     .replace(/\+?\d[\d\s().-]{6,}\d/g, '[number removed]')
     .replace(/\s+/g, ' ')
     .trim()
-  return t.length > 400 ? `${t.slice(0, 400)} (text continues)` : t
+  return keep(t, 600)
 }
 
+// A visit that happened and has no payment recorded: what "unpaid" can mean here (money nobody recorded isn't known).
+const UNPAID = "a.status = 'showed' AND NOT EXISTS (SELECT 1 FROM revenue_entries x WHERE x.appointment_id = a.id AND x.customer = a.customer AND x.kind = 'paid')"
 const APPT = `SELECT a.id, a.start_at, a.status, a.lead_id, l.name, l.need, l.zip, l.phone, l.email, ao.work,
     (SELECT source FROM lead_attribution la WHERE la.lead_id = l.id AND la.customer = l.customer) AS source,
     EXISTS (SELECT 1 FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed,
     (SELECT x.amount_cents FROM revenue_entries x WHERE x.appointment_id = a.id AND x.customer = a.customer AND x.kind = 'paid' ORDER BY x.id DESC LIMIT 1) AS paid
   FROM appointments a JOIN leads l ON l.id = a.lead_id AND l.customer = a.customer
   LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer`
-const LEAD = `SELECT l.id, l.name, l.need, l.zip, l.status, l.created_at, l.email, l.phone, t.stage, t.last_outbound_at, t.needs_owner, r.status AS coverage,
+const LEAD = `SELECT l.id, l.name, l.need, l.zip, l.status, l.created_at, l.email, l.phone, t.stage, t.last_outbound_at,
+    (SELECT m.author FROM thread_messages m WHERE m.customer = l.customer AND m.lead_id = l.id AND m.direction = 'out' AND m.channel <> 'note' AND m.status IN ('sent','delivered') ORDER BY m.created_at DESC LIMIT 1) AS last_sender, t.needs_owner, r.status AS coverage,
     (SELECT source FROM lead_attribution la WHERE la.lead_id = l.id AND la.customer = l.customer) AS source,
     (SELECT count(*) FROM appointments a WHERE a.lead_id = l.id AND a.customer = l.customer AND a.status = 'no_show') AS no_shows,
     (SELECT count(*) FROM appointments a WHERE a.lead_id = l.id AND a.customer = l.customer AND a.status = 'showed') AS showed,
@@ -117,18 +122,20 @@ export function refBook(given) {
 
 // A context per turn: session business, references, and what the page needs to show (real names) per reference.
 export function toolContext(env, customer, given, now = Date.now(), days = 30) {
-  return { days, env, db: env.ONBOARDING_DB, customer, tz: customer.timezone, now, refs: refBook(given), shown: new Map(), proposals: [], withdraw: false, go: null, internal: internalEmails(env) }
+  return { days, env, db: env.ONBOARDING_DB, customer, tz: customer.timezone, now, refs: refBook(given), shown: new Map(), claims: new Map(), proposals: [], pending: [], withdrawn: new Set(), go: null, internal: internalEmails(env) }
 }
 
 export const apptOut = (c, r) => {
   const ref = c.refs.ref('A', r.id)
   c.shown.set(ref, { ref, kind: 'appointment', leadId: r.lead_id, name: r.name, when: whenText(r.start_at, c.tz), what: r.need, state: apptState(r, c.now), contact: [r.phone, r.email].filter(Boolean), go: 'appointments' })
+  c.claims.set(ref, { kind: 'appointment', at: r.start_at, confirmed: !!r.confirmed })
   return { ref, when: whenText(r.start_at, c.tz), asked_for: tidy(r.need), zip: r.zip || null, state: apptState(r, c.now), confirmed_by_customer: !!r.confirmed, came_from: SOURCE[r.source] || 'not traced to an ad', ...(r.status === 'showed' ? { paid_recorded: r.paid == null ? 'none recorded' : usd(r.paid) } : {}), inquiry: c.refs.ref('L', r.lead_id) }
 }
 const leadState = (r) => (r.status === 'unqualified' ? `outside the service area (${r.coverage || 'kept'})` : r.status === 'booked' ? 'booked' : r.no_shows > 0 && !r.showed ? 'booked before, did not show up, not rebooked' : 'not booked')
 export const leadOut = (c, r) => {
   const ref = c.refs.ref('L', r.id)
   const state = leadState(r)
+  c.claims.set(ref, { kind: 'inquiry', at: r.created_at, sender: r.last_sender || null, sentAt: r.last_outbound_at || null, waiting: r.status === 'new' || !!r.needs_owner })
   c.shown.set(ref, { ref, kind: 'inquiry', leadId: r.id, name: r.name, when: whenText(r.created_at, c.tz), what: r.need, state, contact: [r.phone, r.email].filter(Boolean), go: 'followups' })
   return {
     ref,
@@ -138,7 +145,7 @@ export const leadOut = (c, r) => {
     zip: r.zip || null,
     state,
     in_service_area: r.status !== 'unqualified',
-    message_sent_through_getshowups: r.last_outbound_at ? `${whenText(r.last_outbound_at, c.tz)} (who sent it, the owner or an automatic message, is not shown)` : 'none',
+    message_sent_through_getshowups: r.last_outbound_at ? `${whenText(r.last_outbound_at, c.tz)} by ${{ owner: 'the owner', auto: 'an automatic message', ai: 'the automatic assistant', system: 'an automatic message' }[r.last_sender] || 'a sender that is not recorded'}` : 'none',
     waiting_for_owner: r.needs_owner ? NEEDS_OWNER[r.needs_owner] || 'yes' : false,
     appointments: { booked: Number(r.booked), showed: Number(r.showed), no_show: Number(r.no_shows) },
     can_be_reached_by: [r.email && 'email', r.phone && 'phone'].filter(Boolean),
@@ -148,14 +155,27 @@ export const leadOut = (c, r) => {
 export const requestOut = (c, r) => {
   const ref = c.refs.ref('R', r.id)
   const callback = r.kind === 'callback'
+  c.claims.set(ref, { kind: callback ? 'callback' : 'message', at: r.created_at, urgent: !!r.urgent, lead: r.lead_id || null, waiting: r.status === 'open' })
   const state = r.status === 'open' ? (callback ? 'waiting for a call back' : 'message waiting for the owner') : 'marked done'
   c.shown.set(ref, { ref, kind: callback ? 'callback' : 'message', leadId: r.lead_id || null, name: r.name || 'A customer', when: whenText(r.created_at, c.tz), what: r.note || '', state: r.urgent ? `${state}, urgent` : state, contact: [r.phone, r.email].filter(Boolean), go: 'receptionist' })
-  return { ref, kind: callback ? 'asked the receptionist for a call back' : 'left a message with the receptionist', state, urgent: !!r.urgent, received: whenText(r.created_at, c.tz), hours_ago: Math.max(0, Math.round((c.now - r.created_at) / 3_600_000)), asked_for: tidy(r.note) || 'nothing written', can_be_reached_by: [r.phone && 'phone', r.email && 'email'].filter(Boolean), ...(r.lead_id ? { same_person_inquiry: c.refs.ref('L', r.lead_id) } : {}) }
+  return { ref, kind: callback ? 'asked the receptionist for a call back' : 'left a message with the receptionist', state, urgent: !!r.urgent, received: whenText(r.created_at, c.tz), ...(callback ? {} : { expects_a_call: 'not stated', read_by_owner: 'not recorded' }), about_a_visit: r.lead_id ? 'see same_person_inquiry' : 'names no visit or address; whose it affects is unknown', hours_ago: Math.max(0, Math.round((c.now - r.created_at) / 3_600_000)), asked_for: tidy(r.note) || 'nothing written', can_be_reached_by: [r.phone && 'phone', r.email && 'email'].filter(Boolean), ...(r.lead_id ? { same_person_inquiry: c.refs.ref('L', r.lead_id) } : {}) }
 }
 const all = async (c, sql, ...a) => (await c.db.prepare(sql).bind(c.customer.id, ...a).all()).results
 const one = async (c, sql, ...a) => c.db.prepare(sql).bind(c.customer.id, ...a).first()
 const listed = (rows, out) => ({ total: rows.length, shown: Math.min(rows.length, LIST), items: rows.slice(0, LIST).map(out) })
 const MISSING = { error: 'not_found', note: 'That record is not in this business (it may have been removed). Look it up again.' }
+
+// "n frost" finds "N. Frost" and "Nell Frost": every word typed begins a word of the name; accents and dots don't matter.
+const nameWords = (v) => String(v ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+export const named = (typed, name) => {
+  const have = nameWords(name)
+  const want = nameWords(typed)
+  return want.length > 0 && want.every((w) => have.some((h) => h.startsWith(w)))
+}
+async function leadsNamed(c, typed) {
+  const ids = (await all(c, 'SELECT id, name FROM leads WHERE customer = ?1 ORDER BY created_at DESC LIMIT 2000')).filter((r) => named(typed, r.name)).slice(0, 6).map((r) => r.id)
+  return (await Promise.all(ids.map((id) => one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, id)))).filter(Boolean)
+}
 
 async function apptByRef(c, ref) {
   const { kind, id } = c.refs.id(ref)
@@ -179,6 +199,18 @@ async function leadByRef(c, ref) {
   return a ? one(c, `${LEAD} WHERE l.customer = ?1 AND l.id = ?2`, a.lead_id) : null
 }
 
+// The same person writing again: another record of this business with exactly the same phone (last 10 digits) or email.
+async function sameContact(c, r, self) {
+  const phone = String(r.phone || '').replace(/\D/g, '').slice(-10)
+  const email = String(r.email || '').trim().toLowerCase()
+  if (phone.length < 10 && !email) return []
+  const rows = await all(c, `${LEAD} WHERE l.customer = ?1 AND l.id <> ?2 AND ((?3 <> '' AND lower(l.email) = ?3) OR (length(?4) = 10 AND substr(replace(replace(replace(replace(replace(replace(coalesce(l.phone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', ''), -10) = ?4)) ORDER BY l.created_at DESC LIMIT 4`, self || '', email, phone).catch(() => [])
+  return rows.map((x) => leadOut(c, x).ref)
+}
+const withContact = async (c, r, out, self) => {
+  const same = await sameContact(c, r, self)
+  return same.length ? { ...out, same_contact: same, same_contact_note: 'Certain: exactly the same phone or email, so the same person (or household) wrote more than once.' } : out
+}
 const requestByRef = (c, ref) => {
   const { kind, id } = c.refs.id(ref)
   return kind === 'R' && id ? requestById(c.db, c.customer.id, id) : null
@@ -193,12 +225,13 @@ export const apptRefs = async (c, list) => (await Promise.all(list.map((x) => on
 export async function rangeStats(c, r) {
   const a = [r.from, r.to, c.internal]
   const T = `AND NOT ${isTestLead('l', '?4')}`
-  const [l, b, v, m, p] = await Promise.all([
+  const [l, b, v, m, p, u] = await Promise.all([
     one(c, `SELECT count(*) AS n, coalesce(sum(l.status = 'unqualified'), 0) AS outside FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND l.created_at < ?3 ${T}`, ...a),
     one(c, `SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.created_at >= ?2 AND a.created_at < ?3 AND a.status IN ('booked','showed','no_show') ${T}`, ...a),
     one(c, `SELECT coalesce(sum(a.status IN ('booked','showed','no_show')), 0) AS n, coalesce(sum(a.status = 'showed'), 0) AS showed, coalesce(sum(a.status = 'no_show'), 0) AS no_show, coalesce(sum(a.status = 'booked' AND a.start_at <= ?5), 0) AS unmarked FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 ${T}`, ...a, c.now),
     (await adsAccess(c.env, c.customer)) ? one(c, 'SELECT count(*) AS n, sum(spend_cents) AS s, sum(clicks) AS k, min(date) AS d FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2 AND date <= ?3', r.days[0], r.days[1]) : null,
     one(c, `SELECT sum(x.amount_cents) AS s, count(x.amount_cents) AS n FROM revenue_entries x JOIN appointments a ON a.id = x.appointment_id AND a.customer = x.customer JOIN leads l ON l.id = a.lead_id WHERE x.customer = ?1 AND x.kind = 'paid' AND a.status = 'showed' AND a.start_at >= ?2 AND a.start_at < ?3 ${T} AND x.id = (SELECT max(y.id) FROM revenue_entries y WHERE y.appointment_id = x.appointment_id AND y.kind = 'paid')`, ...a).catch(() => null),
+    one(c, `SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 AND ${UNPAID} ${T}`, ...a).catch(() => null),
   ])
   return {
     period: r.label,
@@ -211,6 +244,7 @@ export async function rangeStats(c, r) {
     visits_happened: Number(v.showed),
     no_shows: Number(v.no_show),
     past_visits_without_outcome: Number(v.unmarked),
+    visits_happened_without_recorded_payment: u ? Number(u.n) : 'could not be read',
     payments_recorded: p?.n ? usd(p.s) : 'none recorded',
     ad_spend_reported: m?.n ? usd(m.s) : 'none reported',
     ad_clicks_reported: m?.n ? Number(m.k) : 'none reported',
@@ -228,14 +262,14 @@ const tool = (name, description, properties, required, run) => ({ name, descript
 export const TOOLS = [
   tool(
     'list_appointments',
-    'Appointments. With no arguments: everything coming up plus past ones whose outcome is not recorded. Use period or from/to for a day or range, and state to narrow.',
-    { period: PERIOD, from: D8, to: D8, state: { type: 'string', enum: ['any', 'upcoming', 'needs_outcome', 'happened', 'no_show', 'cancelled'] } },
+    'Appointments. With no arguments: everything coming up plus past ones whose outcome is not recorded. Use period or from/to for a day or range, and state to narrow. happened_no_payment answers who has not paid or what is unpaid (no payment recorded).',
+    { period: PERIOD, from: D8, to: D8, state: { type: 'string', enum: ['any', 'upcoming', 'needs_outcome', 'happened', 'happened_no_payment', 'no_show', 'cancelled'] } },
     [],
     async (c, a) => {
       const bounded = a.period || a.from || a.to
       const r = bounded ? rangeOf(a, c.tz, c.now) : null
       if (bounded && !r) return { error: 'invalid_period', note: `Use one of ${PERIODS.join(', ')} or real dates.` }
-      const W = { upcoming: "a.status = 'booked' AND a.start_at > ?4", needs_outcome: "a.status = 'booked' AND a.start_at <= ?4", happened: "a.status = 'showed'", no_show: "a.status = 'no_show'", cancelled: "a.status = 'cancelled'" }[a.state]
+      const W = { upcoming: "a.status = 'booked' AND a.start_at > ?4", needs_outcome: "a.status = 'booked' AND a.start_at <= ?4", happened: "a.status = 'showed'", happened_no_payment: UNPAID, no_show: "a.status = 'no_show'", cancelled: "a.status = 'cancelled'" }[a.state]
       const q = (where, from, to, order) => all(c, `${APPT} WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 AND ?4 = ?4 AND a.status <> 'pending' AND NOT ${isTestLead('l', '?5')} ${where ? `AND ${where}` : ''} ORDER BY a.start_at ${order} LIMIT 60`, from, to, c.now, c.internal)
       if (r) {
         const rows = await q(W, r.from, r.to, 'ASC')
@@ -267,7 +301,7 @@ export const TOOLS = [
       const days = Math.min(365, Math.max(1, Number.isInteger(a.days) ? a.days : 30))
       const W = {
         recent: '1 = 1',
-        unanswered: "l.status = 'new' AND t.last_outbound_at IS NULL AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status IN ('booked','showed','no_show'))",
+        unanswered: UNANSWERED,
         not_booked: "l.status = 'new'",
         booked: "l.status = 'booked'",
         booked_no_show: "EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status = 'no_show')",
@@ -284,14 +318,15 @@ export const TOOLS = [
     const r = await leadByRef(c, a.ref)
     if (!r) return MISSING
     const appts = await all(c, `${APPT} WHERE a.customer = ?1 AND a.lead_id = ?2 AND a.status <> 'pending' ORDER BY a.start_at DESC LIMIT 5`, r.id)
-    return { ...leadOut(c, r), appointment_history: appts.map((x) => apptOut(c, x)) }
+    return { ...(await withContact(c, r, leadOut(c, r), r.id)), appointment_history: appts.map((x) => apptOut(c, x)) }
   }),
   tool('find_person', "Find inquiries, appointments, call-back requests and receptionist messages by a customer name the owner typed. Returns references, not names.", { name: { type: 'string' } }, ['name'], async (c, a) => {
     const q = String(a.name || '').replace(/[%_\\]/g, '').trim().slice(0, 60)
     if (q.length < 2) return { error: 'name_too_short' }
-    const rows = await all(c, `${LEAD} WHERE l.customer = ?1 AND l.name LIKE ?2 ORDER BY l.created_at DESC LIMIT 6`, `%${q}%`)
-    const req = await findRequests(c.db, c.customer.id, `%${q}%`).catch(() => [])
-    return { matches: rows.length + req.length, items: [...rows.map((x) => leadOut(c, x)), ...req.map((x) => requestOut(c, x))] }
+    const rows = await leadsNamed(c, q)
+    const req = (await findRequests(c.db, c.customer.id, '%').catch(() => [])).filter((x) => named(q, x.name)).slice(0, 6)
+    if (!rows.length && !req.length) return { matches: 0, note: 'No customer of this business by that name. If it is another company, you only have this business: say that in one sentence, without figures or anything about what this business has recorded.' }
+    return { matches: rows.length + req.length, items: [...(await Promise.all(rows.map((x) => withContact(c, x, leadOut(c, x), x.id)))), ...req.map((x) => requestOut(c, x))] }
   }),
   tool('business_numbers', 'Counts for one period, by the date things happened: inquiries, bookings, visits, no-shows, payments recorded, ad spend.', { period: PERIOD, from: D8, to: D8 }, [], async (c, a) => {
     const r = rangeOf(a.period || a.from ? a : { period: 'last_30_days' }, c.tz, c.now)
@@ -326,6 +361,7 @@ export const TOOLS = [
       past_visits_without_outcome: s.past - s.outcomeRecorded,
       jobs_completed: s.completed,
       findings: diagnose(f).map((d) => `${d.title}. ${d.detail}`),
+      happened_without_recorded_payment: Math.max(0, s.attended - f.revenue.paidJobs),
       payments_recorded_for_all: usd(f.revenue.paidCents) ?? 'none recorded',
       ...(g
         ? {
@@ -402,20 +438,20 @@ export const TOOLS = [
   tool('page_state', 'What a dashboard page shows right now (any page, whichever one the owner is on): its sections, tiles, alerts, statuses and what can be done there.', { page: { type: 'string', enum: PAGE_IDS } }, ['page'], (c, a) => pageState(c, a.page)),
   tool('get_call_back', 'One call-back request or receptionist message in full.', { ref: REF }, ['ref'], async (c, a) => {
     const r = await requestByRef(c, a.ref)
-    return r ? requestOut(c, r) : MISSING
+    return r ? withContact(c, r, requestOut(c, r), r.lead_id) : MISSING
   }),
   // ---------- prepare (nothing is saved) ----------
-  tool('prepare_call_back_done', 'Prepare marking a call-back request or receptionist message as dealt with, for the owner to approve. Only when the owner says they called or answered that person, or asks to clear it.', { ref: REF }, ['ref'], async (c, a) => {
+  tool('prepare_call_back_done', 'Prepare marking a call-back request or receptionist message as dealt with, for the owner to approve. Only when the owner says they called or answered that person, or asks to clear it. Not for a visit (prepare_outcome).', { ref: REF }, ['ref'], async (c, a) => {
     const r = await requestByRef(c, a.ref)
     if (!r) return MISSING
     const out = requestOut(c, r)
     if (r.status !== 'open') return { already: true, state: out.state }
-    c.proposals.push({ type: 'call_back_done', id: r.id, ref: out.ref, name: r.name || 'A customer', when: whenText(r.created_at, c.tz), kind: r.kind, from: out.state, to: 'Dealt with', effects: ['It leaves Needs your attention. Nothing is sent to the customer.'] })
+    addProposal(c, { type: 'call_back_done', id: r.id, ref: out.ref, name: r.name || 'A customer', when: whenText(r.created_at, c.tz), kind: r.kind, from: out.state, to: 'Dealt with', effects: ['It leaves Needs your attention. Nothing is sent to the customer.'] })
     return { prepared: true, for: out, note: 'Shown to the owner with an Approve button. Not saved.' }
   }),
   tool(
     'prepare_outcome',
-    'Prepare recording what happened at a past appointment, for the owner to approve. completed = happened and the job is done; happened_not_finished; happened; no_show; undo = back to not recorded.',
+    'Prepare recording what happened at a past visit, for the owner to approve ("mark them done", "they came", "no show" for anyone with a past visit). completed = happened and the job is done; happened_not_finished; happened; no_show; undo = back to not recorded.',
     { ref: REF, outcome: { type: 'string', enum: ['completed', 'happened_not_finished', 'happened', 'no_show', 'undo'] } },
     ['ref', 'outcome'],
     async (c, a) => {
@@ -427,7 +463,7 @@ export const TOOLS = [
       const o = OUTCOMES[a.outcome]
       if (r.status === o.status && (r.work ?? null) === o.work) return { already: true, state: apptState(r, c.now) }
       const out = apptOut(c, r)
-      c.proposals.push({
+      addProposal(c, {
         type: 'outcome',
         id: r.id,
         ref: out.ref,
@@ -457,14 +493,14 @@ export const TOOLS = [
       if (/https?:|www\.|[$%<>{}]|\b(guarantee\w*|discount|free)\b/i.test(text) || /\d/.test(text)) return { error: 'message_content', note: 'Rewrite without numbers, prices, links, discounts or guarantees.' }
       if (!r.email && !r.phone) return { error: 'no_contact', note: 'No email or phone is on record for this person.' }
       const out = leadOut(c, r)
-      c.proposals.push({ type: 'follow_up', id: r.id, ref: out.ref, name: r.name, message: text, effects: ['Opens in Follow-ups for you to edit. Nothing is sent from here.', c.env.MESSAGES_LIVE !== 'true' && 'Sending to customers isn’t live yet, so calling may be quicker.'].filter(Boolean) })
+      addProposal(c, { type: 'follow_up', id: r.id, ref: out.ref, name: r.name, message: text, effects: ['Opens in Follow-ups for you to edit. Nothing is sent from here.', c.env.MESSAGES_LIVE !== 'true' && 'Sending to customers isn’t live yet, so calling may be quicker.'].filter(Boolean) })
       return { prepared: true, for: out, note: 'Shown to the owner to edit. Not sent.' }
     },
   ),
   tool('prepare_service_area', 'Prepare adding or removing service-area ZIP codes, for the owner to approve. Use ZIPs the owner named, or ones business_settings shows were asked from more than once.', { add: { type: 'array', items: { type: 'string' } }, remove: { type: 'array', items: { type: 'string' } } }, [], async (c, a) => {
     const arr = (v) => (Array.isArray(v) ? v.map(String).slice(0, 20) : [])
     const r = serviceAreaChange(c.customer, arr(a.add), arr(a.remove))
-    if (r.proposal) c.proposals.push(r.proposal)
+    if (r.proposal) addProposal(c, r.proposal)
     return r.proposal ? { prepared: true, before: r.proposal.before, after: r.proposal.after, notes: r.proposal.effects, note: 'Shown to the owner with an Approve button. Not saved.' } : { prepared: false, reason: r.text }
   }),
   tool(
@@ -478,19 +514,11 @@ export const TOOLS = [
       if (error) return { error }
       const after = { dayStart: v.dayStart, dayEnd: v.dayEnd, workdays: v.workdays, slotMinutes: v.slotMinutes }
       if (JSON.stringify(after) === JSON.stringify(cur)) return { already: true, note: 'Those are the current hours.' }
-      c.proposals.push({ type: 'hours', before: cur, after, from: hoursText(cur), to: hoursText(after), effects: ['Changes which times people can book from now on. Appointments already booked stay.'] })
+      addProposal(c, { type: 'hours', before: cur, after, from: hoursText(cur), to: hoursText(after), effects: ['Changes which times people can book from now on. Appointments already booked stay.'] })
       return { prepared: true, before: hoursText(cur), after: hoursText(after), note: 'Shown to the owner with an Approve button. Not saved.' }
     },
   ),
-  tool('withdraw_prepared', 'Withdraw what was prepared earlier and is still waiting for approval, when the owner does not want it. With ref: only what was prepared for that person ("scrap that" means the latest one). Without: everything.', { ref: REF }, [], async (c, a) => {
-    const m = /^\[?([ALR]\d{1,3})\]?$/i.exec(a.ref || '')
-    const ref = m ? m[1].toUpperCase() : null
-    if (a.ref && !ref) return { error: 'invalid_arguments', field: 'ref' }
-    if (ref && c.withdraw !== true) c.withdraw = [...(c.withdraw || []), ref]
-    else c.withdraw = true
-    c.proposals.splice(0, c.proposals.length, ...c.proposals.filter((p) => ref && p.ref !== ref))
-    return { withdrawn: true, note: 'Nothing was changed.' }
-  }),
+  tool('withdraw_prepared', 'Withdraw what was prepared and is waiting for approval, when the owner does not want it. which: P1, P2… as listed under WAITING FOR THE OWNER\'S APPROVAL, or a person\'s reference. all: only when they said everything.', { which: { type: 'string' }, all: { type: 'boolean' } }, [], async (c, a) => withdrawProposals(c, a)),
   tool('no_lookup_needed', 'Only when nothing about this business has to be read: a greeting, a general business question, a needed clarification, or something already in the records discussed.', { why: { type: 'string', enum: ['greeting', 'general_question', 'clarify', 'already_have_it', 'unrelated'] } }, ['why'], async () => ({ ok: true })),
   tool('show_page', 'Offer a button to a dashboard page, when the owner asks to go there or the next step can only be done there.', { page: { type: 'string', enum: ['overview', 'appointments', 'followups', 'receptionist', 'teach', 'website', 'ads', 'settings'] } }, ['page'], async (c, a) => {
     if (!['overview', 'appointments', 'followups', 'receptionist', 'teach', 'website', 'ads', 'settings'].includes(a.page)) return { error: 'invalid_page' }
@@ -524,7 +552,7 @@ export async function runTool(c, name, args) {
     let v = args[k]
     if (v === undefined || v === null || v === '') continue
     if (spec.type === 'integer' && typeof v === 'string' && /^\d{1,4}$/.test(v)) v = Number(v)
-    const ok = spec.type === 'string' ? typeof v === 'string' && v.length <= 1000 : spec.type === 'integer' ? Number.isInteger(v) : Array.isArray(v) && v.length <= 30
+    const ok = spec.type === 'string' ? typeof v === 'string' && v.length <= 1000 : spec.type === 'boolean' ? typeof v === 'boolean' : spec.type === 'integer' ? Number.isInteger(v) : Array.isArray(v) && v.length <= 30
     if (!ok || (spec.enum && !spec.enum.includes(v))) return { error: 'invalid_arguments', field: k, ...(spec.enum ? { allowed: spec.enum } : {}) }
     clean[k] = v
   }
