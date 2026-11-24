@@ -20,6 +20,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // CI runners have 4 cores and Playwright would use 2; 3 was measured first in docs/AZ_PROGRESS.md (phase A).
+  ...(process.env.CI ? { workers: 3 } : {}),
   // CI also writes qa-report.json (uploaded as an artifact; on main the qa-report job posts it to the Control Center).
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }], ['json', { outputFile: 'qa-report.json' }]] : 'list',
   use: { baseURL: site, trace: 'retain-on-failure' },
