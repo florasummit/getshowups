@@ -269,6 +269,10 @@ test('cost and latency shape of a turn: the conversation is cached as well as th
   assert.ok(modelRequests[0].at - t < 300, `model asked after ${modelRequests[0].at - t} ms`)
   const { body } = modelRequests[0]
   assert.deepEqual([body.cache_control, body.system[0].cache_control], [{ type: 'ephemeral' }, { type: 'ephemeral' }])
+  // Per-turn telemetry for both channels: numbers only, short enough to be stored whole.
+  const usage = db.sql.prepare("SELECT detail FROM receptionist_events WHERE kind = 'turn_usage'").get().detail
+  assert.match(usage, /^ch=voice;total=\d+;model=\d+;tools=\d+;calls=1;in=1000;cr=0;cw=0;out=40;c=4800$/)
+  assert.ok(usage.length < 120)
 })
 
 // Changed with the conditional holding line (HOLD_AFTER_MS): a quick lookup is answered directly; the line is spoken

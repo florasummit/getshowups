@@ -365,6 +365,29 @@ function Attention({ data, go }) {
   )
 }
 
+// The one finding worth acting on, from the same rules as the Ads results (server/ads/funnel.js diagnose: minimum samples,
+// every lead counted once). Nothing to say → nothing shown.
+function Finding() {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let live = true
+    api('/api/dashboard/results?days=30&scope=all').then(({ status, data }) => live && status === 200 && setD(data.diagnostics?.find((x) => x.level === 'act') || null))
+    return () => {
+      live = false
+    }
+  }, [])
+  if (!d) return null
+  return (
+    <section className="card" aria-label="Worth a look" data-finding={d.id}>
+      <h2 className="card-title">{d.title}</h2>
+      <p className="fine">
+        {d.detail}
+        {d.sample ? ` Based on ${d.sample}.` : ''}
+      </p>
+    </section>
+  )
+}
+
 // Whole dollars when exact, cents otherwise; '—' when unavailable (never an estimate).
 const money = (cents) => {
   if (cents === null || cents === undefined) return '—'
@@ -421,6 +444,7 @@ function Overview({ me, data, reload, go, site }) {
         <div className="enter ui-overview">
           <Attention data={data} go={go} />
           <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.length} />
+          <Finding />
           {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">
