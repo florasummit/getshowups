@@ -9,12 +9,12 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium, devices } from '@playwright/test'
+import { explain, verdict } from './accounts.mjs'
 import { ARCH, DEPLOYED, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
 import { BUSINESSES, token } from './worlds.mjs'
 
 const arg = (k, d = null) => (process.argv.includes(k) ? (process.argv[process.argv.indexOf(k) + 1] ?? true) : d)
 const has = (k) => process.argv.includes(k)
-export const ALLOWED = ['gsu-journey-test']
 export const PROFILE = join(homedir(), '.getshowups-acceptance')
 const OUT = resolve(arg('--out', 'test-results/acceptance'))
 mkdirSync(OUT, { recursive: true })
@@ -157,8 +157,9 @@ async function deployed() {
   await page.goto(`${origin}/dashboard`)
   const me = async () => (await page.request.get(`${origin}/api/dashboard/me`)).json().catch(() => ({}))
   let who = await me()
-  if (!who.customer) throw new Error('Not signed in: run node scripts/acceptance/login.mjs (a person signs in once).')
-  if (!ALLOWED.includes(who.customer.id) || who.testBusiness !== true) throw new Error('Refusing: the signed-in business is not an allowed, admin-marked test business.')
+  const v = verdict(who)
+  if (v === 'signed_out') throw new Error('Not signed in: run node scripts/acceptance/login.mjs (a person signs in once).')
+  if (v !== 'ok') throw new Error(explain(who, v))
   who = null
   await guard(page, blocked, has('--approve'))
   const build = await (await page.request.get(`${origin}/build.json`)).json().catch(() => ({}))

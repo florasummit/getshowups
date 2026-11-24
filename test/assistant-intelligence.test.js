@@ -147,6 +147,14 @@ test('a change prepared while the AI is out has an id too; the browser test stan
   assert.match(readFileSync(new URL('./e2e/mock-google.mjs', import.meta.url), 'utf8'), /You work inside GetShowUps for the owner/)
 })
 
+test('acceptance sign-in and run agree: only a named, server-marked test business; the refusal says who, why and what to use', async () => {
+  const { ALLOWED, explain, verdict } = await import('../scripts/acceptance/accounts.mjs')
+  const me = (id, testBusiness, email = 'x@y.example') => ({ email, customer: id ? { id, name: `${id} name` } : null, testBusiness })
+  assert.deepEqual(ALLOWED.map((id) => verdict(me(id, true))), ['ok', 'ok'])
+  assert.deepEqual([verdict({}), verdict(me(null, false)), verdict(me('poolthru-llc', false)), verdict(me('poolthru-llc', true)), verdict(me('gsu-journey-test', false)), verdict(me('gsu-journey-test', undefined))], ['signed_out', 'no_business', 'real_business', 'not_allowed', 'real_business', 'real_business'])
+  assert.match(explain(me('poolthru-llc', false), 'real_business'), /x@y.example.*Google accepted it.*not a test business.*gsu-journey-test/)
+})
+
 test('the specification names only files that exist, and the instructions stay within their budget', async () => {
   const doc = readFileSync(new URL('../docs/INTELLIGENCE.md', import.meta.url), 'utf8')
   for (const [, f] of doc.matchAll(/`((?:server|test|scripts|functions|src|docs)\/[\w./-]+\.(?:js|mjs|md))`/g)) assert.ok(existsSync(new URL(`../${f}`, import.meta.url)), f)
