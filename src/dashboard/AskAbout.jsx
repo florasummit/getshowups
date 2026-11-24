@@ -155,7 +155,7 @@ function Records({ list }) {
           <details>
             <summary>
               <strong>{r.name}</strong>
-              <span>{r.kind === 'appointment' ? r.when : `${r.kind === 'callback' ? 'call back, asked' : r.kind === 'message' ? 'message,' : 'asked'} ${r.when}`}</span>
+              <span>{r.kind === 'appointment' ? r.when : `asked ${r.when}`}</span>
             </summary>
             <p>{r.what}</p>
             <p className="fine">{r.state}</p>
