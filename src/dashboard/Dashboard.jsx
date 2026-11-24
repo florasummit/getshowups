@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, noIndex } from '../lib/api.js'
 import { useEnrollmentOpen } from '../lib/enrollment.js'
+import { HelpPanel } from './Help.jsx'
 import Setup from './Setup.jsx'
 import Home, { SignOut } from './Home.jsx'
 import '../app.css'
@@ -264,6 +265,7 @@ export default function Dashboard() {
         </div>
       )}
       {me.data.progress.complete ? <Home me={me.data} reload={load} /> : <Setup me={me.data} reload={load} />}
+      <HelpPanel />
     </>
   )
 }

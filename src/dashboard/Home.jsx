@@ -8,6 +8,7 @@ import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
+import { HelpTip, TitleHelp } from './Help.jsx'
 import { LoadError, Pill } from './ui.jsx'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
@@ -297,12 +298,12 @@ function WebsiteCard({ me, site, go }) {
 function Stats({ stats, visit, upcoming }) {
   const recorded = stats.showed + stats.noShow
   const rows = [
-    ['New inquiries', stats.leads],
-    ['Booked', stats.booked],
-    [visit ? 'Visits' : 'Show-ups', stats.showed],
+    ['New inquiries', stats.leads, 'inquiries'],
+    ['Booked', stats.booked, 'booked'],
+    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed'],
   ]
-  if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`])
-  if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`])
+  if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`, 'show_rate'])
+  if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`, 'completed'])
   const pendingRate = visit ? stats.completed + stats.notCompleted < 5 : recorded < 5
   return (
     <section aria-label="Last 30 days">
@@ -311,10 +312,12 @@ function Stats({ stats, visit, upcoming }) {
         <span className="fine">{upcoming} upcoming</span>
       </div>
       <div className={`stats stats--${rows.length}`}>
-        {rows.map(([label, value]) => (
+        {rows.map(([label, value, help]) => (
           <div key={label} className="stat">
             <p className="stat-value">{value}</p>
-            <p className="stat-label">{label}</p>
+            <p className="stat-label">
+              <span>{label}</span> <HelpTip id={help} />
+            </p>
           </div>
         ))}
       </div>
@@ -373,22 +376,24 @@ const money = (cents) => {
 // spend has been recorded, or there is nothing to divide by.
 function AdsResults({ ads }) {
   const tiles = [
-    ['Ad spend', money(ads.spendCents)],
+    ['Ad spend', money(ads.spendCents), 'ad_spend'],
     ['Clicks', ads.clicks ?? '—'],
-    ['Leads from ads', ads.leads],
-    ['Bookings', ads.booked],
-    ['Show-ups', ads.showed],
-    ['Cost per booking', money(ads.costPerBookingCents)],
-    ['Cost per show-up', money(ads.costPerShowUpCents)],
+    ['Leads from ads', ads.leads, 'ad_leads'],
+    ['Bookings', ads.booked, 'booked'],
+    ['Show-ups', ads.showed, 'showed'],
+    ['Cost per booking', money(ads.costPerBookingCents), 'cost_per_booking'],
+    ['Cost per show-up', money(ads.costPerShowUpCents), 'cost_per_showup'],
   ]
   return (
     <section aria-label="Advertising, last 30 days" data-ads-results>
       <h2 className="card-title">Advertising</h2>
       <div className="stats">
-        {tiles.map(([label, value]) => (
+        {tiles.map(([label, value, help]) => (
           <div key={label} className="stat">
             <p className="stat-value">{value}</p>
-            <p className="stat-label">{label}</p>
+            <p className="stat-label">
+              <span>{label}</span> <HelpTip id={help} />
+            </p>
           </div>
         ))}
       </div>
@@ -534,27 +539,27 @@ function Settings({ me, reload, billing }) {
     <div className="enter">
       <h1 className="title title--page">Settings</h1>
       <section className="card">
-        <h2 className="card-title">Business</h2>
+        <TitleHelp help="service_area">Business</TitleHelp>
         <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} />
       </section>
       <section className="card">
-        <h2 className="card-title">Details on your website</h2>
+        <TitleHelp help="website_details">Details on your website</TitleHelp>
         <ProfileForm />
       </section>
       <section className="card">
-        <h2 className="card-title">What customers should know</h2>
+        <TitleHelp help="policies">What customers should know</TitleHelp>
         <PoliciesForm />
       </section>
       <section className="card">
-        <h2 className="card-title">Booking hours</h2>
+        <TitleHelp help="hours">Booking hours</TitleHelp>
         <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} />
       </section>
       <section className="card">
-        <h2 className="card-title">Google Calendar</h2>
+        <TitleHelp help="calendar">Google Calendar</TitleHelp>
         <CalendarSettings />
       </section>
       <section className="card">
-        <h2 className="card-title">Reminders</h2>
+        <TitleHelp help="reminders">Reminders</TitleHelp>
         <Reminders />
       </section>
       {billing && <BillingCard billing={billing} />}

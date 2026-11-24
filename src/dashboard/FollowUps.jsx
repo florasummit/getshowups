@@ -2,6 +2,7 @@
 // The owner can take over from the assistant, reply, pause automatic messages, adjust a few preferences, and see
 // (and prepare) texting setup. No workflow graphs, prompts or technical settings.
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { HelpTip } from './Help.jsx'
 import { LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
 
@@ -87,7 +88,10 @@ export default function FollowUps() {
   return (
     <>
       <div className="fu-head">
-        <h1 className="title title--page">Follow-ups</h1>
+        <div className="title-help">
+          <h1 className="title title--page">Follow-ups</h1>
+          <HelpTip id="followups" />
+        </div>
         <Automation on={data.automations} onChange={load} />
       </div>
       <Notices channels={data.channels} />

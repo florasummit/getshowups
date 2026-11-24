@@ -21,7 +21,7 @@ isn't done. Evidence only: nothing is marked done from a claim.
 | A Foundation | done | #141 (main e106333, deployment f3af0540, rollback 1587ad1d) |
 | B Public messaging | in progress | az/b-c: seven lifecycle steps with real status; Teach Your AI labelled pilot everywhere |
 | C Usability | in progress | az/b-c: see below |
-| D Static help | not started | |
+| D Static help | in progress | az/d-help: 20 topics, one panel, zero requests (browser-tested) |
 | E Dashboard AI chat | not started | |
 | F Inline writing | not started | |
 | G AI architecture | not started | |
