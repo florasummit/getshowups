@@ -314,7 +314,7 @@ export const TOOLS = [
     if (!r) return { error: 'invalid_period' }
     const o = await openSlots(c.env, c.customer, c.now).catch(() => ({ ok: false, status: 'calendar_error' }))
     if (!o.ok) return { error: 'calendar_unavailable', note: 'The calendar could not be read, so open times are unknown. Settings shows its status.' }
-    const t = o.slots.map((x) => (typeof x === 'number' ? x : Date.parse(x.start ?? x))).filter((x) => x >= r.from && x < r.to)
+    const t = o.slots.map((x) => x.start).filter((x) => x >= r.from && x < r.to)
     return { period: r.label, open_times: t.length, first_times: t.slice(0, 8).map((x) => whenText(x, c.tz)) }
   }),
   tool('business_settings', 'Current settings: hours, service area, services, receptionist, website, calendar, automatic messages, and what is missing.', {}, [], async (c) => {
