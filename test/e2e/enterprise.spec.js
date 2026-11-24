@@ -36,7 +36,7 @@ test('two plans: Growth $499/month starts as before, Enterprise starts at $10,00
   await expect(cards.nth(1)).toContainText('Starting at$10,000/month')
   await expect(cards.nth(1).locator('a')).toHaveCount(0)
   await expect(cards.nth(1).getByRole('button', { name: 'Contact sales' })).toBeVisible()
-  await expect(cards.nth(1)).toContainText('not live yet')
+  await expect(cards.nth(1)).toContainText('Up to 25 business accounts included')
   await open(page)
   for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 })

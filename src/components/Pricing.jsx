@@ -21,7 +21,7 @@ export default function Pricing() {
   return (
     <section id="pricing" className="section pricing" aria-labelledby="pricing-title">
       <div className="container">
-        <SectionHeading id="pricing-title" eyebrow="Pricing" title="Two ways to start" intro="One business, or many. Ad spend is separate." />
+        <SectionHeading id="pricing-title" eyebrow="Pricing" title="One business, or many" />
         <div className="price-grid">
           <div className="price-card" data-plan="growth">
             <div className="price-main">
@@ -65,7 +65,6 @@ export default function Pricing() {
             <div className="price-main price-main--light">
               <div className="price-head">
                 <p className="price-name">{enterprise.name}</p>
-                <span className="badge badge--lav">{enterprise.badge}</span>
               </div>
               <p className="price-amount price-amount--from">
                 <span className="price-from">{enterprise.lead}</span>
@@ -79,7 +78,7 @@ export default function Pricing() {
               </button>
             </div>
             <div className="price-side">
-              <p className="price-list-title">What Enterprise means</p>
+              <p className="price-list-title">What’s included</p>
               <ul className="price-list price-list--one">
                 {enterprise.points.map((item) => (
                   <li key={item}>
@@ -88,7 +87,7 @@ export default function Pricing() {
                   </li>
                 ))}
               </ul>
-              <p className="price-fine">{enterprise.today}</p>
+              <p className="price-fine">{enterprise.excludes}</p>
             </div>
           </div>
         </div>

@@ -25,10 +25,9 @@ export const enrollmentClosed = {
 
 export const hero = {
   eyebrow: 'For pool, HVAC and roofing businesses',
-  // Founder-approved 2026-11-23. Every clause is true today: the receptionist and booking page go live during
-  // onboarding (well under an hour hands-on); ads are drafted and approved here but delivered only once live ad
-  // delivery is switched on for customers (ADS_LIVE_LAUNCH). Reword when that changes.
-  sub: 'Get your AI receptionist and bookings running in under an hour, with your first ads drafted and ready to approve. One platform to attract customers, capture leads, and grow your business.',
+  // Founder wording 2026-11-24. "in just 20 minutes" waits for a recorded human onboarding (QA `activation` run); until
+  // then "in minutes". Ads are drafted and approved here, delivered only once live ad delivery is on (ADS_LIVE_LAUNCH).
+  sub: 'Get your AI receptionist, bookings, and first ad drafts ready in minutes.',
 }
 
 // Trademark rule: plain-text names only, no third-party logos, no word that implies partnership or endorsement. A name
@@ -36,8 +35,8 @@ export const hero = {
 // limited, in testing or coming soon belongs in the FAQ, never here.
 export const integrations = {
   title: 'Works with',
-  names: ['Google Calendar', 'Google sign-in', 'Claude', 'OpenAI', 'Your own domain'],
-  note: 'Claude and OpenAI use your own API key. No affiliation or endorsement implied.',
+  names: ['Google Calendar', 'Google sign-in', 'Claude', 'OpenAI'],
+  note: 'Claude and OpenAI use your own API key. Trademarks belong to their owners; no endorsement implied.',
 }
 
 // The friction GetShowUps removes, told as one example day (components/Story.jsx → Problem). Fictional, illustrative,
@@ -85,7 +84,7 @@ export const journeyNotes = 'Texting, email reminders and automatic follow-ups: 
 // rules with the moment one of them decides what the AI says (components/Story.jsx → TeachYourAI).
 export const teach = {
   title: 'Your AI, your rules',
-  sub: 'Decide what it asks, what you don’t offer, what counts as urgent, and when to hand off to you.',
+  sub: 'Set what it asks, what’s urgent, and when to hand off to you.',
   points: [
     ['Teach a change in plain words', 'You see exactly what would change before it’s saved.'],
     ['Test it first', 'Type what a customer might say. Nothing is sent or booked.'],
@@ -114,39 +113,36 @@ export const industries = [
 ]
 
 // Two offerings (2026-11-23): Growth, the $499/month plan every business signs up for online (plan id `founding`
-// in billing stays as it is), and Enterprise for organizations that run many businesses, priced by agreement and
-// sold through an inquiry (components/EnterpriseInquiry.jsx), never instant checkout.
+// in billing stays as it is), and Enterprise for organizations that run many businesses, sold
+// through an inquiry (components/EnterpriseInquiry.jsx), never instant checkout.
 export const pricing = {
   name: 'Growth',
   price: 499,
   period: 'month',
   badge: 'Founding customers',
-  note: 'Billed monthly. No free trial, no setup fee, cancel any time from your billing page.',
+  note: 'Billed monthly. No free trial, no setup fee. Cancel any time.',
   includes: [
-    'A professional website, built and hosted for you',
-    'Your GetShowUps address or your own domain',
-    'AI receptionist on your website chat',
-    'Online booking straight into Google Calendar',
+    'Website, hosted on our address or your domain',
+    'AI receptionist on website chat',
+    'Online booking into Google Calendar, invitations included',
     'Service-area screening for every lead',
-    'Teach Your AI (pilot): your questions and rules',
-    'Google Calendar invitations for every booking',
+    'Teach Your AI (pilot): your rules',
     'Show-up and no-show tracking',
     'Direct help from the founding team',
   ],
   excludes: 'Ad spend is separate, paid directly to Google or Meta. Texting, email reminders and ad management: coming soon.',
 }
 
-// Every line describes what exists today. Organization-level management (one login over many workspaces, shared
-// reporting, one invoice) is designed, not built: say so, never imply it (docs/ENTERPRISE_ORGANIZATIONS.md).
+// Capacity only: up to 25 separate business accounts. Organization-level management (one login over many workspaces,
+// shared reporting, one invoice) is designed, not built: never imply it (docs/ENTERPRISE_ORGANIZATIONS.md).
 export const enterprise = {
   name: 'Enterprise',
   lead: 'Starting at',
   price: '10,000',
   period: 'month',
-  badge: 'By agreement',
-  audience: 'For agencies, franchises, entrepreneurship programs, universities and multi-location organizations.',
-  points: ['The same acquisition engine as Growth, across your businesses', 'Limits, support, onboarding and billing by agreement', 'Ad spend and separately priced usage excluded unless contracted'],
-  today: 'Each business runs as its own workspace. Organization-wide management is not live yet.',
+  audience: 'For agencies, franchises, universities and multi-location organizations.',
+  points: ['Up to 25 business accounts included', 'Everything in Growth for each business', 'A separate workspace for each business'],
+  excludes: 'Ad spend and separately priced usage are not included unless contracted.',
   cta: 'Contact sales',
   // Keys are validated by the server (server/enterprise.js ORG_TYPES); a test keeps the two lists identical.
   types: [
@@ -168,6 +164,6 @@ export const faqs = [
   { q: 'Do I need any other software?', a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.' },
   { q: 'Which integrations are limited or coming soon?', a: 'Google Calendar works today; while Google reviews our app, you may see a notice that Google hasn’t verified it when you connect. Google Ads: limited, test accounts only. Facebook and Instagram ads: coming soon. GoHighLevel: in testing. Text messaging: coming soon.' },
   { q: 'Can I use my own domain? What if I cancel?', a: 'Yes. Your website works on a free GetShowUps address, and you can connect a domain you own from your dashboard. Your domain always stays yours. If you cancel, your website stays online until the end of the period you paid for plus 14 days, you can download your text and photos, and you can point your domain anywhere else.' },
-  { q: 'What does it cost?', a: 'Growth is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta. Enterprise, for organizations that run many businesses, starts at $10,000 a month and is priced by agreement: use Contact sales under Pricing.' },
+  { q: 'What does it cost?', a: 'Growth is $499 a month, billed monthly with no setup fee and no free trial. You can cancel any time from your billing page. Advertising spend, if you run ads, is paid directly to Google or Meta. Enterprise, for organizations that run many businesses, starts at $10,000 a month and includes up to 25 business accounts. Contact sales under Pricing.' },
   { q: 'When will text messages work?', a: 'Business texting in the US requires A2P 10DLC registration and consent from the people you message. Text messaging is coming soon; until then, every booking is confirmed with a Google Calendar invitation.' },
 ]
