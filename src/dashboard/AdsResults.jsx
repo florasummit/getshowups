@@ -3,6 +3,7 @@
 // leads the ads could be credited for, and evidence-based diagnostics. Nothing here changes a campaign.
 import { useEffect, useState } from 'react'
 import { api, timeAgo } from '../lib/api.js'
+import { HelpTip } from './Help.jsx'
 import { Pill } from './ui.jsx'
 
 const usd = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: c % 100 ? 2 : 0, maximumFractionDigits: 2 })}`)
@@ -22,13 +23,13 @@ export default function AdsResults({ testAccount }) {
   const f = r?.funnel
   const s = f?.stages
   const rows = f && [
-    ['Ad spend', usd(f.spend.cents), f.spend.clicks != null ? `${f.spend.clicks} clicks` : 'not reported yet', null],
-    ['Leads from your ads', s.leads, usd(f.cost.perLead), null],
-    ['Qualified (in your area)', s.qualified, usd(f.cost.perQualified), rate(s.qualified, s.leads, 10)],
+    ['Ad spend', usd(f.spend.cents), f.spend.clicks != null ? `${f.spend.clicks} clicks` : 'not reported yet', null, 'ad_spend'],
+    ['Leads from your ads', s.leads, usd(f.cost.perLead), null, 'cost_per_lead'],
+    ['Qualified (in your area)', s.qualified, usd(f.cost.perQualified), rate(s.qualified, s.leads, 10), 'qualified'],
     ...(s.outsideArea ? [['Outside your service area', s.outsideArea, '', 'answer in Appointments']] : []),
-    ['Booked', s.booked, usd(f.cost.perBooking), rate(s.booked, s.leads, 10)],
-    ['Showed up', s.attended, usd(f.cost.perAttended), s.outcomeRecorded ? `${s.attended} of ${s.outcomeRecorded} marked` : 'none marked yet'],
-    ['Jobs completed', s.completed, usd(f.cost.perCompleted), null],
+    ['Booked', s.booked, usd(f.cost.perBooking), rate(s.booked, s.leads, 10), 'cost_per_booking'],
+    ['Showed up', s.attended, usd(f.cost.perAttended), s.outcomeRecorded ? `${s.attended} of ${s.outcomeRecorded} marked` : 'none marked yet', 'cost_per_showup'],
+    ['Jobs completed', s.completed, usd(f.cost.perCompleted), null, 'completed'],
   ]
   return (
     <section className="ui-section ar" aria-label="Ad results">
@@ -67,9 +68,11 @@ export default function AdsResults({ testAccount }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(([label, value, cost, detail]) => (
+              {rows.map(([label, value, cost, detail, help]) => (
                 <tr key={label}>
-                  <th scope="row">{label}</th>
+                  <th scope="row">
+                    {label} {help && <HelpTip id={help} />}
+                  </th>
                   <td>{value}</td>
                   <td>{label === 'Ad spend' ? '' : cost}</td>
                   <td className="ar-detail">{label === 'Ad spend' ? cost : detail}</td>
@@ -79,7 +82,9 @@ export default function AdsResults({ testAccount }) {
           </table>
           <dl className="ar-money" aria-label="Money from these jobs">
             <div>
-              <dt>Estimated job value</dt>
+              <dt>
+                Estimated job value <HelpTip id="job_value" />
+              </dt>
               <dd>{usd(f.revenue.estimatedCents)}</dd>
             </div>
             <div>

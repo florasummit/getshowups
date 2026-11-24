@@ -2,6 +2,7 @@
 // review and launch). Every campaign is an editable draft until the owner approves it; launching
 // creates it PAUSED and nothing spends until the owner presses Start.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TitleHelp } from './Help.jsx'
 import { api } from '../lib/api.js'
 import AdsResults from './AdsResults.jsx'
 import AdsImported from './AdsImported.jsx'
@@ -205,7 +206,7 @@ function BudgetCard({ budget, profile, onSaved }) {
   }
   return (
     <section className="card">
-      <h2 className="card-title">4. Approve your monthly ad budget</h2>
+      <TitleHelp help="ad_budget">4. Approve your monthly ad budget</TitleHelp>
       {budget ? (
         <p>
           Approved: <strong>{money(budget.monthlyCents)}/month</strong>. GetShowUps sets Google’s average daily budget for you: up to {money(budget.dailyCeilingCents)}/day across

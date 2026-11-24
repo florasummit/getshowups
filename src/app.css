@@ -4425,3 +4425,106 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   background: var(--lav-50);
   overflow-wrap: anywhere;
 }
+
+/* Help (Help.jsx) */
+.help-tip {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--ink-500);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  border-color: var(--ink-900);
+  color: var(--ink-900);
+}
+
+.title-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.title-help > :first-child {
+  margin-bottom: 0;
+}
+
+.help-panel {
+  position: fixed;
+  z-index: 70;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  width: min(380px, 100vw);
+  padding: 24px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--white);
+  box-shadow: var(--shadow-float);
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.help-head h2 {
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.help-kind {
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--mint-50);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.help-parts {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.help-parts dt {
+  color: var(--ink-500);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.help-parts dd {
+  margin: 2px 0 0;
+}
+
+@media (max-width: 640px) {
+  .help-panel {
+    top: auto;
+    left: 0;
+    width: auto;
+    max-height: 75vh;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+  }
+}
