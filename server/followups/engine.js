@@ -87,7 +87,11 @@ export async function businessFacts(env, customer, { profile: given } = {}) {
   const db = env.ONBOARDING_DB
   const [profile, pol] = await Promise.all([given || getProfile(db, customer.id).catch(() => null), policiesOrEmpty(db, customer.id)])
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const hm = (m) => `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, '0')} ${m >= 720 ? 'PM' : 'AM'}`
+  // Hours are stored as 'HH:MM'.
+  const hm = (t) => {
+    const [h, m] = String(t).split(':').map(Number)
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
+  }
   const hours = customer.hoursConfirmed && customer.workdays?.length ? `${customer.workdays.map((d) => days[d]).join(', ')} ${hm(customer.dayStart)}–${hm(customer.dayEnd)}` : ''
   return {
     name: customer.name,
