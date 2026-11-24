@@ -32,7 +32,7 @@ export async function onRequestPost({ request, env }) {
   const help = req.topic || req.history.length ? null : helpFor(req.question)
   if (help) return json(200, { kind: 'help', answer: help, days: req.days })
   // Only "where is…". "How do I change…" goes to the model, which can look it up and prepare the change.
-  const place = /^\W*how\b/i.test(req.question) || req.history.length ? null : placeAnswer(req)
+  const place = /^\W*how\b/i.test(req.question) ? null : placeAnswer(req)
   if (place) return json(200, { kind: 'help', ...place, days: req.days })
   // What the owner gets when the model can't answer: the records themselves, never a guess.
   // It says so (aiOut): a list of records must never pass for the assistant's analysis.

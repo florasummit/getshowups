@@ -320,7 +320,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
       </p>
     )
   const pool = topic ? (missing ? [BLANK] : HELP[topic].ask || []) : IDEAS[view] || IDEAS.overview
-  const recent = talk.map((e) => e.q)
+  const recent = talk.filter((e) => e.ctx.days === days).map((e) => e.q)
   const ideas = pool.filter((x) => !recent.includes(x)).slice(0, 2)
   return (
     <section className="ask" aria-label="Conversation" data-ask data-ask-talking={talk.length || q ? '' : undefined}>

@@ -127,7 +127,10 @@ test('words that point at the screen or the conversation reach the model; only p
   const before = seen.length
   assert.match((await ask('alpha', 'What is this page for?')).body.answer, /^This is Overview/)
   assert.equal(seen.length, before)
+  // Names the page itself, so it is the same inside a conversation; "this" alone is not.
   await ask('alpha', 'What is this page for?', { history: [{ q: 'hi', a: 'hello' }] })
+  assert.equal(seen.length, before)
+  await ask('alpha', 'What is this?', { history: [{ q: 'hi', a: 'hello' }] })
   assert.ok(seen.length > before)
 })
 
