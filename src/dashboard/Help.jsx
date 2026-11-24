@@ -120,27 +120,32 @@ function usePlacement(cur) {
       el.style.setProperty('--link-y', `${y}px`)
       el.dataset.linked = String(!!cur.label && y > 24 && y < window.innerHeight - 24)
     }
-    place()
-    const r = target?.getBoundingClientRect()
-    const sheet = getComputedStyle(el).getPropertyValue('--sheet').trim() === '1'
-    const bottom = sheet ? window.innerHeight - el.offsetHeight - 16 : window.innerHeight - 16
-    // Lowest first: the metric's bottom edge clears the sheet unless that would push its top off the screen.
-    const by = !r ? 0 : r.bottom > bottom ? Math.min(r.bottom - bottom, r.top - 16) : r.top < 16 ? r.top - 16 : 0
-    if (by) window.scrollBy({ top: by, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    const reveal = () => {
+      place()
+      const r = target?.getBoundingClientRect()
+      const sheet = getComputedStyle(el).getPropertyValue('--sheet').trim() === '1'
+      const bottom = sheet ? window.innerHeight - el.offsetHeight - 16 : window.innerHeight - 16
+      // Lowest first: the metric's bottom edge clears the sheet unless that would push its top off the screen.
+      const by = !r ? 0 : r.bottom > bottom ? Math.min(r.bottom - bottom, r.top - 16) : r.top < 16 ? r.top - 16 : 0
+      if (by) window.scrollBy({ top: by, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    }
+    reveal()
     window.addEventListener('scroll', place, { passive: true })
     window.addEventListener('resize', place)
     window.visualViewport?.addEventListener('resize', place)
     const watch = new ResizeObserver(place)
-    watch.observe(el)
     watch.observe(document.body)
+    const grown = new ResizeObserver(reveal) // an answer makes the sheet taller
+    grown.observe(el)
     return () => {
       window.removeEventListener('scroll', place)
       window.removeEventListener('resize', place)
       window.visualViewport?.removeEventListener('resize', place)
       watch.disconnect()
+      grown.disconnect()
       root.classList.remove('help-open')
     }
-  }, [cur?.key, cur?.from, cur?.label]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cur?.key, cur?.from, cur?.label, cur?.days, cur?.loading]) // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function HelpPanel() {

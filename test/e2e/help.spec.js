@@ -159,6 +159,7 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
   const panel = page.locator('.help-panel')
   const idea = panel.locator('[data-ask-idea]').first()
   for (const days of [30, 7, 90]) {
+    await page.evaluate(() => scrollTo(0, 0))
     await ar.getByRole('button', { name: `${days} days` }).click()
     await expect(panel.locator('.help-fact')).toContainText(`Last ${days} days`)
     await expect(panel.locator('.help-fact')).toContainText(`$${days * 10}`)
@@ -168,6 +169,10 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
     await expect(panel).toContainText(`the last ${days} days of results`)
   }
   expect(asked).toEqual([30, 7, 90])
+  // After switching periods and reading answers the selected row is still in the open.
+  await page.waitForTimeout(800)
+  const [a, b] = [await ar.getByRole('row', { name: /^Ad spend/ }).boundingBox(), await panel.boundingBox()]
+  expect(a.y >= 0 && (a.x + a.width <= b.x + 1 || a.y + a.height <= b.y + 1)).toBe(true)
   await expect(panel).toContainText('Ad spend is recorded from 2026-02-10') // partial data is disclosed
   // While the next period loads nothing can be asked; a draft question is kept.
   await panel.getByRole('textbox').fill('How is it going?')
