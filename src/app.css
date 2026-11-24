@@ -4358,8 +4358,8 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .rx-voice-row .check { align-items: start; flex: 1; min-width: 0; }
 .rx-voice-row .check > span { display: grid; gap: 2px; }
 .rx-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--s-2); }
-.rx-choice { display: grid; gap: 2px; padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
-.rx-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.rx-choice { position: relative; display: grid; gap: 2px; padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
+.rx-choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .rx-choice:has(input:focus-visible) { outline: 2px solid var(--ink-900); outline-offset: 2px; }
 .rx-choice--on { border-color: var(--ink-900); box-shadow: inset 0 0 0 1px var(--ink-900); }
 .rx-provider-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
@@ -4396,4 +4396,32 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   border-bottom: 1px solid #f3c9c0;
   color: #7a2114;
   font-size: 0.95rem;
+}
+
+/* Writing help under a field (AiWrite.jsx) */
+.ai-write {
+  display: grid;
+  gap: 8px;
+  margin-top: -6px;
+}
+
+.ai-write[hidden] {
+  display: none;
+}
+
+.ai-write-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.ai-write-suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--lav-50);
+  overflow-wrap: anywhere;
 }

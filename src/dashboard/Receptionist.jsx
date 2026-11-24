@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AiWrite from './AiWrite.jsx'
 import { api, phoneText, whenFull } from '../lib/api.js'
 import { Ago, PageHeader, Pill, Section } from './ui.jsx'
 import ReceptionistVoice from './ReceptionistVoice.jsx'
@@ -449,6 +450,7 @@ export default function Receptionist() {
               <span>Greeting</span>
               <input value={form.greeting} maxLength={240} onChange={(e) => setForm({ ...form, greeting: e.target.value })} placeholder="Hi! Thanks for reaching out. How can we help?" />
             </label>
+            <AiWrite field="greeting" draft />
             <label className="field">
               <span>Notes for the receptionist</span>
               <textarea rows={4} maxLength={3000} value={form.knowledge} onChange={(e) => setForm({ ...form, knowledge: e.target.value })} placeholder={'e.g. Weekly service includes chemicals.\nWe don’t service commercial pools.'} />

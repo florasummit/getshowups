@@ -75,7 +75,7 @@ ${factsFor(biz)}`
   return [{ role: 'system', content: system }, ...convo]
 }
 
-async function runModel(env, body, timeoutMs) {
+export async function runModel(env, body, timeoutMs) {
   const mock = typeof env.AI_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.AI_API_MOCK_ORIGIN) ? env.AI_API_MOCK_ORIGIN : null
   if (mock) {
     const res = await fetch(`${mock}/ai/run/${ASSISTANT_MODEL}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) })
