@@ -18,7 +18,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
   const adsOnly = scope === 'ads'
   const scopeSql = adsOnly ? `AND a.source IN (${inList(AD_SOURCES)})` : ''
   const spend = await db
-    .prepare('SELECT count(*) AS n, coalesce(sum(spend_cents),0) AS s, coalesce(sum(clicks),0) AS c, max(date) AS last_day, max(fetched_at) AS fetched FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2')
+    .prepare('SELECT count(*) AS n, coalesce(sum(spend_cents),0) AS s, coalesce(sum(clicks),0) AS c, min(date) AS first_day, max(date) AS last_day, max(fetched_at) AS fetched FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2')
     .bind(customerId, sinceDay)
     .first()
   const measured = (spend?.n ?? 0) > 0
@@ -103,7 +103,7 @@ export async function funnel(db, customerId, { days = 30, scope = 'ads', interna
   return {
     range: { days, from: new Date(since).toISOString(), to: new Date(now).toISOString() },
     scope: adsOnly ? 'ads' : 'all',
-    spend: { cents: measured ? n(spend.s) : null, clicks: measured ? n(spend.c) : null, lastDay: spend?.last_day ?? null, fetchedAt, stale: measured && fetchedAt != null && now - fetchedAt > STALE_HOURS * 3_600_000 },
+    spend: { cents: measured ? n(spend.s) : null, clicks: measured ? n(spend.c) : null, firstDay: spend?.first_day ?? null, lastDay: spend?.last_day ?? null, fetchedAt, stale: measured && fetchedAt != null && now - fetchedAt > STALE_HOURS * 3_600_000 },
     stages,
     revenue,
     cost: { perLead: per(stages.leads), perQualified: per(stages.qualified), perBooking: per(stages.booked), perAttended: per(stages.attended), perCompleted: per(stages.completed) },

@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import * as api from '../functions/api/dashboard/assist.js'
 import { chatMessages, checkAnswer, contextFor, validateQuestion } from '../server/assist.js'
+import { funnel } from '../server/ads/funnel.js'
 import { getCustomer } from '../server/customers.js'
 import { customerFromRow } from '../server/auth.js'
 
@@ -57,7 +58,7 @@ test('only this business, counts only: no other tenant, no customer details, no 
   for (const id of ['alpha', 'beta']) db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES (?, ?, ?, ?, '8435550100', 'Private need', '', 'new', 'x', ?, 1)").run(`l-${id}`, id, `Jane ${id}`, `jane@${id}.example`, Date.now() - 1000)
   const tables = () => JSON.stringify(['customers', 'leads', 'business_profiles', 'appointments'].map((t) => db.sql.prepare(`SELECT * FROM ${t}`).all()))
   const before = tables()
-  assert.deepEqual(await post('alpha', { ...q, customer: 'beta', context: 'x' }), { status: 200, body: { answer: 'Check your booking hours in Settings first.' } })
+  assert.deepEqual(await post('alpha', { ...q, customer: 'beta', context: 'x' }), { status: 200, body: { answer: 'Check your booking hours in Settings first.', days: 30 } })
   const sent = JSON.stringify(calls[0])
   assert.match(sent, /alpha co/)
   assert.match(sent, /1 new inquiries/)
@@ -95,7 +96,55 @@ test('requests are validated; topics are the curated ones only', () => {
   for (const b of [null, {}, { topic: 'constructor', question: 'abc' }, { topic: 'nope', question: 'abc' }]) assert.equal(validateQuestion(b)[0], 'invalid_request')
   assert.equal(validateQuestion({ topic: 'hours', question: ' ' })[0], 'empty_question')
   assert.equal(validateQuestion({ topic: 'hours', question: 'x'.repeat(301) })[0], 'too_long')
-  assert.equal(checkAnswer({ answerable: true, answer: 'Yes, 9 to 5 is a common choice.' }, { topic: 'hours', question: 'is it ok' }, '').ok, true)
+  assert.equal(checkAnswer({ answerable: true, answer: 'Yes, 9 to 5 is a common choice.' }, { topic: 'hours', question: 'is it ok' }, 'Booking hours: Mon 9 to 5').ok, true)
+})
+
+test('example figures are not the owner’s: never sent to the model, refused in an answer', () => {
+  const req = { topic: 'cost_per_booking', question: 'How am I doing?' }
+  assert.doesNotMatch(chatMessages(req, 'F')[0].content, /\$120|\$160/)
+  assert.equal(checkAnswer({ answerable: true, answer: 'You spent $120 for 3 bookings.' }, req, 'Ads: spend not available').reason, 'invented')
+})
+
+test('period: answers use exactly the period on screen, from this business only; other periods are refused, never replaced', async () => {
+  const DAY = 864e5
+  db.sql.exec('PRAGMA foreign_keys = OFF')
+  const metric = (c, date, cents) => db.sql.prepare('INSERT INTO ad_metrics_daily (campaign_id, customer, date, spend_cents, clicks, fetched_at) VALUES (?, ?, ?, ?, 5, 1)').run(`k-${c}`, c, date, cents)
+  const lead = (c, i, ago) => {
+    const id = `${c}-${i}`
+    db.sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES (?, ?, 'N', ?, '', '', '', 'new', 'x', ?, 1)").run(id, c, `${id}@x.example`, Date.now() - ago * DAY)
+    db.sql.prepare("INSERT INTO lead_attribution (lead_id, customer, source, created_at) VALUES (?, ?, 'google_ads', 1)").run(id, c)
+  }
+  ;[1, 2, 20, 60, 61, 62].forEach((ago, i) => lead('alpha', i, ago))
+  for (let i = 0; i < 40; i++) lead('beta', i, 1)
+  const day = (ago) => new Date(Date.now() - ago * DAY).toISOString().slice(0, 10)
+  for (const [ago, cents] of [[2, 1000], [20, 2000], [60, 4000]]) metric('alpha', day(ago), cents)
+  metric('beta', day(1), 777700)
+  const c = customerFromRow(await getCustomer(db, 'alpha'))
+  for (const [days, spend, leads] of [[7, 10, 2], [30, 30, 3], [90, 70, 6]]) {
+    db.sql.exec('DELETE FROM rate_limits')
+    const r = await post('alpha', { topic: 'ad_leads', question: 'How many became bookings?', days })
+    assert.deepEqual([r.status, r.body.days], [200, days])
+    const sent = calls.at(-1).messages[0].content
+    assert.match(sent, new RegExp(`last ${days} days only[^\\n]*spend \\$${spend}, [^\\n]*, ${leads} leads`))
+    assert.doesNotMatch(sent, /7777|40 leads/)
+    for (const other of [7, 30, 90]) if (other !== days) assert.doesNotMatch(sent, new RegExp(`last ${other} days`, 'i'))
+    // Data that starts inside the period is said to be partial.
+    assert.match(sent, /only part of this period/)
+    // The same numbers as the Results screen.
+    const f = await funnel(db, 'alpha', { days, scope: 'ads' })
+    assert.deepEqual([f.spend.cents, f.stages.leads, f.spend.firstDay], [spend * 100, leads, day(days === 7 ? 2 : days === 30 ? 20 : 60)])
+    for (const [say, d] of [['In the last 7 days you did fine.', 7], ['Over the past month you did fine.', 30], ['In the last ninety days you did fine.', 90]])
+      assert.equal(checkAnswer({ answerable: true, answer: say }, { topic: 'ad_leads', question: 'x', days }, await contextFor(env, c, Date.now(), { days, results: true })).reason, d === days ? undefined : 'wrong_period', `${say} at ${days}`)
+  }
+  // No data for a period is said to be missing, never filled from another.
+  db.sql.exec("DELETE FROM ad_metrics_daily WHERE customer = 'alpha' AND date >= '" + day(10) + "'")
+  assert.match(await contextFor(env, c, Date.now(), { days: 7, results: true }), /last 7 days only[^\n]*spend not available/)
+  const n = calls.length
+  for (const days of [0, 14, 365, '30', null]) assert.deepEqual(await post('alpha', { topic: 'ad_leads', question: 'How many?', days }), { status: 400, body: { error: 'invalid_request' } })
+  // Results that can't be read: no answer and no model call.
+  db.sql.exec('ALTER TABLE ad_metrics_daily RENAME TO gone')
+  assert.equal((await post('beta', { topic: 'ad_leads', question: 'How many?', days: 90 })).status, 503)
+  assert.equal(calls.length, n)
 })
 
 test('missing numbers are said to be missing', async () => {
