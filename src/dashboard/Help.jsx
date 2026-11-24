@@ -1,7 +1,8 @@
 // Help next to a setting or number: <HelpTip id> opens ONE panel (side panel on wide screens, bottom sheet on phones)
-// with curated text from content/help.js. No request is made. Keyboard: the panel takes focus, Escape closes it and focus
+// with curated text from content/help.js. Opening makes no request (AskAbout.jsx: only on a press). Keyboard: the panel takes focus, Escape closes it and focus
 // returns to the button. Mounted once per dashboard (HelpPanel); never put a HelpTip inside a <label>.
 import { useEffect, useRef, useState } from 'react'
+import AskAbout from './AskAbout.jsx'
 import { HELP } from '../content/help.js'
 
 const KIND = { measured: 'Measured from your records', estimated: 'Includes estimates' }
@@ -75,6 +76,7 @@ export function HelpPanel() {
           </div>
         ))}
       </dl>
+      <AskAbout key={open.id} topic={open.id} />
     </aside>
   )
 }

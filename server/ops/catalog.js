@@ -556,6 +556,15 @@ registerCapability({
   verify: seen('writing suggestion', 30, `SELECT max(at) AS at FROM events e WHERE e.type = 'ai_write' AND json_extract(e.props, '$.ok') = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
 })
 registerCapability({
+  id: 'assist.ask',
+  tier: 'optional',
+  name: 'Ask about this (help panel)',
+  journey: 'onboarding',
+  description: 'One owner question about one help topic, read-only, included model (server/assist.js).',
+  state: (env) => (env.AI_ASSIST_ENABLED === 'false' || env.AI_ASSIST_CHAT_ENABLED === 'false' ? { mode: 'disabled', note: 'Switched off' } : env.AI?.run ? { mode: 'live' } : { mode: 'missing', note: 'Workers AI binding missing' }),
+  verify: seen('answered question', 30, `SELECT max(at) AS at FROM events e WHERE e.type = 'ai_ask' AND json_extract(e.props, '$.ok') = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
+})
+registerCapability({
   id: 'crm.ghl',
   tier: 'later',
   name: 'GoHighLevel sync',
