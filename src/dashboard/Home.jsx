@@ -8,7 +8,7 @@ import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
-import { HelpTip, TitleHelp } from './Help.jsx'
+import { MetricCard, MetricHint, TitleHelp } from './Help.jsx'
 import { LoadError, Pill } from './ui.jsx'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
@@ -298,9 +298,9 @@ function WebsiteCard({ me, site, go }) {
 function Stats({ stats, visit, upcoming }) {
   const recorded = stats.showed + stats.noShow
   const rows = [
-    ['New inquiries', stats.leads, 'inquiries'],
-    ['Booked', stats.booked, 'booked'],
-    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed'],
+    ['New inquiries', stats.leads, 'inquiries', 'people who left details'],
+    ['Booked', stats.booked, 'booked', 'cancelled ones left out'],
+    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed', 'you marked as happened'],
   ]
   if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`, 'show_rate'])
   if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`, 'completed'])
@@ -312,15 +312,11 @@ function Stats({ stats, visit, upcoming }) {
         <span className="fine">{upcoming} upcoming</span>
       </div>
       <div className={`stats stats--${rows.length}`}>
-        {rows.map(([label, value, help]) => (
-          <div key={label} className="stat">
-            <p className="stat-value">{value}</p>
-            <p className="stat-label">
-              <span>{label}</span> <HelpTip id={help} />
-            </p>
-          </div>
+        {rows.map(([label, value, topic, hint]) => (
+          <MetricCard key={label} topic={topic} label={label} value={value} hint={hint} />
         ))}
       </div>
+      <MetricHint />
       {pendingRate && <p className="fine stats-note">{visit ? 'Job completion rate' : 'Show-up rate'} appears after 5 recorded outcomes.</p>}
     </section>
   )
@@ -398,26 +394,22 @@ const money = (cents) => {
 // Advertising results (shown only while the Ads feature is on). '—' means not available yet: no ad
 // spend has been recorded, or there is nothing to divide by.
 function AdsResults({ ads }) {
+  const missing = (topic) => (topic === 'ad_clicks' ? 'Google has reported no clicks yet.' : ads.spendCents == null ? 'No ad spend reported yet.' : 'Nothing to divide the spend by yet.')
   const tiles = [
     ['Ad spend', money(ads.spendCents), 'ad_spend'],
-    ['Clicks', ads.clicks ?? '—'],
+    ['Clicks', ads.clicks ?? '—', 'ad_clicks'],
     ['Leads from ads', ads.leads, 'ad_leads'],
-    ['Bookings', ads.booked, 'booked'],
-    ['Show-ups', ads.showed, 'showed'],
-    ['Cost per booking', money(ads.costPerBookingCents), 'cost_per_booking'],
-    ['Cost per show-up', money(ads.costPerShowUpCents), 'cost_per_showup'],
+    ['Bookings', ads.booked, 'ad_booked'],
+    ['Show-ups', ads.showed, 'ad_showed'],
+    ['Cost per booking', money(ads.costPerBookingCents), 'cost_per_booking', 'spend ÷ bookings'],
+    ['Cost per show-up', money(ads.costPerShowUpCents), 'cost_per_showup', 'spend ÷ show-ups'],
   ]
   return (
     <section aria-label="Advertising, last 30 days" data-ads-results>
       <h2 className="card-title">Advertising</h2>
       <div className="stats">
-        {tiles.map(([label, value, help]) => (
-          <div key={label} className="stat">
-            <p className="stat-value">{value}</p>
-            <p className="stat-label">
-              <span>{label}</span> <HelpTip id={help} />
-            </p>
-          </div>
+        {tiles.map(([label, value, topic, hint]) => (
+          <MetricCard key={label} topic={topic} label={label} value={value} hint={hint} missing={missing(topic)} note={ads.testAccount ? 'Google Ads test account: not a business result' : undefined} />
         ))}
       </div>
       <p className="fine stats-note">

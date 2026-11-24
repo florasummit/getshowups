@@ -2,6 +2,17 @@
 
 _Update at the end of every task. Newest first._
 
+## Metrics explain themselves (2026-11-23, branch ux/kpi-assist)
+
+Results and Overview figures are the buttons (MetricCard / MetricRow in src/dashboard/Help.jsx): the whole card or row is
+selected, the panel docks beside the page (>= 1100 px) or is a bottom sheet. Order: the figure and where it comes from,
+meaning, why, next step, example (closed, labelled), follow-up. Settings keep their "?". The AI answer uses the same
+route, limits and cost record; the prompt no longer receives example figures (they can't be quoted as the owner's) and
+is told not to repeat the on-screen definition.
+Follow-ups on Ads results send the displayed period (7/30/90): facts come from the same funnel (scope ads, that period
+only), an answer naming another period is refused, a bad period is 400, unreadable results = no model call. Switching
+periods clears (or drops) the old answer. Ad data that starts inside the period is disclosed (funnel spend.firstDay). KPI calculations unchanged. Real answer wording: not verified (no paid call).
+
 ## A–Z plan phases A–I (2026-11-24) — #141 to #145 + az/i-final
 
 - Record: docs/AZ_PROGRESS.md (evidence, deployments, rollback ids, owner items). Live main cbf2bf4 / 689a0549.

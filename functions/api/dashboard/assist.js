@@ -1,5 +1,5 @@
 // "Ask about this" (server/assist.js): read-only, one question about one help topic.
-//   GET → { enabled }.  POST { topic, question } → { answer } | { error }. The business is the signed-in session's own.
+//   GET → { enabled }.  POST { topic, question, days? (7|30|90: the Ads results period on screen) } → { answer, days } | { error }. The business is the signed-in session's own.
 import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
@@ -31,7 +31,7 @@ export async function onRequestPost({ request, env }) {
     return json(503, { error: 'unavailable' })
   }
   // Topic, codes and numbers only; never the question or the answer.
-  await track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, ok: r.ok, ...(r.ok ? {} : { reason: r.reason }), costMicros: r.costMicros, ms: r.ms } })
-  if (r.ok) return json(200, { answer: r.answer })
+  await track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, days: req.days, ok: r.ok, ...(r.ok ? {} : { reason: r.reason }), costMicros: r.costMicros, ms: r.ms } })
+  if (r.ok) return json(200, { answer: r.answer, days: req.days })
   return json(['timeout', 'unavailable'].includes(r.reason) ? 503 : 422, { error: r.reason === 'timeout' ? 'unavailable' : r.reason })
 }
