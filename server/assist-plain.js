@@ -75,7 +75,8 @@ const near = (word, want) => {
 }
 const mentions = (w, list) => {
   const t = w.replace(/[^a-z ]/g, '').trim()
-  const parts = [...t.split(/\s+/), t.replace(/\s+/g, '')]
+  const ws = t.split(/\s+/)
+  const parts = [...ws, ...ws.slice(1).map((x, i) => ws[i] + x)] // "app oinmntes" is one word
   return list.some((x) => parts.some((p) => p === x || (x.length > 6 && near(p, x))))
 }
 // What a question asks the records for. Anything asking for a reason, a draft or a change is the model's.
