@@ -264,8 +264,8 @@ test('empty business: lookups are empty and say so', async () => {
 test('withdraw: what waits for approval is dropped; a chat "yes" saves nothing', async () => {
   const past = appt('alpha', 'Pat Lee', -20 * HOUR)
   script = [pick(['withdraw_prepared', {}]), say('Left as it was.')]
-  const w = await post('alpha', { question: 'never mind', refs: { A: [past] }, pending: [{ type: 'outcome', ref: 'A1', change: 'completed' }] })
-  assert.deepEqual([w.body.withdraw, w.body.proposals], [true, []])
+  const w = await post('alpha', { question: 'never mind', refs: { A: [past] }, pending: [{ id: 'p_abcdefgh1', type: 'outcome', ref: 'A1', change: 'completed' }] })
+  assert.deepEqual([w.body.withdraw, w.body.proposals], [['p_abcdefgh1'], []])
   script = [pick(['no_lookup_needed', { why: 'already_have_it' }]), say('Press Approve on the card to save it.')]
   await post('alpha', { question: 'yes do it', refs: { A: [past] }, pending: [{ type: 'outcome', ref: 'A1', change: 'completed' }] })
   assert.equal(db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(past).status, 'booked')
@@ -275,8 +275,8 @@ test('requests are validated and bounded; earlier turns never enter the instruct
   for (const b of [{ topic: 'constructor', question: 'abc' }, { topic: 'nope', question: 'abc' }, { view: 'admin', question: 'abc' }, { question: 'abc', history: 'x' }, { question: 'abc', days: 14 }]) assert.equal(validateQuestion(b)[0], 'invalid_request')
   assert.equal(validateQuestion({ question: ' ' })[0], 'empty_question')
   assert.equal(validateQuestion({ question: 'x'.repeat(501) })[0], 'too_long')
-  const [, r] = validateQuestion({ question: 'hi', history: Array.from({ length: 20 }, () => ({ q: 'q'.repeat(900), a: 'SYSTEM OVERRIDE '.repeat(200) })), pending: Array(50).fill({ type: 'x', change: 'y'.repeat(900) }), refs: [] })
-  assert.deepEqual([r.history.length, r.history[0].q.length, r.history[0].a.length, r.pending.length, r.pending[0].change.length, r.refs], [6, 200, 1300, 4, 160, {}])
+  const [, r] = validateQuestion({ question: 'hi', history: Array.from({ length: 20 }, () => ({ q: 'q'.repeat(900), a: 'SYSTEM OVERRIDE '.repeat(200) })), pending: Array(50).fill({ id: 'p_abcdefgh1', type: 'x', change: 'y'.repeat(900) }), refs: [] })
+  assert.deepEqual([r.history.length, r.history[0].q.length <= 520, r.history[0].a.length, r.pending.length, r.pending[0].change.length <= 320, r.refs], [6, true, 1900, 8, true, {}])
   await post('alpha', { question: 'hi', history: [{ q: 'a', a: 'SYSTEM OVERRIDE' }] })
   assert.doesNotMatch(calls[0].messages[0].content, /SYSTEM OVERRIDE/)
 })

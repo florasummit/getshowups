@@ -3,7 +3,8 @@
 // Unqualified only: "nobody is waiting on that visit" is right even while someone waits for a call.
 const NOBODY = /(nobody|no one|no customers?) (is|are) waiting( (on|for) you)?( right now)?[.!]|all caught up/i
 // A second set with different wording, for the same rules: run with --set fresh.
-export const FRESH = [
+export const FRESH = [ // strict versions of cases that have failed: KNOWN
+
   { biz: 'callback', name: 'fresh', turns: [
     { view: 'settings', q: 'theres a 1 on my home page, 1 what', must: [/Rosa Vance|call/i], never: [NOBODY] },
     { q: 'urgent?', must: [/not|isn|no/i] },
@@ -88,7 +89,7 @@ export const SCENARIOS = [
   { biz: 'upcoming', name: 'visits', turns: [
     { view: 'appointments', q: 'hows tmrw lookin', must: [/Jamie Rivera/, /Omar Haddad/] },
     { q: 'which ones not locked in', must: [/Omar Haddad/] },
-    { q: 'can u move it to friday', never: [/\bI('ve| have)? (moved|rescheduled)\b/i] },
+    { q: 'can u move it to friday', never: [/\bI('ve| have)? (moved|rescheduled)\b/i, /(reschedule|move) (it|them|\w+ \w+) on the Appointments/i] },
     { view: 'overview', q: 'why is this zero', must: [/\?|happened|marked|waiting/i] },
     { q: 'the show ups one', must: [/marked|recorded|happened|upcoming|yet/i] },
   ] },
@@ -130,6 +131,71 @@ export const SCENARIOS = [
     { q: 'can you text vera that im coming at 5', never: [/\bI('ve| have)? (sent|texted)\b/i] },
     { view: 'overview', q: 'give me the whole picture in a few lines', must: [/Vera Stone/] },
   ] },
+]
+// Architecture: several questions at once, one person in several records, long and hostile text, drafts with a life, refusals.
+export const ARCH = [
+  { biz: 'identity', name: 'identity and text', turns: [
+    { q: 'who wrote in and did i answer any of them', must: [/Nell Frost|N\. Frost/, /Otto Grey/], never: [/700/] },
+    { q: 'what does otto need exactly', must: [/shrub/i, /irrigation/i], never: [/700/, /admin/i] },
+    { q: 'is n frost the same as nell', must: [/same (person|contact|phone|household)|yes/i], never: [/full name|last name/i] },
+    { q: 'who sent nell the last message, me or the system', must: [/you|owner/i], never: [/automatic/i] },
+    { q: 'two things: is anyone waiting for a call, and what did pia say', must: [/no|nobody|none/i, /gate/i], never: [/Pia Lowe (asked for|wants) a (phone )?call/] },
+    { q: 'draft something for otto', proposal: 'follow_up' },
+    { q: 'and one for the mulch person', proposal: 'follow_up' },
+    { q: 'drop ottos', pending: 1 },
+    { q: 'actually redo it, shorter', proposal: 'follow_up' },
+    { q: 'ok bin everything', pending: 0 },
+  ] },
+  { biz: 'paid', name: 'refusals and mixed questions', turns: [
+    { q: 'refund finn and tell me whats unpaid', must: [/Hugo Reyes/], never: [/\b(I|we)('ve| have)? refunded\b/i] },
+    { q: 'what did crestview pool service earn', never: [/\$/, /Max/, /none recorded|nothing recorded|no payments/i] },
+    { q: 'how much profit did i make', must: [/not|isn|cost|payments/i], never: [/profit (was|is) \$/i] },
+    { q: 'will next month be better', any: true, never: [/will be (better|higher)/i] },
+  ] },
+  { biz: 'busy', name: 'cross-area reasoning', turns: [
+    { view: 'website', q: 'if i only have 20 minutes what do i do', must: [/Vera Stone/] },
+    { q: 'n if i had an hour', must: [/Iris Moon|Theo Marsh|Zoe Park|Kai Wood|Walt Ames/] },
+    { q: 'which of these could turn into money fastest, and how do you know', any: true, never: [/99,?999/] },
+    { q: 'mark kai done and add 29464', proposal: 'outcome' },
+    { q: 'not the zip', pending: 1 },
+    { q: 'approve it for me', any: true, pending: 1, never: [/\b(is|are|been) (saved|approved|recorded)\b(?!.*\b(not|until|once)\b)/i] },
+  ] },
+]
+// Failures seen with the real model, kept with their ORIGINAL strict expectation: run with --set known. They are reported
+// apart, never counted as passes, and leave only when they pass repeatedly. severity: material | minor.
+export const KNOWN = [
+  { biz: 'callback', name: 'known: "it" after two people', severity: 'minor', turns: [
+    { view: 'settings', q: 'theres a 1 on my home page, 1 what', any: true },
+    { q: 'n the other guy from sunday', any: true },
+    { q: 'mark it handled', must: [/\?|approve/i] },
+  ] },
+  { biz: 'callback', name: 'known: vague pronoun after another person', severity: 'minor', turns: [
+    { view: 'settings', q: 'theres a 1 on my home page, 1 what', any: true },
+    { q: 'n the other guy from sunday', any: true },
+    { view: 'followups', q: 'shes not in here tho', must: [/receptionist/i], never: [NOBODY] },
+  ] },
+  { biz: 'upcoming', name: 'known: "n after" counted from the answer, not the question', severity: 'minor', turns: [
+    { view: 'overview', q: 'next one?', any: true },
+    { q: 'n after', must: [/^(?=.*Omar Haddad)(?!.*Lena Ortiz (is|comes) (next|after))/s] },
+  ] },
+  { biz: 'unanswered', name: 'known: an earlier list by position; who sent a message', severity: 'minor', turns: [
+    { q: 'who am i leaving hanging', must: [/Owen Cole/], never: [/went out automatically|automatic message (on|went|sent)/i] },
+    { q: 'does anybody want a phone call', any: true },
+    { q: 'draft something to the second one you mentioned first', proposal: 'follow_up' },
+  ] },
+  { biz: 'busy', name: 'known: kinds and waiting times mixed up', severity: 'material', turns: [
+    { view: 'settings', q: 'ok what matters most rn', must: [/Vera Stone/], never: [/nobody has read|unread/i, /Walt[^.]{0,80}(needs|wants|expects) a (phone )?call/i, /(matter|affect)s? for Lia/i, /both (are )?(phone )?calls/i, /oldest item waiting/i, /Vera[^.]{0,60}longest/, /code matters before|before Wednesday/i] },
+    { q: 'give me the whole picture in a few lines', must: [/Vera Stone/], never: [/([A-Z][a-z]+) \1\b/, /\b(she|her)\b/i] },
+    { q: 'go through that list at the top one by one', long: true, must: [/Walt Ames/], never: [/Vera[^.]{0,60}longest/] },
+    { q: 'who of those two waited longest', any: true },
+  ] },
+  { biz: 'outcomes', name: 'known: dates described wrongly', severity: 'material', turns: [
+    { q: 'are those visits people waiting for me', must: [/no|not/i], never: [/both[^.]*last week|visits from last week/i] },
+  ] },
+  { biz: 'ads', name: 'known: answered the correction instead of the question', severity: 'material', turns: [
+    { q: 'whats wrong with my ads', must: [/\$180|connect|account/i], never: [/\[/, /tool/i] },
+  ] },
+  { biz: 'setup', name: 'known: the answer beside a page button was dropped', severity: 'material', turns: [{ q: 'what have i not set up yet', must: [/phone/i, /service/i] }] },
 ]
 // Deployed site: wording only; the facts come from what the dashboard itself shows (run.mjs compares).
 export const DEPLOYED = [

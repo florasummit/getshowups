@@ -17,6 +17,13 @@ export async function serve(dist, port = 8799) {
     GOOGLE_TOKENS: { get: async (k) => (String(k).startsWith('google:') ? '{}' : null), put: async () => {}, delete: async () => {} },
     OPERATOR_PROVIDER: 'claude', OPERATOR_ANTHROPIC_API_KEY: process.env.OPERATOR_ANTHROPIC_API_KEY, OPERATOR_BUSINESS_DAILY_USD: '1',
   }
+  // Model comparison only (docs/INTELLIGENCE.md 5): the same product with another model or effort; never used in production.
+  if (process.env.ACCEPTANCE_MODEL) {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk')
+    const real = new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY, maxRetries: 2 })
+    const [model, effort] = process.env.ACCEPTANCE_MODEL.split(':')
+    env.ANTHROPIC_CLIENT = { messages: { create: (b) => real.messages.create({ ...b, model, output_config: { effort } }) } }
+  }
   const route = (path) => [`${path}.js`, `${path}/index.js`].map((p) => new URL(`../../functions${p}`, import.meta.url)).find((u) => existsSync(u))
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, origin)

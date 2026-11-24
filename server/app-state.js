@@ -159,7 +159,18 @@ async function setup(c) {
   return { to_do: todo.length ? todo : 'nothing', waiting: r.items.filter((i) => i.state === 'pending').map((i) => `${STEP[i.id]}: ${i.detail}`), calendar_note: 'last known; not checked with Google just now' }
 }
 
-export const pageState = (c, page) => PAGES[page](c)
+// What each page is about and what the owner can do there, so neither is guessed.
+const ABOUT = {
+  overview: ['the business today', ['see what needs attention', 'record how a past visit went'], []],
+  appointments: ['visits and people who have not booked', ['record outcomes and payments', 'cancel an upcoming visit', 'approve or decline outside-area requests'], ['move a visit to another time (cancel it; the customer picks a new time)', 'refunds']],
+  followups: ['written conversations', ['write and send a reply to someone with a conversation', 'pause automatic follow-ups'], ['call-back requests (Receptionist)']],
+  receptionist: ['the AI receptionist (website chat)', ['turn it on or off', 'greeting and notes', 'mark call backs and messages done'], ['phone calls']],
+  teach: ['rules for how the receptionist answers', ['write, test and publish a rule'], []],
+  website: ['the business website', ['edit, preview, publish', 'connect a domain'], []],
+  ads: ['advertising', ['connect an ad account', 'prepare a campaign', 'approve a budget'], []],
+  settings: ['business details and setup', ['services and prices', 'phone', 'service area', 'booking hours', 'Google Calendar', 'policies'], []],
+}
+export const pageState = async (c, page) => ({ this_page_is_about: ABOUT[page][0], owner_can_do_here: ABOUT[page][1], ...(ABOUT[page][2].length ? { not_possible_here: ABOUT[page][2] } : {}), ...(await PAGES[page](c)) })
 export const selectedLead = async (c, id) => {
   const r = await leadByRefId(c, id)
   return r && { what: 'the conversation open on screen', ...r }

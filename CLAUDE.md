@@ -59,7 +59,8 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      session's business; the model sees references (A1, L2), never names or contact details; prepares, never
                      saves; AI_ASSIST_CHAT_ENABLED=false = off; OPERATOR_PROVIDER=claude needs its own key (approval)
                      server/attention.js = the ONE definition of who is waiting (Overview card + assistant); app-state.js = what each page
-                     shows, in every turn. Release check: scripts/acceptance/run.mjs (real UI + real model; CI green is not acceptance)
+                     shows, in every turn. Governing spec: docs/INTELLIGENCE.md (read it before
+                     changing assistant behaviour; software before instructions). Release check: scripts/acceptance/run.mjs
   api/dashboard/insights   Proactive suggestions (server/insights.js): deterministic, no model, dismissal = events row; AI_INSIGHTS_ENABLED=false = off
   api/dashboard/proposal   Owner approves a prepared change (server/proposals.js): ZIPs, outcome, hours; before must match, audited
                      Privacy policy: src/legal/Privacy.jsx, also plain HTML at build (vite.config.js). Every security

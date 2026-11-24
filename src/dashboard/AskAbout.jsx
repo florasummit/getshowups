@@ -174,7 +174,37 @@ function Records({ list }) {
   )
 }
 
-function Entry({ e, retry, ask, onState }) {
+const WRONG = { wrong_fact: 'Wrong fact', misunderstood: 'Misunderstood me', wrong_action: 'Wrong action', missing: 'Something is missing', not_useful: 'Not useful' }
+// Only a code is sent: which answer, and why it wasn't right.
+function NotRight({ id }) {
+  const [sent, setSent] = useState('')
+  const send = async (reason) => {
+    const { status } = await api('/api/dashboard/assist-feedback', { method: 'POST', body: { id, reason } })
+    setSent(status === 200 ? 'Thanks. We’ll look into it.' : 'That didn’t go through. Please try again.')
+  }
+  return (
+    <details className="ask-feedback">
+      <summary className="fine">Not right?</summary>
+      {sent ? (
+        <p className="fine" role="status">
+          {sent}
+        </p>
+      ) : (
+        <ul className="ask-ideas">
+          {Object.entries(WRONG).map(([k, label]) => (
+            <li key={k}>
+              <button type="button" onClick={() => send(k)}>
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  )
+}
+
+function Entry({ e, newest, retry, ask, onState }) {
   return (
     <div className="ask-entry">
       <p className="ask-q">
@@ -245,6 +275,7 @@ function Entry({ e, retry, ask, onState }) {
             </button>
           )}
           {e.note && <p className="fine">{e.note}</p>}
+          {newest && e.answerId && <NotRight key={e.answerId} id={e.answerId} />}
           {e.aiOut && (
             <p className="fine" data-ai-out>
               {LIMIT[e.limit] ? `${LIMIT[e.limit]} This is straight from your records, without analysis.` : NOT_READ[e.aiOut] || OUT}
@@ -274,17 +305,17 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const entry = { id: key, ctx, q: question, about: replace ? replace.about : title || VIEW[view], days: ctx.days, busy: true }
     // A question the AI couldn't answer still counts as said, and a bare list is never replayed as the AI's own reading.
     const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}${(e.proposals || []).some((p) => p.state === 'saved') ? ' (Since then the owner approved it: saved.)' : ''}` }))
-    const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
+    const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state && p.pid).slice(-8).map((p) => ({ id: p.pid, type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
     const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending, ...(view === 'followups' && getSelected() ? { selected: getSelected() } : {}) } })
     if (data.refs) refs.current = data.refs
     if (data.lookups) looked.current = data.lookups
-    if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state || (Array.isArray(data.withdraw) && !data.withdraw.includes(p.ref)) ? p : { ...p, state: 'withdrawn' })) })))
+    if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state || !data.withdraw.includes(p.pid) ? p : { ...p, state: 'withdrawn' })) })))
     if (status === 404) setOff(true)
     const code = status === 429 ? 'rate_limited' : ERRORS[data.error] ? data.error : status === 422 ? 'refused' : 'unavailable'
     const done =
       status === 200
-        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, limit: data.limit, aiOut: data.aiOut, resumesAt: data.resumesAt, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
+        ? { kind: data.kind, answerId: data.id, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, limit: data.limit, aiOut: data.aiOut, resumesAt: data.resumesAt, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
         : { error: code === 'refused' ? OTHER : (code === 'rate_limited' && LIMIT[data.limit]) || ERRORS[code], retry: ['unavailable', 'busy', 'timeout'].includes(code), resumesAt: code === 'quota' ? data.resumesAt : null, tries: data.try, evidence: data.evidence, days: data.days ?? ctx.days }
     setTalk((t) => t.map((e) => (e.id === key ? { ...entry, busy: false, ...done } : e)))
     if (status === 200 && fromBox) setQ((now) => (now === question ? '' : now))
@@ -330,7 +361,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
       {!topic && !talk.length && <p className="fine">Ask in your own words. I look up your appointments, inquiries, numbers and settings, and get changes ready for you to approve.</p>}
       <div className="ask-live" ref={live} tabIndex={-1} role="log" aria-live="polite" aria-busy={busy}>
         {talk.map((e) => (
-          <Entry key={e.id} e={e} retry={() => send(e.q, { replace: e })} ask={suggest} onState={onState} />
+          <Entry key={e.id} e={e} newest={e === talk.at(-1)} retry={() => send(e.q, { replace: e })} ask={suggest} onState={onState} />
         ))}
       </div>
       {ideas.length > 0 && !busy && (

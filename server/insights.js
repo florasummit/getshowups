@@ -7,6 +7,7 @@ import { track } from './events.js'
 import { diagnose, funnel } from './ads/funnel.js'
 import { adsAccess } from './ads/access.js'
 import { internalEmails, isTestLead } from './testdata.js'
+import { UNANSWERED } from './attention.js'
 import { getProfile } from './onboarding.js'
 
 const HOUR = 3_600_000
@@ -31,8 +32,8 @@ export async function outsideZips(env, customer, now = Date.now()) {
 // Unbooked leads from the last 14 days, older than a day, that nothing was ever sent to.
 export async function unanswered(env, customer, now = Date.now()) {
   const r = await env.ONBOARDING_DB.prepare(
-    `SELECT count(*) AS n FROM leads l JOIN lead_threads t ON t.lead_id = l.id AND t.customer = l.customer
-      WHERE l.customer = ?1 AND l.status = 'new' AND l.created_at BETWEEN ?2 AND ?3 AND t.last_outbound_at IS NULL AND t.stage = 'new' AND NOT ${isTestLead('l', '?4')}`,
+    `SELECT count(*) AS n FROM leads l LEFT JOIN lead_threads t ON t.lead_id = l.id AND t.customer = l.customer
+      WHERE l.customer = ?1 AND ${UNANSWERED} AND l.created_at BETWEEN ?2 AND ?3 AND NOT ${isTestLead('l', '?4')}`,
   )
     .bind(customer.id, now - 14 * DAY, now - DAY, internalEmails(env))
     .first()

@@ -8,6 +8,8 @@ import { serviceAreaProposal, wantsServiceArea } from './proposals.js'
 import { plainAnswer } from './assist-plain.js'
 import { REPEATABLE } from './operator-tools.js'
 import { operatorConfigured } from './operator-model.js'
+import { keep } from './fit.js'
+import { newProposalId, PROPOSAL_ID } from './proposal-set.js'
 import { businessEligible } from './eligibility.js'
 import { internalEmails } from './testdata.js'
 
@@ -37,9 +39,9 @@ export function validateQuestion(b) {
   if (b.days !== undefined && !PERIODS.includes(b.days)) return ['invalid_request']
   const h = b.history === undefined ? [] : b.history
   if (!Array.isArray(h) || h.length > 20) return ['invalid_request']
-  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, 200), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 1300) }))
+  const history = h.slice(-LIMITS.history).map((x) => ({ q: keep(clean(x?.q), LIMITS.question), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, 1900) }))
   const named = periodIn(question)
-  const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[ALR]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
+  const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 8).map((p) => ({ id: PROPOSAL_ID.test(p?.id) ? p.id : '', type: String(p?.type || '').slice(0, 20), ref: /^[ALR]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: keep(clean(p?.change), 300) })).filter((p) => p.id)
   const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L, R: b.refs.R } : {}
   const looked = (Array.isArray(b.looked) ? b.looked : []).slice(0, 5).filter((x) => REPEATABLE.includes(x?.name) && x.args && typeof x.args === 'object' && !Array.isArray(x.args) && JSON.stringify(x.args).length < 400).map((x) => ({ name: x.name, args: x.args }))
   const selected = typeof b.selected === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(b.selected) ? b.selected : null
@@ -84,7 +86,7 @@ export function funnelEvidence(f) {
 export async function withoutModel(env, customer, req) {
   if (wantsServiceArea(req.question)) {
     const p = await serviceAreaProposal(env, customer, req.question)
-    return { kind: 'prepared', answer: p.text, ...(p.proposal ? { proposals: [p.proposal] } : {}) }
+    return { kind: 'prepared', answer: p.text, ...(p.proposal ? { proposals: [{ ...p.proposal, pid: newProposalId() }] } : {}) }
   }
   return plainAnswer(env, customer, req)
 }

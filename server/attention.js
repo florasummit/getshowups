@@ -10,13 +10,16 @@ const REQUEST = `SELECT r.id, r.kind, r.name, r.phone, r.email, r.note, r.urgent
   FROM receptionist_requests r LEFT JOIN receptionist_conversations c ON c.id = r.conversation_id AND c.customer = r.customer`
 export const openRequests = async (db, customerId) => (await db.prepare(`${REQUEST} WHERE r.customer = ?1 AND r.status = 'open' ORDER BY r.urgent DESC, r.created_at LIMIT 100`).bind(customerId).all()).results
 export const requestById = (db, customerId, id) => db.prepare(`${REQUEST} WHERE r.customer = ?1 AND r.id = ?2`).bind(customerId, id).first()
-export const findRequests = async (db, customerId, like) => (await db.prepare(`${REQUEST} WHERE r.customer = ?1 AND r.name LIKE ?2 ORDER BY r.created_at DESC LIMIT 6`).bind(customerId, like).all()).results
+export const findRequests = async (db, customerId, like) => (await db.prepare(`${REQUEST} WHERE r.customer = ?1 AND r.name LIKE ?2 ORDER BY r.created_at DESC LIMIT 200`).bind(customerId, like).all()).results
 
 // The owner dealt with a call-back request or message (Receptionist page and an approved assistant proposal).
 export async function resolveRequest(db, customerId, id, now = Date.now()) {
   const r = await db.prepare("UPDATE receptionist_requests SET status = 'resolved', resolved_at = ?3, updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'open'").bind(id, customerId, now).run()
   return r?.meta?.changes > 0
 }
+
+// An inquiry nothing was ever sent to and that never booked (leads l, lead_threads t). Every use of "unanswered" is this one.
+export const UNANSWERED = "l.status = 'new' AND t.last_outbound_at IS NULL AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status IN ('booked','showed','no_show'))"
 
 const n = (x) => Number(x) || 0
 // → { callbacks, messages, replies, unbooked, coverage, outcomes } each { total, urgent? } | null
@@ -32,6 +35,7 @@ export async function attention(env, customerId, now = Date.now()) {
     one(`SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.status = 'booked' AND a.start_at <= ?2 AND NOT ${isTestLead('l', '?3')}`, now, internal),
   ])
   return {
+    readAt: now,
     callbacks: req && { total: n(req.c), urgent: n(req.cu) },
     messages: req && { total: n(req.m), urgent: n(req.mu) },
     replies: replies && { total: n(replies.n) },

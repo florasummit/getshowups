@@ -22,6 +22,7 @@ import { randomToken } from '../google-oauth.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 import { resumeUrl, confirmUrl, linkToken, verifyLinkToken } from '../links.js'
 import { acquireControl, currentController, releaseControl } from '../conversations/control.js'
+import { internalEmails, isTestLead } from '../testdata.js'
 import { recordEvent } from '../auditlog.js'
 import { hit } from '../ratelimit.js'
 import { classify, helpText, startText, humanText, cancelText, fallbackText, aiReply, assistantConfigured } from './assistant.js'
@@ -467,13 +468,13 @@ export async function listThreads(env, customerId, { now = Date.now(), limit = 1
               (SELECT controller FROM conversation_control cc WHERE cc.customer = lt.customer AND cc.conversation_id = lt.lead_id) AS controller,
               (SELECT body FROM thread_messages tm WHERE tm.customer = lt.customer AND tm.lead_id = lt.lead_id AND tm.status <> 'skipped' ORDER BY tm.created_at DESC LIMIT 1) AS last_body,
               (SELECT count(*) FROM thread_messages tm WHERE tm.customer = lt.customer AND tm.lead_id = lt.lead_id AND tm.status = 'failed') AS failures,
-              (SELECT is_test FROM test_marks tk WHERE tk.customer = lt.customer AND tk.lead_id = lt.lead_id) AS test
+              ${isTestLead('l', '?3')} AS test
          FROM lead_threads lt JOIN leads l ON l.id = lt.lead_id AND l.customer = lt.customer
         WHERE lt.customer = ?1
         ORDER BY (lt.needs_owner IS NOT NULL) DESC, coalesce(lt.last_inbound_at, lt.created_at) DESC
         LIMIT ?2`,
     )
-    .bind(customerId, limit)
+    .bind(customerId, limit, internalEmails(env))
     .all()
     .catch(async () => db.prepare('SELECT lt.*, l.name, l.need, l.status AS lead_status, NULL AS controller, NULL AS last_body, 0 AS failures, NULL AS test FROM lead_threads lt JOIN leads l ON l.id = lt.lead_id AND l.customer = lt.customer WHERE lt.customer = ?1 ORDER BY lt.created_at DESC LIMIT ?2').bind(customerId, limit).all())
   const threads = results.map((r) => ({
