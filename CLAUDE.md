@@ -690,6 +690,9 @@ scripts/gh.sh run view <run-id> --log-failed              # read the first failu
 scripts/gh.sh pr view <n> --json headRefOid,mergeable,statusCheckRollup   # release readiness
 ```
 
+- Active program: docs/AZ_MASTER_PLAN.md (authoritative, verbatim) + docs/AZ_PROGRESS.md (resume from the next unfinished phase).
+- CI: `scripts/ci-check.sh <pr>` (one bounded look; never `--watch`), then keep working. Release of an APPROVED PR:
+  `scripts/release.sh <pr> <head sha>`.
 - Allowed without asking (when the task asks for PR work): push feature branches, open/update PRs, comment on PRs,
   watch CI, read logs, push fixes. Still needs approval: merge, push to main (= production deploy), closing others' PRs,
   deleting branches, repo settings, token changes.
