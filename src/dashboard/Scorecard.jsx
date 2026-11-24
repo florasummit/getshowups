@@ -42,7 +42,7 @@ export default function Scorecard() {
           </button>
         ))}
       </div>
-      {!r ? <div className="ui-skeleton-block" aria-busy="true" /> : r.failed ? <p className="form-error" role="alert">Couldn’t load results. Try again in a moment.</p> : (
+      {!open ? null : !r ? <div className="ui-skeleton-block" aria-busy="true" /> : r.failed ? <p className="form-error" role="alert">Couldn’t load results. Try again in a moment.</p> : (
         <table className="ar-table" aria-busy={r.funnel.range.days !== days}>
           <caption className="fine">Inquiries from the last {r.funnel.range.days} days, followed to what became of each. Records only; nothing is estimated.</caption>
           <tbody>
