@@ -4942,6 +4942,217 @@ html.help-open .app {
   border-radius: 50%;
 }
 
+.help-topic {
+  display: grid;
+  gap: 16px;
+}
+
+.assist-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--lav-300);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink-900);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.assist-btn svg {
+  color: var(--lav-700);
+}
+
+.assist-btn:hover,
+.assist-btn[aria-expanded='true'] {
+  border-color: var(--lav-700);
+  background: var(--lav-50);
+}
+
+@media (max-width: 400px) {
+  .app-header,
+  .header-user {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .assist-btn {
+    flex: none;
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .assist-btn span {
+    display: none;
+  }
+}
+
+/* The smallest phones: the assistant panel carries the email link instead. */
+@media (max-width: 360px) {
+  .header-user:has(.assist-btn) > a.link-btn {
+    display: none;
+  }
+}
+
+.insight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 20px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--lav-300);
+  border-left: 3px solid var(--lav-700);
+  border-radius: 12px;
+  background: var(--white);
+}
+
+.insight-main {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.insight-title {
+  font-weight: 600;
+}
+
+.insight-why summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--ink-500);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.insight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.insight-actions .link-btn {
+  min-height: 40px;
+}
+
+.help-panel .btn {
+  border-radius: 10px;
+}
+
+.help-panel .btn-primary {
+  background: var(--ink-950);
+  color: var(--white);
+  box-shadow: none;
+}
+
+.ask-list {
+  list-style: disc;
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.88rem;
+}
+
+.ask-entry {
+  display: grid;
+  gap: 8px;
+}
+
+.ask-q small {
+  display: block;
+  color: var(--ink-500);
+  font-size: 0.72rem;
+}
+
+.ask-evidence {
+  display: grid;
+  gap: 4px;
+}
+
+.ask-evidence summary {
+  min-height: 32px;
+  color: var(--ink-500);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ask-proposal {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1.5px solid var(--lav-300);
+  border-radius: 12px;
+  background: var(--white);
+}
+
+.ask-proposal-title {
+  font-weight: 650;
+}
+
+.ask-proposal dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ask-proposal dt {
+  color: var(--ink-500);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ask-proposal dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  max-height: 120px;
+  margin: 0;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-proposal .is-new {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--mint-100);
+  font-weight: 600;
+}
+
+.ask-proposal del {
+  color: var(--ink-500);
+}
+
+.ask-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-saved {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--mint-50);
+  font-size: 0.9rem;
+}
+
+.fu-reply {
+  display: block;
+}
+
+.fu-reply textarea {
+  width: 100%;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .app {
     transition: padding-right 0.28s var(--ease);
@@ -4960,7 +5171,7 @@ html.help-open .app {
     transition: top 0.2s var(--ease);
   }
 
-  .help-scroll {
+  .help-topic {
     animation: help-swap 0.22s var(--ease);
   }
 

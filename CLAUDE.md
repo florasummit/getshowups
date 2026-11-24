@@ -55,7 +55,12 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   sms-terms/[customer]  Public texting program terms (A2P disclosures) from records
   api/dashboard/policies   What customers should know (GET/POST beforeVisit, cancellation ≤300 chars)
   api/dashboard/write      Writing help for description/greeting/policies (server/writing.js, AI_ASSIST_ENABLED=false = off): suggestion only
-  api/dashboard/assist     Ask about one help topic (server/assist.js): read-only, no tools, counts only; AI_ASSIST_CHAT_ENABLED=false = off
+  api/dashboard/assist     Dashboard assistant (server/assist.js): curated help → own counts (the owner's 7/30/90 period) → general business
+                     questions; no tools, no customer details, nothing stored; AI_ASSIST_CHAT_ENABLED=false = off
+  api/dashboard/insights   Proactive suggestions (server/insights.js): deterministic, no model, dismissal = events row; AI_INSIGHTS_ENABLED=false = off
+  api/dashboard/proposal   Owner approves a prepared change (server/proposals.js): service ZIPs only; before must match, audited
+                     Privacy policy: src/legal/Privacy.jsx, also plain HTML at build (vite.config.js). Every security
+                     claim there has evidence in docs/GOOGLE_PRIVACY_RESUBMISSION.md; change both together
                      Help topics: src/content/help.js + dashboard/Help.jsx (opening never makes a request)
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)

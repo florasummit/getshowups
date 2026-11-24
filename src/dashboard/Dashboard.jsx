@@ -96,7 +96,7 @@ function SignIn({ invite, plan }) {
         <a className={`btn ${closed ? 'btn-quiet' : 'btn-primary'} btn-lg btn-block`} href={`/api/auth/google/start${returnTo()}`}>
           Continue with Google
         </a>
-        <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage.</p>
+        <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage. <a href="/privacy">Privacy policy</a></p>
         {!invite && (
           <p className="fine">
             {signup ? (

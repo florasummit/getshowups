@@ -22,7 +22,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
     await p.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null)))) // entrance fades done
     await p.screenshot({ path: `${shots}/${testInfo.project.name}-${name}.png`, fullPage: true })
   }
-  await page.goto(`/book/${fixtures.E2E_ADS_CUSTOMER}?utm_source=google&utm_medium=cpc&utm_campaign=e2e-campaign`)
+  await page.goto(`/book/${fixtures.E2E_AREA_CUSTOMER}?utm_source=google&utm_medium=cpc&utm_campaign=e2e-campaign`)
   await page.getByLabel('What do you need?').fill('Green pool cleanup')
   await page.getByLabel('Name').fill(who)
   await page.getByLabel('Phone').fill('(555) 010-0177')
@@ -53,7 +53,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
 
   // The owner answers in Appointments.
   const ownerCtx = await browser.newContext({ ...(testInfo.project.use || {}) })
-  await useSession(ownerCtx, fixtures.E2E_ADS_SESSION_TOKEN)
+  await useSession(ownerCtx, fixtures.E2E_AREA_SESSION_TOKEN)
   const owner = await ownerCtx.newPage()
   await owner.goto('/dashboard/appointments')
   const row = owner.locator('.row', { hasText: who })
@@ -63,7 +63,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
   await row.getByRole('button', { name: 'We serve this area' }).click()
   await expect(row.getByText('Area approved')).toBeVisible()
   const link = await row.getByLabel('Their booking link').inputValue()
-  expect(link).toMatch(new RegExp(`/book/${fixtures.E2E_ADS_CUSTOMER}\\?lead=[A-Za-z0-9_-]+&k=`))
+  expect(link).toMatch(new RegExp(`/book/${fixtures.E2E_AREA_CUSTOMER}\\?lead=[A-Za-z0-9_-]+&k=`))
   await shot(owner, 'owner-approved')
   // After a reload the link is still one click away (approving again changes nothing and sends nothing new).
   await owner.reload()
@@ -92,7 +92,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
 })
 
 test('in the service area: books straight away (no coverage step)', async ({ page }) => {
-  await page.goto(`/book/${fixtures.E2E_ADS_CUSTOMER}`)
+  await page.goto(`/book/${fixtures.E2E_AREA_CUSTOMER}`)
   await page.getByLabel('What do you need?').fill('Weekly pool cleaning')
   await page.getByLabel('Name').fill('Robin InArea')
   await page.getByLabel('Phone').fill('(555) 010-0178')
