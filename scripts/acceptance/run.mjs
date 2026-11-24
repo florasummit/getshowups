@@ -1,6 +1,6 @@
 // Browser acceptance for the dashboard assistant: opens the dashboard, types questions, reads what is rendered, compares it
 // with the records and the page, tries supported actions, and writes a Markdown report with screenshots.
-//   node scripts/acceptance/run.mjs --local <dist dir> [--only <biz>] [--cap 0.50]   synthetic businesses, real model
+//   node scripts/acceptance/run.mjs --local <dist dir> [--set fresh|known] [--only <biz>] [--cap 0.50]   synthetic businesses, real model
 //   node scripts/acceptance/run.mjs --deployed [--approve]                           https://getshowups.com, saved sign-in
 // Deployed runs: login.mjs once (a person signs in; nothing is bypassed). They refuse to start unless the signed-in business
 // is on ALLOWED and admin-marked as a test business, and every request that could change anything is blocked in the browser
@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium, devices } from '@playwright/test'
-import { DEPLOYED, FRESH, SCENARIOS } from './scenarios.mjs'
+import { DEPLOYED, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
 import { BUSINESSES, token } from './worlds.mjs'
 
 const arg = (k, d = null) => (process.argv.includes(k) ? (process.argv[process.argv.indexOf(k) + 1] ?? true) : d)
@@ -111,7 +111,7 @@ async function local(dist) {
   const cap = Number(arg('--cap', '0.50'))
   const names = Object.fromEntries(Object.keys(BUSINESSES).map((id) => [id, s.sql.prepare('SELECT name FROM leads WHERE customer = ?1 UNION SELECT name FROM receptionist_requests WHERE customer = ?1').all(id).map((r) => r.name)]))
   const browser = await chromium.launch()
-  for (const [i, sc] of (arg('--set') === 'fresh' ? FRESH : SCENARIOS).entries()) {
+  for (const [i, sc] of ({ fresh: FRESH, known: KNOWN }[arg('--set')] || SCENARIOS).entries()) {
     if (arg('--only') && ![sc.biz].includes(arg('--only'))) continue
     const mobile = i % 3 === 1
     const ctx = await browser.newContext(mobile ? { ...devices['Pixel 7'] } : { viewport: { width: 1440, height: 950 } })
@@ -121,7 +121,7 @@ async function local(dist) {
     await guard(page, blocked, true)
     page.on('pageerror', (e) => fail(sc.biz, `page error ${e.message}`))
     await page.goto(`${s.origin}/dashboard`)
-    const where = `${sc.biz} / ${sc.name}`
+    const where = `${sc.severity ? `[known, ${sc.severity}] ` : ''}${sc.biz} / ${sc.name}`
     log(`\n## ${BUSINESSES[sc.biz]} — ${sc.name} (${mobile ? 'mobile' : 'desktop'})`)
     const others = Object.entries(names).filter(([id]) => id !== sc.biz).flatMap(([, l]) => l)
     for (const t of sc.turns) {

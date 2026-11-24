@@ -3,7 +3,8 @@
 // Unqualified only: "nobody is waiting on that visit" is right even while someone waits for a call.
 const NOBODY = /(nobody|no one|no customers?) (is|are) waiting( (on|for) you)?( right now)?[.!]|all caught up/i
 // A second set with different wording, for the same rules: run with --set fresh.
-export const FRESH = [
+export const FRESH = [ // strict versions of cases that have failed: KNOWN
+
   { biz: 'callback', name: 'fresh', turns: [
     { view: 'settings', q: 'theres a 1 on my home page, 1 what', must: [/Rosa Vance|call/i], never: [NOBODY] },
     { q: 'urgent?', must: [/not|isn|no/i] },
@@ -130,6 +131,37 @@ export const SCENARIOS = [
     { q: 'can you text vera that im coming at 5', never: [/\bI('ve| have)? (sent|texted)\b/i] },
     { view: 'overview', q: 'give me the whole picture in a few lines', must: [/Vera Stone/] },
   ] },
+]
+// Failures seen with the real model, kept with their ORIGINAL strict expectation: run with --set known. They are reported
+// apart, never counted as passes, and leave only when they pass repeatedly. severity: material | minor.
+export const KNOWN = [
+  { biz: 'callback', name: 'known: vague pronoun after another person', severity: 'minor', turns: [
+    { view: 'settings', q: 'theres a 1 on my home page, 1 what', any: true },
+    { q: 'n the other guy from sunday', any: true },
+    { view: 'followups', q: 'shes not in here tho', must: [/receptionist/i], never: [NOBODY] },
+  ] },
+  { biz: 'upcoming', name: 'known: "n after" counted from the answer, not the question', severity: 'minor', turns: [
+    { view: 'overview', q: 'next one?', any: true },
+    { q: 'n after', must: [/^(?=.*Omar Haddad)(?!.*Lena Ortiz (is|comes) (next|after))/s] },
+  ] },
+  { biz: 'unanswered', name: 'known: an earlier list by position; who sent a message', severity: 'minor', turns: [
+    { q: 'who am i leaving hanging', must: [/Owen Cole/], never: [/went out automatically|automatic message (on|went|sent)/i] },
+    { q: 'does anybody want a phone call', any: true },
+    { q: 'draft something to the second one you mentioned first', proposal: 'follow_up' },
+  ] },
+  { biz: 'busy', name: 'known: kinds and waiting times mixed up', severity: 'material', turns: [
+    { view: 'settings', q: 'ok what matters most rn', must: [/Vera Stone/], never: [/both (are )?(phone )?calls/i, /oldest item waiting/i, /Vera[^.]{0,60}longest/, /code matters before|before Wednesday/i] },
+    { q: 'give me the whole picture in a few lines', must: [/Vera Stone/], never: [/([A-Z][a-z]+) \1\b/, /\b(she|her)\b/i] },
+    { q: 'go through that list at the top one by one', long: true, must: [/Walt Ames/], never: [/Vera[^.]{0,60}longest/] },
+    { q: 'who of those two waited longest', any: true },
+  ] },
+  { biz: 'outcomes', name: 'known: dates described wrongly', severity: 'material', turns: [
+    { q: 'are those visits people waiting for me', must: [/no|not/i], never: [/both[^.]*last week|visits from last week/i] },
+  ] },
+  { biz: 'ads', name: 'known: answered the correction instead of the question', severity: 'material', turns: [
+    { q: 'whats wrong with my ads', must: [/\$180|connect|account/i], never: [/\[/, /tool/i] },
+  ] },
+  { biz: 'setup', name: 'known: the answer beside a page button was dropped', severity: 'material', turns: [{ q: 'what have i not set up yet', must: [/phone/i, /service/i] }] },
 ]
 // Deployed site: wording only; the facts come from what the dashboard itself shows (run.mjs compares).
 export const DEPLOYED = [
