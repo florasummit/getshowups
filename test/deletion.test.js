@@ -192,7 +192,7 @@ test('owner deletion: confirmed by typing the business name; everything erased, 
   assert.equal(stripe.subs.sub_B, 'active')
   assert.equal(kv.m.has('google:beta-co'), true)
   // Members lost access at once; the public booking page is gone.
-  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json().customer, null)
+  assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).status, 401) // signed out everywhere
   assert.equal((await call(bookInfo, 'GET', '/api/book/alpha-co', { params: { customer: 'alpha-co' } })).status, 404)
   // Record + permanent audit trail, without personal data.
   const j = job('alpha-co')

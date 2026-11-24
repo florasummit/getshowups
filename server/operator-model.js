@@ -11,10 +11,31 @@ const mockOf = (env) => (typeof env.AI_API_MOCK_ORIGIN === 'string' && MOCK_RE.t
 
 export const MODELS = {
   workers: { provider: 'workers', model: ASSISTANT_MODEL, price: { in: PRICE.inputPerM, out: PRICE.outputPerM, read: PRICE.inputPerM, write: PRICE.inputPerM } },
-  claude: { provider: 'claude', model: 'claude-haiku-5-5', effort: 'low', price: { in: 0.1, out: 0.5, read: 0.01, write: 0.125 } },
+  claude: { provider: 'claude', model: 'claude-haiku-5-5', effort: 'medium', price: { in: 0.1, out: 0.5, read: 0.01, write: 0.125 } },
 }
 export const operatorModel = (env) => (env.OPERATOR_PROVIDER === 'claude' && env.OPERATOR_ANTHROPIC_API_KEY ? MODELS.claude : MODELS.workers)
 export const operatorConfigured = (env) => operatorModel(env).provider === 'claude' || Boolean(env.AI?.run) || Boolean(mockOf(env))
+
+// Money limits for a paid provider (Anthropic's own workspace limit is the outer guard). Both configurable; unset, zero or
+// nonsense means the default, never unlimited.
+const usd = (v, d) => (Number(v) > 0 && Number(v) <= 1000 ? Number(v) : d)
+export const spendLimits = (env) => ({ day: usd(env.OPERATOR_DAILY_USD, 2), business: usd(env.OPERATOR_BUSINESS_DAILY_USD, 0.1) })
+// Counted even when a call failed or timed out: the provider may still have billed it.
+export const MIN_CHARGE_MICROS = 1000
+
+// Today's recorded spend (UTC), all businesses and this one. Unreadable → treated as over (no unbounded spending).
+export async function overBudget(env, customerId, now = Date.now()) {
+  if (operatorModel(env).provider !== 'claude') return false
+  const { day, business } = spendLimits(env)
+  try {
+    const r = await env.ONBOARDING_DB.prepare("SELECT coalesce(sum(json_extract(props, '$.costMicros')), 0) AS a, coalesce(sum(CASE WHEN customer = ?2 THEN json_extract(props, '$.costMicros') END), 0) AS b FROM events WHERE type = 'ai_ask' AND at >= ?1")
+      .bind(now - (now % 86_400_000), customerId)
+      .first()
+    return r.a >= day * 1e6 || r.b >= business * 1e6
+  } catch {
+    return true
+  }
+}
 
 const withTimeout = async (p, ms) => {
   let timer

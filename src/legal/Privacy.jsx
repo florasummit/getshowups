@@ -124,9 +124,9 @@ export default function Privacy() {
       <h2>Sharing</h2>
       <p>
         Appointment requests are shared with the business the request was made to. We use service providers to run
-        GetShowUps: Cloudflare for hosting, storage and the AI models behind the dashboard’s help and website writing;
+        GetShowUps: Cloudflare for hosting, storage and the AI models behind website writing and parts of the dashboard’s help;
         Google for sign-in, calendars and ads; Resend to deliver email; Twilio to deliver text messages; Anthropic to run
-        the AI receptionist’s language model; and OpenAI for its voice calls (speech and voice). ElevenLabs and Retell are
+        the AI receptionist’s language model and the dashboard assistant; and OpenAI for its voice calls (speech and voice). ElevenLabs and Retell are
         other voice services we can use; voice calls go to one of them only where we have selected it. Each provider
         receives what it needs for its part and keeps it under its own terms. If an owner connects their own AI account
         for website design, the business information used there goes to that provider under their agreement with it. If we
