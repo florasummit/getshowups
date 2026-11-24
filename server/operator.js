@@ -8,9 +8,9 @@
 import { HELP } from '../src/content/help.js'
 import { inventedNumbers } from './fact-numbers.js'
 import { chat, costOf, operatorModel, providerReason } from './operator-model.js'
-import { pageState, PAGE_IDS, selectedLead, waitingNow } from './app-state.js'
+import { pageState, selectedLead, waitingNow } from './app-state.js'
 import { PAGES } from './assist-plain.js'
-import { knownRecords, repeatLookups, REPEATABLE, runTool, toolContext, TOOLS, whenText } from './operator-tools.js'
+import { PAGE_IDS, knownRecords, repeatLookups, REPEATABLE, runTool, toolContext, TOOLS, whenText } from './operator-tools.js'
 
 export const BOUNDS = { rounds: 5, calls: 8, callMs: 25_000, totalMs: 40_000, tokens: 2400, answer: 1800, resultChars: 7000 }
 const SPECS = TOOLS.map(({ name, description, parameters }) => ({ name, description, parameters }))
@@ -45,6 +45,7 @@ TRUTH
 - Who waited longest, is oldest or newest: compare the times given, never assume that the urgent one is also the longest.
 - Keep apart what the records show, what you conclude from it ("that suggests"), and what isn't recorded.
 - The records below are the authority. If the owner's words or your earlier answer differ from them, say what the records show now, plainly.
+- A call back with same_person_inquiry is ONE person with two records: use one of the two references, count them once, and don't report the inquiry as someone else.
 - Keep people apart: never connect one person's request, message or visit with another person's unless a record does. A note that names no visit or customer is only about the person who left it: don't guess which visit or address it affects. A statement about several people must be true of each. Use they/them for customers unless the owner used another pronoun for that person.
 - No more than the record says: "no message from GetShowUps" is not "nobody contacted them"; a detail the customer didn't give (a date, a size, a deadline) stays unknown; "not confirmed" doesn't mean they won't come. How GetShowUps works (who can book, what a setting does, where it is changed) comes only from tool results. Avoid "nobody can", "no way" and "only" unless a tool said so.
 - Small numbers: don't call them a trend. Don't predict results or promise anything.
@@ -91,11 +92,13 @@ const NOT_DONE = /\b(not|never|no|hasn['’]?t|haven['’]?t|isn['’]?t|aren['�
 const NOBODY = /\b(nobody|no one|no customers?|no-one) (else )?(is|are|seems?|appears?)( \w+)? (waiting|needing|in need)( (on|for) you)?\s*(right now|at the moment|today|currently)?[.!]?$|\b(all caught up|nothing needs (you|your attention))\b/i
 const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more|will (keep|continue to) grow\w*)\b/i
 // How it works is never part of an answer, nor is doubting an answer nobody questioned.
-const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups)\b( (says?|shows?|returned|found|reports?))|\b(funnel tool|lookup)\b|\bmy (earlier|last|previous) (reply|answer|message) was (wrong|incorrect|mistaken)\b|\bI (shouldn['’]t|should not) have (said|linked|told)\b/i
+const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups)\b( (says?|shows?|returned|found|reports?))|\b(funnel tool|lookup)\b|\b(found|is the) (one|a|only|the only) match\b|\bonly match\b|\bmy (earlier|last|previous) (reply|answer|message) was (wrong|incorrect|mistaken)\b|\bI (shouldn['’]t|should not) have (said|linked|told)\b/i
 const CREDITED = /\b(ads?|advertising|campaigns?) (have |has )?(generated|earned|produced|brought in|made|drove|caused|returned)\b[^.]*\$|\$[\d,.]+[^.]*\b(generated|earned|produced|caused|driven) (by|from|through) (your |the )?(ads?|advertising|campaigns?)\b|\b(ROI|ROAS|return on (ad spend|investment))\b[^.]*\d/i
 
 // → null | what is wrong, in words the model can act on
-export function problemWith(text, { facts, looked, refs, waiting = null }) {
+// quoted: what customers wrote. Their numbers (a pool's size, a time to call) may be repeated, but never as money or results.
+const MONEY = /[$%]|\b(percent|revenue|paid|payments?|earn\w*|income|profit\w*|spent|spend|cost\w*|dollars?|bookings?|inquir\w+|leads?|clicks?)\b/i
+export function problemWith(text, { facts, looked, refs, waiting = null, quoted = '' }) {
   if (!text || text.length < 2) return 'The answer was empty.'
   if (text.length > BOUNDS.answer) return 'The answer was too long. Under 160 words.'
   if (/https?:|www\.|[<>{}]/i.test(text)) return 'Remove links, code and braces.'
@@ -110,12 +113,19 @@ export function problemWith(text, { facts, looked, refs, waiting = null }) {
   // The card on screen says someone is waiting: no answer may say the opposite.
   if (waiting?.some((n) => n > 0) && sentences.some((x) => NOBODY.test(x))) return 'WAITING NOW shows people waiting, so do not say that nobody is waiting or all is caught up. Say which kind of waiting is meant.'
   if (sentences.some((x) => DONE.test(x) && !NOT_DONE.test(x))) return 'It says something was done. You cannot save or send anything: say what is prepared, or what the records show happened, without "I" having done it.'
+  if (/[[\]]/.test(text.replace(/\[[ALR]\d{1,3}\]/g, ''))) return 'Square brackets are only for one reference, like [A1]. Remove the others.'
   if (INSIDE.test(text)) return 'It talks about how you work, or calls an earlier answer wrong. Say only what the records show now. An owner may have approved something since: that does not make an earlier answer wrong.'
   if (PROMISE.test(text)) return 'It promises or predicts a result. Remove that.'
   if (sentences.some((x) => CREDITED.test(x) && !NOT_DONE.test(x))) return 'It credits money to ads or gives a return. Say what was recorded for jobs traced to ads, and that the ads’ effect isn’t measured.'
   const bare = text.replace(/\[[ALR]\d{1,3}\]/g, ' ').replace(/^\s*\d+[.)]\s/gm, ' ')
   const check = looked ? bare : sentences.filter((x) => /\byou(r|['’]ve|['’]re)?\b/i.test(x)).join(' ').replace(/\[[ALR]\d{1,3}\]/g, ' ').replace(/^\s*\d+[.)]\s/gm, ' ')
-  const bad = inventedNumbers(check, facts).filter((n) => !/^[1-9]$/.test(n) || !looked || !countable(n, facts))
+  const strict = check.split(/(?<=[.!?])\s+|\n/)
+  const unbacked = strict.flatMap((x) => inventedNumbers(x, MONEY.test(x) ? facts : `${facts} ${quoted}`))
+  // A figure only a customer's text contains is never a result, looked up or not.
+  const theirs = new Set(String(quoted).match(/\d[\d,.]*/g)?.map((n) => n.replace(/[.,]+$/, '').replace(/,/g, '')) || [])
+  const fed = sentences.filter((x) => MONEY.test(x)).flatMap((x) => inventedNumbers(x.replace(/\[[ALR]\d{1,3}\]/g, ' '), facts)).filter((n) => theirs.has(n.replace(/,/g, '')))
+  if (fed.length) return `These figures appear only in a customer’s text, not in the records: ${fed.slice(0, 4).join(', ')}. Leave them out.`
+  const bad = unbacked.filter((n) => !/^[1-9]$/.test(n) || !looked || !countable(n, facts))
   if (bad.length) return `These numbers are not in what you looked up: ${bad.slice(0, 6).join(', ')}. Remove them or look them up.`
   if (!looked && inventedNumbers(sentences.filter((x) => /[$%]|\bpercent\b/i.test(x)).join(' '), facts).length) return 'Without a lookup, leave out amounts and percentages.'
   return null
@@ -124,9 +134,10 @@ export function problemWith(text, { facts, looked, refs, waiting = null }) {
 const countable = (n, facts) => (facts.match(/"ref":"[ALR]\d+"/g) || []).length >= Number(n)
 
 // One card per person: their appointment rather than the inquiry behind it.
-const onePer = (list) => list.filter((r) => r.kind !== 'inquiry' || !list.some((x) => x.kind === 'appointment' && x.leadId === r.leadId))
+const onePer = (list) => list.filter((r) => r.kind !== 'inquiry' || !list.some((x) => x !== r && x.leadId && x.leadId === r.leadId))
 const squash = (v) => String(v ?? '').replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim()
-// What customers typed must not become a source of "facts" for the number check.
+// What customers typed must not become a source of "facts" for the number check (only quotable: problemWith).
+const wordsOf = (v, out = []) => (JSON.stringify(v, (k, x) => (k === 'asked_for' && typeof x === 'string' && out.push(x), x)), out)
 const factsOnly = (v) => JSON.stringify(v, (k, x) => (k === 'asked_for' ? undefined : x))
 
 // One turn. → { ok, answer (names filled in), raw (references), records, proposals, withdraw, go, refs, tools, costMicros, ms } | { ok: false, reason, … }
@@ -137,8 +148,8 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const known = await knownRecords(c, (req.history || []).map((h) => h.a).join(' '))
   const pending = (req.pending || []).map((p) => ({ type: p.type, ...(p.ref ? { ref: p.ref } : {}), change: p.change }))
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
-  const [waiting, page, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])
-  const screen = { waiting, page, selected }
+  const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])
+  const screen = { waiting, page: shownPage, selected }
   const system = systemPrompt(c, req, known, pending, before, screen)
   const messages = []
   for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
@@ -150,6 +161,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   let calls = 0
   let retries = 0
   let beside = '' // an answer written next to a lookup or button, when nothing follows it
+  let page = '' // the same, next to a page button only
   let again = false
   const looked = [] // repeated next turn, so "why?" reasons over the same evidence
   const base = () => ({ refs: c.refs.book, lookups: looked.length ? looked.slice(-5) : req.looked || [], records: [...c.shown.values()].slice(0, 12), proposals: c.proposals, withdraw: c.withdraw, go: c.go, tools, usage, costMicros: Math.round(cost), ms: Date.now() - started })
@@ -183,6 +195,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
     for (const k of ['in', 'out', 'read', 'write']) usage[k] += reply.usage[k] || 0
     trace?.push({ round, calls: reply.calls, text: reply.text, usage: reply.usage })
     if (reply.calls.length && !last) {
+      if (reply.calls.every((x) => x.name === 'show_page')) page = reply.text
       beside = reply.calls.every((x) => x.name === 'show_page' || x.name.startsWith('prepare_')) ? reply.text : ''
       const batch = reply.calls.slice(0, Math.max(1, BOUNDS.calls - calls))
       messages.push({ role: 'assistant', text: reply.text, calls: batch, native: reply.native && batch.length === reply.calls.length ? reply.native : undefined })
@@ -200,10 +213,12 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
       messages.push({ role: 'tool', results: out })
       continue
     }
-    const text = (reply.text || (retries ? '' : beside)).replace(/\*\*/g, '').replace(/[【】]/g, '').replace(/(?<![[\w])([ALR]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
+    // The answer may have been written next to a page button; what follows is then only a closing line.
+    const whole = !retries && page && page.length > (reply.text || '').length ? page : reply.text || (retries ? '' : beside)
+    const text = whole.replace(/\*\*/g, '').replace(/[【】]/g, '').replace(/(?<![[\w])([ALR]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
     const facts = `${factsOnly(screen)} ${factsOnly(known)} ${factsOnly(before)} ${factsOnly(results)} ${factsOnly(pending)} ${req.question} ${whenText(now, c.tz)} ${new Intl.DateTimeFormat('en-US', { timeZone: c.tz, dateStyle: 'full' }).format(now)}`
     const read = results.some((r) => !r?.ok) || known.length > 0 || before.length > 0
-    const wrong = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : problemWith(text, { facts, looked: read || /\[[ALR]\d{1,3}\]/.test(text), refs: c.shown, waiting: waiting === 'could not be read' ? null : [waiting.call_backs_waiting, waiting.receptionist_messages_waiting, waiting.conversations_needing_the_owner].filter(Number.isInteger) })
+    const wrong = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : problemWith(text, { facts, quoted: wordsOf([screen, known, before, results]).join(' '), looked: read || /\[[ALR]\d{1,3}\]/.test(text), refs: c.shown, waiting: waiting === 'could not be read' ? null : [waiting.call_backs_waiting, waiting.receptionist_messages_waiting, waiting.conversations_needing_the_owner].filter(Number.isInteger) })
     if (!wrong) {
       const used = new Set([...text.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))
       return { ok: true, answer: fillNames(text), raw: text, looked: results.some((r) => !r?.ok), ...base(), records: onePer([...c.shown.values()].filter((r) => used.has(r.ref))).slice(0, 8) }

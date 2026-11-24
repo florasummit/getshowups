@@ -17,7 +17,7 @@ import { outsideZips } from './insights.js'
 import { serviceAreaChange } from './proposals.js'
 import { validateHours } from './customers.js'
 import { findRequests, NEEDS_OWNER, requestById } from './attention.js'
-import { PAGE_IDS, pageState, waitingNow } from './app-state.js'
+import { pageState, waitingNow } from './app-state.js'
 
 const DAY = 86_400_000
 const LIST = 12
@@ -149,7 +149,7 @@ export const requestOut = (c, r) => {
   const ref = c.refs.ref('R', r.id)
   const callback = r.kind === 'callback'
   const state = r.status === 'open' ? (callback ? 'waiting for a call back' : 'message waiting for the owner') : 'marked done'
-  c.shown.set(ref, { ref, kind: callback ? 'callback' : 'message', name: r.name || 'A customer', when: whenText(r.created_at, c.tz), what: r.note || '', state: r.urgent ? `${state}, urgent` : state, contact: [r.phone, r.email].filter(Boolean), go: 'receptionist' })
+  c.shown.set(ref, { ref, kind: callback ? 'callback' : 'message', leadId: r.lead_id || null, name: r.name || 'A customer', when: whenText(r.created_at, c.tz), what: r.note || '', state: r.urgent ? `${state}, urgent` : state, contact: [r.phone, r.email].filter(Boolean), go: 'receptionist' })
   return { ref, kind: callback ? 'asked the receptionist for a call back' : 'left a message with the receptionist', state, urgent: !!r.urgent, received: whenText(r.created_at, c.tz), hours_ago: Math.max(0, Math.round((c.now - r.created_at) / 3_600_000)), asked_for: tidy(r.note) || 'nothing written', can_be_reached_by: [r.phone && 'phone', r.email && 'email'].filter(Boolean), ...(r.lead_id ? { same_person_inquiry: c.refs.ref('L', r.lead_id) } : {}) }
 }
 const all = async (c, sql, ...a) => (await c.db.prepare(sql).bind(c.customer.id, ...a).all()).results
@@ -218,6 +218,8 @@ export async function rangeStats(c, r) {
   }
 }
 
+// Here, not in app-state.js: the two modules import each other, and tools are built while loading.
+export const PAGE_IDS = ['overview', 'appointments', 'followups', 'receptionist', 'teach', 'website', 'ads', 'settings']
 const PERIOD = { type: 'string', enum: PERIODS }
 const D8 = { type: 'string', description: 'YYYY-MM-DD, only for an exact date or range' }
 const REF = { type: 'string', description: 'A reference such as A1 or L2 from earlier results' }
