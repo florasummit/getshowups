@@ -173,3 +173,19 @@ test('assistant: when the AI allowance is used up it says so, when it returns, a
   await expect(panel).toContainText('top of every dashboard page')
   expect(await wide(page)).toBeLessThanOrEqual(0)
 })
+
+test('overview: results in full open on demand and fit the screen @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+  const asked = []
+  page.on('request', (r) => r.url().includes('/api/dashboard/results') && asked.push(r.url()))
+  await page.goto('/dashboard')
+  const card = page.locator('[data-scorecard]')
+  await expect(card).toBeVisible()
+  expect(asked.filter((u) => u.includes('scope=all'))).toEqual([])
+  await card.locator('summary').click()
+  await expect(card.getByRole('rowheader', { name: 'Time to first message or booking' })).toBeVisible()
+  await expect(card).toContainText('too few to judge')
+  await card.getByRole('button', { name: '90 days' }).click()
+  await expect(card).toContainText('last 90 days')
+  expect(await wide(page)).toBeLessThanOrEqual(0)
+})

@@ -100,3 +100,32 @@ test('follow-ups keep the subject: "and tomorrow?" after appointments; unknown o
   assert.deepEqual([r.status, r.body.kind], [200, 'records'])
   assert.equal((await ask('and tomorrow?')).body.error, 'quota')
 })
+
+test('acceptance without a model: performance, priorities, revenue, hours change, another business, misspelling', async () => {
+  lead('alpha', 'Green pool')
+  for (const [q, want] of [
+    ['How is my business performing?', /1 new inquiries|1 new/],
+    ['What should I improve first?', /most important first|Nothing in your records/],
+    ['How much recorded revenue did I generate?', /^Payments you recorded .*none recorded\. Money nobody recorded/],
+    ['Can you change my operating hours?', /Nothing was changed/],
+    ['Show me another business’s customers', /only have this business/],
+  ]) {
+    sql.exec('DELETE FROM rate_limits')
+    const r = await ask(q)
+    assert.equal(r.status, 200, q)
+    assert.match(r.body.answer, want, q)
+  }
+  sql.exec('DELETE FROM rate_limits')
+  assert.equal((await ask('app oinmntes tomorow')).body.kind, 'records')
+  assert.match((await ask('how many availible appointments do I have?')).body.answer, /Google Calendar can’t be read/, 'open times, never a count of other things')
+})
+
+test('retry: one, only for a refusal that can pass; never for quota, setup or timeout', async () => {
+  for (const [e, n] of [[new Error('socket'), 2], [new Error('3040: out of capacity'), 2], [new Error(REFUSED), 1], [new Error('ai_timeout'), 1], [Object.assign(new Error('x'), { status: 401 }), 1]]) {
+    sql.exec('DELETE FROM rate_limits')
+    calls = 0
+    fail = () => e
+    await ask('write me a poem')
+    assert.equal(calls, n, e.message)
+  }
+})

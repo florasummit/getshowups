@@ -11,6 +11,7 @@ import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
 import { AssistantButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
 import { setAssistantView } from './assistant-store.js'
 import Insight from './Insight.jsx'
+import Scorecard from './Scorecard.jsx'
 import { useInsights } from './insights-data.js'
 import { LoadError, Pill } from './ui.jsx'
 
@@ -418,6 +419,7 @@ function Overview({ me, data, reload, go, site, insight }) {
           <Attention data={data} go={go} />
           <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.length} />
           {insight}
+          <Scorecard />
           {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">

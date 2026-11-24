@@ -1,6 +1,7 @@
 // The assistant without a model: where things are, what they mean, and what the records say. Exact or nothing: a question
 // it doesn't understand returns null and the owner is told why the AI is out and what works. Used when the provider can't
 // answer; places (placeAnswer) are answered this way always. Same tools, same session business, nothing saved.
+import { insights } from './insights.js'
 import { HELP } from '../src/content/help.js'
 import { periodIn } from './assist.js'
 import { runTool, toolContext } from './operator-tools.js'
@@ -80,13 +81,18 @@ const mentions = (w, list) => {
 // What a question asks the records for. Anything asking for a reason, a draft or a change is the model's.
 export function intentOf(q) {
   const w = words(q)
+  // Another business's records: this is the only one there is. Never answered with this one's numbers.
+  if (has(w, /\b(another|other|different|someone elses|competitors?) (\w+ )?(business(es|s)?|company?s?|companies|accounts?|owners?)\b|\bcompetitors?\b/)) return 'other'
+  if (has(w, /\bwhat (should|do|can) i (improve|fix|do|work on|focus on|look at)\b|\b(improve|fix) first\b|\bpriorit\w+\b/)) return 'priorities'
+  if (has(w, /\b(change|update|set|edit) (my|our|the)( \w+)? hours\b/)) return 'change_hours'
+  if (has(w, /\b(revenue|paid|payments|earned|income)\b/) && !has(w, /\b(why|advert\w*|ads?|campaigns?|roi|return)\b/)) return 'money'
   if (has(w, /\b(why|draft|write|prepare|add|remove|change|mark|cancel|reschedule|should|improve|compare|revenue|advert\w*|ads?|campaigns?|roi)\b/)) return null
-  if (has(w, /\b(open|free|available) (times?|slots?|appointments?)\b|\bavailab\w+\b|\bwhen (can|could) (someone|people|customers?) book\b/)) return 'times'
+  if (has(w, /\b(open|free|available) (times?|slots?|appointments?)\b|\bavail\w+\b|\bwhen (can|could) (someone|people|customers?) book\b/)) return 'times'
   if (has(w, /\b(ask(ing|ed)?|want(ing|ed)?|need(ing|ed)?|request(s|ed|ing)?)( me| us)? (for|about)\b|\bwhat (do|did|are) (people|customers|they|leads)( \w+)? (want|need|ask)/)) return 'needs'
   if (has(w, /\b(my|our|the|what|booking|business) hours\b|\bwhen (am|are) (i|we) open\b/)) return 'hours'
   if (has(w, /\b(my|our|the) (services|prices|towns|service area|settings|zips?|zip codes?)\b|\b(what|which) (services|zips?|zip codes?|towns)\b/)) return 'settings'
   if (mentions(w, ['unanswered', 'answered', 'waiting'])) return 'unanswered'
-  if (has(w, /\b(how many|how much|numbers|results|stats|statistics|how (is|are) (it|things|we|i|business) (going|doing))\b/)) return 'numbers'
+  if (has(w, /\b(how many|how much|numbers|results|stats|statistics|how (is|are|am) (it|things|we|i|(my |the )?business) (going|doing|performing))\b/)) return 'numbers'
   if (mentions(w, ['appointment', 'appointments', 'schedule', 'visits', 'calendar']) || has(w, /\bcoming up\b/)) return 'appointments'
   if (mentions(w, ['leads', 'lead', 'inquiry', 'inquiries']) || has(w, /\bwho asked\b/)) return 'leads'
   return null
@@ -115,6 +121,12 @@ export async function plainAnswer(env, customer, req) {
   if (topic && has(w, EXPLAIN) && !has(w, /\b(my|our|me|us)\b/)) return { kind: 'help', answer: `${HELP[topic].what} ${HELP[topic].why}` }
   if (!intent) return null
 
+  if (intent === 'other') return { kind: 'help', answer: 'I only have this business’s records. Other businesses’ information isn’t available here.' }
+  if (intent === 'change_hours') return { kind: 'help', answer: 'You can change booking hours in Settings. Preparing the change for you in this chat needs AI, which isn’t available right now. Nothing was changed.', go: 'settings' }
+  if (intent === 'priorities') {
+    const list = (await insights(env, customer)).slice(0, 3)
+    return { kind: 'records', answer: list.length ? `From your records, most important first:\n${list.map((x, i) => `${i + 1}. ${x.title}. ${x.evidence?.[0] ?? ''}`.trim()).join('\n')}` : 'Nothing in your records needs fixing right now.', ...(list[0]?.home ? { go: list[0].home } : {}) }
+  }
   const c = toolContext(env, customer, req.refs)
   const run = async (name, args = {}) => {
     const r = await runTool(c, name, args)
@@ -136,8 +148,9 @@ export async function plainAnswer(env, customer, req) {
     const z = r.service_area_zips
     return { kind: 'records', answer: `Services: ${r.services.map((s) => `${s.name} (${s.price})`).join(', ') || 'none added yet'}. Towns: ${r.towns.join(', ') || 'none added yet'}. Service area: ${Array.isArray(z) ? z.join(', ') : z}. Hours: ${r.booking_hours}.`, go: 'settings' }
   }
-  if (intent === 'numbers') {
+  if (intent === 'numbers' || intent === 'money') {
     const r = await run('business_numbers', { period: period ?? (days === 7 ? 'last_7_days' : days === 90 ? 'last_90_days' : 'last_30_days') })
+    if (r && intent === 'money') return { kind: 'records', answer: `Payments you recorded (${r.period}): ${r.payments_recorded}. Money nobody recorded isn’t counted.` }
     return r && { kind: 'records', answer: `${r.period}: ${r.new_inquiries} new inquiries, ${r.bookings_made} bookings made, ${r.visits_happened} visits marked as happened, payments recorded: ${r.payments_recorded}.` }
   }
   if (intent === 'appointments') {

@@ -57,6 +57,7 @@ export const RULES = {
   aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
   aiRulesTeachModel: { limit: 60, windowSec: 86400 }, // teach requests that reach the model (per business and day; cost cap)
   aiRulesTeach: { limit: 30, windowSec: 3600 }, //   POST /api/dashboard/ai-rules teach (per business; may call the model)
+  health: { limit: 60, windowSec: 600 }, //          GET /api/health (per IP)
   qaIngest: { limit: 30, windowSec: 600 }, //        POST /api/qa/runs (per IP; bearer QA_INGEST_TOKEN)
   qaWrite: { limit: 600, windowSec: 600 }, //        POST /api/platform/qa (per admin; guided human QA)
   supportDiagnose: { limit: 6, windowSec: 600 }, //  POST /api/platform/inspector calendar diagnosis (per business)

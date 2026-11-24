@@ -104,6 +104,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   let cost = 0
   let calls = 0
   let retried = false
+  let again = false
   const base = () => ({ refs: c.refs.book, records: [...c.shown.values()].slice(0, 12), proposals: c.proposals, withdraw: c.withdraw, go: c.go, tools, costMicros: Math.round(cost), ms: Date.now() - started })
   const fillNames = (t) => t.replace(/\[([AL]\d{1,3})\]/g, (m, r) => squash(c.shown.get(r)?.name) || 'that person')
   for (let round = 0; round <= BOUNDS.rounds; round++) {
@@ -111,8 +112,16 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
     if (left < 1500) break
     const last = round >= BOUNDS.rounds - 1 || calls >= BOUNDS.calls
     let reply
+    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens }
     try {
-      reply = await chat(env, model, { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens }, Math.min(BOUNDS.callMs, left))
+      // One short retry, once per question, only for a refusal that can pass (Anthropic's client retries by itself). Never
+      // for a used-up allowance, a refused account or a timeout.
+      reply = await chat(env, model, req1, Math.min(BOUNDS.callMs, left)).catch(async (err) => {
+        if (again || model.provider !== 'workers' || !['busy', 'unavailable'].includes(providerReason(err))) throw err
+        again = true
+        await new Promise((r) => setTimeout(r, 300))
+        return chat(env, model, req1, Math.min(BOUNDS.callMs, Math.max(1500, BOUNDS.totalMs - (Date.now() - started))))
+      })
     } catch (err) {
       trace?.push({ error: String(err?.message).slice(0, 200) })
       return { ok: false, reason: providerReason(err), looked: results.length > 0, ...base() }
