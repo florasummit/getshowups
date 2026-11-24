@@ -816,6 +816,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   const system = [{ type: 'text', text: rules ? `${prompt}\n\n${rulesInstructions(rules.config, rules.records)}` : prompt, cache_control: { type: 'ephemeral' } }]
   const tools = rules ? [...TOOLS, NOTE_ANSWER_TOOL] : TOOLS
   let spent = 0
+  const tokens = { in: 0, cr: 0, cw: 0, out: 0 } // what the provider reported this turn (cached reads apart)
   let reply = ''
   let failed = null
   let blocked = null
@@ -908,6 +909,11 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     timing.modelMs += Date.now() - tm
     timing.modelCalls++
     spent += costMicros(res.usage)
+    const u = res.usage || {}
+    tokens.in += u.input_tokens || 0
+    tokens.cr += u.cache_read_input_tokens || 0
+    tokens.cw += u.cache_creation_input_tokens || 0
+    tokens.out += u.output_tokens || 0
     transcript.push({ role: 'assistant', content: res.content })
     if (opts.onText && emitted) reply = reply ? `${reply} ${emitted}` : emitted
     if (res.stop_reason === 'refusal') {
@@ -983,6 +989,8 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
   // The receptionist line carries the turn's timings (numbers only) for the owner's view.
   conv.state.log[conv.state.log.length - 1].timing = { firstTokenMs: timing.firstTokenMs, firstTextMs: timing.firstTextMs, holdMs: timing.holdMs, toolMs: timing.toolMs, modelMs: timing.modelMs, modelCalls: timing.modelCalls, totalMs: timing.totalMs }
   conv.summary = summaryOf(conv, k)
+  // Numbers only, both channels: how long the turn took and what the prompt cache saved (docs/AI_ARCHITECTURE.md).
+  note('turn_usage', !failed, `ch=${channel};total=${timing.totalMs};model=${timing.modelMs};tools=${timing.toolMs};calls=${timing.modelCalls};in=${tokens.in};cr=${tokens.cr};cw=${tokens.cw};out=${tokens.out};c=${spent}`)
   await Promise.all(pending)
   const next = conv.turns + 1
   const saved = await db

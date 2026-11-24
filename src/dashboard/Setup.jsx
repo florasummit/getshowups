@@ -3,6 +3,7 @@
 // calendar → hours → website → address → publish → launch. Older businesses keep business → calendar → hours.
 import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo.jsx'
+import AiWrite from './AiWrite.jsx'
 import { LoadError } from './ui.jsx'
 import { api, browserTimeZone, timeZones } from '../lib/api.js'
 import { BusinessForm, HoursForm } from './forms.jsx'
@@ -343,6 +344,7 @@ function DetailsStep({ customer, onDone }) {
         </span>
         <textarea name="description" rows={3} maxLength={400} defaultValue={p.description || ''} placeholder="Family-run pool care for homes across Charleston." />
       </label>
+      <AiWrite field="description" draft />
       <label className="field">
         <span>Time zone</span>
         <select name="timezone" defaultValue={customer.timezone || browserTimeZone()}>
