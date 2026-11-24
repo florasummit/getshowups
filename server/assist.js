@@ -8,7 +8,6 @@
 import { HELP } from '../src/content/help.js'
 import { assistAccess } from './writing.js'
 import { overview } from './booking.js'
-import { adSummary } from './ads/campaigns.js'
 import { diagnose, funnel } from './ads/funnel.js'
 import { adsAccess } from './ads/access.js'
 import { serviceAreaProposal, wantsServiceArea } from './proposals.js'
@@ -26,6 +25,7 @@ const SCHEMA = { type: 'object', properties: { kind: { type: 'string', enum: KIN
 const TIMEOUT_MS = 12_000
 const ACTED = /\b(i|we)(['’]ve| have| just|['’]ll| will|['’]m going to)? ?(changed?|updated?|set|turned|paused?|started?|launched?|published?|sent|booked|cancell?ed|charged|refunded|saved?|deleted?)\b/i
 const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more)\b/i
+const CREDITED = /\b(ads?|advertising|campaigns?) (have |has )?(generated|earned|produced|brought in|made|drove|caused|returned)\b[^.]*\$|\$[\d,.]+[^.]*\b(generated|earned|produced|caused|driven) (by|from|through) (your |the )?(ads?|advertising|campaigns?)\b|\b(ROI|ROAS|return on (ad spend|investment))\b[^.]*\d/i
 
 export const chatEnabled = (env) => env.AI_ASSIST_CHAT_ENABLED !== 'false'
 export const chatAccess = async (env, customer) => chatEnabled(env) && assistAccess(env, customer)
@@ -84,7 +84,7 @@ async function resultsFacts(env, customer, days, now) {
   return [
     `Ads results, last ${days} days only (measured; leads created in this period and what became of them): spend ${usd(f.spend.cents)}, clicks ${f.spend.clicks ?? 'not available'}, ${s.leads} leads, ${s.qualified} qualified, ${s.outsideArea} outside the service area, ${s.booked} booked, ${s.attended} showed up, ${s.noShow} no-shows, ${s.completed} jobs completed, ${s.past - s.outcomeRecorded} past visits not marked yet`,
     `Cost each, last ${days} days: lead ${usd(f.cost.perLead)}, qualified lead ${usd(f.cost.perQualified)}, booking ${usd(f.cost.perBooking)}, show-up ${usd(f.cost.perAttended)}, completed job ${usd(f.cost.perCompleted)}`,
-    `Money, last ${days} days: estimated ${usd(f.revenue.estimatedCents)}, invoiced ${usd(f.revenue.invoicedCents)}, paid ${usd(f.revenue.paidCents)}, paid per $1 of ads ${f.roas == null ? 'not available' : `$${f.roas.toFixed(2)}`}`,
+    `Money, last ${days} days: estimated ${usd(f.revenue.estimatedCents)}, invoiced ${usd(f.revenue.invoicedCents)}, paid ${usd(f.revenue.paidCents)}, paid per $1 of ads ${f.roas == null ? 'not available' : `$${f.roas.toFixed(2)}`}. Paid is what the owner recorded for jobs from leads traced to ads. It is not revenue the ads caused and not a return on investment: never call it either.`,
     late ? 'Ad spend is recorded for only part of this period: earlier days have no ad data. Say so when spend or cost is discussed.' : '',
     JSON.parse(conn?.extra || '{}').testAccount === true ? 'Google Ads test account: not real results.' : '',
     `These facts cover only the last ${days} days. For any other period use kind out_of_scope.`,
@@ -106,6 +106,7 @@ async function wideFacts(env, customer, days, now) {
   return [
     `All inquiries, last ${days} days (measured; inquiries created in this period and what became of them): ${e.known.join(' ')}`,
     `Not known: ${e.unknown.join(' ')}`,
+    `Payments the owner recorded for all of these inquiries, whatever brought them: ${usd(f.revenue.paidCents)}`,
     `Receptionist: ${rec === undefined ? 'not available' : rec?.enabled === 1 ? 'on' : 'off'}${talks?.n ? `; ${talks.n} conversations, ${talks.booked || 0} booked, ${talks.handoff || 0} passed to the owner` : ''}`,
     late == null ? '' : `Inquiries older than a day that nothing was sent to (right now): ${late}`,
     `Automatic confirmations and follow-ups: ${customer.automations ? 'on' : 'off'}`,
@@ -120,7 +121,8 @@ export async function contextFor(env, customer, now = Date.now(), { days = 30, r
   const [biz, o, ads, wide] = await Promise.all([
     businessFacts(env, customer),
     !overviewFigures ? null : overview(db, customer.id, now, internalEmails(env)).catch(() => null),
-    !overviewFigures ? null : adsAccess(env, customer).then((ok) => (ok ? adSummary(db, customer.id, now, internalEmails(env)) : null)).catch(() => null),
+    // On the results screen unreadable numbers mean no answer; elsewhere ads are one subject among several.
+    results ? resultsFacts(env, customer, days, now) : resultsFacts(env, customer, days, now).catch(() => 'Ads: not available'),
     results ? null : wideFacts(env, customer, days, now),
   ])
   const s = o?.stats
@@ -131,11 +133,15 @@ export async function contextFor(env, customer, now = Date.now(), { days = 30, r
     `ZIP codes listed: ${customer.serviceZips?.length ? customer.serviceZips.length : 'none, everyone can book'}`,
     `Booking hours: ${biz.hours || 'not set'}`,
     biz.visit ? 'Appointments: at the customer’s address' : 'Appointments: at the business',
-    ...(results ? [await resultsFacts(env, customer, days, now)] : !overviewFigures ? [wide, await resultsFacts(env, customer, days, now)] : [wide, s
-      ? `Last 30 days (measured): ${s.leads} new inquiries, ${s.booked} booked, ${s.showed} showed, ${s.noShow} no-shows. Right now, whatever their date: ${o.needsOutcome.length} past appointments not marked yet`
-      : 'Last 30 days: not available',
-    ads ? `Ads last 30 days (measured): spend ${usd(ads.spendCents)}, ${ads.leads} leads, ${ads.booked} bookings, cost per booking ${usd(ads.costPerBookingCents)}${ads.testAccount ? ' (Google test account: not real results)' : ''}` : 'Ads: no results available']),
-  ].join('\n')
+    wide,
+    overviewFigures &&
+      (s
+        ? `Last 30 days (measured): ${s.leads} new inquiries, ${s.booked} booked, ${s.showed} showed, ${s.noShow} no-shows. Right now, whatever their date: ${o.needsOutcome.length} past appointments not marked yet`
+        : 'Last 30 days: not available'),
+    ads,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 // What the records show about inquiries turning into jobs, in plain lines, with what can't be known. No model.
@@ -183,6 +189,8 @@ export function checkAnswer(raw, { topic, question, days = 30 }, context) {
   const answer = clean(raw.answer)
   if (answer.length < 8 || answer.length > LIMITS.answer || /https?:|www\.|[<>{}]/i.test(answer)) return { ok: false, reason: 'bad_output' }
   if (ACTED.test(answer) || PROMISE.test(answer)) return { ok: false, reason: 'commitment' }
+  // Money is never credited to ads: only that it was recorded for jobs from traced leads.
+  if (raw.kind === 'business' && CREDITED.test(answer)) return { ok: false, reason: 'attribution' }
   const t = topic ? HELP[topic] : null
   if (raw.kind === 'general') {
     // General knowledge may hold a number ("form 1099"), but never an amount or share, and never one about this business.
@@ -208,8 +216,32 @@ export async function deterministic(env, customer, req) {
   return null
 }
 
-// Shown with any question about inquiries becoming jobs, whether or not the model can be reached.
+export const wantsMoney = (q) => /\b(revenue|income|earn\w*|made|make|paid|payments?|money|profit\w*|roi|roas|return on)\b/i.test(q) && /\b(ads?|advertis\w*|campaigns?|google|revenue|paid|payments?)\b/i.test(q)
+// Recorded payments, the part from leads traced to ads, and why neither is what the ads earned. No model.
+async function moneyEvidence(env, customer, days) {
+  const opts = { days, internal: internalEmails(env) }
+  const [all, ads] = await Promise.all([
+    funnel(env.ONBOARDING_DB, customer.id, { ...opts, scope: 'all' }),
+    adsAccess(env, customer).then((ok) => (ok ? funnel(env.ONBOARDING_DB, customer.id, { ...opts, scope: 'ads' }) : null)),
+  ])
+  const paid = (c) => (c == null ? 'none recorded' : usd(c))
+  return {
+    known: [
+      `Payments you recorded for inquiries of the last ${days} days: ${paid(all.revenue.paidCents)}.`,
+      ads && `Of those, for jobs from leads traced to your ads: ${paid(ads.revenue.paidCents)}.`,
+      ads && `Ad spend Google reported: ${ads.spend.cents == null ? 'none reported' : usd(ads.spend.cents)}.`,
+    ].filter(Boolean),
+    unknown: [
+      'How much of this your ads caused isn’t measured, so this isn’t a return on ad spend.',
+      ads && ads.attribution.unattributed > 0 && `${ads.attribution.unattributed} of ${ads.attribution.allLeads} inquiries couldn’t be traced to an ad or came from elsewhere.`,
+      all.stages.attended > all.revenue.paidJobs && `${all.stages.attended - all.revenue.paidJobs} of ${all.stages.attended} visits that happened have no payment recorded.`,
+    ].filter(Boolean),
+  }
+}
+
+// Shown with any question about money or inquiries becoming jobs, whether or not the model can be reached.
 export async function evidenceFor(env, customer, req) {
+  if (wantsMoney(req.question)) return moneyEvidence(env, customer, req.days)
   if (!wantsFunnel(req.question)) return null
   return funnelEvidence(await funnel(env.ONBOARDING_DB, customer.id, { days: req.days, scope: req.results ? 'ads' : 'all', internal: internalEmails(env) }))
 }
