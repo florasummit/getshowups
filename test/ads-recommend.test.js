@@ -14,7 +14,7 @@ import { importedTotals } from '../server/ads/imports.js'
 import * as results from '../functions/api/dashboard/results.js'
 
 const ORIGIN = 'https://getshowups.com'
-const now = Date.parse('2026-11-23T15:00:00Z')
+const now = Date.now()
 const DAY = 86400000
 const day = (ms) => new Date(ms).toISOString().slice(0, 10)
 function d1() {
