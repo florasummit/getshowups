@@ -51,12 +51,18 @@ export const FRESH = [
   ] },
   { biz: 'upcoming', name: 'fresh', turns: [
     { view: 'overview', q: 'next one?', must: [/Jamie Rivera/] },
-    { q: 'n after', must: [/Omar Haddad/] },
+    { q: 'n after', must: [/Omar Haddad|Lena Ortiz/] /* Lena when Omar was already named */ },
     { q: 'cancel it', any: true, never: [/(is|has been) cancell?ed/i] },
     { q: 'ok whats his number', any: true },
   ] },
 ]
 export const SCENARIOS = [
+  { biz: 'linked', name: 'numbers in the caller’s words; one person, two records', turns: [
+    { view: 'ads', q: 'what needs me', must: [/Tess Lund/, /call/i], never: [NOBODY, /Tess Lund and Tess Lund/] },
+    { view: 'overview', q: 'who is that and what exactly do they want', must: [/15x30|15 ?x ?30/], never: [/Tess Lund and Tess Lund/] },
+    { q: 'are they booked already', must: [/Nov|Thu|11:00/] },
+    { q: 'when can i ring', must: [/4/] },
+  ] },
   { biz: 'callback', name: 'the production defect', turns: [
     { q: 'what is that needs your attention thing about', must: [/Rosa Vance/, /call(ing)? ?back|call/i], never: [NOBODY] },
     { q: 'isnt that just the old visit?', must: [/Rosa Vance|call/i], never: [NOBODY] },
@@ -109,7 +115,7 @@ export const SCENARIOS = [
     { q: 'is my website live btw', must: [/not|no|none/i] },
   ] },
   { biz: 'empty', name: 'almost no data', turns: [
-    { q: 'so how are things', any: true, never: [/\d+ (new )?(customers|bookings)\b(?!.*\b0\b)/] },
+    { q: 'so how are things', any: true, never: [/\b[1-9]\d* (new )?(customers|bookings)\b/] },
     { q: 'anybody waiting?', must: [/no|nobody|none/i] },
     { q: 'what would you do first', any: true },
   ] },

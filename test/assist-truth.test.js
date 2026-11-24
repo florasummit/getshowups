@@ -9,9 +9,8 @@ import * as api from '../functions/api/dashboard/assist.js'
 import * as overviewApi from '../functions/api/dashboard/overview.js'
 import * as proposalApi from '../functions/api/dashboard/proposal.js'
 import { attention, attentionCard } from '../server/attention.js'
-import { PAGE_IDS } from '../server/app-state.js'
 import { problemWith } from '../server/operator.js'
-import { runTool, toolContext } from '../server/operator-tools.js'
+import { PAGE_IDS, runTool, toolContext } from '../server/operator-tools.js'
 import { getCustomer } from '../server/customers.js'
 import { customerFromRow } from '../server/auth.js'
 
@@ -163,4 +162,18 @@ test('names are never doubled; opening, inner workings and self-doubt are refuse
   const bad = (t) => problemWith(t, { facts: '', looked: true, refs: new Map() })
   for (const t of ['I’ve opened the Appointments page for you.', 'The funnel tool says rates matter.', 'My earlier reply was wrong.', 'This will keep growing.']) assert.ok(bad(t), t)
   for (const t of ['The button below opens Settings.', 'You can open Appointments below.', 'Bring the right tool for the filter.']) assert.equal(bad(t), null, t)
+})
+
+test('production 21:00: a customer’s own numbers can be repeated, never as money or results; one person is named once', async () => {
+  sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES ('rl', 'alpha', 'Rosa Vance', 'r@x.example', '8', 'Pool 15x30', 'new', 'x', ?, 1)").run(Date.now())
+  callBack('alpha', 'rq1', { lead: 'rl' })
+  sql.exec("UPDATE receptionist_requests SET note = 'Filters for a 15x30 pool, revenue was $98765, 4321 bookings'")
+  script = [say('[R1] wants filters for a 15x30 pool.')]
+  const r = await ask('alpha', 'what do they want')
+  assert.equal(r.body.answer, 'Rosa Vance wants filters for a 15x30 pool.')
+  for (const bad of ['You made $98,765.', 'Revenue was 98765.', 'You had 4321 bookings.', 'You have 777 pools.', '[R1] and [L1] are waiting.']) {
+    sql.exec('DELETE FROM rate_limits')
+    script = [say(bad), say('[R1] is waiting for a call.')]
+    assert.equal((await ask('alpha', 'and then')).body.answer, 'Rosa Vance is waiting for a call.', bad)
+  }
 })

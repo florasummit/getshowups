@@ -159,7 +159,6 @@ async function setup(c) {
   return { to_do: todo.length ? todo : 'nothing', waiting: r.items.filter((i) => i.state === 'pending').map((i) => `${STEP[i.id]}: ${i.detail}`), calendar_note: 'last known; not checked with Google just now' }
 }
 
-export const PAGE_IDS = Object.keys(PAGES)
 export const pageState = (c, page) => PAGES[page](c)
 export const selectedLead = async (c, id) => {
   const r = await leadByRefId(c, id)

@@ -13,7 +13,7 @@ const at = (day, h) => {
   const t = new Date(Date.UTC(y, m - 1, d + day))
   return zonedToUtc(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), h, 0, TZ)
 }
-export const BUSINESSES = { callback: 'Bluewater Pools', unanswered: 'Cedar Lawn Care', upcoming: 'Summit Plumbing', outcomes: 'Maple Electric', setup: 'Brand New Painting', ads: 'Harbor Roofing', paid: 'Lakeside Cleaning', empty: 'Quiet Heating', busy: 'Crestview Pool Service' }
+export const BUSINESSES = { callback: 'Bluewater Pools', unanswered: 'Cedar Lawn Care', upcoming: 'Summit Plumbing', outcomes: 'Maple Electric', setup: 'Brand New Painting', linked: 'Oak Street Pools', ads: 'Harbor Roofing', paid: 'Lakeside Cleaning', empty: 'Quiet Heating', busy: 'Crestview Pool Service' }
 
 export function world() {
   const sql = new DatabaseSync(':memory:')
@@ -52,6 +52,9 @@ export function world() {
   const recept = (c, on) => run('INSERT INTO receptionist_settings (customer, enabled, updated_at) VALUES (?, ?, 1)', c, on ? 1 : 0)
   // The production defect: one call back waiting, and one past visit without an outcome.
   recept('callback', true)
+  // Production 2026-11-24 21:00: the caller is also an inquiry with a visit, and the note has numbers in it.
+  recept('linked', true)
+  request('linked', 'Tess Lund', 'Needs 2 filters for a 15x30 pool, call after 4pm', 5, { lead: lead('linked', 'Tess Lund', 'Filter replacement', 2, { status: 'booked', start: at(2, 11), sent: 1 }) })
   request('callback', 'Rosa Vance', 'Pump is making a loud noise and wants to talk to someone', 5)
   lead('callback', 'Gil Porter', 'Filter check', 8, { status: 'booked', start: at(-2, 11), sent: 1 })
   lead('unanswered', 'Dana Fox', 'Hedge trimming before a party', 4)
