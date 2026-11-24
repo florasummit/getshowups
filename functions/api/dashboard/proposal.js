@@ -1,9 +1,9 @@
-// POST { type: 'service_zips', before, after, confirm: true }: the owner approves a change the assistant prepared
+// POST { type: service_zips | outcome | hours, …, confirm: true }: the owner approves a change the assistant prepared
 // (server/proposals.js). The business is the session's own; 409 stale when the list changed since it was reviewed.
 import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
-import { applyServiceArea } from '../../../server/proposals.js'
+import { applyProposal } from '../../../server/proposals.js'
 import { chatAccess } from '../../../server/assist.js'
 
 export async function onRequestPost({ request, env }) {
@@ -13,8 +13,8 @@ export async function onRequestPost({ request, env }) {
   const rl = await hit(env, 'assistMessage', session.customer.id)
   if (rl.limited) return tooManyJson(rl.retryAfter)
   try {
-    const r = await applyServiceArea(env, session, await request.json().catch(() => null))
-    return r.ok ? json(200, { ok: true, serviceZips: r.serviceZips }) : json(r.status, { error: r.error })
+    const r = await applyProposal(env, session, await request.json().catch(() => null))
+    return r.ok ? json(200, { ok: true, ...(r.serviceZips ? { serviceZips: r.serviceZips } : {}), ...(r.state ? { state: r.state } : {}), ...(r.already ? { already: true } : {}) }) : json(r.status, { error: r.error })
   } catch (err) {
     console.error('proposal failed:', err?.name)
     return json(503, { error: 'storage_error' })

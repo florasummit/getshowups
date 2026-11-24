@@ -5,6 +5,7 @@
 //   - The raw key never leaves the server: views show the provider and the last 4 characters only. Never logged.
 //   - Validated with a read-only provider call before it is stored; invalid keys are never saved.
 
+import { withEitherKey } from './google-oauth.js'
 export const PROVIDERS = {
   anthropic: { label: 'Claude (Anthropic)', keyRe: /^sk-ant-[A-Za-z0-9_-]{20,200}$/ },
   openai: { label: 'OpenAI', keyRe: /^sk-[A-Za-z0-9_-]{20,200}$/ },
@@ -16,8 +17,8 @@ const enc = new TextEncoder()
 const b64 = (u8) => btoa(String.fromCharCode(...u8))
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 
-async function derivedKey(env) {
-  const master = await crypto.subtle.importKey('raw', unb64(env.TOKEN_ENCRYPTION_KEY), 'HKDF', false, ['deriveKey'])
+async function derivedKey(env, key = env.TOKEN_ENCRYPTION_KEY) {
+  const master = await crypto.subtle.importKey('raw', unb64(key), 'HKDF', false, ['deriveKey'])
   return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('getshowups/ai-credentials/v1'), info: enc.encode('aes-gcm') }, master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
 }
 const aad = (customer, provider) => enc.encode(`${customer}|${provider}`)
@@ -30,7 +31,7 @@ export async function sealKey(env, customer, provider, apiKey) {
 export async function openKey(env, customer, provider, sealed) {
   const [v, iv, ct] = String(sealed).split('.')
   if (v !== 'v1') throw new Error('bad credential')
-  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv), additionalData: aad(customer, provider) }, await derivedKey(env), unb64(ct)))
+  return withEitherKey(env, async (key) => new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv), additionalData: aad(customer, provider) }, await derivedKey(env, key), unb64(ct))))
 }
 
 export async function saveCredential(env, customer, provider, apiKey, now = Date.now(), model = null) {

@@ -2,6 +2,11 @@
 
 _Update at the end of every task. Newest first._
 
+## Operator, alerts, key rotation, deletion, backups (2026-11-24)
+
+docs/ASSISTANT_PROGRESS.md (evaluation), docs/KEY_ROTATION.md, docs/BACKUPS.md, docs/DATA_REQUESTS.md, docs/pilot/CUSTOMER_ZERO.md.
+Model change, Anthropic key, deletion switch, live messaging, live billing: owner.
+
 ## Dashboard assistant, proactive suggestions, privacy policy (2026-11-24)
 
 See docs/ASSISTANT_PROGRESS.md (checklist, limits, cost) and docs/GOOGLE_PRIVACY_RESUBMISSION.md (evidence, resubmission).

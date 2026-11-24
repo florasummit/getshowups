@@ -52,6 +52,7 @@ export const RULES = {
   assistMessage: { limit: 40, windowSec: 600 }, //  POST /api/dashboard/assist, insights, proposal (per business; no model needed)
   aiAskBurst: { limit: 5, windowSec: 60 }, //       POST /api/dashboard/assist (per business)
   aiAsk: { limit: 20, windowSec: 86400 }, //        POST /api/dashboard/assist (per business and day; cost cap)
+  aiAskAll: { limit: 25, windowSec: 86400 }, //     the same, all businesses together: the included model shares one small daily allowance (docs/ASSISTANT_PROGRESS.md)
   aiWriteBurst: { limit: 10, windowSec: 60 }, //    POST /api/dashboard/write (per business)
   aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
   aiRulesTeachModel: { limit: 60, windowSec: 86400 }, // teach requests that reach the model (per business and day; cost cap)

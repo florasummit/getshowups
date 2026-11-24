@@ -1,9 +1,12 @@
 // Founder alerts (docs/FOUNDER_ALERTS_PROPOSAL.md): an email to the platform admins when something stops a paying
-// business from getting bookings or messages. Three kinds only:
+// business from getting bookings or messages:
 //   calendar      the calendar connection is broken (lookups fail with a connection error, or hours are confirmed but
 //                 no calendar is connected)
 //   availability  the booking page shows no times because lookups keep failing (not "no free time")
 //   comms         messages fail to deliver (one failed booking confirmation, or 3+ failures in an hour)
+//   incident      any other critical/high open incident (payments, messaging, receptionist, domains, background work)
+//   assistant     the dashboard assistant failed 3+ times in an hour and never succeeded
+// Not covered: the 5-minute job itself stopping (nothing would run to say so; check Business Review's last run).
 // OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Recipients: PLATFORM_ADMIN_EMAILS only, and only
 // those the launch gate would deliver to NOW (recipientAllowed: while MESSAGES_LIVE is off, MESSAGE_TEST_RECIPIENTS),
 // so nothing waits in the outbox to go out late. Reads existing records only (audit_log events, messages, outbox, KV
@@ -33,7 +36,8 @@ const COMMS_MIN = 3
 
 const utcDay = (t) => new Date(t).toISOString().slice(0, 10)
 const iso = (t) => new Date(t).toISOString().replace('.000Z', 'Z')
-const LABEL = { calendar: 'Calendar connection broken', availability: 'Booking page shows no times (calendar lookups failing)', comms: 'Messages failing to deliver' }
+const LABEL = { calendar: 'Calendar connection broken', availability: 'Booking page shows no times (calendar lookups failing)', comms: 'Messages failing to deliver', incident: 'Service failure', assistant: 'Dashboard assistant not answering' }
+export const PLATFORM = 'platform'
 
 // Open availability failures (no later success) per business, newest 24 h.
 async function availabilityIncidents(db, now) {
@@ -123,6 +127,26 @@ async function commsIncidents(db, now) {
   return out
 }
 
+// Anything else the incident register holds as critical or high for a real business or the platform (payments, messaging,
+// receptionist, domains, failed background work), and the assistant failing repeatedly with no success in between.
+const COVERED = ['calendar', 'availability', 'comms']
+async function otherIncidents(db, now) {
+  const out = []
+  const inc = await db
+    .prepare(`SELECT id, customer, feature, code, first_seen, last_seen FROM ops_incidents WHERE status = 'open' AND is_test = 0 AND severity IN ('critical','high') AND kind NOT IN (${COVERED.map((k) => `'${k}'`).join(',')}) AND last_seen >= ?1 ORDER BY first_seen LIMIT 50`)
+    .bind(now - DAY)
+    .all()
+    .catch(() => ({ results: [] }))
+  for (const r of inc.results) out.push({ kind: 'incident', customer: r.customer || PLATFORM, key: r.id, facts: { feature: r.feature, error: r.code, firstSeen: r.first_seen, lastSeen: r.last_seen } })
+  const a = await db
+    .prepare("SELECT coalesce(sum(json_extract(props, '$.ok') = 0 AND json_extract(props, '$.reason') IN ('unavailable','timeout')), 0) AS bad, coalesce(sum(json_extract(props, '$.ok') = 1), 0) AS good FROM events WHERE type = 'ai_ask' AND at >= ?1")
+    .bind(now - HOUR)
+    .first()
+    .catch(() => null)
+  if (a?.bad >= 3 && !a.good) out.push({ kind: 'assistant', customer: PLATFORM, key: `d${utcDay(now)}`, facts: { failedLastHourAssistant: a.bad } })
+  return out
+}
+
 // Every open incident of the three kinds, from records only (test businesses NOT filtered here). Shared with the
 // incident register (server/ops/incidents.js) so alerts and incidents use the same rules.
 export async function detectIncidents(env, now = Date.now()) {
@@ -136,6 +160,8 @@ function render(env, a, name, now) {
     `${LABEL[a.kind]}`,
     '',
     `Business: ${name} (${a.customer})`,
+    f.feature ? `Feature: ${f.feature}` : null,
+    f.failedLastHourAssistant ? `Failed answers in the last hour, with none succeeding: ${f.failedLastHourAssistant}` : null,
     f.error ? `Error code: ${f.error}` : null,
     f.failedLookups30m != null ? `Failed booking-page lookups in the last 30 min: ${f.failedLookups30m}` : null,
     f.failedLastHour != null ? `Failed deliveries in the last hour: ${f.failedLastHour} (booking confirmations: ${f.failedConfirmations})` : null,
@@ -165,11 +191,11 @@ export async function founderAlerts(env, now = Date.now()) {
     const admins = adminEmails(env)
     const to = admins.filter((e) => recipientAllowed(env, e))
     const tests = await testStatuses(env)
-    const found = await detectIncidents(env, now)
+    const found = [...(await detectIncidents(env, now)), ...(await otherIncidents(db, now))]
     // Test businesses never alert; if the test list is unreadable nothing alerts (fails closed, decided next run).
-    const candidates = tests === null ? [] : found.filter((a) => !statusIn(tests, a.customer).test)
-    const ids = [...new Set(candidates.map((a) => a.customer))]
-    const names = new Map()
+    const candidates = tests === null ? [] : found.filter((a) => a.customer === PLATFORM || !statusIn(tests, a.customer).test)
+    const ids = [...new Set(candidates.map((a) => a.customer))].filter((id) => id !== PLATFORM)
+    const names = new Map([[PLATFORM, { name: 'GetShowUps platform' }]])
     for (const id of ids) {
       // Deleted (or deleting) accounts never alert.
       const r = await db.prepare('SELECT name, status, EXISTS (SELECT 1 FROM account_deletions d WHERE d.customer = c.id) AS deleted FROM customers c WHERE c.id = ?1').bind(id).first()
@@ -178,6 +204,9 @@ export async function founderAlerts(env, now = Date.now()) {
     }
     const out = { enabled: true, recipients: to.length, held: admins.length - to.length, candidates: 0, queued: 0, digest: 0, cooldown: 0 }
     if (!to.length) return { ...out, candidates: candidates.length }
+    // Once per recipient, ever: proof that alerts are on and reach a real inbox.
+    for (const email of to)
+      await enqueue(env, { id: `alert:on:v1:${await recipientRef(email)}`, to: email, template: 'founder_alert', subject: 'GetShowUps alerts are on', body: 'Founder alerts are now on. You will get one email per problem, at most one per business and kind every six hours. Nothing is wrong right now because of this email.' }, now)
     const fresh = []
     for (const a of candidates) {
       const biz = names.get(a.customer)

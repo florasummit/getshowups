@@ -613,9 +613,13 @@ export default function Home({ me, reload }) {
   }, [])
   useEffect(() => setAssistantView(view), [view])
   useEffect(() => {
-    window.addEventListener('gsu:changed', reload)
-    return () => window.removeEventListener('gsu:changed', reload)
-  }, [reload])
+    const on = () => {
+      reload()
+      loadOverview()
+    }
+    window.addEventListener('gsu:changed', on)
+    return () => window.removeEventListener('gsu:changed', on)
+  }, [reload, loadOverview])
   // On narrow screens the tab bar scrolls: keep the current tab in view.
   useEffect(() => {
     document.querySelector('.tabs [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
@@ -628,6 +632,11 @@ export default function Home({ me, reload }) {
     setView(tab)
     window.scrollTo(0, 0)
   }
+  useEffect(() => {
+    const on = (e) => go(e.detail)
+    window.addEventListener('gsu:go', on)
+    return () => window.removeEventListener('gsu:go', on)
+  })
   return (
     <div className={`app${view === 'website' || view === 'followups' || view === 'teach' ? ' app--wide' : ''}`}>
       <header className="app-header">

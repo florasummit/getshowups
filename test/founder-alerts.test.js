@@ -42,7 +42,7 @@ const failedMessage = (id, customer, kind, at) => {
 const failLookups = async (customer, error, times) => {
   for (const at of times) await recordAvailability(env, customer, { ok: false, status: error }, at)
 }
-const outbox = () => db.sql.prepare("SELECT id, to_email, customer, template, subject, body, status FROM email_outbox WHERE template = 'founder_alert' ORDER BY id").all()
+const outbox = () => db.sql.prepare("SELECT id, to_email, customer, template, subject, body, status FROM email_outbox WHERE template = 'founder_alert' AND id NOT LIKE 'alert:on:%' ORDER BY id").all()
 
 beforeEach(() => {
   db = d1()
@@ -193,11 +193,11 @@ test('the email carries codes and counts only (no lead name, email or phone); th
   await founderAlerts(env, NOW)
   for (const o of outbox()) assert.doesNotMatch(`${o.subject}\n${o.body}`, /Casey|casey@example\.net|555-010-0100/)
   const out = await flushOutbox(env, NOW)
-  assert.equal(out.sent, 2)
-  assert.deepEqual(sent.map((s) => s.key).sort(), outbox().map((o) => o.id).sort())
+  assert.equal(out.sent, 3) // and the one-time "alerts are on"
+  assert.deepEqual(sent.map((s) => s.key).filter((k) => !k.startsWith('alert:on:')).sort(), outbox().map((o) => o.id).sort())
   await founderAlerts(env, NOW + MIN)
   await flushOutbox(env, NOW + MIN)
-  assert.equal(sent.length, 2)
+  assert.equal(sent.length, 3)
   // Each queued alert is recorded as a platform.alerts event (codes only).
   const ev = db.sql.prepare("SELECT action, details FROM audit_log WHERE capability = 'platform.alerts'").all()
   assert.equal(ev.length, 2)
@@ -278,4 +278,19 @@ test('route: admin only (401/403), same-origin, confirm required, 409 codes, aud
   assert.doesNotMatch(JSON.stringify(ok.json), /@/)
   assert.equal(db.sql.prepare("SELECT count(*) AS n FROM admin_audit WHERE action = 'alerts.test_sent'").get().n, 1)
   assert.equal((await call('POST', { c: admin, body: { action: 'test', confirm: true } })).json.error, 'too_soon')
+})
+
+test('once per founder: alerts are on; other critical incidents and a failing assistant alert once; test ones never', async () => {
+  await founderAlerts(env, NOW)
+  await founderAlerts(env, NOW + 5 * MIN)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM email_outbox WHERE id LIKE 'alert:on:%'").get().n, 1)
+  const inc = (id, customer, test, sev = 'critical') => db.sql.prepare("INSERT INTO ops_incidents (id, fingerprint, customer, feature, journey, step, kind, code, severity, cause, status, is_test, first_seen, last_seen, detected_at) VALUES (?, ?, ?, 'billing.stripe', 'x', 'x', 'failure', 'webhook_failed', ?, 'unknown', 'open', ?, ?, ?, 1)").run(id, id, customer, sev, test, NOW, NOW)
+  inc('i1', 'alpha', 0)
+  inc('i2', null, 0)
+  inc('i3', 'bravo', 1)
+  inc('i4', 'bravo', 0, 'medium')
+  for (let i = 0; i < 3; i++) db.sql.prepare("INSERT INTO events (id, type, customer, at, props) VALUES (?, 'ai_ask', 'alpha', ?, '{\"ok\":false,\"reason\":\"unavailable\"}')").run(`e${i}`, NOW - MIN)
+  await founderAlerts(env, NOW + 10 * MIN)
+  await founderAlerts(env, NOW + 15 * MIN)
+  assert.deepEqual(outbox().map((o) => o.id.split(':').slice(0, 3).join(':')).sort(), ['alert:assistant:platform', 'alert:incident:alpha', 'alert:incident:platform'])
 })

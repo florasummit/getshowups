@@ -30,3 +30,16 @@ export const setAssistantView = (v) => {
   subs.forEach((f) => f())
 }
 export const useView = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => view)
+
+// A follow-up the owner opened from the assistant: FollowUps.jsx puts it in that person's reply box. Nothing is sent.
+let draft = null
+export const setDraft = (d) => {
+  draft = d
+  window.dispatchEvent(new CustomEvent('gsu:draft'))
+}
+export const takeDraft = (leadId) => {
+  if (!draft || (leadId && draft.leadId !== leadId)) return null
+  const d = draft
+  if (leadId) draft = null
+  return d
+}

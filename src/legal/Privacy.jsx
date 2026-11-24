@@ -62,8 +62,11 @@ export default function Privacy() {
         <li>
           <strong>Help for business owners:</strong> when an owner asks the dashboard assistant a question or asks for help
           with wording, the question or text, the business’s own settings and counts (for example inquiries, bookings and
-          ad spend) are sent to an AI model to write the answer. Customers’ names, contact details and messages are not
-          added to these requests. We don’t store the assistant’s conversation.
+          ad spend) are sent to an AI model to write the answer. When the owner asks about appointments or inquiries, the
+          assistant also sends their dates, status, ZIP code and what the person asked for, with email addresses, links and
+          phone numbers removed. We don’t add customers’ names, contact details or service addresses, or the messages they
+          exchange with the business. Anything the owner types, such as a name, is sent as typed. We don’t store the
+          assistant’s conversation.
         </li>
         <li>
           <strong>Product usage and security:</strong> records of actions such as sign-ups and bookings without names or
@@ -114,8 +117,8 @@ export default function Privacy() {
         We do not use Google user data, or information derived from it, to develop, improve or train generalized or
         non-personalized AI or machine learning models. Some features a business turns on pass limited information derived
         from Google data to an AI provider, only to answer at that moment: the AI receptionist receives the open times it
-        can offer and the booked time (never your calendar’s events or busy periods), and the dashboard assistant receives
-        Google Ads totals such as spend and clicks. Google sign-in credentials are never sent to an AI provider.
+        can offer and the booked time (never your calendar’s events or busy periods), and the dashboard assistant, when
+        the owner asks, receives Google Ads totals such as spend and clicks, open booking times, and appointment times. Google sign-in credentials are never sent to an AI provider.
       </p>
 
       <h2>Sharing</h2>

@@ -9,11 +9,16 @@ delete their information. There is no self-service tool: requests are handled ma
 > until verified, and audited (docs/DATA_RETENTION.md, docs/OPERATIONS.md). The steps below remain for **one person's**
 > data (a lead asking to be forgotten), which is not automated yet.
 
-> **These SQL steps are incomplete (2026-11-24).** They predate newer tables. Before telling anyone a deletion is done,
-> also cover every table in `ERASED_TABLES` (server/deletion.js) that holds their rows (for one person at least:
-> thread_messages, lead_threads, receptionist_conversations/events/calls/requests, coverage_requests, revenue_entries,
-> lead_attribution, message_optouts) and, for a business, the KV records `google:<id>`, `ads:google:<id>`, `ads:gbp:<id>`,
-> `ads:meta:<id>`. Old copies remain in D1 Time Travel and in the local pre-release backups.
+> **One person (a lead):** use `node scripts/person-deletion.mjs <business id> <email>`: it prints the full SQL and runs nothing;
+> proven on synthetic data in test/person-deletion.test.js. The older hand-written SQL in section A is incomplete: don't use it.
+> Order: verify the requester → back up → remove their Google Calendar events by hand → run the printed file (approval) →
+> re-run the SELECTs in section A (expect none) → note date, request id and counts, without their details → reply.
+> Repeat per business if they asked more than one. Kept: opt-out hashes, the audit log. Copies remain in D1 Time Travel (7 days)
+> and in pre-release exports (docs/BACKUPS.md). A person known only by phone has no email on their lead: find the lead id first.
+> **A whole business:** the workflow in docs/DATA_RETENTION.md (ACCOUNT_DELETION_ENABLED, off: approval). Until then it is not
+> available by hand: the SQL in section B is incomplete.
+> **Elsewhere:** Google Calendar events and Google Ads data stay in the owner's Google account. Resend, OpenAI and Anthropic hold
+> message or call data under their own retention; ask them where the request requires it (Stripe keeps billing records).
 
 Rules
 - Verify the requester first: reply to the address on record (or have the business owner confirm) before sharing or

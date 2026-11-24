@@ -1,13 +1,14 @@
-// The dashboard assistant (server/assist.js): read-only, one question at a time, the session's own business.
+// The dashboard assistant (server/operator.js): the session's own business; looks up, reasons, prepares; saves nothing.
 //   GET → { enabled }.
-//   POST { question, topic?, view?, days? (7|30|90: the Ads results period on screen), history? }
-//     → { kind, answer, days, note?, evidence?, proposal? } | { error, evidence? }.
-// Help and prepared changes need no model and don't use the daily allowance.
+//   POST { question, topic?, view?, days?, history?, refs?, pending? }
+//     → { kind, answer, raw?, records?, proposals?, withdraw?, go?, refs?, note?, evidence?, days } | { error, evidence?, records? }.
+// A definition from the curated help needs no model and doesn't use the daily allowance.
 import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { track } from '../../../server/events.js'
-import { ask, chatAccess, deterministic, evidenceFor, validateQuestion } from '../../../server/assist.js'
+import { chatAccess, evidenceFor, helpFor, isSensitive, SENSITIVE_NOTE, validateQuestion, withoutModel } from '../../../server/assist.js'
+import { operate } from '../../../server/operator.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
@@ -24,29 +25,29 @@ export async function onRequestPost({ request, env }) {
   if (error) return json(400, { error })
   const burst = await hit(env, 'assistMessage', customer.id)
   if (burst.limited) return tooManyJson(burst.retryAfter)
-  let evidence = null
-  try {
-    const d = await deterministic(env, customer, req)
-    if (d) return json(200, { ...d, days: req.days })
-    evidence = await evidenceFor(env, customer, req)
-  } catch (err) {
-    console.error('assist failed:', err?.name)
-    return json(503, { error: 'unavailable' })
+  const help = req.topic ? null : helpFor(req.question)
+  if (help) return json(200, { kind: 'help', answer: help, days: req.days })
+  // What the owner gets when the model can't answer: the records themselves, never a guess.
+  const fallback = async (status, error, r = {}) => {
+    const [plain, evidence] = await Promise.all([withoutModel(env, customer, req).catch(() => null), evidenceFor(env, customer, req).catch(() => null)])
+    if (plain) return json(200, { ...plain, days: req.days, limited: error === 'rate_limited', ...(evidence ? { evidence } : {}) })
+    if (r.proposals?.length) return json(200, { kind: 'prepared', answer: 'Here’s what I prepared. Nothing is saved until you approve it.', proposals: r.proposals, records: r.records, refs: r.refs, days: req.days })
+    if (r.looked && r.records?.length) return json(200, { kind: 'records', answer: 'Here’s what’s recorded:', records: r.records.slice(0, 8), refs: r.refs, days: req.days })
+    return json(status, { error, days: req.days, ...(evidence ? { evidence } : {}) })
   }
-  const extra = evidence ? { evidence, days: req.days } : {}
-  for (const rule of ['aiAskBurst', 'aiAsk']) {
-    const rl = await hit(env, rule, customer.id)
-    if (rl.limited) return evidence ? json(429, { error: 'rate_limited', ...extra }) : tooManyJson(rl.retryAfter)
+  for (const [rule, key] of [['aiAskBurst', customer.id], ['aiAsk', customer.id], ['aiAskAll', 'all']]) {
+    const rl = await hit(env, rule, key)
+    if (rl.limited) return fallback(429, 'rate_limited')
   }
   let r
   try {
-    r = await ask(env, customer, req)
+    r = await operate(env, customer, req)
   } catch (err) {
     console.error('assist failed:', err?.name)
-    return json(503, { error: 'unavailable', ...extra })
+    return fallback(503, 'unavailable')
   }
-  // Topic, codes and numbers only; never the question or the answer.
-  await track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, view: req.view, days: req.days, ok: r.ok, ...(r.ok ? { kind: r.kind } : { reason: r.reason }), costMicros: r.costMicros, ms: r.ms } })
-  if (r.ok) return json(200, { kind: r.kind, answer: r.answer, days: req.days, ...(r.note ? { note: r.note } : {}), ...extra })
-  return json(['timeout', 'unavailable'].includes(r.reason) ? 503 : 422, { error: r.reason === 'timeout' ? 'unavailable' : r.reason, ...extra })
+  // Codes, tool names and numbers only; never the question, the answer or a record.
+  await track(env, 'ai_ask', { customer: customer.id, props: { topic: req.topic, view: req.view, ok: r.ok, tools: r.tools.slice(0, 8), ...(r.ok ? {} : { reason: r.reason }), proposals: r.proposals.map((p) => p.type), costMicros: r.costMicros, ms: r.ms } })
+  if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason === 'unchecked' ? 'unchecked' : 'unavailable', r)
+  return json(200, { kind: r.looked || r.records.length ? 'business' : 'general', answer: r.answer, raw: r.raw, records: r.records, proposals: r.proposals, withdraw: r.withdraw, go: r.go, refs: r.refs, days: req.days, ...(isSensitive(req.question) && !r.records.length ? { note: SENSITIVE_NOTE } : {}) })
 }

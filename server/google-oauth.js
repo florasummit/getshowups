@@ -69,8 +69,8 @@ export async function pkceChallenge(verifier) {
   return b64url(new Uint8Array(digest))
 }
 
-async function aesKey(env) {
-  const raw = Uint8Array.from(atob(env.TOKEN_ENCRYPTION_KEY), (c) => c.charCodeAt(0))
+async function aesKey(key) {
+  const raw = Uint8Array.from(atob(key), (c) => c.charCodeAt(0))
   if (raw.length !== 32) throw new Error('TOKEN_ENCRYPTION_KEY must be 32 bytes, base64-encoded')
   return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'])
 }
@@ -78,7 +78,7 @@ async function aesKey(env) {
 // AES-256-GCM: confidentiality + integrity. Output: base64url(iv || ciphertext).
 export async function encrypt(env, plaintext) {
   const iv = crypto.getRandomValues(new Uint8Array(12))
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(env), enc.encode(plaintext))
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(env.TOKEN_ENCRYPTION_KEY), enc.encode(plaintext))
   const out = new Uint8Array(12 + ct.byteLength)
   out.set(iv)
   out.set(new Uint8Array(ct), 12)
@@ -87,8 +87,18 @@ export async function encrypt(env, plaintext) {
 
 export async function decrypt(env, token) {
   const data = fromB64url(token)
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, await aesKey(env), data.slice(12))
-  return dec.decode(pt)
+  return withEitherKey(env, async (key) => dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, await aesKey(key), data.slice(12))))
+}
+
+// Key rotation (docs/KEY_ROTATION.md): everything is written with the current key; while TOKEN_ENCRYPTION_KEY_PREVIOUS is
+// set, what the old key wrote can still be read. GCM authenticates, so a wrong key can only fail, never mis-read.
+export async function withEitherKey(env, open) {
+  try {
+    return await open(env.TOKEN_ENCRYPTION_KEY)
+  } catch (err) {
+    if (!env.TOKEN_ENCRYPTION_KEY_PREVIOUS) throw err
+    return open(env.TOKEN_ENCRYPTION_KEY_PREVIOUS)
+  }
 }
 
 export function timingSafeEqual(a, b) {

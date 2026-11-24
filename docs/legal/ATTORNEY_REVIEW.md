@@ -122,3 +122,11 @@ From the code [FACT]; the owner confirms which are active at publication:
 5. Attorney review of Terms, Privacy, DPA (questions above).
 6. Owner approves final text; then one engineering PR adds `/terms` (and the refund wording inside it) and updates
    `/privacy`, keeping the Google sections word for word (OAuth review). Not before.
+
+## 6. Added 2026-11-24 (for the same review)
+- Live privacy policy changed (safeguards, Google data and AI, sharing, retention, the dashboard assistant). Please review as published.
+- Pilot: an unbilled founder-assisted pilot (docs/pilot/CUSTOMER_ZERO.md) needs short written terms before it starts. [Q]
+- AI assistant: answers owners' questions and prepares changes; needs a limitation in the Terms (may be wrong, not advice). [Q]
+- Refunds: owner decision is discretionary (Terms §4 Option C); confirm state-law limits. [Q]
+- Providers to list: Cloudflare (including Workers AI), Google, Resend, Twilio (not active), Anthropic, OpenAI (voice today), ElevenLabs and
+  Retell (selectable), Stripe (test mode). [FACT]
