@@ -45,7 +45,7 @@ test('a suggested question is one request; an account without answers is told so
   const panel = page.locator('.help-panel')
   await panel.getByRole('button', { name: 'How many inquiries became bookings?' }).click()
   await expect(panel).toContainText('Start by checking')
-  expect(asked).toEqual([{ topic: 'inquiries', view: 'overview', question: 'How many inquiries became bookings?', history: [], refs: {}, pending: [] }])
+  expect(asked).toEqual([{ topic: 'inquiries', view: 'overview', question: 'How many inquiries became bookings?', history: [], refs: {}, looked: [], pending: [] }])
   await page.waitForTimeout(700)
   const [tag, sheet] = [await panel.getByText('Start by checking').boundingBox(), await panel.boundingBox()]
   expect(tag.y).toBeGreaterThan(sheet.y)
