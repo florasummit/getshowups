@@ -547,6 +547,15 @@ registerCapability({
   verify: seen('enterprise inquiry', 60, `SELECT max(l.created_at) AS at FROM leads l JOIN lead_threads t ON t.lead_id = l.id WHERE t.source = 'enterprise_inquiry' AND ${REAL_LEAD}`),
 })
 registerCapability({
+  id: 'assist.writing',
+  tier: 'optional',
+  name: 'Writing help in settings fields',
+  journey: 'onboarding',
+  description: 'Owner-pressed suggestions (included model), checked and never saved automatically (server/writing.js).',
+  state: (env) => (env.AI_ASSIST_ENABLED === 'false' ? { mode: 'disabled', note: 'AI_ASSIST_ENABLED=false' } : env.AI?.run ? { mode: 'live' } : { mode: 'missing', note: 'Workers AI binding missing' }),
+  verify: seen('writing suggestion', 30, `SELECT max(at) AS at FROM events e WHERE e.type = 'ai_write' AND json_extract(e.props, '$.ok') = 1 AND ${NOT_TEST_BIZ('e.customer', 'e.at')}`),
+})
+registerCapability({
   id: 'crm.ghl',
   tier: 'later',
   name: 'GoHighLevel sync',

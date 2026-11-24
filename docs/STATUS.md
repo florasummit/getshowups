@@ -2,6 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
+## Writing help in owner fields (2026-11-23) — feat/ai-writing (no migration)
+
+- Draft / Improve / Shorten under description, greeting, before-visit and cancellation text. Owner-pressed, one included
+  (Workers AI) call, checked (records only, claims, numbers, added facts; policies only reworded), shown as a suggestion,
+  never saved. 40 a day per business; cost and time in `ai_write` events. AI_ASSIST_ENABLED=false = off.
+- Scope decision: no written spec for "contextual AI Assist" exists; this is the help in context. A chat assistant in
+  the dashboard is not built.
+
 ## Sales assistant accuracy + expired sessions (2026-11-23) — feat/sales-accuracy-session (no migration)
 
 - server/sales.js: Growth ($499/month) and Enterprise (starting at $10,000/month, by agreement; organization tools not

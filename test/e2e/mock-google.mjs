@@ -456,6 +456,13 @@ createServer(async (req, res) => {
     if (/^You answer text messages/.test(JSON.parse(raw).messages[0].content)) {
       return send(res, 200, { response: { intent: 'question', answerable: true, reply: 'Yes, we can help with that in Charleston.' }, usage: { prompt_tokens: 500, completion_tokens: 20 } })
     }
+    // Writing help (server/writing.js): "lighthouse" in the owner's text → an invented fact, which must be refused.
+    if (/^You help a small business owner/.test(JSON.parse(raw).messages[0].content)) {
+      const u = JSON.parse(raw).messages[1].content
+      const own = u.split("OWNER'S TEXT\n")[1]
+      const text = /lighthouse/.test(own) ? 'Family-owned for 20 years.' : /^Write/.test(u) ? 'Pool care you can book online.' : `Kindly note: ${own}`
+      return send(res, 200, { response: { text }, usage: { prompt_tokens: 300, completion_tokens: 30 } })
+    }
     const prompt = JSON.parse(raw).messages.at(-1).content
     const facts = JSON.parse(prompt.match(/Facts \(JSON\):\n(\{.*\})/)[1])
     const revision = prompt.includes("Owner's request")

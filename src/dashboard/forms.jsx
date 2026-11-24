@@ -1,5 +1,6 @@
 // Business and booking-hours forms, shared by setup and settings.
 import { useEffect, useRef, useState } from 'react'
+import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
 
 // A settings save refused because the saved values changed elsewhere (another tab or device) since this page loaded.
@@ -205,6 +206,7 @@ export function ProfileForm({ onSaved }) {
         <span>Short description <em>(optional)</em></span>
         <textarea name="description" rows={3} maxLength={400} defaultValue={p.description || ''} />
       </label>
+      <AiWrite field="description" draft />
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
@@ -260,10 +262,12 @@ export function PoliciesForm() {
         <span>Before the appointment <em>(optional)</em></span>
         <textarea name="beforeVisit" rows={3} maxLength={300} defaultValue={p.beforeVisit} placeholder="Please unlock the gate and keep pets inside." />
       </label>
+      <AiWrite field="beforeVisit" />
       <label className="field">
         <span>Cancellations <em>(optional)</em></span>
         <textarea name="cancellation" rows={2} maxLength={300} defaultValue={p.cancellation} placeholder="Please cancel at least 24 hours ahead." />
       </label>
+      <AiWrite field="cancellation" />
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}

@@ -54,6 +54,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/platform/messaging  Admin: GET counts only; POST record provider-reported registration status / sender (audited)
   sms-terms/[customer]  Public texting program terms (A2P disclosures) from records
   api/dashboard/policies   What customers should know (GET/POST beforeVisit, cancellation ≤300 chars)
+  api/dashboard/write      Writing help for description/greeting/policies (server/writing.js, AI_ASSIST_ENABLED=false = off): suggestion only
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)

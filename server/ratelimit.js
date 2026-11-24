@@ -49,6 +49,8 @@ export const RULES = {
   receptionistVoiceSession: { limit: 300, windowSec: 600 }, // POST /api/receptionist/:id/voice-session (per IP; transcript batches + end)
   receptionistSocket: { limit: 120, windowSec: 600 }, // GET /api/receptionist/llm/:call (per IP, before the call lookup)
   aiRulesWrite: { limit: 240, windowSec: 600 }, //   POST /api/dashboard/ai-rules save/simulate/publish/rollback (per business)
+  aiWriteBurst: { limit: 10, windowSec: 60 }, //    POST /api/dashboard/write (per business)
+  aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
   aiRulesTeachModel: { limit: 60, windowSec: 86400 }, // teach requests that reach the model (per business and day; cost cap)
   aiRulesTeach: { limit: 30, windowSec: 3600 }, //   POST /api/dashboard/ai-rules teach (per business; may call the model)
   qaIngest: { limit: 30, windowSec: 600 }, //        POST /api/qa/runs (per IP; bearer QA_INGEST_TOKEN)
