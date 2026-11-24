@@ -1,6 +1,7 @@
 // Appointments: who to mark, what's coming up, past results (always correctable), and people who
 // haven't booked yet. Test bookings are tagged and never counted.
 import { useState } from 'react'
+import { LoadError } from './ui.jsx'
 import { api, fmt, phoneText } from '../lib/api.js'
 
 const when = (iso, tz) => fmt(iso, tz, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -255,6 +256,7 @@ function PastResult({ a, tz, visit, onDone }) {
 // "Did they show up?" with an Undo right after marking, for accidental taps.
 function NeedsOutcome({ a, tz, visit, onDone, simple }) {
   const [marked, setMarked] = useState(null)
+  const [undoError, setUndoError] = useState(false)
   if (marked) {
     return (
       <Appointment a={a} tz={tz} compact>
@@ -264,12 +266,14 @@ function NeedsOutcome({ a, tz, visit, onDone, simple }) {
             type="button"
             className="link-btn"
             onClick={async () => {
-              await record({ id: a.id, outcome: 'clear' })
-              setMarked(null)
+              const { status } = await record({ id: a.id, outcome: 'clear' })
+              if (status === 200) setMarked(null)
+              else setUndoError(true)
             }}
           >
             Undo
           </button>
+          {undoError && <span className="fine" role="alert">Couldn’t undo. Try again.</span>}
           <button type="button" className="link-btn" onClick={onDone}>
             Done
           </button>
@@ -336,6 +340,14 @@ function Upcoming({ a, tz, onDone }) {
 export default function Appointments({ me, data, reload }) {
   const tz = me.customer.timezone
   const visit = me.customer.appointmentMode === 'at_customer'
+  if (data?.failed) {
+    return (
+      <>
+        <h1 className="title title--page">Appointments</h1>
+        <LoadError what="your appointments" onRetry={reload} />
+      </>
+    )
+  }
   if (!data) return <div aria-busy="true" />
   return (
     <div className="enter">

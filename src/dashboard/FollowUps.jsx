@@ -2,6 +2,7 @@
 // The owner can take over from the assistant, reply, pause automatic messages, adjust a few preferences, and see
 // (and prepare) texting setup. No workflow graphs, prompts or technical settings.
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
 
 const STAGE = { new: 'New', contacted: 'Contacted', replied: 'Replied', booked: 'Booked', closed: 'Closed', opted_out: 'Opted out' }
@@ -62,8 +63,9 @@ export default function FollowUps() {
   const [filter, setFilter] = useState('all')
   const [tick, setTick] = useState(0)
   const load = useCallback(() => setTick((n) => n + 1), [])
+  // A failed background refresh keeps what's on screen (and any reply being written).
   useEffect(() => {
-    api('/api/dashboard/followups').then(({ status, data: d }) => setData(status === 200 ? d : { failed: true }))
+    api('/api/dashboard/followups').then(({ status, data: d }) => setData((prev) => (status === 200 ? d : prev && !prev.failed ? prev : { failed: true })))
   }, [tick])
   useEffect(() => {
     const t = setInterval(load, 30_000)
@@ -71,7 +73,7 @@ export default function FollowUps() {
   }, [load])
 
   if (!data) return <div aria-busy="true" className="fu-loading">Loading follow-ups…</div>
-  if (data.failed) return <p className="notice" role="alert">Follow-ups couldn’t be loaded. Please try again in a moment.</p>
+  if (data.failed) return <LoadError what="follow-ups" onRetry={load} />
   if (!data.ready)
     return (
       <>
@@ -160,8 +162,9 @@ function Automation({ on, onChange }) {
   const toggle = async () => {
     if (on && !window.confirm('Pause all automatic messages (replies, reminders to book, confirmations and reminders)? You can resume any time.')) return
     setBusy(true)
-    await api('/api/dashboard/followups', { method: 'POST', body: { action: 'automations', enabled: !on } })
+    const { status } = await api('/api/dashboard/followups', { method: 'POST', body: { action: 'automations', enabled: !on } })
     setBusy(false)
+    if (status !== 200) return window.alert('Couldn’t change this. Please try again.')
     onChange()
   }
   return (

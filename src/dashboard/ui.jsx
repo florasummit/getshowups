@@ -41,6 +41,18 @@ export function Section({ title, label, action, children, className = '', id }) 
   )
 }
 
+// Something couldn't be loaded: say what, offer the retry. Never an empty form (saving one would replace what's stored).
+export function LoadError({ what, onRetry }) {
+  return (
+    <p className="form-error" role="alert" data-load-error>
+      Couldn’t load {what}.{' '}
+      <button type="button" className="link-btn" onClick={onRetry}>
+        Retry
+      </button>
+    </p>
+  )
+}
+
 export function Ago({ t }) {
   return (
     <time dateTime={new Date(t).toISOString()} title={whenFull(t)}>

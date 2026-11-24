@@ -66,18 +66,19 @@ export const problem = {
   },
 }
 
-// Attract → Answer → Qualify → Book → Notify → Measure: each step is drawn as the product state it produces
+// Attract → Capture → Qualify → Book → Follow up → Measure → Optimize: each step is drawn as the product state it produces
 // (components/Story.jsx → HowItWorks). `status`: live | partly | soon. Bodies are one line.
 export const journey = [
   { id: 'attract', status: 'live', title: 'Attract', body: 'Your website, hosted for you, with booking and chat built in.' },
-  { id: 'answer', status: 'live', title: 'Answer', body: 'Replies in seconds, in your words, from your records only.' },
-  { id: 'qualify', status: 'live', title: 'Qualify', body: 'Your area and your rules, checked before any time is offered.' },
+  { id: 'answer', status: 'live', title: 'Capture', body: 'Replies in seconds from your records.' },
+  { id: 'qualify', status: 'live', title: 'Qualify', body: 'Your service area, checked before any time is offered.' },
   { id: 'book', status: 'live', title: 'Book', body: 'Real open times from Google Calendar. Never booked twice.' },
-  { id: 'notify', status: 'live', title: 'Notify', body: 'On your calendar with the address. Google invites the customer.' },
-  { id: 'measure', status: 'live', title: 'Measure', body: 'Inquiry → booked → showed → done, in one place.' },
+  { id: 'notify', status: 'partly', title: 'Follow up', body: 'Google invites the customer. Reminders: testing.' },
+  { id: 'measure', status: 'live', title: 'Measure', body: 'Inquiry → booked → showed → done.' },
+  { id: 'optimize', status: 'partly', title: 'Optimize', body: 'Change rules, test them. Live use: pilot.' },
 ]
 
-export const journeyNotes = 'Texting, email reminders and automatic follow-ups are built and in testing, not live. Voice on your website is in a pilot.'
+export const journeyNotes = 'Texting, email reminders and automatic follow-ups: testing. Website voice: pilot.'
 
 // Teach Your AI (released 2026-11-20 as a controlled pilot: the Studio is on for the first pilot business; published
 // rules reach live conversations only once GetShowUps switches that on per business). The panel pairs an owner's
@@ -127,7 +128,7 @@ export const pricing = {
     'AI receptionist on your website chat',
     'Online booking straight into Google Calendar',
     'Service-area screening for every lead',
-    'Teach Your AI: your questions, rules and hand-offs',
+    'Teach Your AI (pilot): your questions and rules',
     'Google Calendar invitations for every booking',
     'Show-up and no-show tracking',
     'Direct help from the founding team',
@@ -162,7 +163,7 @@ export const faqs = [
   { q: 'What happens after I request early access?', a: 'You pick a time for a short call, straight from the calendar on this page. We look at your services, service area and current website together. Online enrollment isn’t open yet; when it opens, early-access businesses are set up first. Nothing is charged until you choose to sign up.' },
   { q: 'Is the AI on this page the real product?', a: 'The conversations are scripted examples with made-up businesses, so nothing you click is sent, booked or stored. They follow the same behaviour as the real AI receptionist: facts from the customer’s words, the service-area check, questions one at a time, real calendar times, and a booking only after a clear yes.' },
   { q: 'Will the AI say things I didn’t approve?', a: 'No. It only uses your records: services, prices, towns, ZIP codes, hours and the notes you approve. Prices that aren’t in your records are never stated. Guarantees, discounts or credentials never appear unless you’ve written them down.' },
-  { q: 'Can I control how it handles my customers?', a: 'Yes. Teach Your AI lets you set the order of questions, what’s required before times are offered, services you don’t do, which towns you serve completely, urgent situations, hand-offs and tone. Some protections can’t be switched off: the area check, the customer’s yes before a booking, and safety advice when danger is described.' },
+  { q: 'Can I control how it handles my customers?', a: 'Yes, in pilot: you can write and test rules today, and we switch them on for live conversations business by business. Teach Your AI lets you set the order of questions, what’s required before times are offered, services you don’t do, which towns you serve completely, urgent situations, hand-offs and tone. Some protections can’t be switched off: the area check, the customer’s yes before a booking, and safety advice when danger is described.' },
   { q: 'What if someone asks for a person?', a: 'The AI says plainly that it can’t transfer the call, then records a callback request or a message with their name and number. It shows up in your dashboard under Needs attention. It never promises when someone will call.' },
   { q: 'Do I need any other software?', a: 'Just a Google account with the calendar you book appointments on. If you already use GoHighLevel, a connection that copies your leads into your pipeline is in testing with founding customers.' },
   { q: 'Which integrations are limited or coming soon?', a: 'Google Calendar works today; while Google reviews our app, you may see a notice that Google hasn’t verified it when you connect. Google Ads: limited, test accounts only. Facebook and Instagram ads: coming soon. GoHighLevel: in testing. Text messaging: coming soon.' },

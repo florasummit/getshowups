@@ -92,7 +92,7 @@ const STEP_UI = {
         <Icon name="tick" size={12} strokeWidth={3} /> Mount Pleasant · in your area
       </span>
       <span className="jf-chip jf-chip--ok">
-        <Icon name="tick" size={12} strokeWidth={3} /> Your rule: urgency asked first
+        <Icon name="tick" size={12} strokeWidth={3} /> What they need, asked first
       </span>
       <span className="jf-chip">No price invented</span>
     </div>
@@ -131,6 +131,14 @@ const STEP_UI = {
       ))}
     </div>
   ),
+  optimize: (
+    <div className="jf-ui jf-checks">
+      <span className="jf-chip">Rule 3: “no heat” is urgent</span>
+      <span className="jf-chip jf-chip--ok">
+        <Icon name="tick" size={12} strokeWidth={3} /> Tested before publishing
+      </span>
+    </div>
+  ),
 }
 const STATUS = { live: ['Live today', 'ok'], partly: ['Partly live', 'warn'], soon: ['Coming soon', 'neutral'] }
 
@@ -139,7 +147,7 @@ export function HowItWorks() {
     <section id="how-it-works" className="section how" aria-labelledby="how-title">
       <div className="container">
         <SectionHeading id="how-title" eyebrow="How it works" title="From first message to finished job" />
-        <ol className="jf" aria-label="The six steps">
+        <ol className="jf" aria-label="The seven steps">
           {journey.map((s, i) => {
             const [label, tone] = STATUS[s.status]
             return (

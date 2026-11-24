@@ -219,12 +219,12 @@ test('less text, more product: every story section explains with a product visua
   await expect(problem.getByRole('figure', { name: 'Without GetShowUps' }).locator('.pn-note').last()).toHaveText('Booked someone else')
   await expect(problem.getByRole('figure', { name: 'With GetShowUps' }).locator('.pn-note').last()).toHaveText(/Booked · on your calendar/)
   await expect(problem.locator('.pn-event--ai')).toHaveCount(1)
-  // How it works: six product states (website, chat, checks, open times, the appointment, the counts), each live today.
+  // How it works: seven product states, each with what runs in production today.
   const steps = page.locator('#how-it-works .jf-step')
-  await expect(steps).toHaveCount(6)
-  await expect(steps.locator('h3')).toHaveText(['Attract', 'Answer', 'Qualify', 'Book', 'Notify', 'Measure'])
-  await expect(steps.locator('.jf-card .jf-ui')).toHaveCount(6)
-  await expect(steps.locator('.status--ok')).toHaveCount(6)
+  await expect(steps).toHaveCount(7)
+  await expect(steps.locator('h3')).toHaveText(['Attract', 'Capture', 'Qualify', 'Book', 'Follow up', 'Measure', 'Optimize'])
+  await expect(steps.locator('.jf-card .jf-ui')).toHaveCount(7)
+  await expect(steps.locator('.status--ok')).toHaveCount(5) // Follow up and Optimize are honestly “Partly live”
   await expect(page.locator('#how-it-works .jf-slot--on')).toHaveText('10:30 AM')
   // Teach Your AI: the owner's rules beside the reply one of them decides; the applied rule is highlighted.
   const teach = page.locator('#teach')
