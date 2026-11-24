@@ -259,6 +259,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
   const [off, setOff] = useState(false)
   const [q, setQ] = useState('')
   const [talk, setTalk] = useState([])
+  const looked = useRef([]) // the lookups behind the last answer, read again for a follow-up question
   const refs = useRef({}) // which records A1, L2… are, for this conversation
   const onState = (id, p, state) => setTalk((t) => t.map((e) => (e.id === id ? { ...e, proposals: e.proposals.map((x) => (x.key === p.key ? { ...x, state } : x)) } : e)))
   const busy = talk.some((e) => e.busy)
@@ -271,8 +272,9 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}` }))
     const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
-    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, pending } })
+    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending } })
     if (data.refs) refs.current = data.refs
+    if (data.lookups) looked.current = data.lookups
     if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state ? p : { ...p, state: 'withdrawn' })) })))
     if (status === 404) setOff(true)
     const code = status === 429 ? 'rate_limited' : ERRORS[data.error] ? data.error : status === 422 ? 'refused' : 'unavailable'

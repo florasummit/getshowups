@@ -132,6 +132,7 @@ const leadOut = (c, r) => {
     asked_for: tidy(r.need),
     zip: r.zip || null,
     state,
+    in_service_area: r.status !== 'unqualified',
     message_sent_by_getshowups: r.last_outbound_at ? whenText(r.last_outbound_at, c.tz) : 'none',
     waiting_for_owner: !!r.needs_owner,
     appointments: { booked: Number(r.booked), showed: Number(r.showed), no_show: Number(r.no_shows) },
@@ -339,13 +340,26 @@ export const TOOLS = [
       outside_zips_asked_from_last_90_days: outside.slice(0, 6).map((x) => ({ zip: x.zip || 'unknown', inquiries: x.n })),
       services: (profile?.services || []).map((s) => ({ name: s.name, price: s.price || 'no price listed' })),
       towns: profile?.cities || [],
-      ai_receptionist: rec === undefined ? 'unknown' : rec?.enabled === 1 ? 'on' : 'off',
-      website: site?.published ? 'published' : site?.exists ? 'draft, not published' : 'none',
+      online_booking: c.customer.status && c.customer.status !== 'active' ? 'closed: the account is not active' : cal === null || cal === false ? 'CLOSED to new bookings: needs Google Calendar connected (Settings); nobody can book online, and website chat cannot run, until then' : c.customer.hoursConfirmed === false ? 'CLOSED to new bookings: booking hours not confirmed (Settings)' : cal === undefined ? 'unknown' : 'open if hosting is active: customers can book on the booking page at any hour, with or without a website or the receptionist',
+      ai_receptionist: rec === undefined ? 'unknown' : rec?.enabled === 1 ? 'on' : 'off (optional website chat, turned on in Receptionist; not phone calls)',
+      website: site?.published ? 'published' : site?.exists ? 'draft, not published' : 'none (optional: the booking page has its own link)',
       google_calendar: cal === undefined ? 'unknown' : cal ? 'connected (last known)' : 'not connected',
       automatic_messages: c.customer.automations ? 'turned on' : 'turned off',
-      messages_to_customers: c.env.MESSAGES_LIVE === 'true' ? 'live' : 'not live yet: GetShowUps is still activating email sending, so customers do not receive them',
+      messages_to_customers: c.env.MESSAGES_LIVE === 'true' ? 'live' : 'not live yet: GetShowUps is still activating sending, so new automatic messages do not go out. Anything a record shows as sent was sent',
+      // What each gap does, from how the product works, so the model neither guesses a consequence nor a place to fix it.
       ...(profile !== undefined
-        ? { not_set: [!profile?.phone && 'business phone', !profile?.description && 'business description', !profile?.services?.length ? 'services (the receptionist and booking page have none to offer)' : profile.services.some((s) => !s.price) && 'prices for some services', !profile?.cities?.length && 'towns served', !z.length && 'service-area limit (anyone anywhere can book)', !policy.beforeVisit && 'what customers should know before a visit', !policy.cancellation && 'cancellation policy'].filter(Boolean) }
+        ? {
+            not_set: [
+              !profile?.services?.length && 'services (Settings): the receptionist has none to describe',
+              profile?.services?.length && profile.services.some((s) => !s.price) && `price for ${profile.services.filter((s) => !s.price).map((s) => s.name).join(', ')} (Settings); all other listed services have one`,
+              !profile?.phone && 'business phone (Settings): not shown to customers; online booking works without it',
+              !profile?.description && 'business description (Settings)',
+              !profile?.cities?.length && 'towns served (Settings): wording only, ZIPs decide who can book',
+              !z.length && 'service-area ZIPs (Settings): anyone anywhere can book',
+              !policy.beforeVisit && 'what customers should know before a visit (Settings)',
+              !policy.cancellation && 'cancellation policy (Settings)',
+            ].filter(Boolean),
+          }
         : { not_set: 'could not be read' }),
       not_in_getshowups: ['phone calls', 'why someone did not book', 'costs other than reported ad spend', 'payments nobody recorded'],
     }
@@ -427,7 +441,7 @@ export const TOOLS = [
   tool('show_page', 'Offer a button to a dashboard page, when the owner asks to go there or the next step can only be done there.', { page: { type: 'string', enum: ['overview', 'appointments', 'followups', 'receptionist', 'teach', 'website', 'ads', 'settings'] } }, ['page'], async (c, a) => {
     if (!['overview', 'appointments', 'followups', 'receptionist', 'teach', 'website', 'ads', 'settings'].includes(a.page)) return { error: 'invalid_page' }
     c.go = a.page
-    return { offered: a.page }
+    return { offered: a.page, note: 'A button is shown under your answer; nothing was opened or changed. Still answer the question.' }
   }),
 ]
 
@@ -470,15 +484,24 @@ export async function runTool(c, name, args) {
 }
 
 // The records of this conversation, read again now (so "that one" is true today, and gone records are known to be gone).
-export async function knownRecords(c, limit = 10) {
+// The newest ones, and every one the conversation still names (said: the earlier turns' text).
+export async function knownRecords(c, said = '', limit = 10) {
   const out = []
   for (const k of ['A', 'L']) {
     const n = c.refs.book[k].length
-    for (let i = Math.max(0, n - limit); i < n; i++) {
+    const named = new Set([...said.matchAll(/\[([AL]\d{1,3})\]/g)].map((m) => m[1]).slice(-24))
+    for (let i = 0; i < n; i++) {
       const ref = `${k}${i + 1}`
+      if (i < n - limit && !named.has(ref)) continue
       const r = k === 'A' ? await apptByRef(c, ref) : await leadByRef(c, ref)
       out.push(r ? (k === 'A' ? apptOut(c, r) : leadOut(c, r)) : { ref, state: 'no longer exists' })
     }
   }
   return out
+}
+
+// Lookups whose results a follow-up question needs again. Only these are ever repeated: reads of our own records.
+export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings']
+export async function repeatLookups(c, list) {
+  return Promise.all(list.map(async (x) => ({ tool: x.name, args: x.args, result: await runTool(c, x.name, x.args) })))
 }

@@ -6,6 +6,7 @@ import { diagnose, funnel } from './ads/funnel.js'
 import { adsAccess } from './ads/access.js'
 import { serviceAreaProposal, wantsServiceArea } from './proposals.js'
 import { plainAnswer } from './assist-plain.js'
+import { REPEATABLE } from './operator-tools.js'
 import { operatorConfigured } from './operator-model.js'
 import { businessEligible } from './eligibility.js'
 import { internalEmails } from './testdata.js'
@@ -40,7 +41,8 @@ export function validateQuestion(b) {
   const named = periodIn(question)
   const pending = (Array.isArray(b.pending) ? b.pending : []).slice(0, 4).map((p) => ({ type: String(p?.type || '').slice(0, 20), ref: /^[AL]\d{1,3}$/.test(String(p?.ref)) ? p.ref : null, change: clean(p?.change).slice(0, 160) }))
   const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? { A: b.refs.A, L: b.refs.L } : {}
-  return [null, { topic, view, question, history, pending, refs, days: named ?? b.days ?? 30, results: b.days !== undefined }]
+  const looked = (Array.isArray(b.looked) ? b.looked : []).slice(0, 5).filter((x) => REPEATABLE.includes(x?.name) && x.args && typeof x.args === 'object' && !Array.isArray(x.args) && JSON.stringify(x.args).length < 400).map((x) => ({ name: x.name, args: x.args }))
+  return [null, { topic, view, question, history, pending, refs, looked, days: named ?? b.days ?? 30, results: b.days !== undefined }]
 }
 
 // "What is a qualified lead?" is answered from the curated help, word for word, without a model.

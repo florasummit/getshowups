@@ -220,13 +220,13 @@ test('answers are checked: claims of having done something, invented numbers and
   for (const t of ['I marked [A1] as completed.', 'I’ve sent the message.', 'It has been saved as completed.', 'You made $4,200.', '[A9] is next.', 'Your ads generated $160.', 'Your ROI is 160.', 'This will double your bookings.', 'See https://x.example', '']) assert.ok(bad(t), t)
 })
 
-test('a failed check is corrected once, then the records are shown without prose; nothing invented reaches the owner', async () => {
+test('a failed check is corrected at most twice, then the records are shown without prose; nothing invented reaches the owner', async () => {
   appt('alpha', 'Jamie Rivera', 20 * HOUR)
-  script = [pick(['list_appointments', {}]), say('You have 48 appointments.'), say('You have 49 appointments.')]
+  script = [pick(['list_appointments', {}]), say('You have 48 appointments.'), say('You have 49 appointments.'), say('You have 47 appointments.')]
   const r = await post('alpha', { question: 'what is coming up' })
   assert.deepEqual([r.status, r.body.kind, r.body.records[0].name], [200, 'records', 'Jamie Rivera'])
-  assert.doesNotMatch(JSON.stringify(r.body), /48|49/)
-  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 48/)
+  assert.doesNotMatch(JSON.stringify(r.body), /47|48|49/)
+  assert.match(JSON.stringify(calls.at(-1).messages.at(-1)), /not in what you looked up: 49/)
 })
 
 test('outage, timeout, quota and garbage: the records still answer plain questions, otherwise a code; a broken tool is said, not guessed', async () => {

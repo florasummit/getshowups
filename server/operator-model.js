@@ -104,7 +104,7 @@ async function claude(env, m, { system, messages, tools, allTools, maxTokens }, 
   const u = res.usage || {}
   const usage = { in: u.input_tokens || 0, out: u.output_tokens || 0, read: u.cache_read_input_tokens || 0, write: u.cache_creation_input_tokens || 0 }
   if (res.stop_reason === 'refusal') return { calls: [], text: '', usage, native: res.content }
-  return { calls: res.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input })), text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim(), usage, native: res.content }
+  return { cut: res.stop_reason === 'max_tokens', calls: res.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input })), text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim(), usage, native: res.content }
 }
 
 // Why the provider refused, as a code (its message is never shown or stored):

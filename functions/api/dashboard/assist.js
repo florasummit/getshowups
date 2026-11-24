@@ -63,5 +63,5 @@ export async function onRequestPost({ request, env }) {
   // A refusal before any model work isn't one of the owner's questions for the day.
   if (['quota', 'setup'].includes(r.reason) && !r.costMicros) for (const [rule, key] of limits) if (rule !== 'aiAskBurst') await unhit(env, rule, key)
   if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason, r)
-  return json(200, { kind: r.looked || r.records.length ? 'business' : 'general', answer: r.answer, raw: r.raw, records: r.records, proposals: r.proposals, withdraw: r.withdraw, go: r.go, refs: r.refs, days: req.days, ...(isSensitive(req.question) && !r.records.length ? { note: SENSITIVE_NOTE } : {}) })
+  return json(200, { kind: r.looked || r.records.length ? 'business' : 'general', answer: r.answer, raw: r.raw, lookups: r.lookups, records: r.records, proposals: r.proposals, withdraw: r.withdraw, go: r.go, refs: r.refs, days: req.days, ...(isSensitive(req.question) && !r.records.length ? { note: SENSITIVE_NOTE } : {}) })
 }

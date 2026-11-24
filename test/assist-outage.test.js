@@ -146,11 +146,45 @@ test('business_settings says what is not set, so "what am I missing" has evidenc
   const customer = { id: 'alpha', name: 'alpha co', timezone: 'America/New_York', serviceZips: [], slotMinutes: 60, workdays: [1], dayStart: '09:00', dayEnd: '17:00' }
   sql.exec("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('alpha', '8435550100', 'Pool', 'x', '[{\"name\":\"Weekly\",\"price\":\"\"}]', '[]', 1)")
   const r = await runTool(toolContext(env, customer, {}), 'business_settings', {})
-  assert.deepEqual(r.not_set, ['prices for some services', 'towns served', 'service-area limit (anyone anywhere can book)', 'what customers should know before a visit', 'cancellation policy'])
+  assert.deepEqual(r.not_set, ['price for Weekly (Settings); all other listed services have one', 'towns served (Settings): wording only, ZIPs decide who can book', 'service-area ZIPs (Settings): anyone anywhere can book', 'what customers should know before a visit (Settings)', 'cancellation policy (Settings)'])
   assert.doesNotMatch(JSON.stringify(r), /8435550100/)
   sql.exec("DELETE FROM business_profiles")
-  assert.equal((await runTool(toolContext(env, customer, {}), 'business_settings', {})).not_set[0], 'business phone')
+  assert.equal((await runTool(toolContext(env, customer, {}), 'business_settings', {})).not_set[1].split(' (')[0], 'business phone')
+  assert.match((await runTool(toolContext(env, customer, {}), 'business_settings', {})).online_booking, /^CLOSED.*Google Calendar/)
   sql.exec('DROP TABLE business_profiles')
   const gone = await runTool(toolContext(env, customer, {}), 'business_settings', {})
   assert.ok(gone.error || gone.not_set === 'could not be read')
+})
+
+test('a follow-up reads the same evidence again, from this business only; only known reads are repeated', async () => {
+  const { validateQuestion } = await import('../server/assist.js')
+  const { operate } = await import('../server/operator.js')
+  const [, v] = validateQuestion({ question: 'why?', looked: [{ name: 'list_leads', args: { which: 'unanswered' } }, { name: 'prepare_hours', args: {} }, { name: 'open_times', args: {} }, { name: 'x' }] })
+  assert.deepEqual(v.looked, [{ name: 'list_leads', args: { which: 'unanswered' } }])
+  lead('alpha', 'Green pool')
+  lead('beta', 'Secret of beta')
+  let seen
+  env.ANTHROPIC_CLIENT = { messages: { create: async (b) => ((seen = b), { content: [{ type: 'text', text: 'Because [L1] is waiting.' }], usage: {} }) } }
+  const customer = { id: 'alpha', name: 'alpha co', timezone: 'America/New_York', serviceZips: [], slotMinutes: 60, workdays: [1], dayStart: '09:00', dayEnd: '17:00' }
+  const run = (extra) => operate(env, customer, { ...v, refs: {}, ...extra }, { model: { provider: 'claude', model: 'm', effort: 'medium', price: { in: 0, out: 0, read: 0, write: 0 } } })
+  const r = await run({})
+  assert.deepEqual([r.ok, r.answer, r.lookups], [true, 'Because Dana Fox is waiting.', v.looked])
+  assert.match(seen.system[1].text, /LOOKUPS BEHIND.*Green pool/s)
+  assert.doesNotMatch(seen.system[1].text, /beta|Dana|8435550100/)
+  // An old reference the conversation still names stays known, whatever was listed since.
+  const ids = sql.prepare("SELECT id FROM leads WHERE customer = 'alpha'").all().map((x) => x.id)
+  const q = await run({ looked: [], refs: { L: [...ids, ...Array(20).fill('gone')] }, history: [{ q: 'a', a: 'Start with [L1].' }] })
+  assert.deepEqual([q.ok, q.answer], [true, 'Because Dana Fox is waiting.'])
+  // Cut off by the token limit: never shown.
+  env.ANTHROPIC_CLIENT = { messages: { create: async () => ({ stop_reason: 'max_tokens', content: [{ type: 'text', text: 'Automatic mess' }], usage: {} }) } }
+  assert.deepEqual([(await run({})).ok, (await run({})).reason], [false, 'unchecked'])
+})
+
+test('an answer written beside a page button is the answer when nothing follows it', async () => {
+  const { operate } = await import('../server/operator.js')
+  let n = 0
+  env.ANTHROPIC_CLIENT = { messages: { create: async () => (n++ ? { content: [], usage: {} } : { content: [{ type: 'text', text: 'Settings is where the calendar is connected.' }, { type: 'tool_use', id: 't', name: 'show_page', input: { page: 'settings' } }], usage: {} }) } }
+  const customer = { id: 'alpha', name: 'alpha co', timezone: 'America/New_York', serviceZips: [], slotMinutes: 60, workdays: [1], dayStart: '09:00', dayEnd: '17:00' }
+  const r = await operate(env, customer, { question: 'where', view: 'overview', days: 30, refs: {}, history: [] }, { model: { provider: 'claude', model: 'm', price: { in: 0, out: 0, read: 0, write: 0 } } })
+  assert.deepEqual([r.ok, r.answer, r.go, n], [true, 'Settings is where the calendar is connected.', 'settings', 2])
 })
