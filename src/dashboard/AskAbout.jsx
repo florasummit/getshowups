@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { HELP } from '../content/help.js'
+import { setDraft } from './assistant-store.js'
 
 const ERRORS = {
   empty_question: 'Type a question first.',
@@ -15,54 +16,98 @@ const ERRORS = {
 }
 const OTHER = 'The answer included something we couldn’t confirm, so it wasn’t shown. Try asking differently.'
 const BLANK = 'Why isn’t this available yet?'
-const TAG = { business: 'AI interpretation', general: 'General information', help: 'From the help text', prepared: 'Prepared for you' }
+const TAG = { general: 'General information', help: 'From the help text', prepared: 'Prepared for you', records: 'From your records' }
 const IDEAS = {
-  overview: ['Why are my leads not becoming booked jobs?', 'What should I look at first?'],
-  appointments: ['Help me improve my service area', 'What can I do about no-shows?'],
-  followups: ['How should I answer people who haven’t booked?', 'Why are my leads not becoming booked jobs?'],
-  receptionist: ['What does the receptionist use to answer?', 'How many conversations led to a booking?'],
-  teach: ['What is worth teaching first?'],
-  website: ['What should a small business website say first?'],
-  ads: ['Why are my leads not becoming booked jobs?', 'Do I have enough leads to judge my ads?'],
-  settings: ['Help me improve my service area', 'Are my booking hours limiting bookings?'],
+  overview: ['What should I fix first?', 'What’s coming up?'],
+  appointments: ['What’s on this week?', 'Which visits still need an outcome?'],
+  followups: ['Who hasn’t been answered?', 'Draft a follow-up for me'],
+  receptionist: ['Who asked recently?', 'What should I fix first?'],
+  teach: ['What do people ask me for?'],
+  website: ['Who asked recently?'],
+  ads: ['What did my ads bring in?', 'Compare the last 30 days with the 30 before'],
+  settings: ['Who asks from outside my area?', 'What are my hours?'],
 }
 const VIEW = { overview: 'Overview', appointments: 'Appointments', followups: 'Follow-ups', receptionist: 'Receptionist', teach: 'Teach Your AI', website: 'Website', ads: 'Ads', settings: 'Settings' }
 
-function Proposal({ p }) {
+const goTo = (where) => window.dispatchEvent(new CustomEvent('gsu:go', { detail: where }))
+
+// A change waiting for the owner. Only its button saves it; a withdrawn or saved one can't be pressed again.
+function Proposal({ p, onState }) {
   const [state, setState] = useState({})
-  if (state.gone) return <p className="fine">Discarded. Nothing was changed.</p>
+  const [text, setText] = useState(p.message || '')
+  if (p.state === 'withdrawn') return <p className="fine">Not changed.</p>
+  const gone = () => onState(p, 'withdrawn')
+  if (p.type === 'follow_up')
+    return (
+      <div className="ask-proposal" data-proposal="draft">
+        <p className="ask-proposal-title">Draft for {p.name || 'this person'}</p>
+        <textarea aria-label="Follow-up draft" rows={4} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+        <ul className="ask-list">
+          {p.effects.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+        <div className="ask-proposal-actions">
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={!text.trim()}
+            onClick={() => {
+              setDraft({ leadId: p.id, text })
+              goTo('followups')
+            }}
+          >
+            Open in Follow-ups
+          </button>
+          <button type="button" className="btn btn-sm btn-quiet" onClick={gone}>
+            Discard
+          </button>
+        </div>
+      </div>
+    )
+  const zips = p.type === 'service_zips'
   const save = async () => {
-    // A form open on the page still holds the old list; saving it later would undo this.
+    // A form open on the page still holds the old values; saving it later would undo this.
     if (document.querySelector('.app-main form[data-dirty]')) return setState({ error: 'Save or discard what you’re editing on this page first.' })
     setState({ busy: true })
-    const { status, data } = await api('/api/dashboard/proposal', { method: 'POST', body: { type: p.type, before: p.before, after: p.after, confirm: true } })
-    if (status !== 200) return setState({ error: status === 409 ? 'Your ZIP codes changed since this was prepared, so nothing was saved. Ask again for a fresh one.' : status === 429 ? 'Too many changes at once. Try again in a few minutes.' : 'This wasn’t saved. Please try again.', stale: status === 409 })
-    setState({ saved: data.serviceZips })
+    const body = p.type === 'outcome' ? { type: p.type, id: p.id, outcome: p.outcome, before: p.before, confirm: true } : { type: p.type, before: p.before, after: p.after, confirm: true }
+    const { status, data } = await api('/api/dashboard/proposal', { method: 'POST', body })
+    if (status !== 200)
+      return setState({ error: status === 409 ? 'This changed since it was prepared, so nothing was saved. Ask again for a fresh one.' : status === 404 ? 'That appointment isn’t there any more. Nothing was saved.' : status === 429 ? 'Too many changes at once. Try again in a few minutes.' : 'This wasn’t saved. Please try again.', stale: [404, 409].includes(status) })
+    setState({ saved: data.already ? 'It was already saved.' : zips ? `Saved. Your ZIP codes are now ${data.serviceZips.join(', ')}.` : `Saved: ${data.state}.` })
+    onState(p, 'saved')
     window.dispatchEvent(new CustomEvent('gsu:changed'))
   }
   return (
     <div className="ask-proposal" data-proposal={state.saved ? 'saved' : 'review'}>
-      <p className="ask-proposal-title">Service area ZIP codes</p>
+      <p className="ask-proposal-title">{zips ? 'Service area ZIP codes' : p.type === 'hours' ? 'Booking hours' : `Outcome: ${p.name || 'appointment'}`}</p>
+      {p.when && <p className="fine">{p.when}</p>}
       <dl>
         <div>
           <dt>Now</dt>
-          <dd>{p.before.join(', ') || 'Everyone can book'}</dd>
+          <dd>{zips ? p.before.join(', ') || 'Everyone can book' : p.from}</dd>
         </div>
         <div>
           <dt>After</dt>
           <dd>
-            {p.after.map((z) => (
-              <span key={z} className={p.add.includes(z) ? 'is-new' : ''}>
-                {p.add.includes(z) ? `+ ${z}` : z}
-              </span>
-            ))}
-            {p.remove.map((z) => (
-              <del key={z}>{z}</del>
-            ))}
+            {zips ? (
+              <>
+                {p.after.map((z) => (
+                  <span key={z} className={p.add.includes(z) ? 'is-new' : ''}>
+                    {p.add.includes(z) ? `+ ${z}` : z}
+                  </span>
+                ))}
+                {p.remove.map((z) => (
+                  <del key={z}>{z}</del>
+                ))}
+              </>
+            ) : (
+              <span className="is-new">{p.to}</span>
+            )}
           </dd>
         </div>
       </dl>
-      <p className="fine">{p.why}</p>
+      {p.why && <p className="fine">{p.why}</p>}
       <ul className="ask-list">
         {p.effects.map((x) => (
           <li key={x}>{x}</li>
@@ -70,14 +115,14 @@ function Proposal({ p }) {
       </ul>
       <div role="status">
         {state.error && <p className="ask-error">{state.error}</p>}
-        {state.saved && <p className="ask-saved">Saved. Your ZIP codes are now {state.saved.join(', ')}.</p>}
+        {state.saved && <p className="ask-saved">{state.saved}</p>}
       </div>
       {!state.saved && !state.stale && (
         <div className="ask-proposal-actions">
           <button type="button" className="btn btn-sm btn-primary" disabled={state.busy} onClick={save}>
-            {state.busy ? 'Saving…' : 'Save these ZIP codes'}
+            {state.busy ? 'Saving…' : zips ? 'Save these ZIP codes' : 'Approve'}
           </button>
-          <button type="button" className="btn btn-sm btn-quiet" disabled={state.busy} onClick={() => setState({ gone: true })}>
+          <button type="button" className="btn btn-sm btn-quiet" disabled={state.busy} onClick={gone}>
             Don’t change
           </button>
         </div>
@@ -86,13 +131,41 @@ function Proposal({ p }) {
   )
 }
 
-function Entry({ e, retry }) {
+// The records an answer is about, as they are now. Names and contact details come from the app, not the AI.
+function Records({ list }) {
+  return (
+    <ul className="ask-records" aria-label="Records">
+      {list.map((r) => (
+        <li key={r.ref}>
+          <details>
+            <summary>
+              <strong>{r.name}</strong>
+              <span>{r.kind === 'appointment' ? r.when : `asked ${r.when}`}</span>
+            </summary>
+            <p>{r.what}</p>
+            <p className="fine">{r.state}</p>
+            {r.contact?.map((x) => (
+              <a key={x} href={x.includes('@') ? `mailto:${x}` : `tel:${x.replace(/[^\d+]/g, '')}`}>
+                {x}
+              </a>
+            ))}
+            <button type="button" className="link-btn" onClick={() => goTo(r.go)}>
+              Open in {r.go === 'appointments' ? 'Appointments' : 'Follow-ups'}
+            </button>
+          </details>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Entry({ e, retry, onState }) {
   return (
     <div className="ask-entry">
       <p className="ask-q">
         <span className="sr-only">You asked: </span>
         {e.q}
-        <small>{[e.about, e.days && (e.ctx.days || e.evidence || e.kind === 'business') && `last ${e.days} days`].filter(Boolean).join(' · ')}</small>
+        <small>{[e.about, e.ctx.days && `last ${e.days} days`].filter(Boolean).join(' · ')}</small>
       </p>
       {e.busy && (
         <div className="ask-wait">
@@ -132,10 +205,19 @@ function Entry({ e, retry }) {
       {e.answer && (
         <div className="ask-answer">
           {TAG[e.kind] && <p className="help-tag">{TAG[e.kind]}</p>}
-          <p>{e.answer}</p>
+          <p className="ask-text">{e.answer}</p>
+          {e.records?.length > 0 && <Records list={e.records} />}
+          {e.proposals?.map((p) => (
+            <Proposal key={p.key} p={p} onState={(x, st) => onState(e.id, x, st)} />
+          ))}
+          {e.go && (
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => goTo(e.go)}>
+              Open {VIEW[e.go]}
+            </button>
+          )}
           {e.note && <p className="fine">{e.note}</p>}
-          {e.kind === 'business' && <p className="fine">Based on your settings and the last {e.days} days of results. It can be wrong and can’t change anything.</p>}
-          {e.proposal && <Proposal p={e.proposal} />}
+          {e.limited && <p className="fine">You’ve reached today’s AI answers, so this is straight from your records.</p>}
+          {e.kind === 'business' && <p className="fine">From your records. The wording is AI and can be wrong.</p>}
         </div>
       )}
     </div>
@@ -148,20 +230,25 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
   const [off, setOff] = useState(false)
   const [q, setQ] = useState('')
   const [talk, setTalk] = useState([])
+  const refs = useRef({}) // which records A1, L2… are, for this conversation
+  const onState = (id, p, state) => setTalk((t) => t.map((e) => (e.id === id ? { ...e, proposals: e.proposals.map((x) => (x.key === p.key ? { ...x, state } : x)) } : e)))
   const busy = talk.some((e) => e.busy)
   const send = async (question, { replace = null, fromBox = false } = {}) => {
-    if (loading || busy || question.trim().length < 3) return
+    if (loading || busy || question.trim().length < 2) return
     const key = replace?.id ?? `${Date.now()}-${talk.length}`
     const ctx = replace?.ctx ?? { topic, view, days }
     const entry = { id: key, ctx, q: question, about: replace ? replace.about : title || VIEW[view], days: ctx.days, busy: true }
-    const history = talk.filter((e) => e.answer && e.id !== key).slice(-4).map((e) => ({ q: e.q, a: e.answer }))
+    const history = talk.filter((e) => e.answer && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.raw || e.answer }))
+    const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state).slice(-4).map((p) => ({ type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
-    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history } })
+    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, pending } })
+    if (data.refs) refs.current = data.refs
+    if (status === 200 && data.withdraw) setTalk((t) => t.map((e) => ({ ...e, proposals: e.proposals?.map((p) => (p.state ? p : { ...p, state: 'withdrawn' })) })))
     if (status === 404) setOff(true)
     const code = status === 429 ? 'rate_limited' : ERRORS[data.error] ? data.error : status === 422 ? 'refused' : 'unavailable'
     const done =
       status === 200
-        ? { kind: data.kind, answer: data.answer, note: data.note, days: data.days, evidence: data.evidence, proposal: data.proposal }
+        ? { kind: data.kind, answer: data.answer, raw: data.raw, note: data.note, days: data.days, evidence: data.evidence, records: data.records, go: data.go, limited: data.limited, proposals: (data.proposals || []).map((p, i) => ({ ...p, key: `${key}-${i}` })) }
         : { error: code === 'refused' ? OTHER : ERRORS[code], retry: code === 'unavailable', evidence: data.evidence, days: data.days ?? ctx.days }
     setTalk((t) => t.map((e) => (e.id === key ? { ...entry, busy: false, ...done } : e)))
     if (status === 200 && fromBox) setQ((now) => (now === question ? '' : now))
@@ -204,10 +291,10 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
       <p className="ask-title">
         <Icon name="sparkles" size={15} /> {topic ? 'Ask a follow-up' : 'Ask about your business'}
       </p>
-      {!topic && !talk.length && <p className="fine">I can look at your inquiries, bookings, ads and settings, explain how things work, and prepare changes for you to approve.</p>}
+      {!topic && !talk.length && <p className="fine">Ask in your own words. I look up your appointments, inquiries, numbers and settings, and get changes ready for you to approve.</p>}
       <div className="ask-live" ref={live} tabIndex={-1} role="log" aria-live="polite" aria-busy={busy}>
         {talk.map((e) => (
-          <Entry key={e.id} e={e} retry={() => send(e.q, { replace: e })} />
+          <Entry key={e.id} e={e} retry={() => send(e.q, { replace: e })} onState={onState} />
         ))}
       </div>
       {ideas.length > 0 && !busy && (
@@ -244,7 +331,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
           }}
           placeholder="Ask in your own words"
         />
-        <button type="submit" className="ask-send" aria-label="Send question" disabled={loading || busy || q.trim().length < 3}>
+        <button type="submit" className="ask-send" aria-label="Send question" disabled={loading || busy || q.trim().length < 2}>
           {busy ? <span className="ask-spin" aria-hidden="true" /> : <Icon name="arrow" size={18} />}
         </button>
       </form>

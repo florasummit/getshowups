@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import AiWrite from './AiWrite.jsx'
 import { HelpTip } from './Help.jsx'
+import { takeDraft } from './assistant-store.js'
 import { LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
 
@@ -61,7 +62,7 @@ const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'short', mo
 
 export default function FollowUps() {
   const [data, setData] = useState(null)
-  const [open, setOpen] = useState(null)
+  const [open, setOpen] = useState(() => takeDraft()?.leadId ?? null)
   const [filter, setFilter] = useState('all')
   const [tick, setTick] = useState(0)
   const load = useCallback(() => setTick((n) => n + 1), [])
@@ -69,6 +70,11 @@ export default function FollowUps() {
   useEffect(() => {
     api('/api/dashboard/followups').then(({ status, data: d }) => setData((prev) => (status === 200 ? d : prev && !prev.failed ? prev : { failed: true })))
   }, [tick])
+  useEffect(() => {
+    const on = () => setOpen(takeDraft()?.leadId ?? null)
+    window.addEventListener('gsu:draft', on)
+    return () => window.removeEventListener('gsu:draft', on)
+  }, [])
   useEffect(() => {
     const t = setInterval(load, 30_000)
     return () => clearInterval(t)
@@ -202,9 +208,15 @@ function Notices({ channels: c }) {
 
 function Conversation({ id, onBack, onChanged }) {
   const [v, setV] = useState(null)
-  const [text, setText] = useState('')
+  // A draft prepared by the assistant for this person arrives in the box, to edit; never over something being written.
+  const [text, setText] = useState(() => takeDraft(id)?.text || '')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const on = () => setText((now) => (now.trim() ? now : takeDraft(id)?.text || ''))
+    window.addEventListener('gsu:draft', on)
+    return () => window.removeEventListener('gsu:draft', on)
+  }, [id])
   useEffect(() => {
     api(`/api/dashboard/followups/thread?id=${encodeURIComponent(id)}`).then(({ status, data }) => setV(status === 200 ? data : { failed: true }))
   }, [id])

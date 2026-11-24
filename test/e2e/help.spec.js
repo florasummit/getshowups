@@ -165,7 +165,6 @@ test('the AI answer follows the selected period: 7, 30 and 90 days, also when sw
     await expect(panel.locator('.help-fact')).toContainText(`$${days * 10}`)
     await idea.click()
     await expect(panel).toContainText(`Answer about ${days} days.`)
-    await expect(panel).toContainText(`the last ${days} days of results`)
     await expect(panel.locator('.ask-entry').last().locator('.ask-q small')).toHaveText(`Ad spend · last ${days} days`) // every answer names its period
   }
   expect(asked).toEqual([30, 7, 90])

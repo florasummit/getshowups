@@ -456,18 +456,21 @@ createServer(async (req, res) => {
     if (/^You answer text messages/.test(JSON.parse(raw).messages[0].content)) {
       return send(res, 200, { response: { intent: 'question', answerable: true, reply: 'Yes, we can help with that in Charleston.' }, usage: { prompt_tokens: 500, completion_tokens: 20 } })
     }
-    // Dashboard assistant (server/assist.js): "secret" in the question → an invented number and a claimed action (refused).
-    if (/^You are the assistant inside GetShowUps/.test(JSON.parse(raw).messages[0].content)) {
+    // Dashboard assistant (server/operator.js), scripted: a lookup first, then words that use its references. "secret" →
+    // an invented number and a claimed action (refused twice, so the records are shown instead).
+    if (/^You are the operator inside GetShowUps/.test(JSON.parse(raw).messages[0].content)) {
       events.push({ type: 'ai.assist' })
-      const q = JSON.parse(raw).messages[1].content.split('QUESTION\n').pop()
-      const r = /secret/.test(q)
-        ? { kind: 'business', answer: 'I changed your hours and 9,731 people will come.' }
-        : /LLC/.test(q)
-          ? { kind: 'general', answer: 'No. Being untruthful about a company can void contracts and expose you to fraud claims. Use accurate records, and ask a lawyer how to correct anything already filed.' }
-          : /weather/.test(q)
-            ? { kind: 'out_of_scope', answer: 'x' }
-            : { kind: 'business', answer: 'Start by checking the appointment length in Settings.' }
-      return send(res, 200, { response: r, usage: { prompt_tokens: 600, completion_tokens: 40 } })
+      const { messages } = JSON.parse(raw)
+      const q = messages.filter((m) => m.role === 'user' && !m.content.startsWith('[check')).at(-1).content
+      const seen = messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' ')
+      const call = (name, args) => send(res, 200, { choices: [{ message: { content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name, arguments: JSON.stringify(args) } }] } }], usage: { prompt_tokens: 900, completion_tokens: 30 } })
+      const say = (content) => send(res, 200, { choices: [{ message: { content } }], usage: { prompt_tokens: 900, completion_tokens: 40 } })
+      if (/secret/.test(q)) return say('I changed your hours and 9,731 people will come.')
+      if (/zip/i.test(q)) return seen ? say('It is ready for you to approve.') : call('prepare_service_area', { add: q.match(/\d{5}/g) || [] })
+      if (/mark/i.test(q)) return /prepared/.test(seen) ? say('[A1] is ready to approve as completed.') : /"ref":"A1"/.test(seen) ? call('prepare_outcome', { ref: 'A1', outcome: 'completed' }) : call('list_appointments', { state: 'needs_outcome' })
+      if (/follow/i.test(q)) return /prepared/.test(seen) ? say('A draft for [L1] is ready to edit.') : /"ref":"L1"/.test(seen) ? call('prepare_follow_up', { ref: 'L1', message: 'Thanks for asking about your pool. Would you like to pick a time for a visit?' }) : call('list_leads', { which: 'recent', days: 365 })
+      if (/app/i.test(q)) return seen ? say(/"ref":"A1"/.test(seen) ? '[A1] is coming up.' : 'Nothing is coming up.') : call('list_appointments', {})
+      return seen ? say('Start by checking the appointment length in Settings.') : call('no_lookup_needed', { why: 'general_question' })
     }
     // Writing help (server/writing.js): "lighthouse" in the owner's text → an invented fact, which must be refused.
     if (/^You help a small business owner/.test(JSON.parse(raw).messages[0].content)) {

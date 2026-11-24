@@ -5138,6 +5138,54 @@ html.help-open .app {
   gap: 8px;
 }
 
+.ask-text {
+  white-space: pre-line;
+}
+
+.ask-records {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-records details {
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--white);
+}
+
+.ask-records summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 10px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.ask-records summary span {
+  color: var(--ink-500);
+  font-size: 0.82rem;
+}
+
+.ask-records details > :not(summary) {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.ask-proposal textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 16px;
+}
+
 .ask-saved {
   padding: 8px 12px;
   border-radius: 10px;

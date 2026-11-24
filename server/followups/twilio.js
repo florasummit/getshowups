@@ -11,6 +11,7 @@
 //
 // Creating a subaccount is free; it is still a provider write, so it runs only as a confirmed, audited admin action.
 // TWILIO_API_MOCK_ORIGIN (loopback only) is a test stand-in for every Twilio host.
+import { withEitherKey } from '../google-oauth.js'
 import { CUSTOMER_RE } from '../invites.js'
 
 export const ACCOUNT_TABLES = ['sms_accounts', 'sms_provider_objects', 'sms_registration_extra']
@@ -73,8 +74,8 @@ export async function accountsReady(db) {
 const enc = new TextEncoder()
 const b64 = (u8) => btoa(String.fromCharCode(...u8))
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
-async function derivedKey(env) {
-  const master = await crypto.subtle.importKey('raw', unb64(env.TOKEN_ENCRYPTION_KEY), 'HKDF', false, ['deriveKey'])
+async function derivedKey(env, key = env.TOKEN_ENCRYPTION_KEY) {
+  const master = await crypto.subtle.importKey('raw', unb64(key), 'HKDF', false, ['deriveKey'])
   return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('getshowups/twilio-subaccount/v1'), info: enc.encode('aes-gcm') }, master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
 }
 const aad = (customer, sid) => enc.encode(`${customer}|${sid}`)
@@ -83,10 +84,10 @@ export async function sealToken(env, customer, sid, token) {
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(customer, sid) }, await derivedKey(env), enc.encode(token)))
   return `v1.${b64(iv)}.${b64(ct)}`
 }
-async function openToken(env, customer, sid, sealed) {
+export async function openToken(env, customer, sid, sealed) {
   const [v, iv, ct] = String(sealed).split('.')
   if (v !== 'v1') throw new Error('bad token')
-  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv), additionalData: aad(customer, sid) }, await derivedKey(env), unb64(ct)))
+  return withEitherKey(env, async (key) => new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv), additionalData: aad(customer, sid) }, await derivedKey(env, key), unb64(ct))))
 }
 
 export async function accountOf(db, customer) {
