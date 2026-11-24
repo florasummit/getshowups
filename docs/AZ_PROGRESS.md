@@ -21,20 +21,20 @@ isn't done. Evidence only: nothing is marked done from a claim.
 | A Foundation | done | #141 (main e106333, deployment f3af0540, rollback 1587ad1d) |
 | B Public messaging | done | #142 (main 9678a7e, deployment 7aef7890, rollback f3af0540) |
 | C Usability | done | #142; defects below |
-| D Static help | in progress | az/d-help: 20 topics, one panel, zero requests (browser-tested) |
-| E Dashboard AI chat | in progress | az/e-chat |
-| F Inline writing | in progress | #140 verified in code (10/min, 40/day, off switch); setup description field added. Wording quality unverified (no paid calls) |
-| G AI architecture | in progress | below |
-| H Commercial journeys, KPIs | in progress | below |
-| I Final integration | not started | |
+| D Static help | done | #143 (main be9a2c2, deployment 626be338, rollback 7aef7890) |
+| E Dashboard AI chat | done | #144 (main 07723af, deployment 46051083, rollback 626be338). Answer quality unverified (no paid calls) |
+| F Inline writing | done | #140 verified in code (10/min, 40/day, off switch); setup field added in #145. Wording quality unverified |
+| G AI architecture | done for now | #145 (main cbf2bf4, deployment 689a0549, rollback 46051083). Gains wait for real traffic |
+| H Commercial journeys, KPIs | done for now | #145; unverified parts listed below are gated |
+| I Final integration | done | this PR (docs + CI setting): production checked desktop and phone, 2026-11-24 |
 
 ### A. Engineering workflow
 
 Measured (PR #140, run 45297608877, 12 m 13 s): browser tests 446 s, Chromium install 226 s, everything else 41 s.
 Local: lint 0.3 s, unit 16 s, build 0.5 s, Functions 0.7 s, full browser suite 3.3 min (5 workers).
 
-- Third CI browser worker: #141's whole verify job took 8 m 36 s; the six runs before it 8 m 00 s to 12 m 13 s. One
-  run proves no speedup (the Chromium step alone varies by minutes); no flake seen. Kept, to be compared per step.
+- Third CI browser worker: tried on #141 to #145 and reverted. Browser step averaged 443 s against 452 s before (no
+  gain), and the studio editor test needed a retry in two of the five runs.
 - Chromium install: the fix (caching the browser) is a workflow file change; our token has no Workflows permission
   (owner).
 - Releases were ad-hoc shell each time: now `scripts/release.sh`; CI is looked at with `scripts/ci-check.sh`.
@@ -86,3 +86,9 @@ appointments, 0 payments recorded, 0 ad spend. Too few for any rate. Overview no
 
 Applying the sales answers · enrollment · live Stripe, terms/privacy, sales tax · live ad spend · customer messaging and
 founder alerts · secrets · migrations · paid model benchmarks · Google app review and Ads access level.
+
+## Next action
+
+Owner: apply the sales answers (Admin → Platform → "GetShowUps sells itself"), then the launch blockers above.
+When 20+ new receptionist turns exist: compare `turn_usage` with the baseline in G. Nothing else in the plan is
+actionable without an approval or real traffic.
