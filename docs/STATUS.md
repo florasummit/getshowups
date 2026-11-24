@@ -2,6 +2,14 @@
 
 _Update at the end of every task. Newest first._
 
+## Sales assistant accuracy + expired sessions (2026-11-23) — feat/sales-accuracy-session (no migration)
+
+- server/sales.js: Growth ($499/month) and Enterprise (starting at $10,000/month, by agreement; organization tools not
+  live). The production record keeps the answers it was created with until an admin applies the new ones: Admin →
+  Platform → "GetShowUps sells itself" shows now/after, confirmed, versioned (409), audited. Founder action after deploy.
+- Expired session while working (LAUNCH_DECISION §4 #7): one notice, typed text kept, sign in in a new tab, continue;
+  a different account is never continued. No "A–Z master plan" document exists in the repo, memory or transcripts.
+
 ## AI architecture efficiency (2026-11-23) — feat/ai-efficiency (no migration, no model or prompt change)
 
 - docs/AI_ARCHITECTURE.md: measured vs estimated review. Changed: receptionist record reads run together, conversation

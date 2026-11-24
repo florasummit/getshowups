@@ -10,7 +10,7 @@
 // sales chat answers questions and records callback requests but cannot offer times. Idempotent: an existing record is
 // reported, never changed.
 import { createCustomer, getCustomer, updateHours } from './customers.js'
-import { saveProfile } from './onboarding.js'
+import { getProfile, saveProfile } from './onboarding.js'
 import { setTestBusiness } from './testbusiness.js'
 import { getSettings } from './receptionist/engine.js'
 import { CUSTOMER_RE } from './invites.js'
@@ -24,7 +24,10 @@ export const SALES_PROFILE = {
   phone: '',
   industry: 'Software',
   description: 'AI receptionist and booking for pool, HVAC and roofing businesses: every inquiry answered, qualified and booked on your Google Calendar while you are on a job.',
-  services: [{ name: 'Founding plan', price: '$499/month', description: 'Billed monthly, no setup fee, no free trial, cancel any time. Advertising spend is separate.' }],
+  services: [
+    { name: 'Growth plan', price: '$499/month' },
+    { name: 'Enterprise plan', price: 'Starting at $10,000/month' },
+  ],
   cities: [],
 }
 export const SALES_HOURS = { slotMinutes: 20, dayStart: '09:00', dayEnd: '17:00', workdays: [1, 2, 3, 4, 5] }
@@ -33,7 +36,8 @@ export const SALES_GREETING = 'Hi, this is the GetShowUps assistant. What kind o
 // true in production; the engine's guards still apply (listed price only, no promises).
 export const SALES_NOTES = `What you get for $499/month: a professional website built and hosted for you (your GetShowUps address or your own domain); an AI receptionist on your website chat that answers in seconds using only your services, prices, towns, hours and approved notes; online booking straight into your Google Calendar with a real open time; service-area screening for every lead; Teach Your AI (your questions, rules and hand-offs); Google Calendar invitations for every booking; show-up and visit tracking; direct help from the founding team.
 Not available yet (say so plainly): text messaging, email reminders, ad management, and voice on the phone. Voice on the website is in a pilot.
-Pricing: the Founding plan is $499 a month, billed monthly, no setup fee, no free trial, cancel any time from the billing page. Advertising spend, if they run ads, is separate and paid directly to Google or Meta. Applicable taxes are separate where required. No discounts.
+Pricing: the Growth plan is $499 a month, billed monthly, no setup fee, no free trial, cancel any time from the billing page. Advertising spend, if they run ads, is separate and paid directly to Google or Meta. Applicable taxes are separate where required. No discounts.
+Enterprise: for agencies, franchises, entrepreneurship programs, universities and multi-location organizations; priced by agreement, never online checkout. Each business runs as its own workspace today; one login across businesses, shared reporting and one invoice are not live. Offer to take their details or book a consultation, or point them to Contact sales under Pricing.
 Setup: the founder sets the business up with them on a short call; online enrollment opens later. Nothing is charged until they choose to sign up.
 Already have voicemail or texts: voicemail does not ask the questions or book the time; the receptionist answers in seconds, checks the area, asks what they would ask, and books a real open slot. Every inquiry still shows on their dashboard.
 Will it say something wrong: it uses only their records and never invents a price or a promise; if a price is not listed it says the team will confirm. They can test it before customers see it.
@@ -69,6 +73,41 @@ export async function createSalesBusiness(env, admin, kind, now = Date.now()) {
   return { ok: true, created: true, kind, id, status: await salesStatus(env, kind) }
 }
 
+// The record keeps the answers it was created with; when the approved answers above change, the console shows the
+// difference and an admin applies it (confirmed, audited; the page's version must still be the stored one). Only the plan
+// list, description and approved notes: greeting, hours, calendar, on/off and voice are never touched.
+async function salesAnswers(env, id) {
+  const db = env.ONBOARDING_DB
+  const [profile, settings, stamp] = await Promise.all([
+    getProfile(db, id),
+    getSettings(db, id),
+    db.prepare('SELECT (SELECT updated_at FROM business_profiles WHERE customer = ?1) AS p, (SELECT updated_at FROM receptionist_settings WHERE customer = ?1) AS s').bind(id).first(),
+  ])
+  const list = (l) => (l || []).map((s) => `${s.name}: ${s.price || ''}`).join('\n')
+  const stored = { services: list(profile?.services), description: profile?.description || '', notes: settings.knowledge }
+  const latest = { services: list(SALES_PROFILE.services), description: SALES_PROFILE.description, notes: SALES_NOTES }
+  return { current: JSON.stringify(stored) === JSON.stringify(latest), stored, latest, version: `${stamp?.p ?? 0}:${stamp?.s ?? 0}` }
+}
+
+// → { ok, changed, id } | { ok: false, httpStatus, error }
+export async function refreshSalesAnswers(env, kind, version, now = Date.now()) {
+  const spec = SALES_KINDS[kind]
+  if (!spec) return { ok: false, httpStatus: 400, error: 'invalid_request' }
+  const db = env.ONBOARDING_DB
+  if (!(await getCustomer(db, spec.id))) return { ok: false, httpStatus: 404, error: 'not_found' }
+  const a = await salesAnswers(env, spec.id)
+  if (a.version !== version) return { ok: false, httpStatus: 409, error: 'conflict' }
+  if (a.current) return { ok: true, changed: false, id: spec.id }
+  const [p, s] = a.version.split(':').map(Number)
+  const results = await db.batch([
+    db.prepare('UPDATE business_profiles SET services = ?2, description = ?3, updated_at = ?4 WHERE customer = ?1 AND updated_at = ?5 AND EXISTS (SELECT 1 FROM receptionist_settings r WHERE r.customer = ?1 AND r.updated_at = ?6)').bind(spec.id, JSON.stringify(SALES_PROFILE.services), SALES_PROFILE.description, now, p, s),
+    db.prepare('UPDATE receptionist_settings SET knowledge = ?2, updated_at = ?3 WHERE customer = ?1 AND updated_at = ?4 AND EXISTS (SELECT 1 FROM business_profiles b WHERE b.customer = ?1 AND b.updated_at = ?3)').bind(spec.id, SALES_NOTES, now, s),
+  ])
+  // An edit in between changed neither row (each update requires the other's version too).
+  if (!results.every((r) => (r?.meta?.changes ?? 0) > 0)) return { ok: false, httpStatus: 409, error: 'conflict' }
+  return { ok: true, changed: true, id: spec.id }
+}
+
 // What the console shows per record: exists, receptionist on, calendar connected (the one step only the founder can do).
 export async function salesStatus(env, kind) {
   const spec = SALES_KINDS[kind]
@@ -76,5 +115,5 @@ export async function salesStatus(env, kind) {
   const row = await getCustomer(env.ONBOARDING_DB, spec.id)
   if (!row) return { exists: false }
   const [settings, calendar] = await Promise.all([getSettings(env.ONBOARDING_DB, spec.id), env.GOOGLE_TOKENS.get(`google:${spec.id}`)])
-  return { exists: true, id: spec.id, name: row.name, receptionistOn: settings.enabled, calendarConnected: Boolean(calendar), hoursConfirmed: Boolean(row.hours_confirmed_at), chatUrl: `/chat/${spec.id}` }
+  return { exists: true, id: spec.id, name: row.name, receptionistOn: settings.enabled, calendarConnected: Boolean(calendar), hoursConfirmed: Boolean(row.hours_confirmed_at), chatUrl: `/chat/${spec.id}`, answers: await salesAnswers(env, spec.id) }
 }

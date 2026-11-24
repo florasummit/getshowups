@@ -1202,6 +1202,15 @@ function SalesSetup() {
     if (code !== 200) return setError(`Couldn’t create it (${data?.error || code}).`)
     load()
   }
+  const refresh = async (kind, st) => {
+    if (!window.confirm(`Replace the plan list, description and approved notes of ${st.name} with the current approved answers? Customers see them from the next message.`)) return
+    setBusy(kind)
+    setError('')
+    const { status: code, data } = await api('/api/platform/sales-business', { method: 'POST', body: { kind, action: 'refresh_answers', version: st.answers.version, confirm: true } })
+    setBusy('')
+    if (code !== 200) setError(code === 409 ? 'It was edited since this page loaded. Review it again.' : `Couldn’t update it (${data?.error || code}).`)
+    load()
+  }
   if (!status || status.error) return null
   return (
     <section className="card" aria-label="GetShowUps sells itself" data-sales-setup>
@@ -1214,6 +1223,27 @@ function SalesSetup() {
               <div>
                 <strong>{title}</strong> {st?.exists ? <Pill tone={st.calendarConnected ? 'ok' : 'warn'}>{st.calendarConnected ? 'Ready' : 'Calendar not connected'}</Pill> : <Pill tone="neutral">Not created</Pill>}
                 <p className="fine">{what}</p>
+                {st?.answers && !st.answers.current && (
+                  <details data-sales-answers="outdated">
+                    <summary>Its answers differ from the current approved answers</summary>
+                    {['services', 'description', 'notes'].filter((f) => st.answers.stored[f] !== st.answers.latest[f]).map((f) => (
+                      <div key={f}>
+                        <p className="fine">
+                          <strong>{{ services: 'Plans', description: 'Description', notes: 'Approved notes' }[f]}: now</strong>
+                        </p>
+                        <p className="fine pre-line">{st.answers.stored[f] || '(empty)'}</p>
+                        <p className="fine">
+                          <strong>After</strong>
+                        </p>
+                        <p className="fine pre-line">{st.answers.latest[f]}</p>
+                      </div>
+                    ))}
+                    <button type="button" className="btn btn-sm btn-quiet" disabled={Boolean(busy)} onClick={() => refresh(kind, st)} data-sales-refresh={kind}>
+                      Use the current approved answers
+                    </button>
+                  </details>
+                )}
+                {st?.answers?.current && <p className="fine" data-sales-answers="current">Answers are up to date.</p>}
                 {st?.exists && !st.calendarConnected && <p className="fine">Next: sign in to the dashboard as the owner of {st.name} and connect the Google Calendar the consultations should land on (Settings → Google Calendar). Until then the chat answers questions and records callbacks but cannot offer times.</p>}
               </div>
               {!st?.exists && (

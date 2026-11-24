@@ -79,7 +79,7 @@ function SignIn({ invite, plan }) {
             : closed
               ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
               : signup
-                ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month founding plan.'
+                ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
                 : 'Sign in to manage your booking page.'}
         </p>
         {closed && (
@@ -198,6 +198,22 @@ export default function Dashboard() {
     return cleanup
   }, [load, invite])
 
+  // Session ended mid-work: keep the page (and anything typed); sign in in a new tab, then "Try again" continues here.
+  const [expired, setExpired] = useState(false)
+  useEffect(() => {
+    const on = () => setExpired(true)
+    window.addEventListener('gsu:signed-out', on)
+    return () => window.removeEventListener('gsu:signed-out', on)
+  }, [])
+  const [recheck, setRecheck] = useState('')
+  const check = async () => {
+    const { status, data } = await api('/api/dashboard/me')
+    // Another account signed in: never continue this page as someone else.
+    if (status === 200 && (data.email !== me.data?.email || data.customer?.id !== me.data?.customer?.id)) return window.location.assign('/dashboard')
+    if (status === 200) setExpired(false)
+    setRecheck(status === 200 ? '' : status === 401 ? 'Still signed out.' : 'Couldn’t check. Try again.')
+  }
+
   if (me.loading) return <main className="center-page" aria-busy="true" />
   if (me.signedOut) return <SignIn invite={invitePreview} plan={plan} />
   if (me.error) {
@@ -234,5 +250,20 @@ export default function Dashboard() {
         </div>
       </main>
     )
-  return me.data.progress.complete ? <Home me={me.data} reload={load} /> : <Setup me={me.data} reload={load} />
+  return (
+    <>
+      {expired && (
+        <div className="signed-out" role="alert" data-signed-out>
+          <span>You’ve been signed out. What you typed is still here. {recheck}</span>
+          <a className="btn btn-sm btn-primary" href="/api/auth/google/start" target="_blank" rel="noopener">
+            Sign in (new tab)
+          </a>
+          <button type="button" className="btn btn-sm btn-quiet" onClick={check}>
+            I’ve signed in
+          </button>
+        </div>
+      )}
+      {me.data.progress.complete ? <Home me={me.data} reload={load} /> : <Setup me={me.data} reload={load} />}
+    </>
+  )
 }

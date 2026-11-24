@@ -4375,3 +4375,25 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   .rx-provider-table tr { display: grid; gap: 4px; padding: var(--s-2) 0; border-top: 1px solid var(--surface-muted); }
   .rx-provider-table th, .rx-provider-table td { border: 0; padding: 0; }
 }
+
+.pre-line {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* Signed out while working (Dashboard.jsx): what was typed stays on the page. */
+.signed-out {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  background: #fff4f2;
+  border-bottom: 1px solid #f3c9c0;
+  color: #7a2114;
+  font-size: 0.95rem;
+}

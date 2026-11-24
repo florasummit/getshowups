@@ -9,6 +9,9 @@ export async function api(path, { method = 'GET', body, keepalive = false } = {}
       body: body === undefined ? undefined : JSON.stringify(body),
       ...(keepalive ? { keepalive: true } : {}),
     })
+    // The session ended while a page was open (expired, or signed out elsewhere): the app says so once (Dashboard.jsx);
+    // callers still get the 401. The sign-in check itself (/me) is how a page learns it is signed out at all.
+    if (res.status === 401 && path.startsWith('/api/dashboard/') && !path.startsWith('/api/dashboard/me')) window.dispatchEvent(new Event('gsu:signed-out'))
     return { status: res.status, data: await res.json().catch(() => ({})) }
   } catch {
     return { status: 0, data: { error: 'network_error' } }
