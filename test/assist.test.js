@@ -9,7 +9,7 @@ import * as api from '../functions/api/dashboard/assist.js'
 import * as proposalApi from '../functions/api/dashboard/proposal.js'
 import { validateQuestion } from '../server/assist.js'
 import { problemWith } from '../server/operator.js'
-import { operatorModel } from '../server/operator-model.js'
+import { operatorModel, overBudget, spendLimits } from '../server/operator-model.js'
 import { rangeOf, refBook, runTool, toolContext, TOOLS } from '../server/operator-tools.js'
 import { getCustomer } from '../server/customers.js'
 import { customerFromRow } from '../server/auth.js'
@@ -311,4 +311,32 @@ test('limits: per business burst and day, and one shared ceiling; records still 
     await post('beta', { question: 'hello there' })
   }
   assert.ok(db.sql.prepare("SELECT count(*) AS n FROM events WHERE type = 'ai_ask'").get().n <= 25)
+})
+
+test('paid provider: own accounting, daily money ceilings per business and overall, unreadable or odd settings never mean unlimited', async () => {
+  const paid = { ...env, OPERATOR_PROVIDER: 'claude', OPERATOR_ANTHROPIC_API_KEY: 'k' }
+  assert.deepEqual(spendLimits({}), { day: 2, business: 0.1 })
+  for (const v of ['0', '-5', 'abc', '99999', '']) assert.equal(spendLimits({ OPERATOR_DAILY_USD: v }).day, 2)
+  assert.equal(spendLimits({ OPERATOR_DAILY_USD: '5' }).day, 5)
+  const spend = (id, c, micros, at = Date.now()) => db.sql.prepare("INSERT INTO events (id, type, customer, at, props) VALUES (?, 'ai_ask', ?, ?, ?)").run(id, c, at, JSON.stringify({ costMicros: micros }))
+  assert.equal(await overBudget(paid, 'alpha'), false)
+  spend('y', 'alpha', 9e6, Date.now() - 2 * DAY)
+  assert.equal(await overBudget(paid, 'alpha'), false)
+  spend('b', 'alpha', 1e5)
+  assert.deepEqual([await overBudget(paid, 'alpha'), await overBudget(paid, 'beta')], [true, false])
+  spend('c', 'alpha', 2e6)
+  assert.equal(await overBudget(paid, 'beta'), true)
+  assert.equal(await overBudget(env, 'beta'), false)
+  assert.equal(await overBudget({ ...paid, ONBOARDING_DB: { prepare: () => { throw new Error('x') } } }, 'beta'), true)
+  // At the ceiling nothing is sent to the provider and the records still answer. A provider failure counts a charge.
+  appt('alpha', 'Jamie Rivera', 20 * HOUR)
+  let sent = 0
+  env.OPERATOR_PROVIDER = 'claude'
+  env.OPERATOR_ANTHROPIC_API_KEY = 'k'
+  env.ANTHROPIC_CLIENT = { messages: { create: async () => { sent++; throw new Error('529') } } }
+  assert.deepEqual([(await post('alpha', { question: 'appointments' })).body.records[0].name, sent], ['Jamie Rivera', 0])
+  db.sql.exec("DELETE FROM events WHERE type = 'ai_ask'")
+  assert.equal((await post('alpha', { question: 'appointments' })).body.records[0].name, 'Jamie Rivera')
+  const ev = JSON.parse(db.sql.prepare("SELECT props FROM events WHERE type = 'ai_ask'").get().props)
+  assert.deepEqual([sent, ev.model, ev.ok, ev.costMicros], [1, 'claude-haiku-5-5', false, 1000])
 })

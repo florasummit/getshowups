@@ -44,6 +44,11 @@ now but not a good long-term state (it keeps end customers' personal data with n
 Steps are idempotent; failures retry with backoff (5 min doubling to 6 h), are recorded as failure events, and after 3
 failed attempts show as "Deletion stuck" in /admin. A deletion is never reported complete while anything is left.
 
+Added 2026-11-24: members are signed out everywhere (their sign-in sessions are removed); test/deletion-completeness.test.js fails
+if a table with a business id is neither erased nor deliberately kept. Google Ads and Business Profile grants are not revoked at Google
+(they may be shared with Calendar): the owner is told to remove GetShowUps in their Google Account. Expired sessions of everyone are
+removed a day after they expire (server/sessions-purge.js). Still switched off: ACCOUNT_DELETION_ENABLED. Backups: docs/BACKUPS.md.
+
 ## 4. Kept after deletion, and why (proposed)
 
 | Record | Contents | Why | Proposed period |

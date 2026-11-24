@@ -9,6 +9,7 @@
 //   verify       re-checks that nothing erasable is left, then records the report
 // Each step is idempotent; a failed step is retried with backoff by the cron (processDeletions). No undo window.
 // Runs only when ACCOUNT_DELETION_ENABLED is exactly 'true' (approval); otherwise nothing is requested or run.
+import { adminEmails } from './platform.js'
 import { closeSubaccount } from './followups/twilio.js'
 import { emailRef, recordEvent } from './auditlog.js'
 import { decrypt, revokeUnlessInUse } from './google-oauth.js'
@@ -81,13 +82,19 @@ export async function requestDeletion(env, customerId, actor, now = Date.now()) 
 async function lockout(env, id, now) {
   const db = env.ONBOARDING_DB
   await db.prepare("UPDATE customers SET status = 'suspended', updated_at = ?2 WHERE id = ?1").bind(id, now).run()
+  // Members are signed out everywhere (an email belongs to one business). A platform admin who is also a member keeps theirs.
+  const admins = adminEmails(env)
+  const sessions = await db
+    .prepare(`DELETE FROM sessions WHERE email IN (SELECT email FROM customer_users WHERE customer = ?1)${admins.length ? ` AND lower(email) NOT IN (${admins.map((_, i) => `?${i + 2}`).join(', ')})` : ''}`)
+    .bind(id, ...admins)
+    .run()
   const members = await db.prepare('DELETE FROM customer_users WHERE customer = ?1').bind(id).run()
   const messages = await db.prepare("UPDATE messages SET status = 'skipped', error = 'account_deleted', updated_at = ?2 WHERE customer = ?1 AND status IN ('scheduled', 'sending')").bind(id, now).run()
   const invites = await db.prepare('UPDATE account_invites SET revoked_at = coalesce(revoked_at, ?2) WHERE customer = ?1').bind(id, now).run()
   await db.prepare("DELETE FROM email_outbox WHERE customer = ?1 AND status = 'pending'").bind(id).run()
   // The hosted website goes offline now (suspension already stops serving; this also clears the published version).
   const site = await db.prepare('UPDATE websites SET live_version = NULL, published_at = NULL, updated_at = ?2 WHERE customer = ?1 AND live_version IS NOT NULL').bind(id, now).run()
-  return { websiteUnpublished: site.meta.changes > 0, membersRemoved: members.meta.changes, messagesCancelled: messages.meta.changes, invitesRevoked: invites.meta.changes }
+  return { websiteUnpublished: site.meta.changes > 0, membersRemoved: members.meta.changes, sessionsEnded: sessions.meta.changes, messagesCancelled: messages.meta.changes, invitesRevoked: invites.meta.changes }
 }
 
 async function ads(env, id, now) {
