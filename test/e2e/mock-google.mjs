@@ -458,7 +458,7 @@ createServer(async (req, res) => {
     }
     // Dashboard assistant (server/operator.js), scripted: a lookup first, then words that use its references. "secret" →
     // an invented number and a claimed action (refused twice, so the records are shown instead).
-    if (/^You are the operator inside GetShowUps/.test(JSON.parse(raw).messages[0].content)) {
+    if (/^You work inside GetShowUps for the owner/.test(JSON.parse(raw).messages[0].content)) {
       events.push({ type: 'ai.assist' })
       const { messages } = JSON.parse(raw)
       const q = messages.filter((m) => m.role === 'user' && !m.content.startsWith('[check')).at(-1).content
@@ -480,7 +480,10 @@ createServer(async (req, res) => {
       return send(res, 200, { response: { text }, usage: { prompt_tokens: 300, completion_tokens: 30 } })
     }
     const prompt = JSON.parse(raw).messages.at(-1).content
-    const facts = JSON.parse(prompt.match(/Facts \(JSON\):\n(\{.*\})/)[1])
+    const found = prompt.match(/Facts \(JSON\):\n(\{.*\})/)
+    // Unknown prompt: say so instead of crashing every later test.
+    if (!found) return send(res, 500, { error: 'mock-google: unrecognised AI prompt' })
+    const facts = JSON.parse(found[1])
     const revision = prompt.includes("Owner's request")
     const first = String(facts.services[0] || facts.whatTheyDo || 'Service').split(' (')[0]
     return send(res, 200, {

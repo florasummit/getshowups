@@ -9,7 +9,7 @@ import { plainAnswer } from './assist-plain.js'
 import { REPEATABLE } from './operator-tools.js'
 import { operatorConfigured } from './operator-model.js'
 import { keep } from './fit.js'
-import { PROPOSAL_ID } from './proposal-set.js'
+import { newProposalId, PROPOSAL_ID } from './proposal-set.js'
 import { businessEligible } from './eligibility.js'
 import { internalEmails } from './testdata.js'
 
@@ -86,7 +86,7 @@ export function funnelEvidence(f) {
 export async function withoutModel(env, customer, req) {
   if (wantsServiceArea(req.question)) {
     const p = await serviceAreaProposal(env, customer, req.question)
-    return { kind: 'prepared', answer: p.text, ...(p.proposal ? { proposals: [p.proposal] } : {}) }
+    return { kind: 'prepared', answer: p.text, ...(p.proposal ? { proposals: [{ ...p.proposal, pid: newProposalId() }] } : {}) }
   }
   return plainAnswer(env, customer, req)
 }

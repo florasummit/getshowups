@@ -135,6 +135,18 @@ test('feedback: the owner’s own answer, codes only, newest reason wins, nothin
   assert.doesNotMatch(rows[0].props, /secret/)
 })
 
+test('a change prepared while the AI is out has an id too; the browser test stand-in knows the instructions by their first words', async () => {
+  const { withoutModel } = await import('../server/assist.js')
+  const { PROPOSAL_ID } = await import('../server/proposal-set.js')
+  const { INSTRUCTIONS } = await import('../server/operator-instructions.js')
+  sql.exec("UPDATE customers SET service_zips = '29401' WHERE id = 'alpha'")
+  const c = customerFromRow(await getCustomer(env.ONBOARDING_DB, 'alpha'))
+  const r = await withoutModel(env, c, { question: 'add 29464 to my zip codes', view: 'settings', refs: {}, history: [] })
+  assert.match(r.proposals[0].pid, PROPOSAL_ID)
+  assert.ok(INSTRUCTIONS.startsWith('You work inside GetShowUps for the owner'))
+  assert.match(readFileSync(new URL('./e2e/mock-google.mjs', import.meta.url), 'utf8'), /You work inside GetShowUps for the owner/)
+})
+
 test('the specification names only files that exist, and the instructions stay within their budget', async () => {
   const doc = readFileSync(new URL('../docs/INTELLIGENCE.md', import.meta.url), 'utf8')
   for (const [, f] of doc.matchAll(/`((?:server|test|scripts|functions|src|docs)\/[\w./-]+\.(?:js|mjs|md))`/g)) assert.ok(existsSync(new URL(`../${f}`, import.meta.url)), f)
