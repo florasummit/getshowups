@@ -1,6 +1,6 @@
 // Public booking page at /book/:id — details → time → booked. Real slots from the business's
 // Google Calendar; the booking creates a real calendar event and Google emails the invitation.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, fmt, noIndex } from '../lib/api.js'
 import '../app.css'
 
@@ -27,6 +27,22 @@ export default function BookingPage({ id }) {
   const [lead, setLead] = useState(resume)
   const [booked, setBooked] = useState(null)
 
+  // After a step change, move focus to the new heading so keyboard and screen-reader users land on it.
+  const panel = useRef(null)
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) {
+      first.current = false
+      return
+    }
+    const h = panel.current?.querySelector('h1')
+    if (h) {
+      h.tabIndex = -1
+      h.focus({ preventScroll: true })
+      window.scrollTo(0, 0)
+    }
+  }, [step])
+
   const loadSlots = () =>
     api(`/api/book/${id}`).then(({ status, data }) => setPage(status === 200 ? { data } : { missing: status === 404, error: status !== 404 }))
 
@@ -47,6 +63,11 @@ export default function BookingPage({ id }) {
         <div className="panel panel--narrow enter">
           <h1 className="title">{page.missing ? 'This booking page isn’t available' : 'We can’t load times right now'}</h1>
           <p className="lede">{page.missing ? 'Check the link and try again.' : 'Please try again in a moment.'}</p>
+          {!page.missing && (
+            <button type="button" className="btn btn-primary btn-block" onClick={loadSlots}>
+              Try again
+            </button>
+          )}
         </div>
       </main>
     )
@@ -56,7 +77,7 @@ export default function BookingPage({ id }) {
   return (
     <main className="center-page center-page--top booking">
       <p className="booking-biz">{biz.name}</p>
-      <section key={step} className="panel panel--narrow enter">
+      <section key={step} ref={panel} className="panel panel--narrow enter">
         {step === 'details' && (
           <Details
             id={id}
@@ -287,13 +308,12 @@ function PickTime({ id, biz, lead, refresh, onBooked }) {
   return (
     <>
       <h1 className="title">{biz.appointmentMode === 'at_customer' ? 'Pick a visit time' : 'Pick a time'}</h1>
-      <div className="day-strip" role="tablist" aria-label="Day">
+      <div className="day-strip" role="group" aria-label="Day">
         {days.map((slots, i) => (
           <button
             key={slots[0]}
             type="button"
-            role="tab"
-            aria-selected={i === day}
+            aria-pressed={i === day}
             className="day-chip"
             onClick={() => {
               setDay(i)
@@ -309,9 +329,9 @@ function PickTime({ id, biz, lead, refresh, onBooked }) {
         {fmt(current[0], tz, { weekday: 'long', month: 'long', day: 'numeric' })}
         {sameZone(tz) ? '' : ` · ${tz.replaceAll('_', ' ')} time`}
       </p>
-      <div className="slot-grid" role="radiogroup" aria-label="Time">
+      <div className="slot-grid" role="group" aria-label="Time">
         {current.map((s) => (
-          <button key={s} type="button" role="radio" aria-checked={slot === s} className="slot" onClick={() => setSlot(s)}>
+          <button key={s} type="button" aria-pressed={slot === s} className="slot" onClick={() => setSlot(s)}>
             {fmt(s, tz, { hour: 'numeric', minute: '2-digit' })}
           </button>
         ))}

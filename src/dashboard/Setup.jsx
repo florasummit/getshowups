@@ -3,6 +3,7 @@
 // calendar → hours → website → address → publish → launch. Older businesses keep business → calendar → hours.
 import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo.jsx'
+import { LoadError } from './ui.jsx'
 import { api, browserTimeZone, timeZones } from '../lib/api.js'
 import { BusinessForm, HoursForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
@@ -258,7 +259,7 @@ const profileError = (fields = []) => fields.map((f) => PROFILE_ERRORS[f]).filte
 function useProfile() {
   const [profile, setProfile] = useState(undefined)
   useEffect(() => {
-    api('/api/dashboard/profile').then(({ status, data }) => setProfile(status === 200 ? data.profile || null : null))
+    api('/api/dashboard/profile').then(({ status, data }) => setProfile(status === 200 ? data.profile || null : 'failed'))
   }, [])
   return profile
 }
@@ -267,6 +268,7 @@ function DetailsStep({ customer, onDone }) {
   const profile = useProfile()
   const [state, setState] = useState({})
   if (profile === undefined) return <div aria-busy="true" />
+  if (profile === 'failed') return <LoadError what="your details" onRetry={() => location.reload()} />
   const p = profile || {}
   const submit = async (e) => {
     e.preventDefault()
@@ -378,6 +380,7 @@ function ServicesStep({ onDone, back }) {
   const [edited, setRows] = useState(null)
   const [state, setState] = useState({})
   if (profile === undefined) return <div aria-busy="true" />
+  if (profile === 'failed') return <LoadError what="your details" onRetry={() => location.reload()} />
   // Saved services, else suggestions for the industry, until the owner edits them.
   const saved = profile?.services || []
   const suggestions = SUGGESTED[(profile?.industry || '').toLowerCase()] || []
@@ -475,7 +478,7 @@ function CalendarHealth() {
     return (
       <p className="status status--ok">
         <span className="status-dot" aria-hidden="true" />
-        Google Calendar connected{cal.account ? ` (${cal.account})` : ''}
+        Google Calendar connected{cal.account?.email ? ` (${cal.account.email})` : ''}
       </p>
     )
   return (

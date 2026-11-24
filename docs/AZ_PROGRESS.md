@@ -18,9 +18,9 @@ isn't done. Evidence only: nothing is marked done from a claim.
 
 | Phase | State | Evidence |
 | --- | --- | --- |
-| A Foundation | in progress | below |
-| B Public messaging | not started | |
-| C Usability | not started | |
+| A Foundation | done | #141 (main e106333, deployment f3af0540, rollback 1587ad1d) |
+| B Public messaging | in progress | az/b-c: seven lifecycle steps with real status; Teach Your AI labelled pilot everywhere |
+| C Usability | in progress | az/b-c: see below |
 | D Static help | not started | |
 | E Dashboard AI chat | not started | |
 | F Inline writing | not started | |
@@ -33,10 +33,23 @@ isn't done. Evidence only: nothing is marked done from a claim.
 Measured (PR #140, run 45297608877, 12 m 13 s): browser tests 446 s, Chromium install 226 s, everything else 41 s.
 Local: lint 0.3 s, unit 16 s, build 0.5 s, Functions 0.7 s, full browser suite 3.3 min (5 workers).
 
-- Third CI browser worker: to be compared below.
+- Third CI browser worker: #141's whole verify job took 8 m 36 s; the six runs before it 8 m 00 s to 12 m 13 s. One
+  run proves no speedup (the Chromium step alone varies by minutes); no flake seen. Kept, to be compared per step.
 - Chromium install: the fix (caching the browser) is a workflow file change; our token has no Workflows permission
   (owner).
 - Releases were ad-hoc shell each time: now `scripts/release.sh`; CI is looked at with `scripts/ci-check.sh`.
+
+### C. Defects found and fixed (each reproduced in code, browser-tested)
+
+| Defect | Effect |
+| --- | --- |
+| Settings / setup forms opened EMPTY when loading failed | saving then erased stored services and notes (data loss) |
+| A failed 30-second refresh of Follow-ups unmounted the conversation | a reply being written was lost |
+| Changing tabs dropped unsaved text silently | now asks first |
+| Appointments stayed blank on a load failure | now says so, with Retry |
+| Setup showed "Google Calendar connected ([object Object])" | shows the email |
+| Reminders / follow-up switch and "Undo" ignored failures | now say so |
+| Booking page: no retry when times fail; focus lost between steps; tab/radio roles without their keyboard behaviour | retry, focus on the new heading, plain pressed buttons |
 
 ## Needs the owner (never inferred)
 

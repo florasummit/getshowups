@@ -8,7 +8,7 @@ import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
-import { Pill } from './ui.jsx'
+import { LoadError, Pill } from './ui.jsx'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
 const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
@@ -410,12 +410,7 @@ function Overview({ me, data, reload, go, site }) {
       <NextStep onOpen={go} skip={site && !site.website?.published ? ['page'] : []} />
       {!data && <div className="ui-skeleton-block" aria-busy="true" />}
       {data?.failed && (
-        <p className="form-error" role="alert">
-          Couldn’t load your results.{' '}
-          <button type="button" className="link-btn" onClick={reload}>
-            Retry
-          </button>
-        </p>
+        <LoadError what="your results" onRetry={reload} />
       )}
       {data && !data.failed && (
         <div className="enter ui-overview">
@@ -496,17 +491,20 @@ function CalendarSettings() {
 // Reminders: on/off and whether they're actually sending yet. Never shown as a failure.
 function Reminders() {
   const [a, setA] = useState(null)
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = useCallback(() => api('/api/dashboard/overview').then(({ status, data }) => status === 200 && setA(data.automation)), [])
+  const load = useCallback(() => api('/api/dashboard/overview').then(({ status, data }) => setA(status === 200 ? data.automation : { failed: true })), [])
   useEffect(() => {
     load()
   }, [load])
   if (!a) return <div aria-busy="true" />
+  if (a.failed) return <LoadError what="reminders" onRetry={load} />
   const sending = a.enabled && (a.email || a.sms) && !a.testMode
   const toggle = async () => {
     setBusy(true)
-    await api('/api/dashboard/automations', { method: 'POST', body: { enabled: !a.enabled } })
-    await load()
+    const { status } = await api('/api/dashboard/automations', { method: 'POST', body: { enabled: !a.enabled } })
+    setError(status === 200 ? '' : 'Couldn’t change this. Please try again.')
+    if (status === 200) await load()
     setBusy(false)
   }
   return (
@@ -521,6 +519,11 @@ function Reminders() {
       <button type="button" className="link-btn" disabled={busy} onClick={toggle}>
         {a.enabled ? 'Turn reminders off' : 'Turn reminders on'}
       </button>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
@@ -611,6 +614,7 @@ export default function Home({ me, reload }) {
   }, [view])
   const go = (where) => {
     const tab = where === 'billing' ? 'settings' : where
+    if (tab !== view && document.querySelector('.app-main form[data-dirty]') && !window.confirm('You have changes that aren’t saved. Leave this page and lose them?')) return
     if (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable) return openBilling({ action: 'portal' }, () => {})
     window.history.pushState(null, '', tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`)
     setView(tab)
@@ -637,7 +641,12 @@ export default function Home({ me, reload }) {
           </a>
         ))}
       </nav>
-      <main className="app-main">
+      {/* A form someone typed in is marked until it is submitted, so changing tabs never silently drops the text. */}
+      <main
+        className="app-main"
+        onInput={(e) => e.target.closest?.('form')?.setAttribute('data-dirty', '')}
+        onSubmit={(e) => e.target.removeAttribute?.('data-dirty')}
+      >
         {view === 'overview' && (
           <>
             <h1 className="ui-page-title ui-page-title--top">{me.customer.name}</h1>
@@ -645,7 +654,7 @@ export default function Home({ me, reload }) {
             <Overview me={me} data={data} reload={loadOverview} go={go} site={site} />
           </>
         )}
-        {view === 'appointments' && <Appointments me={me} data={data && !data.failed ? data : null} reload={loadOverview} />}
+        {view === 'appointments' && <Appointments me={me} data={data} reload={loadOverview} />}
         {view === 'followups' && (
           <Suspense fallback={<div aria-busy="true" />}>
             <FollowUps />

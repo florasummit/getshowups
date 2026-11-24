@@ -1665,6 +1665,24 @@ svg {
   --tint: var(--ink-900);
 }
 
+.jf-step--optimize {
+  --tint: var(--lav-300);
+}
+
+@media (min-width: 1024px) {
+  .jf {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .jf-step {
+    grid-column: span 4;
+  }
+
+  .jf-step:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+}
+
 .jf-n {
   position: absolute;
   left: 14px;

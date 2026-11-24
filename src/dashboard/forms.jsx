@@ -1,5 +1,6 @@
 // Business and booking-hours forms, shared by setup and settings.
 import { useEffect, useRef, useState } from 'react'
+import { LoadError } from './ui.jsx'
 import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
 
@@ -165,12 +166,15 @@ export function ProfileForm({ onSaved }) {
   // The saved details this form shows (only when they loaded): sent as `base`, so a change made elsewhere meanwhile is
   // never silently replaced (409 conflict).
   const base = useRef(null)
-  useEffect(() => {
+  const load = () =>
     api('/api/dashboard/profile').then(({ status, data }) => {
       if (status === 200 && data.profile) base.current = data.profile
-      setP(status === 200 ? data.profile || {} : {})
+      setP(status === 200 ? data.profile || {} : null)
     })
+  useEffect(() => {
+    load()
   }, [])
+  if (p === null) return <LoadError what="your details" onRetry={load} />
   if (p === undefined) return <div aria-busy="true" />
   const submit = async (e) => {
     e.preventDefault()
@@ -236,12 +240,15 @@ export function PoliciesForm() {
   const [p, setP] = useState(undefined)
   const [state, setState] = useState({})
   const base = useRef(null) // the saved policies this form shows (see ProfileForm)
-  useEffect(() => {
+  const load = () =>
     api('/api/dashboard/policies').then(({ status, data }) => {
       if (status === 200) base.current = data.policies
-      setP(status === 200 ? data.policies : { beforeVisit: '', cancellation: '' })
+      setP(status === 200 ? data.policies : null)
     })
+  useEffect(() => {
+    load()
   }, [])
+  if (p === null) return <LoadError what="these notes" onRetry={load} />
   if (p === undefined) return <div aria-busy="true" />
   const submit = async (e) => {
     e.preventDefault()
