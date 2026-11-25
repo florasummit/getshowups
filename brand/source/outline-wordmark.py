@@ -47,4 +47,12 @@ def logo(bg, ink, accent, name):
         f'<path fill="{ink}" d="{out['GetShow']}"/><path fill="{accent}" d="{out['Ups']}"/></svg>\n')
 logo('#0B0B0C', '#111216', '#C2410C', 'getshowups-logo-on-light.svg')
 logo('#22242A', '#FFFFFF', '#FF8A47', 'getshowups-logo-on-dark.svg')
+# The wordmark alone (homepage navigation): same outlines, shifted to start at 0, same 28 px line box.
+WW = round(out['width'] + 0.6, 2)
+def wordmark(ink, accent, name):
+    open(f'brand/logo/{name}', 'w').write(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WW} 28" width="{WW}" height="28"><title>GetShowUps</title>'
+        f'<g transform="translate(-38 0)"><path fill="{ink}" d="{out['GetShow']}"/><path fill="{accent}" d="{out['Ups']}"/></g></svg>\n')
+wordmark('#111216', '#C2410C', 'getshowups-wordmark-on-light.svg')
+wordmark('#FFFFFF', '#FF8A47', 'getshowups-wordmark-on-dark.svg')
 print(f"wordmark width {out['width']:.2f} px, baseline {out['baseline']}, logo {W} x 28")
