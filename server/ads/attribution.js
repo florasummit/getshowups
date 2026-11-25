@@ -2,7 +2,10 @@ import { sealClickId } from './conversions.js'
 // Lead attribution for booking-page leads. Ad clicks land on /book/:id?utm_source=google|meta&utm_campaign=<our id>.
 // A lead is attributed to a campaign only when that campaign belongs to the same business; otherwise
 // it is recorded as a plain booking-page lead. Stores only non-personal parameters.
-const SOURCE = { google: 'google_ads', meta: 'meta_lead_form' }
+const SOURCE = { google: 'google_ads', meta: 'meta_lead_form', openai: 'openai_ad_click' }
+// The lead source recorded for a click on a GetShowUps campaign (ChatGPT Ads links carry utm_source=openai through the
+// campaign's query_string_template, server/ads/openai.js trackingTemplate).
+const CLICK_SOURCE = { google: 'google_ads', meta: 'meta_ad_click', openai: 'openai_ad_click' }
 
 export function parseUtm(input) {
   const s = input && typeof input === 'object' ? input : {}
@@ -30,7 +33,7 @@ export async function recordAttribution(env, customerId, leadId, rawUtm, now = D
   if (utm.campaign && SOURCE[utm.source]) {
     const row = await env.ONBOARDING_DB.prepare('SELECT id, platform FROM ad_campaigns WHERE id = ?1 AND customer = ?2').bind(utm.campaign, customerId).first()
     if (row && row.platform === utm.source) {
-      source = row.platform === 'google' ? 'google_ads' : 'meta_ad_click'
+      source = CLICK_SOURCE[row.platform]
       campaignId = row.id
     } else if (utm.source === 'google' && /^\d{1,20}$/.test(utm.campaign)) {
       // A campaign the business runs itself in Google Ads (imported, read-only), when its links carry

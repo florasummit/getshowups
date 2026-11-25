@@ -100,6 +100,13 @@ d1 "
     ('$E2E_IMPORT_CUSTOMER', 'cus_E2EIMPORT', 'sub_E2EIMPORT', 'founding', 'active', 49900, 'usd', $FAR, $NOW);
   INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_IMPORT_CUSTOMER', 1, 'admin@e2e.example', $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('$E2E_OPENAI_CUSTOMER', 'E2E ChatGPT Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-openai.example', '$E2E_OPENAI_CUSTOMER', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_OPENAI_SESSION_TOKEN")', 'owner@e2e-openai.example', $NOW, $FAR);
+  INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
+    ('$E2E_OPENAI_CUSTOMER', 'Pool service', '[\"Pool repair\",\"Green pool cleanup\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
+  INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-openai-budget', '$E2E_OPENAI_CUSTOMER', 60000, 'owner@e2e-openai.example', $NOW);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_AREA_CUSTOMER', 'E2E Area Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-area.example', '$E2E_AREA_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_AREA_SESSION_TOKEN")', 'owner@e2e-area.example', $NOW, $FAR);
@@ -341,4 +348,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding META_WEBHOOK_VERIFY_TOKEN="$E2E_META_VERIFY_TOKEN" \
   --binding META_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding META_SANDBOX_AD_ACCOUNTS=act_111 \
+  --binding OPENAI_ADS_ENABLED=true \
+  --binding OPENAI_ADS_VERIFY_BUSINESSES="$E2E_OPENAI_CUSTOMER" \
+  --binding OPENAI_ADS_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding VOICE_LAB_ENABLED=true

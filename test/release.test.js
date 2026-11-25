@@ -342,7 +342,10 @@ test('migrations: 0002 is additive and idempotent over production state; PoolThr
   assert.equal(JSON.stringify(db.sql.prepare('SELECT * FROM onboarding_invites').all()), invitesBefore)
   // Append-only guards are the one allowed mention of UPDATE/DELETE: a trigger that only refuses the change.
   const GUARD = /CREATE TRIGGER IF NOT EXISTS \w+ BEFORE (UPDATE|DELETE) ON \w+ BEGIN SELECT RAISE\(ABORT, '[^']*'\); END;/g
-  for (const f of MIGRATIONS) assert.doesNotMatch(migration(f).replace(GUARD, ''), /\b(DROP|DELETE|ALTER|UPDATE)\b/i, `${f} must be additive`)
+  // The one reviewed exception: 0039 rebuilds three ad tables to widen a CHECK (SQLite can't alter one). Its own test
+  // (test/migration-0039.test.js) proves every row, column, index and foreign key survives and that it can run twice.
+  const REVIEWED_REBUILDS = ['0039_ads_platform_openai.sql']
+  for (const f of MIGRATIONS.filter((x) => !REVIEWED_REBUILDS.includes(x))) assert.doesNotMatch(migration(f).replace(GUARD, ''), /\b(DROP|DELETE|ALTER|UPDATE)\b/i, `${f} must be additive`)
   assert.equal("CREATE TRIGGER IF NOT EXISTS t BEFORE DELETE ON x BEGIN DELETE FROM y; END;".replace(GUARD, '').includes('DELETE'), true, 'only pure refusal triggers are exempt')
 
   const linked = await call(customers, 'POST', '/api/admin/customers', {

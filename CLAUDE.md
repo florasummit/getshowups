@@ -81,6 +81,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/domain   Own domain: connect | check | disconnect.  api/dashboard/test-mark: mark a lead test / not test
   p/[customer]       Public website (server-rendered).  site-assets/[id]: website images.  _middleware.js: domain routing
   api/ads/google/     Google Ads connect: start, callback, accounts (+ billing status), disconnect.  api/ads/meta/: start, callback, accounts, webhook (leads)
+  api/ads/openai/     ChatGPT Ads (OPENAI_ADS_ENABLED, else 404): key (GET status; POST save = validated owner Ads API key | disconnect), locations (GET markets/regions)
   api/enterprise/inquiry  Public Enterprise inquiry (GET form token, POST): a lead of the `getshowups` business (server/enterprise.js),
                      no automatic messages. Enterprise is sold by agreement, never checkout; organizations are design only
                      (docs/ENTERPRISE_ORGANIZATIONS.md). The $499 plan is named Growth in copy; its plan id stays `founding`
@@ -271,6 +272,15 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Ads: campaigns are created PAUSED; live create/resume only with ADS_LIVE_LAUNCH=true (approval required), an owner
   budget approval, and room under it. With Stripe configured, LIVE launch/resume also needs an active subscription;
   sandbox (verified Google Ads test account) does not, so never-billed pilots (PoolThru) can test.
+- ChatGPT Ads (server/ads/openai.js, docs/OPENAI_ADS.md, migration 0039 = the ONE reviewed table rebuild; 2026-11-24): a
+  third adapter behind campaigns.js adapter(), nothing duplicated. OFF unless OPENAI_ADS_ENABLED is exactly 'true'
+  (approval); off = no routes, drafts or UI, but PAUSING and read-back always work (safety stop). Owner's own Ads API key
+  (one per ad account), validated read-only before storing, encrypted in KV ads:openai:<id>, only the last 4 shown.
+  Location = markets/regions only (no ZIP/radius/city): always tell the owner. Campaign → ad group → ad created PAUSED
+  with Idempotency-Key gsu-<id>-<step>; anything reported running is paused at once (not_paused). OpenAI has NO sandbox:
+  paused creation without ADS_LIVE_LAUNCH only for OPENAI_ADS_VERIFY_BUSINESSES (approval), never a test business, and
+  Start/resume/budget still need the live switch. A key for another ad account never touches earlier campaigns
+  (account_changed). Leads: utm_source=openai → openai_ad_click. Conversions API, lead forms, partner OAuth: not built.
 - Meta (Facebook/Instagram) lead ads (server/ads/meta.js, docs/META_ADS.md; 2026-11-22): everything created PAUSED;
   long-lived tokens re-exchanged by cron when < 14 days from expiry (expired → reconnect_required, never silent);
   META_SANDBOX_AD_ACCOUNTS lists Meta's API-only sandbox ad accounts (no API flag exists): a business on one may

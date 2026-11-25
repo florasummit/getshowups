@@ -56,8 +56,16 @@ const ERRORS = {
   account_disabled: 'Meta reports this ad account as disabled. Check it in Ads Manager.',
   creative_rejected: 'Meta rejected the ad’s image or text. Change it and try again.',
   invalid_request: 'Meta didn’t accept the campaign as drafted. Check the fields and try again.',
+  invalid_key_format: 'That doesn’t look like a ChatGPT Ads API key. Copy it again from Ads Manager → Settings.',
+  invalid_key: 'ChatGPT Ads didn’t accept that key. Create a new one in Ads Manager → Settings and paste it here.',
+  platform_unavailable: 'ChatGPT ads aren’t switched on for GetShowUps yet.',
+  not_paused: 'ChatGPT Ads reported this campaign as running, so GetShowUps paused it straight away and stopped. Check it in Ads Manager.',
 }
-const PLATFORM_NAME = { google: 'Google', meta: 'Meta' }
+const PLATFORM_NAME = { google: 'Google', meta: 'Meta', openai: 'ChatGPT Ads' }
+const PLATFORM_TITLE = { google: 'Google Search', meta: 'Facebook & Instagram', openai: 'ChatGPT ads' }
+const O = { title: 50, titleMin: 3, body: 100, hints: 10, hint: 200 } // mirrors server/ads/spec.js LIMITS.openai (the server decides)
+const OPENAI_GEO = 'ChatGPT ads can only target whole metro areas or states, not your ZIP codes. Someone outside your ZIP codes can still see and click the ad: your booking page checks their ZIP and won’t offer times, but the click is still paid for.'
+const CHARGING_OPENAI = 'The daily budget is the most ChatGPT Ads may spend on this campaign in a day. There is no ChatGPT Ads test account: anything created is real, and stays paused until you press Start.'
 const META_CTA_LABEL = { GET_QUOTE: 'Get quote', BOOK_NOW: 'Book now', LEARN_MORE: 'Learn more', CONTACT_US: 'Contact us' }
 const META_FORM_LABEL = { FULL_NAME: 'Full name', PHONE: 'Phone', EMAIL: 'Email', ZIP: 'ZIP code' }
 const META_PLACEMENT_LABEL = { facebook: 'Facebook', instagram: 'Instagram' }
@@ -586,7 +594,7 @@ function DisconnectGoogle({ running, onDone, onCancel }) {
   )
 }
 
-function Connections({ connections, capabilities, running = 0, onChange, businessProfile = null, businessProfileReadiness = null }) {
+function Connections({ connections, capabilities, running = 0, runningOpenAi = 0, onChange, businessProfile = null, businessProfileReadiness = null }) {
   const [disconnecting, setDisconnecting] = useState(false)
   const [done, setDone] = useState(null)
   const row = (platform, label) => {
@@ -667,6 +675,7 @@ function Connections({ connections, capabilities, running = 0, onChange, busines
       <ul className="rows">
         {row('google', 'Google Ads')}
         {row('meta', 'Facebook & Instagram')}
+        {capabilities.openai && <OpenAiRow c={connections.openai} running={runningOpenAi} onChange={onChange} />}
         <BusinessProfileRow available={Boolean(capabilities.gbp)} profile={businessProfile} readiness={businessProfileReadiness} onChange={onChange} />
       </ul>
     </section>
@@ -836,6 +845,201 @@ function MetaPreview({ spec }) {
       {m.description && <p className="fine">{m.description}</p>}
       <p className="ad-preview-cta">{META_CTA_LABEL[m.callToAction] || 'Learn more'}</p>
     </div>
+  )
+}
+
+// ChatGPT chat card: what OpenAI shows under a ChatGPT answer (title, text, the site it opens).
+function OpenAiPreview({ spec }) {
+  const o = spec.openai || {}
+  const host = (() => {
+    try {
+      return new URL(spec.finalUrl).host
+    } catch {
+      return 'your-site'
+    }
+  })()
+  return (
+    <div className="ad-preview" aria-label="Ad preview" data-openai-preview>
+      <p className="fine">Sponsored · in ChatGPT · {host}</p>
+      <p className="ad-preview-title">{o.title}</p>
+      <p>{o.body}</p>
+    </div>
+  )
+}
+
+// The ChatGPT ad: chat-card text, what conversations it suits (context hints), and where (markets/regions only).
+function OpenAiEditor({ spec, set, budget, server, busy, connected }) {
+  const o = spec.openai || {}
+  const setO = (patch) => set({ openai: { ...o, ...patch } })
+  const [q, setQ] = useState('')
+  const [found, setFound] = useState(null)
+  const search = async (e) => {
+    e.preventDefault()
+    setFound({ busy: true })
+    const { status, data } = await api(`/api/ads/openai/locations?q=${encodeURIComponent(q)}`)
+    setFound(status === 200 ? { results: data.results } : { error: errorText(data.error) })
+  }
+  const locations = o.locations || []
+  const add = (l) => setO({ locations: [...locations.filter((x) => x.id !== l.id), { id: l.id, name: l.name, type: l.type }] })
+  const remove = (id) => setO({ locations: locations.filter((x) => x.id !== id) })
+  const titleLen = (o.title || '').trim().length
+  const bodyLen = (o.body || '').trim().length
+  return (
+    <div className="campaign-groups" data-openai-editor>
+      <label className="field">
+        <span>Title <em>({titleLen}/{O.title})</em></span>
+        <input value={o.title || ''} maxLength={O.title + 10} disabled={busy} onChange={(e) => setO({ title: e.target.value })} aria-invalid={titleLen < O.titleMin || titleLen > O.title || Boolean(server['openai.title'])} />
+        {server['openai.title'] && <span className="form-error">{server['openai.title']}</span>}
+      </label>
+      <label className="field">
+        <span>Text <em>({bodyLen}/{O.body})</em></span>
+        <textarea rows={2} value={o.body || ''} disabled={busy} onChange={(e) => setO({ body: e.target.value })} aria-invalid={bodyLen === 0 || bodyLen > O.body || Boolean(server['openai.body'])} />
+        {server['openai.body'] && <span className="form-error">{server['openai.body']}</span>}
+      </label>
+      <label className="field">
+        <span>
+          Conversations it suits <em>(one per line, up to {O.hints}; e.g. “pool pump stopped working”)</em>
+        </span>
+        <textarea rows={3} value={(o.contextHints || []).join('\n')} disabled={busy} onChange={(e) => setO({ contextHints: e.target.value.split('\n') })} />
+      </label>
+      <label className="field">
+        <span>Daily budget ($)</span>
+        <input type="number" min="5" step="1" value={spec.dailyBudgetCents / 100} disabled={busy} onChange={(e) => set({ dailyBudgetCents: toCents(e.target.value) })} />
+        {budget && <span className="fine">Up to {money(budget.dailyCeilingCents)}/day under your approved budget.</span>}
+      </label>
+      <fieldset className="field" data-openai-locations>
+        <legend>Where</legend>
+        <p className="notice-info" data-openai-geo>
+          {OPENAI_GEO}
+        </p>
+        {locations.length > 0 ? (
+          <ul className="rows">
+            {locations.map((l) => (
+              <li key={l.id} className="row">
+                <span>
+                  {l.name} <em className="fine">({l.type === 'market' ? 'metro area' : 'state'})</em>
+                </span>
+                <button type="button" className="link-btn" disabled={busy} onClick={() => remove(l.id)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="fine">No area chosen yet.</p>
+        )}
+        {connected ? (
+          <form className="inline-form" onSubmit={search} role="search" aria-label="Find a ChatGPT Ads area">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="City or state, e.g. Charleston" aria-label="City or state" />
+            <button type="submit" className="btn btn-quiet" disabled={busy || found?.busy || q.trim().length < 2}>
+              {found?.busy ? 'Searching…' : 'Find area'}
+            </button>
+          </form>
+        ) : (
+          <p className="fine">Connect your ChatGPT Ads account (step 2) to choose an area.</p>
+        )}
+        {found?.error && <p className="form-error" role="alert">{found.error}</p>}
+        {found?.results && (
+          <ul className="rows" aria-label="Areas found">
+            {found.results.length === 0 && <li className="fine">Nothing found. Try the nearest big city or the state.</li>}
+            {found.results
+              .filter((r) => r.type !== 'country')
+              .map((r) => (
+                <li key={r.id} className="row">
+                  <span>
+                    {r.name} <em className="fine">({r.type === 'market' ? 'metro area' : 'state'})</em>
+                  </span>
+                  <button type="button" className="btn btn-quiet" disabled={busy || locations.some((x) => x.id === r.id)} onClick={() => add(r)}>
+                    Add
+                  </button>
+                </li>
+              ))}
+          </ul>
+        )}
+        {server['openai.locations'] && <span className="form-error">{server['openai.locations']}</span>}
+      </fieldset>
+    </div>
+  )
+}
+
+// ChatGPT Ads connection: the owner's own Ads API key (one per ad account, Ads Manager → Settings). Validated by
+// GetShowUps with a read-only call before it is stored; only its last 4 characters are ever shown again.
+function OpenAiRow({ c, running = 0, onChange }) {
+  const [key, setKey] = useState('')
+  const [state, setState] = useState({})
+  const [confirm, setConfirm] = useState(false)
+  const s = CONN[connState(c)]
+  const save = async (e) => {
+    e.preventDefault()
+    setState({ busy: true })
+    const { status, data } = await api('/api/ads/openai/key', { method: 'POST', body: { action: 'save', apiKey: key } })
+    setKey('')
+    if (status === 200) {
+      setState({ note: data.accountChanged ? 'Connected to a different ad account than before. Campaigns created in the old one stay there.' : 'Connected.' })
+      onChange()
+    } else setState({ error: errorText(data.error) })
+  }
+  const disconnect = async () => {
+    setState({ busy: true })
+    const { status, data } = await api('/api/ads/openai/key', { method: 'POST', body: { action: 'disconnect', confirm: true } })
+    setConfirm(false)
+    if (status === 200) {
+      setState({ note: 'Disconnected. GetShowUps no longer holds the key. Revoke it in ChatGPT Ads Manager → Settings to switch it off completely.' })
+      onChange()
+    } else setState({ error: errorText(data.error) })
+  }
+  return (
+    <li className="row conn-row" data-platform-row="openai">
+      <div className="conn-main">
+        <strong>ChatGPT ads</strong>
+        <p className={`conn-status conn-status--${s.tone}`} data-openai-status={connState(c)}>
+          <span className="conn-icon" aria-hidden="true">
+            {s.icon}
+          </span>
+          {s.text}
+          {c?.status === 'connected' && ` · ${c.accountName || c.accountId}${c.last4 ? ` · key …${c.last4}` : ''}`}
+        </p>
+        {(!c || c.status === 'reconnect_required') && (
+          <form className="inline-form" onSubmit={save} aria-label="Connect ChatGPT Ads">
+            <input type="password" autoComplete="off" spellCheck="false" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your ChatGPT Ads API key" aria-label="ChatGPT Ads API key" />
+            <button type="submit" className="btn btn-primary" disabled={state.busy || key.trim().length < 20}>
+              {state.busy ? 'Checking…' : 'Connect'}
+            </button>
+          </form>
+        )}
+        {(!c || c.status === 'reconnect_required') && (
+          <p className="fine">
+            In{' '}
+            <a href="https://ads.openai.com/settings" target="_blank" rel="noreferrer">
+              ChatGPT Ads Manager → Settings
+            </a>
+            , create an API key for this ad account and paste it here. GetShowUps checks it, stores it encrypted, and uses it only for the ChatGPT campaigns you approve here.
+          </p>
+        )}
+        {c && !confirm && (
+          <p className="conn-links">
+            <button type="button" className="link-btn conn-secondary" onClick={() => setConfirm(true)}>
+              Disconnect
+            </button>
+          </p>
+        )}
+        {confirm && (
+          <div className="confirm" role="group" aria-label="Confirm disconnect">
+            <p>{running ? 'Pause your running ChatGPT campaign first.' : 'Remove the key from GetShowUps? Your campaigns stay in ChatGPT Ads, paused.'}</p>
+            <div className="card-actions">
+              <button type="button" className="btn btn-danger" disabled={state.busy || running > 0} onClick={disconnect}>
+                Confirm: disconnect
+              </button>
+              <button type="button" className="link-btn" onClick={() => setConfirm(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {state.error && <p className="form-error" role="alert">{state.error}</p>}
+        {state.note && <p className="fine" role="status">{state.note}</p>}
+      </div>
+    </li>
   )
 }
 
@@ -1169,6 +1373,9 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
   const sandbox = c.platform === 'google' ? Boolean(capabilities.sandbox) : c.platform === 'meta' ? Boolean(capabilities.metaSandbox) : false
   const sandboxLabel = c.platform === 'meta' ? 'sandbox account' : 'test account'
   const canServe = capabilities.liveLaunch || sandbox
+  // ChatGPT Ads has no test account: a business on the verification list may CREATE paused, never start (the server decides).
+  const verifyOnly = c.platform === 'openai' && !capabilities.liveLaunch && Boolean(capabilities.openaiVerify)
+  const canCreate = canServe || verifyOnly
   const g = spec.google || {}
   const m = spec.meta || {}
   const set = (patch) => setSpec((s) => ({ ...s, ...patch }))
@@ -1236,13 +1443,18 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
   const general = (state.problems || []).filter((p) => !/^google\.(headlines|descriptions)(\[\d+\])?:/.test(p))
 
   return (
-    <article className="card campaign" aria-label={`${c.platform === 'google' ? 'Google Search' : 'Facebook & Instagram'} campaign`}>
+    <article className="card campaign" aria-label={`${PLATFORM_TITLE[c.platform] || c.platform} campaign`} data-campaign-platform={c.platform}>
       <header className="campaign-head">
-        <h3 className="card-title">{c.platform === 'google' ? 'Google Search' : 'Facebook & Instagram'}</h3>
+        <h3 className="card-title">{PLATFORM_TITLE[c.platform] || c.platform}</h3>
         <span className={`chip chip--${c.status}`}>{STATUS_LABEL[c.status] || c.status}</span>
       </header>
 
-      {c.platform === 'google' ? <GooglePreview spec={spec} /> : <MetaPreview spec={spec} />}
+      {c.platform === 'google' ? <GooglePreview spec={spec} /> : c.platform === 'openai' ? <OpenAiPreview spec={spec} /> : <MetaPreview spec={spec} />}
+      {c.platform === 'openai' && !editable && (
+        <p className="fine" data-openai-where>
+          <strong>Where:</strong> {(spec.openai?.locations || []).map((l) => l.name).join(', ') || 'no area'}. {OPENAI_GEO}
+        </p>
+      )}
       {c.platform === 'google' && (spec.geo?.zips || []).length > 0 && (
         <p className="fine" data-where>
           <strong>Where:</strong> people in {spec.geo.zips.length === 1 ? `ZIP code ${spec.geo.zips[0]}` : `${spec.geo.zips.length} ZIP codes (${spec.geo.zips.slice(0, 6).join(', ')}${spec.geo.zips.length > 6 ? ', …' : ''})`}, searching on Google.
@@ -1250,7 +1462,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
         </p>
       )}
       <BudgetSummary dailyCents={spec.dailyBudgetCents} budget={budget} />
-      <p className="fine">{c.platform === 'meta' ? CHARGING_META : CHARGING}</p>
+      <p className="fine">{c.platform === 'meta' ? CHARGING_META : c.platform === 'openai' ? CHARGING_OPENAI : CHARGING}</p>
       {c.launched && <Verification v={c.verification} platform={platformName} />}
       {c.lastError && (
         <p className="form-error" role="alert">
@@ -1287,6 +1499,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
           </details>
         </div>
       )}
+      {editable && c.platform === 'openai' && <OpenAiEditor spec={spec} set={set} budget={budget} server={server} busy={busy} connected={capabilities.openaiConnected} />}
       {editable && c.platform === 'meta' && <MetaEditor spec={spec} m={m} set={set} setM={setM} budget={budget} server={server} busy={busy} photos={photos} creatives={creatives} onCreativesChange={onChange} />}
 
       {editable && dirty && (
@@ -1351,6 +1564,7 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
             {confirm === 'approve_create' ? `Approve this ad and create it on ${platformName}? ` : `Create this campaign on ${platformName}? `}
             It starts <strong>paused</strong>; nothing runs until you press Start.
             {sandbox && (c.platform === 'meta' ? ' Sandbox ad account: it never shows and nothing is charged.' : ' Test account: it never shows and nothing is charged.')}
+            {c.platform === 'openai' && ' ChatGPT Ads has no test account: this creates a real campaign in your account, paused, and OpenAI reviews the ad.'}
           </p>
           <div className="card-actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => (confirm === 'approve_create' ? approveAndCreate() : act('launch', { confirm: true }))}>
@@ -1395,13 +1609,13 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
             )}
             {['draft', 'error'].includes(c.status) && !c.launched && (
               // One step when creating is possible (connected account); otherwise approve now, create later.
-              <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => (canServe ? setConfirm('approve_create') : act('approve'))}>
-                {state.busy === 'approve' ? 'Approving…' : canServe ? `Approve and create (paused)${sandbox ? ` · ${sandboxLabel}` : ''}` : 'Approve'}
+              <button type="button" className="btn btn-primary" disabled={busy || dirty || !budget} onClick={() => (canCreate ? setConfirm('approve_create') : act('approve'))}>
+                {state.busy === 'approve' ? 'Approving…' : canCreate ? `Approve and create (paused)${sandbox ? ` · ${sandboxLabel}` : ''}` : 'Approve'}
               </button>
             )}
             {c.status === 'approved' && !c.launched && (
-              <button type="button" className="btn btn-primary" disabled={busy || dirty || !canServe} onClick={() => setConfirm('launch')}>
-                Create on {c.platform === 'google' ? 'Google' : 'Meta'} (paused){sandbox ? ` · ${sandboxLabel}` : ''}
+              <button type="button" className="btn btn-primary" disabled={busy || dirty || !canCreate} onClick={() => setConfirm('launch')}>
+                Create on {platformName} (paused){sandbox ? ` · ${sandboxLabel}` : ''}
               </button>
             )}
             {c.launched && c.status === 'paused' && (
@@ -1432,18 +1646,19 @@ function CampaignEditor({ c, capabilities, budget, onChange, hold = null, photos
           </div>
           <ul className="action-help fine">
             {dirty && editable && <li>Save your changes first.</li>}
-            {!c.launched && <li>{c.platform === 'meta' ? 'Check: builds exactly what Meta would receive, without sending it. Nothing is created or charged.' : 'Check: Google reviews the ad. Nothing is created or charged.'}</li>}
+            {!c.launched && <li>{c.platform === 'meta' || c.platform === 'openai' ? `Check: builds exactly what ${platformName} would receive, without sending it. Nothing is created or charged.` : 'Check: Google reviews the ad. Nothing is created or charged.'}</li>}
+            {verifyOnly && <li data-openai-verify>Verification: GetShowUps may create this campaign paused in your real ChatGPT Ads account to check it end to end. Starting it is not switched on.</li>}
             {['draft', 'error'].includes(c.status) && !c.launched && (
               <li>
                 {!budget
                   ? 'Approve your monthly ad budget (step 4) to approve this campaign.'
-                  : canServe
+                  : canCreate
                     ? `Approve and create: puts this exact ad on ${platformName}, paused. Nothing runs until you press Start.`
                     : `Approve: locks in this version. Connect your ad account to create it on ${platformName}.`}
               </li>
             )}
             {c.status === 'approved' && !c.launched && (
-              <li>{canServe ? `Create: puts it on ${platformName}, paused. Nothing runs until you press Start.` : ERRORS.live_launch_disabled}</li>
+              <li>{canCreate ? `Create: puts it on ${platformName}, paused. Nothing runs until you press Start.` : ERRORS.live_launch_disabled}</li>
             )}
             {c.launched && c.status === 'paused' && <li>{sandbox ? `Start: runs on the ${sandboxLabel}. It never shows and nothing is charged.` : 'Start: the ad can show and spend, within your approved budget.'}</li>}
             {c.launched && c.platform === 'meta' && <li>Send a test lead: Meta puts a test entry on this ad’s form and sends it to GetShowUps like a real lead, so you can see it arrive, marked as a test. Nothing runs and nothing is charged.</li>}
@@ -1637,6 +1852,16 @@ export default function Ads() {
     setPlan(status === 201 ? { result: data } : { error: errorText(data.error) })
     load()
   }
+  // A ChatGPT ad starter draft from the business's own details (server/ads/openai.js starterSpec).
+  const startOpenAi = async () => {
+    if (planning.current) return
+    planning.current = true
+    setPlan({ busy: true })
+    const { status, data } = await api('/api/dashboard/ads/campaign', { method: 'POST', body: { action: 'start_openai' } })
+    planning.current = false
+    setPlan(status === 200 ? {} : { error: errorText(data.error) })
+    load()
+  }
 
   if (error)
     return (
@@ -1710,7 +1935,7 @@ export default function Ads() {
       )}
 
       {/* Connecting an account needs no business details first (it spends nothing); the status is shown from day one. */}
-      <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} onChange={load} businessProfile={d.businessProfile || null} businessProfileReadiness={d.businessProfileReadiness || null} />
+      <Connections connections={d.connections} capabilities={d.capabilities} running={d.campaigns.filter((c) => c.platform === 'google' && c.launched && c.status === 'active').length} runningOpenAi={d.campaigns.filter((c) => c.platform === 'openai' && c.status === 'active').length} onChange={load} businessProfile={d.businessProfile || null} businessProfileReadiness={d.businessProfileReadiness || null} />
 
       {/* Already advertising: the campaigns in the connected account, read from Google (read-only). */}
       {d.connections?.google?.status === 'connected' && <AdsImported />}
@@ -1749,6 +1974,13 @@ export default function Ads() {
               Tidy up: you have {openGoogle.length} Google Search drafts. Keep the one you want and remove the others.
             </p>
           ) : null}
+          {d.capabilities.openai && !d.campaigns.some((c) => c.platform === 'openai' && !c.launched && ['draft', 'approved', 'error'].includes(c.status)) && (
+            <div className="ui-form-actions">
+              <button type="button" className="btn btn-quiet" disabled={plan.busy} onClick={startOpenAi} data-start-openai>
+                Draft a ChatGPT ad
+              </button>
+            </div>
+          )}
           {plan.error && <p className="form-error" role="alert">{plan.error}</p>}
           {started && openGoogle.length > 0 && (
             <p className="notice-info" role="status" data-template-started>

@@ -10,6 +10,7 @@ import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 import { internalEmails } from '../../../../server/testdata.js'
 import { listAssets } from '../../../../server/assets.js'
 import { isSandboxAdAccount } from '../../../../server/ads/meta.js'
+import { openaiAdsEnabled, verifyBusinesses } from '../../../../server/ads/openai.js'
 import { gbpEnabled, gbpReadiness, gbpStatus, refreshGbp } from '../../../../server/ads/gbp.js'
 
 export async function onRequestGet({ request, env }) {
@@ -49,6 +50,8 @@ export async function onRequestGet({ request, env }) {
             // Meta: the connected Page (the lead form and ads belong to it) and whether the ad account is one the
             // operator listed as a sandbox (API-only, never delivers, never charges).
             ...(c.platform === 'meta' ? { pageName: extra.pageName || null, pageId: extra.pageId || null, sandboxAccount: isSandboxAdAccount(env, c.account_id) } : {}),
+            // ChatGPT Ads: the last 4 characters of the owner's key and OpenAI's account status. Never the key.
+            ...(c.platform === 'openai' ? { last4: extra.last4 || null, accountStatus: extra.accountStatus || null } : {}),
           },
         ]
       }),
@@ -78,6 +81,11 @@ export async function onRequestGet({ request, env }) {
         sandbox: !live && connections.google?.status === 'connected' && connections.google.testAccount === true,
         // Meta sandbox ad account connected (META_SANDBOX_AD_ACCOUNTS): same rule, re-read from the connection before every change.
         metaSandbox: !live && connections.meta?.status === 'connected' && connections.meta.sandboxAccount === true,
+        // ChatGPT Ads (OPENAI_ADS_ENABLED): no sandbox exists. openaiVerify = this business may create campaigns PAUSED
+        // in its real account to verify them (OPENAI_ADS_VERIFY_BUSINESSES); starting still needs the live switch.
+        openai: openaiAdsEnabled(env),
+        openaiConnected: openaiAdsEnabled(env) && connections.openai?.status === 'connected',
+        openaiVerify: openaiAdsEnabled(env) && !live && verifyBusinesses(env).includes(id),
       },
       bookingUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${id}`,
       // The linked Business Profile (names + Google's verification state, refreshed at most daily) and, without one,

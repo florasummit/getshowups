@@ -2,6 +2,13 @@
 
 _Update at the end of every task. Newest first._
 
+## ChatGPT Ads, third ad platform (2026-11-24, draft PR, not released)
+
+server/ads/openai.js + docs/OPENAI_ADS.md. Migration 0039 rebuilds ad_connections/ad_campaigns/ad_metrics_daily to allow
+platform 'openai' (the one reviewed exception to additive-only; test/migration-0039.test.js; rollback in scripts/rollback/).
+Off: OPENAI_ADS_ENABLED. No OpenAI sandbox → OPENAI_ADS_VERIFY_BUSINESSES (paused creation only). Not verified against a
+real ChatGPT Ads account. Next: founder creates the account + key; approvals: 0039 (backup + rehearsal), the two switches.
+
 ## Test sessions for acceptance (2026-11-25)
 
 docs/INTELLIGENCE.md §8. Migration 0038 (additive). ACCEPTANCE_SESSIONS_ENABLED off until the owner sets it. Pairing: scripts/acceptance/pair.mjs.

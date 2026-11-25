@@ -3,7 +3,7 @@
 //
 //   {
 //     version: 1,
-//     platform: 'google' | 'meta',
+//     platform: 'google' | 'meta' | 'openai',
 //     name: string,
 //     dailyBudgetCents: integer,
 //     geo: { zips: string[], radiusMiles?: number },
@@ -18,6 +18,9 @@
 //                placements?: ('facebook'|'instagram')[] (omitted = Meta's automatic placements),
 //                audience?: { ageMin: 18..65, ageMax?: ageMin..65 } (omitted = 18+),
 //                endDate?: 'YYYY-MM-DD' (the ad set's end time; the owner sees daily × days as the most it can spend) }
+//     openai?: { title: 3–50, body: ≤100 (ChatGPT chat card), contextHints: string[0..10] (≤200),
+//                locations: [{ id, name, type: 'market'|'region' }] 1..25 (OpenAI targets whole markets/regions only;
+//                geo.zips stays the service area the booking page checks) } — server/ads/openai.js
 //   }
 //
 // Text limits: Google responsive search ads use 30-character headlines (3–15), 90-character descriptions
@@ -26,6 +29,7 @@
 export const LIMITS = {
   google: { headline: 30, headlinesMin: 3, headlinesMax: 15, description: 90, descriptionsMin: 2, descriptionsMax: 4, path: 15, keywords: 50, negatives: 100 },
   meta: { primaryText: 500, headline: 40, description: 60, textsMax: 5 },
+  openai: { titleMin: 3, title: 50, body: 100, contextHints: 10, contextHint: 200, locations: 25 }, // OpenAI Ads API CreateAdCreativeParams / targeting
   zips: 200,
   minDailyBudgetCents: 500, // $5/day: below this platforms rarely deliver
 }
@@ -35,6 +39,8 @@ const FORM_FIELDS = ['FULL_NAME', 'PHONE', 'EMAIL', 'ZIP']
 export const META_PLACEMENTS = ['facebook', 'instagram'] // Meta targeting publisher_platforms (Marketing API targeting spec)
 const YMD = /^\d{4}-\d{2}-\d{2}$/
 const ZIP_RE = /^\d{5}$/
+export const PLATFORMS = ['google', 'meta', 'openai']
+const LOCATION_ID = /^[A-Za-z0-9_-]{1,100}$/
 
 // Claims the AI may not invent. A phrase is allowed only when the owner listed it in approvedClaims.
 const RISKY = [
@@ -88,7 +94,7 @@ export function validateSpec(input, { approvedClaims = [], ceilingDailyCents = I
   const errors = []
   const s = input && typeof input === 'object' ? input : {}
   const platform = s.platform
-  if (!['google', 'meta'].includes(platform)) return [['platform: must be google or meta'], null]
+  if (!PLATFORMS.includes(platform)) return [['platform: must be google, meta or openai'], null]
 
   const spec = { version: 1, platform, name: clean(s.name).slice(0, 120), dailyBudgetCents: s.dailyBudgetCents, geo: {} }
   if (!spec.name) errors.push('name: required')
@@ -133,6 +139,25 @@ export function validateSpec(input, { approvedClaims = [], ceilingDailyCents = I
       ...(g.path1 ? { path1: g.path1 } : {}),
       ...(g.path2 ? { path2: g.path2 } : {}),
     }
+  } else if (platform === 'openai') {
+    const o = s.openai || {}
+    const L = LIMITS.openai
+    if (!isHttps(s.finalUrl)) errors.push('finalUrl: https URL required')
+    spec.finalUrl = s.finalUrl
+    const title = clean(o.title)
+    const body = clean(o.body)
+    if (title.length < L.titleMin || title.length > L.title) errors.push(`openai.title: ${L.titleMin}–${L.title} characters`)
+    if (!body || body.length > L.body) errors.push(`openai.body: 1–${L.body} characters`)
+    for (const [field, t] of [['openai.title', title], ['openai.body', body]]) for (const c of unapprovedClaims(t, approvedClaims)) errors.push(`${field}: unapproved claim (${c})`)
+    const hints = [...new Set((Array.isArray(o.contextHints) ? o.contextHints : []).map(clean).filter(Boolean))]
+    if (hints.length > L.contextHints || hints.some((h) => h.length > L.contextHint)) errors.push(`openai.contextHints: up to ${L.contextHints}, each ≤${L.contextHint} characters`)
+    for (const [i, h] of hints.entries()) for (const c of unapprovedClaims(h, approvedClaims)) errors.push(`openai.contextHints[${i}]: unapproved claim (${c})`)
+    const seenLoc = new Set()
+    const locations = (Array.isArray(o.locations) ? o.locations : [])
+      .map((l) => ({ id: clean(l?.id), name: clean(l?.name).slice(0, 120), type: l?.type }))
+      .filter((l) => !seenLoc.has(l.id) && seenLoc.add(l.id))
+    if (!locations.length || locations.length > L.locations || locations.some((l) => !LOCATION_ID.test(l.id) || !['market', 'region'].includes(l.type))) errors.push(`openai.locations: 1–${L.locations} markets or regions`)
+    spec.openai = { title, body, contextHints: hints, locations }
   } else {
     const m = s.meta || {}
     const L = LIMITS.meta
