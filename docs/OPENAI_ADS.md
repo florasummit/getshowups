@@ -1,7 +1,9 @@
 # ChatGPT Ads (OpenAI Ads API): third ad platform
 
 Status 2026-11-24: built and tested against a stand-in. **Not verified against OpenAI**: no ChatGPT Ads account is
-connected yet. Off in production (`OPENAI_ADS_ENABLED` unset). Migration 0039 is not applied.
+connected yet. Off in production (`OPENAI_ADS_ENABLED` unset). Migration 0039 **applied to production 2026-11-25** (backup
+prod-20261125T021654Z-pre-0039.sql restored and checked; full rehearsal on SQLite and local D1 passed; afterwards every other
+table's count and the three ad tables' complete contents, foreign keys and indexes were unchanged; marker ad_platforms present).
 
 ## What it does
 One more adapter (`server/ads/openai.js`) behind the shared engine (`server/ads/campaigns.js` `adapter()`). The rest

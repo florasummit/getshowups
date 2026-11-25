@@ -7,7 +7,9 @@ _Update at the end of every task. Newest first._
 server/ads/openai.js + docs/OPENAI_ADS.md. Migration 0039 rebuilds ad_connections/ad_campaigns/ad_metrics_daily to allow
 platform 'openai' (the one reviewed exception to additive-only; test/migration-0039.test.js; rollback in scripts/rollback/).
 Off: OPENAI_ADS_ENABLED. No OpenAI sandbox → OPENAI_ADS_VERIFY_BUSINESSES (paused creation only). Not verified against a
-real ChatGPT Ads account. Next: founder creates the account + key; approvals: 0039 (backup + rehearsal), the two switches.
+real ChatGPT Ads account. 0039 applied to production 2026-11-25 (founder's conditional approval: fresh backup restored and
+checked, rehearsal on SQLite + local D1, before/after fingerprint identical except the CHECK and ad_platforms). Next: founder
+creates the OpenAI ad account + key (docs/OPENAI_ADS.md); approvals: OPENAI_ADS_ENABLED + OPENAI_ADS_VERIFY_BUSINESSES.
 
 
 
