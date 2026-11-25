@@ -330,13 +330,15 @@ export async function handleEvent(env, event, { after = null } = {}) {
 const ENDED_SUB = ['canceled', 'incomplete_expired']
 
 // Read-only: true when Stripe reports the subscription ended (or no longer exists).
-export async function subscriptionEnded(env, id) {
+export const stripeModeMismatch = (env, sub) => sub?.livemode === true && !stripeLiveKey(env)
+// mustExist: a live subscription always stays readable in Stripe after it ends, so "not found" means the wrong account.
+export async function subscriptionEnded(env, id, { mustExist = false } = {}) {
   const r = await stripePost(env, `/subscriptions/${encodeURIComponent(id)}`, {}, { method: 'GET' })
-  if (!r.ok) return r.error === 'resource_missing' ? { ok: true, ended: true } : r
+  if (!r.ok) return r.error === 'resource_missing' && !mustExist ? { ok: true, ended: true } : r
   return { ok: true, ended: ENDED_SUB.includes(r.body.status) }
 }
 
-export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscriptionId = null } = {}) {
+export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscriptionId = null, mustExist = false } = {}) {
   const ids = new Set(stripeSubscriptionId ? [stripeSubscriptionId] : [])
   if (stripeCustomerId) {
     const list = await stripePost(env, '/subscriptions', { customer: stripeCustomerId, status: 'all', limit: 100 }, { method: 'GET' })
@@ -344,10 +346,15 @@ export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscr
     for (const s of list.ok ? list.body.data || [] : []) if (LIVE_SUB.includes(s.status)) ids.add(s.id)
   }
   let canceled = 0
+  let notFound = 0
   for (const id of ids) {
     const path = `/subscriptions/${encodeURIComponent(id)}`
     const before = await stripePost(env, path, {}, { method: 'GET' })
-    if (!before.ok && before.error !== 'resource_missing') return before
+    if (!before.ok && (before.error !== 'resource_missing' || (mustExist && id === stripeSubscriptionId))) return before
+    if (!before.ok) {
+      notFound++
+      continue
+    }
     if (before.ok && !ENDED_SUB.includes(before.body.status)) {
       const del = await stripePost(env, path, {}, { method: 'DELETE' })
       if (!del.ok && del.error !== 'resource_missing') return del
@@ -363,7 +370,7 @@ export async function endBillingNow(env, { stripeCustomerId = null, stripeSubscr
     if (!del.ok && del.error !== 'resource_missing') return del
     customerDeleted = true
   }
-  return { ok: true, canceled, customerDeleted }
+  return { ok: true, canceled, notFound, customerDeleted }
 }
 
 // ---------- reconciliation (read-only) ----------
