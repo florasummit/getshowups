@@ -39,8 +39,8 @@ ${fit(screen.page, 5000)}${screen.selected ? `\nSELECTED ${JSON.stringify(screen
 IN YOUR LAST ANSWER, IN ORDER
 ${lastOrder.map((r, i) => `${i + 1}: [${r}]`).join(', ')} (the first is its main subject; "after that" means the next one after the subject the owner asked about)` : ''}${discussed.length ? `
 
-PEOPLE DISCUSSED (latest first)
-${discussed.map((r) => `[${r}]`).join(', ')}` : ''}${known.length ? `
+PEOPLE DISCUSSED (latest first, with what the owner said then)
+${discussed.map((d) => `[${d.ref}] "${d.words.slice(0, 80)}"`).join(', ')}` : ''}${known.length ? `
 
 RECORDS ALREADY DISCUSSED (current)
 ${fit(known, 6000)}` : ''}${before.length ? `
@@ -116,8 +116,9 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const known = await knownRecords(c, (req.history || []).map((h) => h.a).join(' '))
   c.pending = req.pending || []
   const pending = c.pending.map((p) => ({ type: p.type, ...(p.ref ? { ref: p.ref } : {}), change: p.change }))
-  const said = (req.history || []).flatMap((h) => [...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))
-  const discussed = [...new Set(said.reverse())].slice(0, 12)
+  // Latest first, with the owner's own words from that turn: they say who "she", "the other one" or "that guy" was.
+  const discussed = []
+  for (const h of [...(req.history || [])].reverse()) for (const m of [...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].reverse()) if (discussed.length < 12 && !discussed.some((d) => d.ref === m[1])) discussed.push({ ref: m[1], words: h.q })
   const lastOrder = [...new Set([...((req.history || []).at(-1)?.a || '').matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
   const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])

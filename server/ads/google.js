@@ -438,6 +438,45 @@ export async function fetchAccountMetrics(env, customerId, externalIds, sinceYmd
   })
 }
 
+// Calls Google reports for the connected account (call_view, read-only): when, how long, answered or missed, which campaign
+// and where the number was shown. The caller's area code is never selected. Setup: whether call reporting is on and how many
+// phone numbers are on ads. The setup reads are best effort (null = not known).
+export async function readCalls(env, customerId, sinceYmd, { limit = 1000 } = {}) {
+  if (!YMD.test(sinceYmd)) return failure('invalid_request')
+  return withAccount(env, customerId, async (token, conn) => {
+    const q = (query) => call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
+    const r = await q(`SELECT call_view.resource_name, call_view.start_call_date_time, call_view.call_duration_seconds, call_view.call_status, call_view.call_tracking_display_location, campaign.id FROM call_view WHERE call_view.start_call_date_time >= '${sinceYmd} 00:00:00' ORDER BY call_view.start_call_date_time DESC LIMIT ${Number(limit)}`)
+    if (!r.ok) return r
+    const [cust, onAccount, onCampaigns] = await Promise.all([
+      q('SELECT customer.time_zone, customer.call_reporting_setting.call_reporting_enabled FROM customer LIMIT 1'),
+      q("SELECT customer_asset.asset FROM customer_asset WHERE customer_asset.field_type = 'CALL' AND customer_asset.status = 'ENABLED'"),
+      q("SELECT campaign_asset.asset FROM campaign_asset WHERE campaign_asset.field_type = 'CALL' AND campaign_asset.status = 'ENABLED'"),
+    ])
+    const c = cust.ok ? rowsOf(cust.data)[0]?.customer : null
+    const calls = []
+    for (const x of rowsOf(r.data)) {
+      const v = x.callView || {}
+      const id = lastId(v.resourceName)
+      if (!/^[A-Za-z0-9_~-]{1,80}$/.test(id || '') || !/^\d{4}-\d\d-\d\d \d\d:\d\d/.test(v.startCallDateTime || '')) continue
+      calls.push({
+        id,
+        localTime: v.startCallDateTime.slice(0, 19),
+        seconds: v.callDurationSeconds == null ? null : int(v.callDurationSeconds),
+        status: ['RECEIVED', 'MISSED'].includes(v.callStatus) ? v.callStatus : 'UNKNOWN',
+        shownOn: ['AD', 'LANDING_PAGE'].includes(v.callTrackingDisplayLocation) ? v.callTrackingDisplayLocation : null,
+        campaignExternalId: /^\d{1,20}$/.test(String(x.campaign?.id || '')) ? String(x.campaign.id) : null,
+      })
+    }
+    return {
+      ok: true,
+      calls,
+      timeZone: text(c?.timeZone, 60) || null,
+      reporting: c ? c.callReportingSetting?.callReportingEnabled === true : null,
+      numbersOnAds: onAccount.ok && onCampaigns.ok ? new Set([...rowsOf(onAccount.data).map((x) => x.customerAsset?.asset), ...rowsOf(onCampaigns.data).map((x) => x.campaignAsset?.asset)].filter(Boolean)).size : null,
+    }
+  })
+}
+
 // Local Services leads Google reports for the connected account (read-only; local_services_lead is a report resource
 // that returns data only when the account holds a Local Services campaign). Contact details are NOT selected.
 // creation_date_time is "YYYY-MM-DD HH:MM:SS" in the account time zone; we keep it as the account's calendar instant.

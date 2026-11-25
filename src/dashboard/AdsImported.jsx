@@ -4,6 +4,7 @@
 // are the cards below this section.
 import { useEffect, useState } from 'react'
 import { api, timeAgo } from '../lib/api.js'
+import AdsCalls from './AdsCalls.jsx'
 import { Pill } from './ui.jsx'
 
 const usd = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: c % 100 ? 2 : 0, maximumFractionDigits: 2 })}`)
@@ -40,7 +41,7 @@ const ERRORS = {
 }
 const words = (xs, max = 6) => (xs.length <= max ? xs.join(', ') : `${xs.slice(0, max).join(', ')} and ${xs.length - max} more`)
 
-const LEAD_TYPE = { PHONE_CALL: 'phone call', MESSAGE: 'message', BOOKING: 'booking', COUNT: 'coupon', UNKNOWN: 'other' }
+const LEAD_TYPE = { PHONE_CALL: 'phone call', MESSAGE: 'message', BOOKING: 'booking', COUPON: 'coupon', UNKNOWN: 'other' }
 const LEAD_STATUS = { NEW: 'New', ACTIVE: 'Active', BOOKED: 'Booked', DECLINED: 'Declined', CONSUMER_DECLINED: 'Customer declined', EXPIRED: 'Expired', DISABLED: 'Disabled', WIPED_OUT: 'Removed', UNKNOWN: 'Other' }
 const when = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
@@ -447,6 +448,7 @@ export default function AdsImported() {
         </>
       )}
       {d.localServices?.readiness && <LocalServicesReadiness r={d.localServices.readiness} />}
+      <AdsCalls days={days} refreshed={d.syncedAt} />
     </section>
   )
 }

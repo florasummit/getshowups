@@ -5,6 +5,7 @@
 // Data minimisation: the model sees references, times, statuses, ZIPs and what was asked for (contact details removed),
 // never names, phones, emails or addresses. The page shows the real names next to the references.
 import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
+import { callReport } from './ads/calls.js'
 import { channels } from './ads/economics.js'
 import { INDUSTRIES, industryKey } from './intelligence/industries.js'
 import { taughtFor } from './intelligence/knowledge.js'
@@ -447,6 +448,7 @@ export const TOOLS = [
   tool('acquisition_by_source', 'Where inquiries come from and what they led to, per source: ad spend, inquiries, in area, booked, showed up, completed, payments, cost per step, where each source loses people, and an estimated profit after ads when the owner stated margins. Use for which ads work, what to improve, cost and profit questions.', { days: { type: 'integer', enum: [30, 90] } }, [], async (c, a) => {
     const t = await taughtFor(c.env, c.customer, 'analysis', c.now)
     const ads = await adsAccess(c.env, c.customer)
+    const calls = ads ? await callReport(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, now: c.now, list: 1 }).catch(() => ({ ready: false })) : { ready: false }
     const r = await channels(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, economics: t.economics, now: c.now })
     const m = (v) => usd(v) ?? 'not available'
     return {
@@ -454,6 +456,7 @@ export const TOOLS = [
       basis: 'Inquiries created in the period, followed to what became of each.',
       ...(r.spendReadable ? {} : { ad_spend: 'could not be read' }),
       sources: r.channels.filter((x) => ads || !x.ad).map((x) => ({ source: x.channel, ...(x.ad ? { ad_spend: m(x.spendCents), clicks: x.clicks ?? 'not available' } : {}), inquiries: x.inquiries, in_service_area: x.qualified, booked: x.booked, showed_up: x.showed, jobs_completed: x.completed, payments_recorded: usd(x.paidCents) ?? 'none recorded', ...(x.ad ? { cost_per_inquiry: m(x.costPerInquiry), cost_per_qualified_inquiry: m(x.costPerQualified), cost_per_booking: m(x.costPerBooking), cost_per_completed_job: m(x.costPerCompleted), estimated_profit_after_ads: x.estimatedProfitAfterAdsCents === null ? 'cannot be estimated: needs recorded payments and a margin the owner stated for each paid job' : `${m(x.estimatedProfitAfterAdsCents)} (estimate: recorded payments times the owner’s stated margin, minus reported spend; not proof the ads caused the jobs)` } : {}), where_it_loses_people: x.bottleneck })),
+      ...(calls.ready && calls.setup ? { phone_calls_from_google_ads: { ...calls.totals, missed_not_called_back: calls.totals.missedOpen, missedOpen: undefined, linked_by_owner: { people: calls.results.people, booked: calls.results.booked, completed: calls.results.completed, payments: m(calls.results.paidCents) }, note: 'Counted by Google; who called is known only for calls the owner linked on Ads. Overlaps the sources above: never add them up.' } } : {}),
       rules: ['A traced inquiry came through an ad link; that is not proof the ad caused the job.', 'Budgets and campaigns are changed only by the owner on Ads; never offer to change spend.', 'Say what is evidence and what is the owner’s assumption.'],
     }
   }),

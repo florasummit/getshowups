@@ -6,6 +6,7 @@
 // { ready: false } and the cron step does nothing.
 import { randomToken } from '../google-oauth.js'
 import { fetchAccountMetrics, readAccountCampaigns } from './google.js'
+import { syncCalls } from './calls.js'
 import { lsaReadiness, lsaSummary, syncLsaLeads } from './lsa.js'
 import { gbpVerified } from './gbp.js'
 
@@ -135,7 +136,9 @@ export async function syncImportedCampaigns(env, customerId, { now = Date.now(),
     lsaLeads = l.ok ? (l.skipped ? null : l.leads) : null
     if (!l.ok) metricsError ||= l.error
   }
-  const result = { ok: true, campaigns: seen.size, imported, updated, removed, metricsRows, partial: read.partial === true, ...(metricsError ? { metricsError } : {}), ...(lsaLeads != null ? { lsaLeads } : {}), testAccount: read.testAccount === true }
+  // Calls from ads (GetShowUps' own campaigns included). A failed read never fails the campaign copy.
+  const calls = await syncCalls(env, customerId, { now }).catch(() => ({ ok: false, error: 'storage_error' }))
+  const result = { ok: true, ...(calls.ok ? (calls.skipped ? {} : { calls: calls.calls }) : { callsError: calls.error }), campaigns: seen.size, imported, updated, removed, metricsRows, partial: read.partial === true, ...(metricsError ? { metricsError } : {}), ...(lsaLeads != null ? { lsaLeads } : {}), testAccount: read.testAccount === true }
   await recordState(db, customerId, result, now)
   return result
 }

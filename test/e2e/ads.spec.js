@@ -686,6 +686,24 @@ test('Journey A: an established advertiser connects and the campaigns already in
   await expect(lsa.getByText(/phone call · Booked · charged/)).toBeVisible()
   await expect(lsa).not.toContainText('843') // never a contact detail
   await expect(imported.locator('[data-lsa-readiness]')).toHaveCount(0) // the checklist is for businesses without one
+  // Google's calls: what it reports, one called back, one caller added, booked through their own link; no number is invented.
+  const callsBox = imported.locator('[data-google-calls]')
+  await expect(callsBox.locator('[data-call-totals]')).toContainText('3 calls in 30 days: 1 answered, 2 missed, 2 not called back yet')
+  await expect(callsBox.locator('[data-call-setup]')).toContainText('Google doesn’t share who called')
+  await callsBox.locator('[data-call="c1"]').getByRole('button', { name: 'I called back' }).click()
+  await expect(callsBox.locator('[data-call-totals]')).toContainText('1 not called back yet')
+  if (!(await callsBox.locator('[data-call="c2"]').isVisible())) await callsBox.getByText('Calls', { exact: true }).click()
+  const answered = callsBox.locator('[data-call="c2"]')
+  await answered.getByRole('button', { name: 'Add the caller' }).click()
+  await answered.getByLabel('Name').fill('Phone Caller')
+  await answered.getByLabel('Phone').fill('(843) 555-0142')
+  await answered.getByLabel('What they need').fill('Pool opening')
+  await answered.getByLabel('ZIP').fill('29401')
+  await answered.getByRole('button', { name: 'Save customer' }).click()
+  await expect(answered).toContainText('Customer: Phone Caller')
+  await expect(answered.getByRole('link', { name: 'Book a time for them' })).toHaveAttribute('href', /\/book\//)
+  await expect(callsBox.locator('[data-call-totals]')).toContainText('1 caller linked to customers')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   // Nothing changes by itself: the only controls are proposals that need the owner's approval. The Search campaign
   // can become a template.
   await expect(imported.getByRole('button', { name: /^(Start ads|Pause|Change daily budget|Approve and create)/ })).toHaveCount(0)
