@@ -207,7 +207,8 @@ test('the browser memory holds references, not names; sign-out and age clear it;
   const m = await import('../src/dashboard/assistant-memory.js')
   m.setMemoryOwner('alpha:o')
   m.keep('c1', [{ id: 'e1', q: 'who is waiting', answer: 'Rosa Vance is waiting.', raw: '[R1] is waiting.', ctx: {}, records: [{ contact: ['555'] }], proposals: [{ name: 'Rosa Vance' }] }, { id: 'e2', q: 'x', answer: 'Rosa Vance (from a list)' }], { R: ['r'] }, [])
-  assert.doesNotMatch([...data.values()].join(), /Rosa|555|proposals/)
+  // Timestamps ("at") are dropped first: one can contain 555 by chance; a stored phone number still matches.
+  assert.doesNotMatch([...data.values()].join().replace(/"at":\d+/g, ''), /Rosa|555|proposals/)
   assert.equal(m.withNames('Call Rosa [R1] about [L2].', { R1: 'Rosa Vance' }), 'Call Rosa Vance about a customer.')
   // Another business, or another account of the same business, never sees it, and it is gone from the browser.
   for (const other of ['beta:o', 'alpha:p', null]) {
