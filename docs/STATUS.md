@@ -3,6 +3,22 @@
 _Update at the end of every task. Newest first._
 
 
+## Brand icon: Calendar + Growth (2026-11-25, founder-approved icon replacement, not a rebrand)
+- **New icon:** an orange calendar outline whose top-right corner opens for a white check that continues into an upward arrow, on the same near-black rounded square, with the same stroke weights. It won over Calendar + Speed (whose motion lines turn to noise at 16 px). Comparison sheets are in `brand/archive/`.
+- **Wordmark unchanged:** same text, font, weight, spacing and colours. The live `<Logo />` keeps its 28 px icon and wordmark box, so layouts don't move.
+- **One source:** `brand/` (`brand/README.md`) holds:
+  - the editable SVG icon and transparent marks;
+  - full logos for light and dark backgrounds (wordmark outlined; pixel-compared with the live text, 9 of 8,165 ink pixels differ, all antialiasing);
+  - PNGs from 16 to 1024 px, 2400 px logos and the 1200×630 social image;
+  - the archive of the previous icon and the concepts.
+- **Applied:**
+  - `Logo.jsx`, which covers the site header and footer, dashboard, onboarding/setup, sign-in and admin;
+  - `favicon.svg` and a new `favicon.ico`, the apple-touch icon, manifest icons (`site.webmanifest`) and `og-image` (`index.html`, so also `/privacy`);
+  - the GetShowUps server pages (`google-oauth.js` `page()`).
+- **Not changed:** customer sites, logos and site icons (`/site-icon/*`), booking/chat pages, and emails (they carry no logo).
+- **Guards:** `test/brand.test.js` checks that every copy equals `brand/icon/getshowups-icon.svg`; `flagship.spec.js` checks the exact logo SVG.
+- **Regenerate:** `node scripts/build-brand.mjs`.
+
 ## V1 finish and feature freeze (2026-11-25)
 
 docs/SYSTEM_OVERVIEW.md is the founder's starting page. Google call reading (server/ads/calls.js, migration 0040) built and OFF

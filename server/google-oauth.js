@@ -257,7 +257,7 @@ export const escapeHtml = (s) =>
 
 // extraHtml must be trusted, already-escaped markup.
 export function page(status, title, message, extraHeaders = {}, extraHtml = '', backLink = true) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title><link rel="icon" href="/favicon.svg">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0c;color:#e4e4e9;font:16px/1.6 system-ui,sans-serif;padding:24px}main{max-width:460px;text-align:center}h1{color:#fff;font-size:1.5rem;margin:0 0 12px}a{color:#ff8a47}button{font:inherit;font-weight:600;padding:12px 24px;border:0;border-radius:999px;background:#ff6a1a;color:#0b0b0c;cursor:pointer}</style></head>
 <body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}${backLink ? '<p><a href="/dashboard">Back to your dashboard</a></p>' : ''}</main></body></html>`
   return new Response(html, {

@@ -6,7 +6,7 @@
 import { test, expect } from './test.js'
 import { SCENARIOS } from '../../src/content/conversation.js'
 
-const LOGO_SVG = '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"></rect><rect x="7" y="9" width="18" height="16" rx="3" fill="none" stroke="#FF6A1A" stroke-width="2.2"></rect><path d="M11 6.5v4M21 6.5v4" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"></path><path d="m12 17.5 3 3 5.5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+const LOGO_SVG = '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"></rect><path d="M18 10H9a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-6" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M10 7.5v4M15 7.5v4" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"></path><path d="M10 18l3.5 3.5L26 9M22 9h4v4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>' // = brand/icon/getshowups-icon.svg (Calendar + Growth, 2026-11-25)
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
@@ -19,7 +19,7 @@ test('the logo is the protected brand asset: exact SVG, orange and wordmark in h
     const logo = page.locator(`${where} .logo`).first()
     expect((await logo.locator('svg').evaluate((s) => s.outerHTML)).replace(/\s+/g, ' ')).toBe(LOGO_SVG)
     await expect(logo).toHaveText('GetShowUps')
-    expect(await logo.locator('svg rect[stroke]').evaluate((r) => getComputedStyle(r).stroke)).toBe('rgb(255, 106, 26)')
+    expect(await logo.locator('svg path[stroke="#FF6A1A"]').first().evaluate((r) => getComputedStyle(r).stroke)).toBe('rgb(255, 106, 26)')
     expect(await logo.locator('svg').boundingBox()).toMatchObject({ width: 28, height: 28 })
   }
 })
