@@ -177,3 +177,10 @@ test('production 21:00: a customer’s own numbers can be repeated, never as mon
     assert.equal((await ask('alpha', 'and then')).body.answer, 'Rosa Vance is waiting for a call.', bad)
   }
 })
+
+test('deployed 2026-11-25: asked what another business made, this business’s own figures never stand in for it', async () => {
+  script = [use('find_person', { name: 'PoolThru' }), say('I can’t find PoolThru. For the last 30 days, no payments are recorded.'), say('I only have this business.')]
+  assert.equal((await ask('alpha', 'how much did poolthru make')).body.answer, 'I only have this business.')
+  script = [use('find_person', { name: 'Zed' }), say('No customer called Zed. You have 0 call backs waiting.')]
+  assert.match((await ask('alpha', 'did zed call')).body.answer, /^No customer called Zed/)
+})
