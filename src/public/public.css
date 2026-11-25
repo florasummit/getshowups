@@ -1,0 +1,431 @@
+/* Public customer-facing surfaces (booking page /book/:id, chat /chat/:id): ONE visual system, namespaced .pub so the
+   dashboard and marketing styles never leak in or out. Cool blue-tinted neutrals, Inter (self-hosted, index.css), thin
+   borders, one quiet shadow tier. The accent is the business's own published brand colour (--pub-accent, set inline by
+   PublicShell) or GetShowUps orange on GetShowUps' own pages; the primary action is ink unless the accent passes AA
+   with white text (--pub-action). Light only by design: the business's brand colours are chosen for light pages. */
+.pub {
+  --pub-bg: #f6f8fb;
+  --pub-surface: #ffffff;
+  --pub-sunken: #f1f4f8;
+  --pub-ink: #0f1a2c;
+  --pub-text: #3c4a5e;
+  --pub-muted: #66758a;
+  --pub-line: #e3e8ef;
+  --pub-line-strong: #c9d2de;
+  --pub-accent: #ff6a1a;
+  --pub-accent-ink: #c2410c;
+  --pub-accent-soft: #fff3ec;
+  --pub-action: #0f1a2c;
+  --pub-on-action: #ffffff;
+  --pub-danger: #b42318;
+  --pub-ok: #0f7b4b;
+  --pub-radius: 12px;
+  --pub-radius-sm: 8px;
+  --pub-shadow: 0 1px 2px rgb(15 26 44 / 0.04), 0 8px 24px -12px rgb(15 26 44 / 0.12);
+  --pub-focus: 0 0 0 3px color-mix(in srgb, var(--pub-accent) 28%, transparent);
+  color-scheme: light;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--pub-bg);
+  color: var(--pub-text);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.pub *,
+.pub *::before,
+.pub *::after {
+  box-sizing: border-box;
+}
+.pub :where(h1, h2, h3, p, ol, ul, fieldset, figure) {
+  margin: 0;
+}
+.pub :where(ol, ul) {
+  padding: 0;
+  list-style: none;
+}
+.pub :where(button, input, textarea, select) {
+  font: inherit;
+  color: inherit;
+}
+.pub a {
+  color: var(--pub-accent-ink);
+}
+/* Brand marks keep their own colours: the GetShowUps logo exactly as approved (index.css .logo), a business name in ink. */
+.pub a.pub-brand,
+.pub a.logo {
+  color: var(--pub-ink);
+  text-decoration: none;
+}
+.pub .logo {
+  color: #111216;
+}
+.pub :focus-visible {
+  outline: none;
+  box-shadow: var(--pub-focus);
+}
+.pub .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Shell: brand bar, content, footer ---------- */
+.pub-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) 18px max(16px, env(safe-area-inset-left, 0px));
+}
+.pub-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--pub-ink);
+  text-decoration: none;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.pub-brand img {
+  display: block;
+  max-height: 32px;
+  max-width: 140px;
+  object-fit: contain;
+}
+.pub-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--pub-accent);
+  color: var(--pub-on-accent, #fff);
+  font-size: 14px;
+  font-weight: 700;
+}
+.pub-brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pub-top-link {
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--pub-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pub-top-link:hover {
+  color: var(--pub-ink);
+}
+.pub-main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px));
+}
+.pub-foot {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  font-size: 12.5px;
+  color: var(--pub-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.pub-foot a {
+  color: var(--pub-muted);
+}
+.pub-preview {
+  background: var(--pub-ink);
+  color: #fff;
+  text-align: center;
+  font-size: 13px;
+  padding: 8px 16px;
+}
+
+/* ---------- Card ---------- */
+.pub-card {
+  background: var(--pub-surface);
+  border: 1px solid var(--pub-line);
+  border-radius: var(--pub-radius);
+  box-shadow: var(--pub-shadow);
+}
+
+/* ---------- Type ---------- */
+.pub-eyebrow {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pub-muted);
+}
+.pub-h1 {
+  font-size: clamp(1.35rem, 1.1rem + 0.9vw, 1.6rem);
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--pub-ink);
+  text-wrap: balance;
+}
+.pub-h2 {
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--pub-ink);
+  letter-spacing: -0.005em;
+}
+.pub-lede {
+  color: var(--pub-text);
+  max-width: 60ch;
+}
+.pub-fine {
+  font-size: 13px;
+  color: var(--pub-muted);
+}
+
+/* ---------- Buttons ---------- */
+.pub-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+.pub-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.pub-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.pub-btn--primary {
+  background: var(--pub-action);
+  color: var(--pub-on-action);
+}
+.pub-btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pub-action) 88%, #000);
+}
+.pub-btn--quiet {
+  background: var(--pub-surface);
+  color: var(--pub-ink);
+  border-color: var(--pub-line-strong);
+}
+.pub-btn--quiet:hover:not(:disabled) {
+  background: var(--pub-sunken);
+}
+.pub-btn--link {
+  min-height: 0;
+  padding: 4px 2px;
+  background: none;
+  color: var(--pub-accent-ink);
+  font-weight: 550;
+}
+.pub-btn--block {
+  width: 100%;
+}
+
+/* ---------- Fields ---------- */
+.pub-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.pub-field > span,
+.pub-field > legend {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pub-ink);
+  padding: 0;
+}
+.pub-field small {
+  display: block;
+  margin-top: 1px;
+  font-size: 12.5px;
+  color: var(--pub-muted);
+  font-weight: 400;
+}
+.pub-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--pub-line-strong);
+  border-radius: var(--pub-radius-sm);
+  background: var(--pub-surface);
+  color: var(--pub-ink);
+  font-size: 16px; /* 16px: no zoom on iOS focus */
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+textarea.pub-input {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.pub-input::placeholder {
+  color: #95a2b4;
+}
+.pub-input:focus {
+  outline: none;
+  border-color: var(--pub-accent);
+  box-shadow: var(--pub-focus);
+}
+.pub-input[aria-invalid='true'] {
+  border-color: var(--pub-danger);
+}
+.pub-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.pub-row--zip {
+  grid-template-columns: 1fr 120px;
+}
+@media (max-width: 480px) {
+  .pub-row:not(.pub-row--zip) {
+    grid-template-columns: 1fr;
+  }
+}
+.pub-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  color: var(--pub-text);
+}
+.pub-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--pub-action);
+}
+.pub-error {
+  font-size: 14px;
+  color: var(--pub-danger);
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: var(--pub-radius-sm);
+  padding: 10px 12px;
+}
+.pub-note {
+  font-size: 14px;
+  background: var(--pub-sunken);
+  border: 1px solid var(--pub-line);
+  border-radius: var(--pub-radius-sm);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+/* ---------- Choices (services, quick replies) ---------- */
+.pub-choices {
+  display: grid;
+  gap: 8px;
+}
+.pub-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 16px;
+  align-items: start;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px 14px 44px;
+  border: 1px solid var(--pub-line);
+  border-radius: 10px;
+  background: var(--pub-surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+.pub-choice::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 17px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--pub-line-strong);
+  background: var(--pub-surface);
+  transition: border 0.15s;
+}
+.pub-choice:hover {
+  border-color: var(--pub-line-strong);
+}
+.pub-choice[aria-checked='true'] {
+  border-color: var(--pub-accent);
+  box-shadow: 0 0 0 1px var(--pub-accent);
+  background: color-mix(in srgb, var(--pub-accent) 4%, var(--pub-surface));
+}
+.pub-choice[aria-checked='true']::before {
+  border: 5px solid var(--pub-accent);
+}
+.pub-choice-name {
+  font-weight: 600;
+  color: var(--pub-ink);
+}
+.pub-choice-price {
+  font-weight: 600;
+  color: var(--pub-ink);
+  font-size: 14px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pub-choice-desc {
+  grid-column: 1 / -1;
+  font-size: 13.5px;
+  color: var(--pub-muted);
+}
+.pub-choice-meta {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--pub-muted);
+}
+.pub-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pub-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--pub-line-strong);
+  background: var(--pub-surface);
+  color: var(--pub-ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.pub-chip:hover {
+  border-color: var(--pub-accent);
+  background: color-mix(in srgb, var(--pub-accent) 5%, var(--pub-surface));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pub *,
+  .pub *::before,
+  .pub *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -5306,3 +5306,133 @@ html.help-open .app {
 .setup-check-card:not(:empty) {
   margin-bottom: 16px;
 }
+
+/* ============ Settings → Services and prices (forms.jsx ServicesForm, 2026-11-25): one card per service ============ */
+.svc-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.svc {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white, #fff);
+}
+.svc.is-hidden {
+  background: var(--surface-sunken);
+}
+.svc.is-hidden .svc-main input {
+  color: var(--text-muted);
+}
+.svc-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 200px) auto;
+  gap: 8px;
+  align-items: center;
+}
+.svc-main .field {
+  margin: 0;
+}
+.svc-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.svc-tools .icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white, #fff);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+.svc-tools .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.svc-tools .link-btn {
+  padding: 4px 6px;
+  font-size: 0.85rem;
+}
+.svc-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.svc-more {
+  display: grid;
+  gap: 14px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.svc-more fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.svc-more fieldset legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.svc-more .check {
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.svc-more small {
+  display: block;
+  margin-top: 4px;
+}
+.svc-question {
+  display: grid;
+  gap: 6px;
+}
+.svc-ideas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.svc-ideas .chip {
+  text-transform: none;
+  border: 1px dashed var(--border-strong);
+  background: var(--white, #fff);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.svc-booking {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.svc-booking p {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .svc-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .svc-tools {
+    justify-content: flex-start;
+  }
+}

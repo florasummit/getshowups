@@ -46,10 +46,12 @@ export async function setupCheck(env, customer, now = Date.now()) {
     const unit = services.filter(missingUnit)
     if (unit.length) add('price_unit', 'important', `${unit.map((s) => `“${s.name}” (${s.price})`).join(', ')}: per visit, week or month?`, 'Customers and the receptionist can’t tell what the price covers.', 'Write it in the price, for example “$300+ per month”.', 'settings#services')
     const site = live && live !== UNREAD ? live.content?.services || [] : []
-    if (site.length && services.length) {
+    // Hidden services (temporarily off, server/services.js) are expected to be missing from the website.
+    const shown = services.filter((s) => s?.hidden !== true)
+    if (site.length && shown.length) {
       const mine = new Map(services.map((s) => [plain(s.name), plain(s.price)]))
       const diff = site.filter((s) => !mine.has(plain(s.name)) || (s.price && mine.get(plain(s.name)) !== plain(s.price))).map((s) => s.name)
-      const extra = services.filter((s) => !site.some((x) => plain(x.name) === plain(s.name))).map((s) => s.name)
+      const extra = shown.filter((s) => !site.some((x) => plain(x.name) === plain(s.name))).map((s) => s.name)
       if (diff.length || extra.length) add('services_differ', 'important', 'Your website and your service list disagree', `Different or missing: ${[...new Set([...diff, ...extra])].slice(0, 6).join(', ')}. Customers could see one price and be told another.`, 'Make them match in Settings and Website.', 'settings#services')
     }
     if (!profile?.phone) add('no_phone', 'important', 'No phone number', 'Customers have no way to call you; your website hides its call button.', 'Add your business phone.', 'settings#details')

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, noIndex } from '../lib/api.js'
-import { Pill } from '../dashboard/ui.jsx'
-import '../app.css'
+import { BrandMark } from '../public/PublicShell.jsx'
+import { accentVars } from '../public/color.js'
+import './chat.css'
 
 // Public AI receptionist for one business: one conversation the customer can type in and/or talk in (browser voice).
 // The server is the source of truth for what was said and what happened (booked / callback recorded / ended); this page
@@ -88,6 +89,23 @@ const adParams = () => {
   const out = {}
   for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'gclid']) if (q.get(k)) out[k] = q.get(k).slice(0, 200)
   return out
+}
+
+// Quick replies: natural sentences the customer can send with one tap, from the business's own offered services (never a
+// service it doesn't list). Free text always stays available; the replies disappear once the conversation starts.
+function quickReplies(info) {
+  if (info.brand?.product) return ['How does it work?', 'What does it cost?', 'Is it a fit for a pool company?', 'Book a demo']
+  const named = (info.services || []).slice(0, 3).map((s) => (s.flow === 'request' ? `I’d like a quote for ${s.name.toLowerCase()}` : `I’d like to book ${s.name.toLowerCase()}`))
+  return [...named, 'What times are open this week?', ...(named.length ? [] : ['What do you offer?'])].slice(0, 4)
+}
+const embedMode = () => new URLSearchParams(window.location.search).get('embed') === '1'
+
+function Send() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </svg>
+  )
 }
 
 function Mic() {
@@ -306,19 +324,20 @@ export default function ChatPage({ id }) {
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
-  if (!info) return <main className="rcp" aria-busy="true" />
+  const embed = embedMode()
+  if (!info) return <div className="pub chat" aria-busy="true" />
   if (info.missing) {
     return (
-      <main className="rcp rcp--notice">
-        <p className="rc-empty">This page isn’t available.</p>
-      </main>
+      <div className="pub chat chat--notice">
+        <p className="chat-empty">This page isn’t available.</p>
+      </div>
     )
   }
   if (!info.enabled) {
     return (
-      <main className="rcp rcp--notice">
-        <h1 className="chat-name">{info.name}</h1>
-        <p className="rc-empty">
+      <div className="pub chat chat--notice" style={accentVars(info.brand?.accent, { product: info.brand?.product })}>
+        <BrandMark name={info.name} brand={info.brand} />
+        <p className="chat-empty">
           Chat isn’t available right now. <a href={`/book/${id}`}>Book online</a>
           {info.phone && (
             <>
@@ -328,36 +347,37 @@ export default function ChatPage({ id }) {
           )}
         </p>
         {test && (
-          <p className="rc-empty" data-test-refused={info.test?.error || 'unknown'}>
+          <p className="chat-empty" data-test-refused={info.test?.error || 'unknown'}>
             {TEST_REFUSED[info.test?.error] || 'A test session could not be started here.'} <a href="/admin/voice-lab">Back to the Admin Console</a>
           </p>
         )}
-      </main>
+      </div>
     )
   }
   const testing = Boolean(test && info.test?.provider) // the server confirmed this admin test session
   const testOnly = Boolean(info.testOnly) // receptionist off for customers: the admin's voice test only, no typed chat
   const onCall = voice.state === 'connecting' || voice.state === 'live'
   const started = Boolean(conv) || lines.length > 0
+  const replies = !started && !testOnly && !outcome.ended ? quickReplies(info) : []
   return (
-    <div className="rcp">
+    <div className={`pub chat${embed ? ' chat--embed' : ''}`} style={accentVars(info.brand?.accent, { product: info.brand?.product })}>
       <header className="chat-head">
         <div className="chat-col chat-head-row">
-          <span className="chat-avatar" aria-hidden="true">
-            {info.name.trim().charAt(0).toUpperCase()}
-          </span>
           <div className="chat-id">
-            <h1 className="chat-name">{info.name}</h1>
-            <p className="chat-sub">AI assistant · answers questions and books appointments</p>
+            {info.brand?.product ? <BrandMark name={info.name} brand={info.brand} href="/" /> : <BrandMark name={info.name} brand={info.brand} href={info.website || undefined} />}
+            <p className="chat-sub">
+              <span className="chat-status" aria-hidden="true" />
+              {info.brand?.product ? 'Ask about GetShowUps, or book a demo' : 'Assistant · answers questions and books appointments'}
+            </p>
           </div>
           <div className="chat-head-actions">
-            {info.website && (
-              <a className="link-btn" href={info.website}>
+            {info.website && !embed && (
+              <a className="pub-top-link" href={info.website}>
                 Website
               </a>
             )}
             {started && !outcome.ended && !confirmEnd && (
-              <button type="button" className="link-btn" onClick={() => setConfirmEnd(true)}>
+              <button type="button" className="pub-btn pub-btn--link chat-end" onClick={() => setConfirmEnd(true)}>
                 End conversation
               </button>
             )}
@@ -367,10 +387,10 @@ export default function ChatPage({ id }) {
           <div className="chat-col chat-confirm" role="group" aria-label="End this conversation?">
             <span>End this conversation? You can start a new one after.</span>
             <span className="chat-confirm-actions">
-              <button type="button" className="btn btn-sm btn-quiet" onClick={endConversation}>
+              <button type="button" className="pub-btn pub-btn--quiet" onClick={endConversation}>
                 End conversation
               </button>
-              <button type="button" className="link-btn" onClick={() => setConfirmEnd(false)}>
+              <button type="button" className="pub-btn pub-btn--link" onClick={() => setConfirmEnd(false)}>
                 Keep going
               </button>
             </span>
@@ -380,22 +400,31 @@ export default function ChatPage({ id }) {
 
       <main className="chat-scroll" ref={listRef}>
         <section className="chat-col chat-msgs" aria-label="Conversation" aria-live="polite">
-          <p className="rc-msg rc-msg--receptionist">{info.greeting}</p>
+          <p className="chat-msg chat-msg--receptionist">{info.greeting}</p>
+          {replies.length > 0 && (
+            <div className="pub-chips chat-replies" role="group" aria-label="Suggested questions">
+              {replies.map((r) => (
+                <button key={r} type="button" className="pub-chip" onClick={() => send(r)} disabled={sending}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
           {lines.map((m, i) => (
-            <p key={i} className={`rc-msg rc-msg--${m.who}`}>
-              {m.channel === 'voice' && <span className="rc-tag">said</span>}
+            <p key={i} className={`chat-msg chat-msg--${m.who}`}>
+              {m.channel === 'voice' && <span className="chat-tag">said</span>}
               {m.text}
             </p>
           ))}
           {voice.live.map((m, i) => (
-            <p key={`v${i}`} className={`rc-msg rc-msg--${m.who} rc-msg--live`}>
-              <span className="rc-tag">said</span>
+            <p key={`v${i}`} className={`chat-msg chat-msg--${m.who} chat-msg--live`}>
+              <span className="chat-tag">said</span>
               {m.text}
             </p>
           ))}
           {sending && (
-            <p className="rc-msg rc-msg--receptionist rc-typing">
-              <span className="dots" aria-hidden="true">
+            <p className="chat-msg chat-msg--receptionist chat-typing">
+              <span className="chat-dots" aria-hidden="true">
                 <i />
                 <i />
                 <i />
@@ -406,7 +435,7 @@ export default function ChatPage({ id }) {
           {outcome.booked && (
             <section className="chat-card chat-card--ok" role="status" aria-label="Appointment booked">
               <p className="chat-card-title">
-                <Pill tone="ok">Booked</Pill> Your appointment is booked
+                <span className="chat-badge chat-badge--ok">Booked</span> Your appointment is booked
               </p>
               <dl className="chat-facts">
                 {outcome.booked.service && (
@@ -426,23 +455,23 @@ export default function ChatPage({ id }) {
                   </div>
                 )}
               </dl>
-              <p className="ui-hint">It’s on the {info.name} calendar.</p>
+              <p className="pub-fine">It’s on the {info.name} calendar.</p>
             </section>
           )}
           {outcome.request && !outcome.booked && (
             <section className="chat-card" role="status" aria-label="Request recorded">
               <p className="chat-card-title">
-                <Pill tone="info">Recorded</Pill> {outcome.request === 'callback' ? 'Your callback request is recorded for the team.' : 'Your message is recorded for the team.'}
+                <span className="chat-badge">Recorded</span> {outcome.request === 'callback' ? 'Your callback request is recorded for the team.' : 'Your message is recorded for the team.'}
               </p>
-              <p className="ui-hint">
+              <p className="pub-fine">
                 The {info.name} team will see it.{info.phone ? ` If it’s urgent, you can also call ${info.phone}.` : ''}
               </p>
             </section>
           )}
           {error && (
-            <p className="rc-error" role="alert">
+            <p className="chat-error" role="alert">
               {error.message}{' '}
-              <button type="button" className="link-btn" onClick={() => send(error.text)}>
+              <button type="button" className="pub-btn pub-btn--link" onClick={() => send(error.text)}>
                 Retry
               </button>
             </p>
@@ -458,29 +487,29 @@ export default function ChatPage({ id }) {
                 <strong>This conversation has ended.</strong>{' '}
                 {outcome.booked ? `Your appointment is booked for ${outcome.booked.time}.` : outcome.request === 'callback' ? 'Your callback request is recorded.' : 'Thanks for reaching out.'}
               </p>
-              <button ref={newRef} type="button" className="btn btn-primary" onClick={startNew}>
+              <button ref={newRef} type="button" className="pub-btn pub-btn--primary" onClick={startNew}>
                 Start a new conversation
               </button>
             </section>
           ) : (
             <>
               {(onCall || voice.message || voice.state === 'ended') && (
-                <div className={`callbar${onCall ? ' callbar--live' : ''}`} aria-live="polite">
+                <div className={`chat-callbar${onCall ? ' is-live' : ''}`} aria-live="polite">
                   {onCall ? (
                     <>
-                      <span className={`rc-dot${voice.talking ? ' rc-dot--talking' : ''}`} aria-hidden="true" />
-                      <span className="callbar-text">{voice.state === 'connecting' ? 'Connecting your microphone…' : voice.talking ? 'Speaking…' : 'Listening. Just talk, or type below.'}</span>
+                      <span className={`chat-dot${voice.talking ? ' is-talking' : ''}`} aria-hidden="true" />
+                      <span className="chat-callbar-text">{voice.state === 'connecting' ? 'Connecting your microphone…' : voice.talking ? 'Speaking…' : 'Listening. Just talk, or type below.'}</span>
                       {audioBlocked && (
-                        <button type="button" className="btn btn-sm btn-quiet" onClick={enableSound}>
+                        <button type="button" className="pub-btn pub-btn--quiet chat-small" onClick={enableSound}>
                           Enable sound
                         </button>
                       )}
-                      <button type="button" className="btn btn-sm btn-danger" onClick={endVoice}>
+                      <button type="button" className="pub-btn chat-small chat-hangup" onClick={endVoice}>
                         End call
                       </button>
                     </>
                   ) : (
-                    <span className="callbar-text">{voice.message || 'Call ended. Your microphone is off; you can keep typing.'}</span>
+                    <span className="chat-callbar-text">{voice.message || 'Call ended. Your microphone is off; you can keep typing.'}</span>
                   )}
                 </div>
               )}
@@ -492,7 +521,7 @@ export default function ChatPage({ id }) {
                 </p>
               )}
               <form
-                className="composer"
+                className="chat-composer"
                 onSubmit={(e) => {
                   e.preventDefault()
                   send()
@@ -513,17 +542,17 @@ export default function ChatPage({ id }) {
                   disabled={testOnly}
                 />
                 {(info.voice || test) && !onCall && (
-                  <button type="button" className="composer-mic" onClick={startVoice} aria-label={voice.state === 'ended' ? 'Talk again (uses your microphone)' : 'Talk instead (uses your microphone)'} title="Talk instead">
+                  <button type="button" className="chat-icon-btn" onClick={startVoice} aria-label={voice.state === 'ended' ? 'Talk again (uses your microphone)' : 'Talk instead (uses your microphone)'} title="Talk instead">
                     <Mic />
                   </button>
                 )}
-                <button type="submit" className="btn btn-primary composer-send" disabled={!text.trim() || sending || testOnly}>
-                  Send
+                <button type="submit" className="chat-icon-btn chat-send" aria-label="Send" disabled={!text.trim() || sending || testOnly}>
+                  <Send />
                 </button>
               </form>
               <p className="chat-links">
                 {!testOnly && (
-                  <button type="button" className="link-btn" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
+                  <button type="button" className="pub-btn pub-btn--link" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
                     Ask for a person
                   </button>
                 )}

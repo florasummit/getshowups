@@ -1,0 +1,320 @@
+/* Booking page layout (/book/:id) on the public system (src/public/public.css). Desktop: a quiet summary column beside
+   one focused step card. Phone: one column, the summary as a compact block above, the time button pinned to the
+   bottom while choosing a time. */
+.bk {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 620px);
+  gap: 24px;
+  justify-content: center;
+  align-items: start;
+  padding-top: 8px;
+}
+.bk-side {
+  position: sticky;
+  top: 24px;
+  min-width: 0;
+}
+.bk-panel {
+  padding: 28px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.bk-panel > .pub-eyebrow {
+  margin-bottom: -10px;
+}
+.bk-message {
+  max-width: 520px;
+  margin: 24px auto 0;
+  padding: 28px;
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+.bk-form {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.bk-sub {
+  margin-top: -8px;
+  font-size: 14px;
+}
+.bk-reveal {
+  animation: bk-in 0.18s ease-out;
+}
+@keyframes bk-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.bk-zip {
+  max-width: 280px;
+}
+.bk-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+/* Summary */
+.bk-summary {
+  display: grid;
+  gap: 14px;
+  padding: 4px 4px 0;
+}
+.bk-summary-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--pub-ink);
+  line-height: 1.3;
+}
+.bk-facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--pub-line);
+}
+.bk-facts div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  font-size: 14px;
+}
+.bk-facts dt {
+  color: var(--pub-muted);
+}
+.bk-facts dd {
+  margin: 0;
+  color: var(--pub-ink);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.bk-facts small {
+  color: var(--pub-muted);
+  font-weight: 400;
+}
+.bk-change {
+  display: flex;
+  gap: 14px;
+  margin-top: -4px;
+}
+.bk-good {
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+  color: var(--pub-text);
+  padding-top: 14px;
+  border-top: 1px solid var(--pub-line);
+}
+.bk-good--compact .pub-h2 {
+  font-size: 13px;
+}
+.bk-panel .bk-good {
+  display: none; /* shown in the summary column on desktop */
+}
+
+/* Times */
+.bk-days {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 64px;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  margin: 0 -2px;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+.bk-day {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 8px 4px;
+  border: 1px solid var(--pub-line);
+  border-radius: 10px;
+  background: var(--pub-surface);
+  cursor: pointer;
+  scroll-snap-align: start;
+  font-size: 12px;
+  color: var(--pub-muted);
+}
+.bk-day strong {
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--pub-ink);
+  font-variant-numeric: tabular-nums;
+}
+.bk-day small {
+  font-size: 11px;
+}
+.bk-day:hover {
+  border-color: var(--pub-line-strong);
+}
+.bk-day[aria-pressed='true'] {
+  border-color: var(--pub-accent);
+  box-shadow: 0 0 0 1px var(--pub-accent);
+  background: color-mix(in srgb, var(--pub-accent) 5%, var(--pub-surface));
+}
+.bk-day-label {
+  font-weight: 600;
+  color: var(--pub-ink);
+  margin-bottom: -6px;
+}
+.bk-slot-group {
+  display: grid;
+  gap: 8px;
+}
+.bk-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.bk-slot {
+  min-height: 44px;
+  border: 1px solid var(--pub-line-strong);
+  border-radius: 8px;
+  background: var(--pub-surface);
+  color: var(--pub-ink);
+  font-weight: 600;
+  font-size: 14.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.bk-slot:hover {
+  border-color: var(--pub-accent);
+}
+.bk-slot[aria-pressed='true'] {
+  background: var(--pub-action);
+  border-color: var(--pub-action);
+  color: var(--pub-on-action);
+}
+.bk-loading {
+  min-height: 240px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--pub-sunken), var(--pub-surface), var(--pub-sunken));
+  background-size: 200% 100%;
+  animation: bk-shimmer 1.2s linear infinite;
+}
+@keyframes bk-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Address */
+.bk-address {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+.bk-address-row {
+  display: grid;
+  grid-template-columns: 1fr 72px 104px;
+  gap: 8px;
+}
+
+/* Done */
+.bk-done {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+.bk-done-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #e7f6ee;
+  color: var(--pub-ok);
+}
+.bk-done-when {
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--pub-ink);
+  font-variant-numeric: tabular-nums;
+}
+.bk-next {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--pub-line);
+}
+.bk-next li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 14px;
+}
+.bk-next li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pub-accent);
+}
+.bk-done .bk-good {
+  width: 100%;
+}
+
+/* Phone */
+@media (max-width: 760px) {
+  .bk {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .bk-side {
+    position: static;
+  }
+  .bk-summary {
+    gap: 10px;
+    padding: 0;
+  }
+  .bk-summary-eyebrow {
+    display: none;
+  }
+  .bk-summary .bk-good {
+    display: none;
+  }
+  .bk-panel .bk-good {
+    display: grid;
+  }
+  .bk-facts {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    padding-top: 10px;
+  }
+  .bk-facts div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .bk-facts dt {
+    font-size: 12px;
+  }
+  .bk-panel {
+    padding: 20px 16px;
+  }
+  .bk-sticky {
+    position: sticky;
+    bottom: 0;
+    margin: 0 -16px -20px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--pub-surface) 94%, transparent);
+    border-top: 1px solid var(--pub-line);
+    border-radius: 0 0 var(--pub-radius) var(--pub-radius);
+    backdrop-filter: blur(6px);
+  }
+  .bk-address-row {
+    grid-template-columns: 1fr 64px 92px;
+  }
+}
