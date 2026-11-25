@@ -344,6 +344,8 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
   if (job.status === 'completed') return { status: 'completed', step: 'done' }
   const report = parsed(job.report)
   if (job.step === 'lockout' && report.scheduledFor > now) return { status: 'scheduled', scheduledFor: report.scheduledFor, report: await holdForRecovery(env, customerId, report, now) }
+  // A window whose notes were damaged is still a window: nothing runs before its date.
+  if (job.step === 'lockout' && !report.claimed && !job.attempts && !job.last_error && job.next_attempt_at > now) return { status: 'scheduled', scheduledFor: job.next_attempt_at }
   // Reclassified as ours since it was asked: held, not deleted (an admin undoes it, or reclassifies on purpose).
   if (job.step === 'lockout' && !report.claimed && job.requested_by !== 'system:restore' && (await protectedBusiness(env, customerId))) {
     await db.prepare("UPDATE account_deletions SET last_error = 'protected_business', next_attempt_at = ?2 WHERE customer = ?1 AND status = 'in_progress' AND next_attempt_at = ?3").bind(customerId, now + 86400000, job.next_attempt_at).run()

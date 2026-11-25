@@ -19,10 +19,14 @@ _Update at the end of every task. Newest first._
 - **Verified how:** unit and browser tests with Stripe and Google stand-ins; production: signed-out refusals, test-session refusals,
   Settings page opens on desktop and phone. **Not verified in production:** the new controls signed in as an owner; live Stripe;
   deletion (off).
-- **Independent review for enabling deletion (round 3, on the live code):** earlier fixes verified; no path found that erases a business whose
-  owner undid it. NOT safe to enable then: a failed final check could stay stuck with data left (F1), and a live subscription could be
-  called ended with a test key or the wrong Stripe account (F2), plus F3–F7. Fixed in the follow-up PR that adds this entry, with tests;
-  **re-review of those fixes and the founder's approval of implementation and retention are required before switching on.**
+- **Independent review for enabling deletion:** four rounds, its own attack tests. Round 3 on the live code said NOT safe (leftovers found by the
+  last check could stay; a live subscription could be called ended with a test key or the wrong Stripe account; five smaller). All seven
+  fixed in PR #172 and re-verified in round 4: no path found that erases a business whose owner undid it, reports completion with
+  data, billing or ads left, or strands a business. **Verdict: safe from the engineering side with 0 and with 14 days**, against
+  simulated Stripe, D1 and KV only. The window guard it recommended (L1) was added after and not re-reviewed.
+- **Before switching deletion on:** founder approval of implementation and retention; one real sandbox deletion of an admin-marked test business;
+  no 'system:restore' rows pending; known lows: a failed classification read delays 24 h and looks closed (L2), a protected hold shows
+  as "Scheduled" without its reason (L3), and before live billing a subscription with no recorded mode must count as live (L5).
 - **Off:** ACCOUNT_DELETION_ENABLED, ACCOUNT_RECOVERY_DAYS, STRIPE_LIVE_ENABLED, MESSAGES_LIVE, SMS_LIVE, ADS_LIVE_LAUNCH.
 - **Limitations:** no per-service length (Claude 2's booking branch extends the one catalog, business_profiles.services, with 0042);
   no one-step reschedule; owners can't pause their own business; export is capped by rows (10,000 a table, 1,500 conversations,
