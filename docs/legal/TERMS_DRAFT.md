@@ -24,12 +24,13 @@ confirm you have authority to do so. The Service is for businesses, not for pers
 - Give us accurate business information (name, services, prices, service area, hours). Your website, booking page and
   AI receptionist use it as written.
 - We may suspend access for non-payment (section 5), for a breach of these Terms, or to protect people or the Service.
-  Suspension is a decision made by a person at GetShowUps, not automatic, and we will tell you why unless the law or
-  safety prevents it.
+  Suspension is a decision made by a person at GetShowUps, not automatic, recorded with a reason, and we will tell you why
+  unless the law or safety prevents it. We may also switch off a single feature for a business the same way. Suspension
+  pauses the booking page, website and the ads GetShowUps runs; you keep access to billing and your data.
 
 ## 3. Plan, price and billing
 
-- **Founding plan: US $499 per month**, billed in advance each month from the day you subscribe, through Stripe. There
+- **Growth plan: US $499 per month**, billed in advance each month from the day you subscribe, through Stripe. There
   is no free trial. [DECISION: keep "no free trial"?]
 - **Taxes:** prices **[DECISION: exclude / include]** applicable sales or similar taxes. [DECISION: whether GetShowUps
   collects sales tax, and where; see docs/PAID_LAUNCH.md "Tax".]
@@ -58,17 +59,28 @@ The product currently cancels at the end of the paid period with **no proration*
 
 ## 5. Cancellation
 
-- Cancel any time from **Settings → Plan → Manage billing**. Cancellation takes effect at the **end of the current paid
-  period**; you are not charged again.
+- Cancel any time, without contacting us, from **Settings → Plan and billing → Cancel plan** (or in Stripe's billing
+  portal). Cancellation takes effect at the **end of the current paid period**; you are not charged again. We say it is
+  cancelled only after Stripe confirms it. Until it ends you can choose **Keep my plan**, which restarts monthly charges.
+- After a plan has ended, starting again is a new purchase you confirm at checkout; nothing restarts by itself.
 - After the paid period ends:
   - your GetShowUps-hosted website stays online for **14 more days** so you can move it;
   - ads we manage for you are paused;
   - your account and data are kept and **fully recoverable for 90 days** — resubscribe and everything comes back.
 - What happens to your data after those 90 days is described in the Privacy Policy. **[DECISION: approve the retention
   schedule in docs/DATA_RETENTION.md §2 and disclose it here.]**
-- **Deleting your account** is different from canceling: it is permanent, stops billing immediately, takes your website
-  offline and erases your business data (Privacy Policy). [VERIFY: account deletion is switched off today
-  (`ACCOUNT_DELETION_ENABLED`); until it is on, deletion is done on request.]
+- **Closing a business** is different from canceling: the owner (the longest-standing member) asks in **Settings → Close
+  the business**, after a fresh sign-in. It takes the website and booking page offline, pauses the ads GetShowUps started,
+  disconnects services and erases the business data (Privacy Policy). [FACT: online deletion is switched off; until it is
+  on, the request is recorded and a person handles it.]
+- **[DECISION/attorney: recovery window before anything is erased. Built and configurable; proposed 14 days, approved: none.
+  During it the business is offline, its ads are paused, its plan is set not to renew, and the owner can undo.]**
+- **Deleting your own account** removes your sign-in and personal records and leaves the business with the people who remain.
+  The only person in a business closes it first.
+- **What stays yours:** your Google Account, calendar and its events, ad accounts and the campaigns in them, your domain and
+  its DNS. Upcoming appointments are not cancelled for you. Ads you run yourself outside GetShowUps keep running.
+- **Your data:** the owner can download customers, appointments, recorded payments, messages, settings, taught AI knowledge,
+  website and photos at any time before closing.
 
 ## 6. What the Service does — and does not — promise
 
@@ -83,8 +95,10 @@ The product currently cancels at the end of the paid period with **no proration*
   your business information and notes. It can make mistakes, misunderstand speech, or decline to answer. It cannot
   transfer calls to a person; requests for a person are recorded for you to follow up. It is **not** for emergencies:
   it tells callers to call 911. Review its conversations and keep your information up to date.
-- **Messages.** Confirmation, reminder and follow-up emails (and texts, once texting is approved for your business) are
-  sent on your behalf only to people who gave their details to your business. Text messages require the person's
+- **Dashboard assistant.** An AI answers the owner's questions from the business's records and prepares changes the owner
+  approves. It can be wrong and is not legal, tax or financial advice. It can't cancel, delete or charge.
+- **Messages.** When enabled for your business (not yet), confirmation, reminder and follow-up emails, and texts once
+  approved, are sent on your behalf only to people who gave their details to your business. Text messages require the person's
   consent and honor STOP. You agree not to use the Service to send messages people did not ask for.
 - **Advertising.** If you connect an ad account, GetShowUps creates campaigns only after you approve them (created
   paused), changes them only as you request, and keeps spend within the budget you approve. Ad platforms decide

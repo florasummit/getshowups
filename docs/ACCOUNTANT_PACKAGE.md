@@ -1,5 +1,7 @@
 # Sales tax: accountant decision package (cover sheet)
 
+> 2026-11-25: the plan is called Growth; website chat receptionist is advertised inside the $499 (F9 is partly answered).
+
 Prepared 2026-11-19 for the owner to send to the accountant / tax attorney together with
 [docs/SALES_TAX_ANALYSIS.md](SALES_TAX_ANALYSIS.md) (the full analysis, sources and labels). **Not tax advice.** No tax
 has been registered, no live Stripe price exists, Stripe automatic tax is off. Labels are carried over unchanged:

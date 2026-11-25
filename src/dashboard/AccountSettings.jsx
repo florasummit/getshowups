@@ -404,7 +404,7 @@ function Impact({ i, deletes, recoveryDays }) {
       <li>{count(i.messages, 'scheduled message')} won’t be sent.</li>
       <li>{ads}</li>
       <li>
-        {i.subscription === null ? 'Your plan couldn’t be checked.' : i.subscription ? (deletes && !recoveryDays ? 'Your plan ends right away, with no further charges and no refund of the current period.' : 'Your plan is set to end, so it doesn’t renew.') : 'There’s no plan to end.'}
+        {i.subscription === null ? 'Your plan couldn’t be checked.' : i.subscription ? (deletes && !recoveryDays ? 'Your plan ends right away, with no further charges. The current period isn’t refunded automatically.' : 'Your plan is set to end, so it doesn’t renew.') : 'There’s no plan to end.'}
       </li>
       <li>Disconnected here: {i.services === null ? 'couldn’t be checked' : i.services.length ? i.services.join(', ') : 'nothing connected'}. Those accounts stay yours.</li>
       <li>

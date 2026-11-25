@@ -75,7 +75,7 @@ export default function PlanDetails({ sub, owner, reload, portal }) {
             <strong>Cancel your plan?</strong>
           </p>
           <ul className="fine">
-            <li>You keep everything until {sub.currentPeriodEnd ? date(sub.currentPeriodEnd) : 'the end of the period you paid for'}. No further charges, no refund for the rest of the period.</li>
+            <li>You keep everything until {sub.currentPeriodEnd ? date(sub.currentPeriodEnd) : 'the end of the period you paid for'}. No further charges. The rest of the period isn’t refunded automatically.</li>
             <li>After that: your website stays online 14 more days; ads we run are paused; booking stops when the website does.</li>
             <li>Your data is kept, and for 90 days you can reactivate and find everything as it was.</li>
             <li>Connected Google, ad and domain accounts stay yours. Upcoming appointments stay in your calendar.</li>
