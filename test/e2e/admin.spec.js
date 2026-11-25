@@ -225,12 +225,16 @@ test('admin suspends and reactivates an account (audited); booking page pauses m
   await page.goto('/admin')
   await page.locator('.row--link', { hasText: 'E2E Spare Co' }).first().click()
   await page.getByRole('button', { name: 'Suspend account' }).click()
+  await expect(page.getByRole('button', { name: 'Confirm: pause booking page and ads' })).toBeDisabled() // a reason is required
+  await page.getByLabel(/^Reason/).fill('browser test')
   await page.getByRole('button', { name: 'Confirm: pause booking page and ads' }).click()
   await expect(page.getByRole('button', { name: 'Reactivate account' })).toBeVisible()
   await expect(page.locator('[data-ads-paused]')).toHaveText('Ads: 0 campaigns paused.')
   expect((await book()).status()).toBe(404)
   await expect(page.locator('.card', { hasText: 'Audit trail' }).getByText('customer.suspend')).toBeVisible()
   await page.getByRole('button', { name: 'Reactivate account' }).click()
+  await page.getByLabel(/^Reason/).fill('browser test over')
+  await page.getByRole('button', { name: 'Confirm: reactivate' }).click()
   await expect(page.getByRole('button', { name: 'Suspend account' })).toBeVisible()
   expect((await book()).status()).toBe(200)
   // The permanent audit log on the console home: chain verified, newest entries, export link.
@@ -303,7 +307,7 @@ test('existing pilot (non self-serve) business keeps its dashboard and is never 
   await expect(page.getByText('Fix your plan')).toHaveCount(0)
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Booking hours' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Plan' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Plan and billing' })).toHaveCount(0)
 })
 
 test('Twilio setup per business: steps in its own subaccount, submitting off, a step that can’t run says why (nothing sent to Twilio)', async ({ page, context }) => {

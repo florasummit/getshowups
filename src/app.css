@@ -5284,3 +5284,25 @@ html.help-open .app {
     transform: rotate(1turn);
   }
 }
+
+/* Settings sections */
+.settings-nav {
+  display: flex;
+  gap: 6px 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.settings-nav a {
+  font-size: 0.9rem;
+  padding: 6px 0;
+}
+.app-main section[id],
+#plan {
+  scroll-margin-top: 16px;
+}
+[data-setup-check] .row-title .ui-pill {
+  margin-right: 6px;
+}
+.setup-check-card:not(:empty) {
+  margin-bottom: 16px;
+}

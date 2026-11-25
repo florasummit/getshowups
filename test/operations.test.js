@@ -326,12 +326,12 @@ test('suspension: manual, audited; pauses booking; owner keeps dashboard and bil
   await connectKv('alpha')
   const cookie = await admin()
   assert.equal((await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).status, 200)
-  assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: 'alpha', status: 'suspended', reason: 'requested' } })).status, 200)
+  assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: 'alpha', status: 'suspended', reason: 'requested', confirm: true } })).status, 200)
   assert.equal((await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).status, 404)
   const owner = await session('owner@alpha.example')
   assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: owner })).json().customer.status, 'suspended')
   assert.equal((await call(billing, 'GET', '/api/dashboard/billing', { cookie: owner })).status, 200)
-  await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: 'alpha', status: 'active' } })
+  await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: 'alpha', status: 'active', reason: 'resolved now', confirm: true } })
   assert.equal((await call(bookInfo, 'GET', '/api/book/alpha', { params: { customer: 'alpha' } })).status, 200)
   assert.deepEqual(auditActions(), ['customer.suspend', 'customer.reactivate'])
 })
@@ -817,7 +817,7 @@ test('platform audit log: admin-only, read-only, chain verified live, customer f
   seed('beta')
   const cookie = await admin()
   for (const [c, st] of [['alpha', 'suspended'], ['alpha', 'active'], ['beta', 'suspended']]) {
-    assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: c, status: st } })).status, 200)
+    assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie, body: { customer: c, status: st, reason: 'journey test', confirm: true } })).status, 200)
   }
   const all = await call(pAudit, 'GET', '/api/platform/audit', { cookie })
   assert.equal(all.status, 200)

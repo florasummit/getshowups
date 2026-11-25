@@ -11,6 +11,7 @@ import { operatorConfigured } from './operator-model.js'
 import { keep } from './fit.js'
 import { newProposalId, PROPOSAL_ID } from './proposal-set.js'
 import { businessEligible } from './eligibility.js'
+import { restricted } from './restrictions.js'
 import { internalEmails } from './testdata.js'
 
 export const LIMITS = { question: 500, answer: 900, history: 6 }
@@ -18,7 +19,7 @@ export const VIEWS = ['overview', 'appointments', 'followups', 'receptionist', '
 export const PERIODS = [7, 30, 90]
 
 export const chatEnabled = (env) => env.AI_ASSIST_CHAT_ENABLED !== 'false'
-export const chatAccess = async (env, customer) => env.AI_ASSIST_ENABLED !== 'false' && chatEnabled(env) && operatorConfigured(env) && businessEligible(env, customer)
+export const chatAccess = async (env, customer) => env.AI_ASSIST_ENABLED !== 'false' && chatEnabled(env) && operatorConfigured(env) && (await businessEligible(env, customer)) && !(await restricted(env, customer.id, 'assistant'))
 
 const clean = (v) => String(v ?? '').replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim()
 

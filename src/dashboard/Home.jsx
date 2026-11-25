@@ -4,7 +4,9 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
-import { BusinessForm, HoursForm, PoliciesForm, ProfileForm } from './forms.jsx'
+import { AvailabilityForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
+import { CloseBusiness, Notices, People, Services, SetupCheck, SignInSecurity, YourAccount, YourData } from './AccountSettings.jsx'
+import PlanDetails from './PlanCard.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
@@ -50,10 +52,11 @@ export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = 
 // ---------- billing (only for businesses that pay; pilots never see it) ----------
 function useBilling() {
   const [billing, setBilling] = useState(null)
+  const load = useCallback(() => api('/api/dashboard/billing').then(({ status, data }) => setBilling(status === 200 && data.configured && data.billed ? data : null)), [])
   useEffect(() => {
-    api('/api/dashboard/billing').then(({ status, data }) => setBilling(status === 200 && data.configured && data.billed ? data : null))
-  }, [])
-  return billing
+    load()
+  }, [load])
+  return [billing, load]
 }
 
 async function openBilling(body, setState) {
@@ -66,76 +69,14 @@ async function openBilling(body, setState) {
 const SUB_LABEL = { trialing: 'Free trial', active: 'Active', past_due: 'Payment failed', canceled: 'Ended', incomplete: 'Not completed' }
 const shortDate = (ms) => fmt(new Date(ms).toISOString(), undefined, { month: 'short', day: 'numeric' })
 
-// Permanent deletion (only when the platform has it switched on). No undo: the owner types the business name.
-function DeleteAccount({ name }) {
-  const [open, setOpen] = useState(false)
-  const [typed, setTyped] = useState('')
-  const [state, setState] = useState({})
-  const matches = typed.trim().replace(/\s+/g, ' ').toLowerCase() === String(name).trim().replace(/\s+/g, ' ').toLowerCase()
-  const submit = async (e) => {
-    e.preventDefault()
-    setState({ busy: true })
-    const { status, data } = await api('/api/dashboard/account', { method: 'POST', body: { action: 'delete', confirm: true, name: typed } })
-    if (status === 202) clearMemory()
-    setState(status === 202 ? { done: true } : { error: data.error === 'name_mismatch' ? 'The name doesn’t match.' : 'Couldn’t delete the account. Please try again.' })
-  }
-  if (state.done)
-    return (
-      <div className="stack" role="status" data-account-deleted>
-        <p>
-          <strong>Your account is being deleted.</strong> Your website and booking page are offline, your ads are paused, billing has stopped and
-          your data is being erased. This can’t be undone.
-        </p>
-        <a className="btn btn-sm" href="/">
-          Done
-        </a>
-      </div>
-    )
-  return (
-    <div className="stack">
-      <p className="fine">
-        Permanently deletes {name}: the website and booking page go offline, running ads are paused, your subscription is canceled right away
-        (no further charges), connected Google, ad and GoHighLevel accounts are disconnected, and your customers’ details, appointments and
-        website are erased. Billing records we must keep for tax and accounting stay, without your customers’ details. There is no undo; to
-        come back later you start a new account. To stop paying but keep everything, cancel your plan in Billing instead.
-      </p>
-      {!open ? (
-        <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(true)}>
-          Delete account…
-        </button>
-      ) : (
-        <form className="stack" onSubmit={submit} aria-label="Confirm account deletion">
-          <label className="field">
-            <span>Type the business name ({name}) to confirm</span>
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
-          </label>
-          {state.error && (
-            <p className="form-error" role="alert">
-              {state.error}
-            </p>
-          )}
-          <div className="row-actions">
-            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(false)}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-sm btn-danger" disabled={!matches || state.busy}>
-              Permanently delete account
-            </button>
-          </div>
-        </form>
-      )}
-    </div>
-  )
-}
-
-function BillingCard({ billing }) {
+function BillingCard({ billing, reload }) {
   const [state, setState] = useState({})
   const sub = billing.subscription
   const live = sub && !['canceled', 'incomplete', 'sandbox'].includes(sub.status)
   if (billing.complimentary) {
     return (
       <section className="card" data-billing="complimentary">
-        <h2 className="card-title">Plan</h2>
+        <h2 className="card-title">Plan and billing</h2>
         <p className="status status--ok">
           <span className="status-dot" aria-hidden="true" />
           Complimentary GetShowUps account
@@ -146,7 +87,7 @@ function BillingCard({ billing }) {
   }
   return (
     <section className="card">
-      <h2 className="card-title">Plan</h2>
+      <h2 className="card-title">Plan and billing</h2>
       {live ? (
         <div className="form">
           <p className={`status status--${sub.status === 'past_due' ? 'bad' : 'ok'}`}>
@@ -158,9 +99,7 @@ function BillingCard({ billing }) {
               </span>
             )}
           </p>
-          <button type="button" className="btn btn-quiet btn-block" disabled={state.busy || !sub.manageable} onClick={() => openBilling({ action: 'portal' }, setState)}>
-            Manage billing
-          </button>
+          <PlanDetails sub={sub} owner={billing.owner !== false} reload={reload} portal={() => openBilling({ action: 'portal' }, setState)} />
         </div>
       ) : (
         <div className="form">
@@ -198,9 +137,26 @@ function BillingCard({ billing }) {
   )
 }
 
-function AccountNotice({ customer, billing }) {
+function SetupCheckCard({ go }) {
+  return (
+    <div className="setup-check-card">
+      <SetupCheck go={go} compact />
+    </div>
+  )
+}
+
+function AccountNotice({ customer, billing, closing, go }) {
   const [state, setState] = useState({})
   const s = billing?.subscription?.status
+  if (closing)
+    return (
+      <div className="notice enter" role="status">
+        <p>This business is closed and will be deleted on {shortDate(closing)}.</p>
+        <button type="button" className="btn btn-sm btn-primary" onClick={() => go('settings')}>
+          Keep or review in Settings
+        </button>
+      </div>
+    )
   if (customer.status !== 'suspended' && s !== 'past_due') return null
   return (
     <div className="notice enter" role="status">
@@ -525,28 +481,66 @@ function Reminders() {
   )
 }
 
-function Settings({ me, reload, billing }) {
+function Settings({ me, reload, billing, reloadBilling, go }) {
   const c = me.customer
   return (
     <div className="enter">
       <h1 className="title title--page">Settings</h1>
-      <section className="card">
+      <nav className="settings-nav" aria-label="Settings sections">
+        {[
+          ['business', 'Business'],
+          ['services', 'Services'],
+          ['booking-hours', 'Booking'],
+          ['connected', 'Connections'],
+          ['people', 'People'],
+          ...(billing ? [['plan', 'Plan']] : []),
+          ['notifications', 'Notifications'],
+          ['data', 'Your data'],
+          ['close', 'Close'],
+        ].map(([id, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            onClick={(e) => {
+              e.preventDefault()
+              document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+      <section className="card" aria-labelledby="setup-check-title">
+        <h2 className="card-title" id="setup-check-title">
+          Setup check
+        </h2>
+        <SetupCheck go={go} />
+      </section>
+      <section className="card" id="business">
         <TitleHelp help="service_area">Business</TitleHelp>
         <BusinessForm key={c.serviceZips.join()} customer={c} submitLabel="Save business" onSaved={reload} />
       </section>
-      <section className="card">
+      <section className="card" id="services">
+        <h2 className="card-title">Services and prices</h2>
+        <ServicesForm />
+      </section>
+      <section className="card" id="details">
         <TitleHelp help="website_details">Details on your website</TitleHelp>
         <ProfileForm />
       </section>
-      <section className="card">
+      <section className="card" id="policies">
         <TitleHelp help="policies">What customers should know</TitleHelp>
         <PoliciesForm />
       </section>
-      <section className="card">
+      <section className="card" id="booking-hours">
         <TitleHelp help="hours">Booking hours</TitleHelp>
         <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} />
       </section>
-      <section className="card">
+      <section className="card" id="closed-dates">
+        <h2 className="card-title">Closed dates and notice</h2>
+        <AvailabilityForm />
+      </section>
+      <section className="card" id="google-calendar">
         <TitleHelp help="calendar">Google Calendar</TitleHelp>
         <CalendarSettings />
       </section>
@@ -554,7 +548,7 @@ function Settings({ me, reload, billing }) {
         <TitleHelp help="reminders">Reminders</TitleHelp>
         <Reminders />
       </section>
-      {billing && <BillingCard billing={billing} />}
+      <div id="plan">{billing && <BillingCard billing={billing} reload={reloadBilling} />}</div>
       {me.features?.ghl && (
         <section className="card">
           <h2 className="card-title">GoHighLevel</h2>
@@ -563,14 +557,37 @@ function Settings({ me, reload, billing }) {
           </Suspense>
         </section>
       )}
-      {me.features?.accountDeletion && (
-        <section className="card" aria-labelledby="delete-account-title">
-          <h2 className="card-title" id="delete-account-title">
-            Delete account
-          </h2>
-          <DeleteAccount name={c.name} />
-        </section>
-      )}
+      <section className="card" id="connected">
+        <h2 className="card-title">Connected services</h2>
+        <Services go={go} />
+      </section>
+      <section className="card" id="people">
+        <h2 className="card-title">People</h2>
+        <People />
+      </section>
+      <section className="card">
+        <h2 className="card-title">Sign-in and security</h2>
+        <SignInSecurity />
+        <p className="fine">
+          How we use and protect data: <a href="/privacy">Privacy policy</a>. Questions or requests: <a href="mailto:hello@getshowups.com">hello@getshowups.com</a>.
+        </p>
+      </section>
+      <section className="card" id="notifications">
+        <h2 className="card-title">Notifications to you</h2>
+        <Notices />
+      </section>
+      <section className="card" id="data">
+        <h2 className="card-title">Your data</h2>
+        <YourData />
+      </section>
+      <section className="card" id="close">
+        <h2 className="card-title">Close the business</h2>
+        <CloseBusiness />
+      </section>
+      <section className="card">
+        <h2 className="card-title">Your own account</h2>
+        <YourAccount />
+      </section>
     </div>
   )
 }
@@ -594,7 +611,7 @@ export default function Home({ me, reload }) {
   // /dashboard/ads (or /teach) for a business without that feature (e.g. back from a refused ad sign-in) → Overview.
   const view = (requested === 'ads' && !me.features?.ads) || (requested === 'teach' && !me.features?.teachAi) ? 'overview' : requested
   const [found, dropInsight] = useInsights(view)
-  const billing = useBilling()
+  const [billing, reloadBilling] = useBilling()
   const [data, loadOverview] = useOverview()
   const site = useSite()
   // Teach Your AI (after Receptionist) and Ads (before Settings) exist for every eligible business (server/eligibility.js);
@@ -664,7 +681,8 @@ export default function Home({ me, reload }) {
         {view === 'overview' && (
           <>
             <h1 className="ui-page-title ui-page-title--top">{me.customer.name}</h1>
-            <AccountNotice customer={me.customer} billing={billing} />
+            <AccountNotice customer={me.customer} billing={billing} closing={me.closing} go={go} />
+            <SetupCheckCard go={go} />
             <Overview me={me} data={data} reload={loadOverview} go={go} site={site} insight={<Insight view="overview" list={found} drop={dropInsight} go={go} covered={data?.followUp?.some((l) => !l.test && l.status === 'new') ? ['unanswered'] : []} />} />
           </>
         )}
@@ -694,7 +712,7 @@ export default function Home({ me, reload }) {
             <Ads />
           </Suspense>
         )}
-        {view === 'settings' && <Settings me={me} reload={reload} billing={billing} />}
+        {view === 'settings' && <Settings me={me} reload={reload} billing={billing} reloadBilling={reloadBilling} go={go} />}
       </main>
     </div>
   )

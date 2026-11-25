@@ -15,6 +15,7 @@ import { offerSmsFor } from './followups/settings.js'
 import { isTestLead } from './testdata.js'
 import { CURRENT_REVENUE_SQL, revenueReady } from './revenue.js'
 import { areaFor, checkZip } from './zipcode.js'
+import { withBookingRules } from './booking-rules.js'
 import { coverageFor, coverageInsert, coverageReady } from './coverage.js'
 
 export const BOOKING_DAYS = 14
@@ -136,9 +137,10 @@ export async function createLead(env, customer, lead, now = Date.now(), opts = {
 // Open slots for the public booking page: booking hours minus Google busy time minus our own
 // reserved appointments (covers the moment between reserving and Google showing the event).
 export async function openSlots(env, customer, now = Date.now()) {
+  const rules = await withBookingRules(env.ONBOARDING_DB, customer)
   const conn = await connect(env, customer.id)
   if (!conn.ok) return { ok: false, status: conn.status }
-  const { rangeEnd } = computeSlots({ busy: [], rules: customer, now, days: BOOKING_DAYS })
+  const { rangeEnd } = computeSlots({ busy: [], rules, now, days: BOOKING_DAYS })
   const fb = await freeBusy(env, conn.accessToken, now, rangeEnd)
   if (!fb.ok) return { ok: false, status: 'calendar_error' }
   const { results } = await env.ONBOARDING_DB.prepare(
@@ -147,7 +149,7 @@ export async function openSlots(env, customer, now = Date.now()) {
     .bind(customer.id, now, now - STALE_PENDING_MS)
     .all()
   const busy = [...fb.busy, ...results.map((r) => ({ start: r.start_at, end: r.end_at }))]
-  return { ok: true, slots: computeSlots({ busy, rules: customer, now, days: BOOKING_DAYS }).slots }
+  return { ok: true, slots: computeSlots({ busy, rules, now, days: BOOKING_DAYS }).slots }
 }
 
 // Availability for the public booking page (and the receptionist): a lookup that failed because of the calendar
@@ -277,7 +279,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
   if (!tokenOk) return fail(404, 'lead_not_found')
   if (lead.status === 'unqualified') return fail(409, 'not_qualified')
   if (lead.status === 'booked') return fail(409, 'already_booked')
-  if (!isOfferedSlot({ rules: customer, now, days: BOOKING_DAYS, start })) return fail(409, 'slot_unavailable')
+  if (!isOfferedSlot({ rules: await withBookingRules(db, customer), now, days: BOOKING_DAYS, start })) return fail(409, 'slot_unavailable')
 
   const end = start + customer.slotMinutes * 60 * 1000
   const conn = await connect(env, customer.id)

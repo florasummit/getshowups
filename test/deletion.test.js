@@ -162,6 +162,7 @@ test('gate: without ACCOUNT_DELETION_ENABLED nothing can be requested or run (ro
 })
 
 test('owner deletion: confirmed by typing the business name; everything erased, billing ended, Google revoked; beta untouched', async () => {
+  kv.m.delete('ads:google:beta-co') // an ads connection anywhere could share the grant (tested separately)
   const c = await cookie(OWNER)
   assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json().features.accountDeletion, true)
   const del = (body, opts = {}) => call(account, 'POST', '/api/dashboard/account', { cookie: c, body, ...opts })
@@ -170,7 +171,7 @@ test('owner deletion: confirmed by typing the business name; everything erased, 
   assert.equal((await del({ action: 'delete', confirm: true, name: 'Alpha Co' }, { origin: 'https://evil.example' })).status, 403)
   assert.equal(db.sql.prepare('SELECT count(*) n FROM account_deletions').get().n, 0, 'nothing started by refused requests')
   const r = await del({ action: 'delete', confirm: true, name: '  alpha   co ' })
-  assert.deepEqual([r.status, r.json()], [202, { deleting: true, status: 'completed' }])
+  assert.deepEqual([r.status, r.json()], [202, { deleting: true, status: 'completed', scheduledFor: null }])
 
   // Erased: every business/personal record of alpha.
   for (const t of ERASED_TABLES) assert.equal(count(t, 'alpha-co'), 0, t)
@@ -211,6 +212,7 @@ test('owner deletion: confirmed by typing the business name; everything erased, 
 })
 
 test('shared Google grant: the token is deleted but NOT revoked while another business still uses the same grant', async () => {
+  kv.m.delete('ads:google:beta-co')
   await kv.put('google:beta-co', JSON.stringify({ customer: 'beta-co', refreshToken: await encrypt(env, RT), googleSub: 'sub-A', clientId: 'cid', scope: 'x' }))
   db.sql.prepare("DELETE FROM self_signups WHERE customer = 'alpha-co'").run()
   await requestDeletion(env, 'alpha-co', { type: 'owner', id: OWNER })

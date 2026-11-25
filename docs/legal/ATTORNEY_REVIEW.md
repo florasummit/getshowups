@@ -130,3 +130,18 @@ From the code [FACT]; the owner confirms which are active at publication:
 - Refunds: owner decision is discretionary (Terms §4 Option C); confirm state-law limits. [Q]
 - Providers to list: Cloudflare (including Workers AI), Google, Resend, Twilio (not active), Anthropic, OpenAI (voice today), ElevenLabs and
   Retell (selectable), Stripe (test mode). [FACT]
+
+## 7. Added 2026-11-25: account controls (please answer with the numbered questions above)
+
+The unnumbered questions in the section above are 19 (pilot terms), 20 (AI assistant limits) and 21 (state-law limits on
+discretionary refunds). [FACT] Cancel, keep, export, people, connections and closing are now in Settings; see POLICY_MAP.md.
+
+22. Recovery window before erasure: none (decided 2026-11-14) or 14 days (proposed)? Must deletion requests from individuals
+    (the business's customers) be faster than the business's own window?
+23. May the longest-standing member alone close a business that has several people? What notice do the others need?
+24. Cancelling online: does the confirmation in Settings meet "click to cancel" and renewal-notice rules that apply to us?
+25. An owner who cancels while a payment is overdue: the unpaid invoice stays due. Wording?
+26. Outstanding amounts when a business is deleted: billing ends at once and nothing further is charged. Acceptable?
+27. Ads that keep running in the customer's own ad account after closing: is our notice enough?
+28. The id-and-date marker and the permanent log kept after deletion (no personal data): acceptable, and how to disclose?
+29. Feature restrictions and suspension: notice and appeal wording.

@@ -114,3 +114,17 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   calls and requests) are purged 365 days after their last update (cron).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
   for as long as the lead exists.
+
+## 8. Added 2026-11-25 (code: server/deletion.js, server/people.js, server/business-export.js)
+
+| Topic | What happens | State |
+| --- | --- | --- |
+| Recovery window | `ACCOUNT_RECOVERY_DAYS` (0–90; unset = none, the 2026-11-14 decision). Business offline, ads paused, plan set not to renew and confirmed with Stripe (retried every cron run), nothing erased, owner or founder can undo. Afterwards the workflow of section 3 runs. Undo never restarts charges or ads | Built, off. 14 days is proposed, **not approved** |
+| While deletion is off | The owner asks in Settings; the founder sees it in /admin; nothing is changed by the request | Live with the release |
+| Personal account | Membership, sessions, invitations, account email, notice choices and the sign-up marker are erased; staff-log emails become one-way refs. Never the last member or a platform admin | Built, off with ACCOUNT_DELETION_ENABLED |
+| Protected | internal_live businesses and the GetShowUps sales record can't be deleted from the product | Always |
+| Restored backups | Completed deletions leave a marker in KV (id, date). Hourly, a deleted business found back in the database is taken offline, its people removed, and (when deletion is on) deleted again. Ids are never reused | Always on |
+| Canceled plans after a restore | Daily reconciliation applies subscriptions Stripe says have ended | Always on |
+| Also erased | ChatGPT Ads key; closed dates, booking notice, notice choices, restrictions | With the workflow |
+
+**Decisions:** recovery window (0 or 14) · retention after 90 days · billing records 7 years · all in docs/legal/ATTORNEY_REVIEW.md.

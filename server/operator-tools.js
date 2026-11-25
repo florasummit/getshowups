@@ -10,6 +10,8 @@ import { channels } from './ads/economics.js'
 import { INDUSTRIES, industryKey } from './intelligence/industries.js'
 import { taughtFor } from './intelligence/knowledge.js'
 import { economicsText, MONTHS } from './intelligence/schema.js'
+import { bookingRules } from './booking-rules.js'
+import { setupCheck } from './setup-check.js'
 import { openSlots } from './booking.js'
 import { zonedToUtc } from './calendar.js'
 import { diagnose, funnel } from './ads/funnel.js'
@@ -396,7 +398,7 @@ export const TOOLS = [
     return { period: r.label, open_times: t.length, first_times: t.slice(0, 8).map((x) => whenText(x, c.tz)) }
   }),
   tool('business_settings', 'Current settings: hours, service area, services, receptionist, website, calendar, automatic messages, and what is missing.', {}, [], async (c) => {
-    const [f, profile, rec, site, cal, outside, policy] = await Promise.all([
+    const [f, profile, rec, site, cal, outside, policy, rules, check] = await Promise.all([
       businessFacts(c.env, c.customer),
       getProfile(c.db, c.customer.id).catch(() => undefined),
       one(c, 'SELECT enabled FROM receptionist_settings WHERE customer = ?1').catch(() => undefined),
@@ -404,12 +406,17 @@ export const TOOLS = [
       c.env.GOOGLE_TOKENS.get(`google:${c.customer.id}`).catch(() => undefined),
       outsideZips(c.env, c.customer, c.now).catch(() => []),
       policiesOrEmpty(c.db, c.customer.id),
+      bookingRules(c.db, c.customer.id).catch(() => null),
+      setupCheck(c.env, c.customer, c.now).catch(() => null),
     ])
     const z = c.customer.serviceZips || []
     return {
       business: f.name,
       booking_hours: f.hours || 'not set',
       appointment_minutes: c.customer.slotMinutes,
+      minimum_booking_notice: rules ? (rules.minNoticeMinutes ? `${rules.minNoticeMinutes} minutes` : 'none: a time can be booked minutes ahead') : 'could not be read',
+      closed_dates: rules ? (rules.closures.length ? rules.closures.slice(0, 20).map((x) => `${x.date}${x.label ? ` (${x.label})` : ''}`) : 'none') : 'could not be read',
+      setup_check: check ? (check.items.length ? check.items.map((x) => `${x.level}: ${x.title}. ${x.why} ${x.fix}`) : 'nothing found') : 'could not be read',
       time_zone: c.tz,
       appointments_are: f.visit ? "at the customer's address" : 'at the business',
       service_area_zips: z.length ? z.slice(0, 40) : 'no limit, anyone can book',

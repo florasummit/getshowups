@@ -1,6 +1,8 @@
 // What the receptionist knows: ONLY the business's verified records (profile, services and prices, area, hours,
 // policies, owner-approved answers) plus a generic industry playbook (how to qualify, what counts as urgent). The
 // playbook is guidance for asking good questions, never facts about the business.
+import { bookingRules } from '../booking-rules.js'
+import { addDays, dateIn } from '../dates.js'
 import { businessFacts } from '../followups/engine.js'
 import { getVoiceSettings, PERSONALITIES, personalityPrompt } from '../voice/style.js'
 import { INDUSTRIES } from '../intelligence/industries.js'
@@ -37,14 +39,16 @@ export function playbookFor(text) {
 
 // Verified facts for one business, as data (used for the prompt and for checking replies). `settingsIn` may be a promise:
 // the records are read together (one D1 round trip's worth of waiting per turn, not five).
+const BOOKING_WINDOW_DAYS = 14
 export async function knowledgeFor(env, customer, settingsIn) {
   const profileRead = getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
-  const [facts, profile, settings, stored, taught] = await Promise.all([
+  const [facts, profile, settings, stored, taught, rules] = await Promise.all([
     businessFacts(env, customer, { profile: profileRead }),
     profileRead,
     settingsIn,
     settingsIn?.voice ? null : getVoiceSettings(env.ONBOARDING_DB, customer.id),
     taughtFor(env, customer, 'receptionist'),
+    bookingRules(env.ONBOARDING_DB, customer.id).catch(() => null),
   ])
   // How the receptionist sounds (migration 0035; defaults before it): the personality preset shapes the prompt.
   const voice = settings?.voice || stored
@@ -59,6 +63,8 @@ export async function knowledgeFor(env, customer, settingsIn) {
     towns: (profile?.cities || []).map(String).filter(Boolean),
     timezone: customer.timezone,
     slotMinutes: customer.slotMinutes,
+    // Closed dates in the booking window, so a closed day is called closed, never "fully booked".
+    closed: closedSoon(rules, customer.timezone),
     hours: days.length ? `${days.join(', ')}, ${clock(customer.dayStart)} to ${clock(customer.dayEnd)} (${customer.timezone})` : '',
     // Owner notes, then what the owner taught and published (customer-facing parts only; intelligence/knowledge.js).
     knowledge: [String(settings?.knowledge || '').trim(), ...taught.facts.map((f) => `${f.topic}: ${f.text}`)].filter(Boolean).join('\n'),
@@ -67,6 +73,12 @@ export async function knowledgeFor(env, customer, settingsIn) {
     // The owner's stated industry wins; the services list is only a fallback signal.
     playbook: withTaught(playbookFor(profile?.industry).key !== 'general' ? playbookFor(profile?.industry) : playbookFor((facts.services || []).map((s) => s.name).join(' ')), taught),
   }
+}
+
+const closedSoon = (rules, tz, now = Date.now()) => {
+  const today = dateIn(now, tz)
+  const until = addDays(today, BOOKING_WINDOW_DAYS)
+  return (rules?.closures || []).filter((c) => c.date >= today && c.date <= until).map((c) => `${new Date(`${c.date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })}${c.label ? ` (${c.label})` : ''}`)
 }
 
 // The owner's published questions come before the industry's defaults.
@@ -102,11 +114,11 @@ ${k.description ? `About: ${k.description}\n` : ''}Services and prices (exactly 
 ${services}
 ${k.zips.length ? `Service ZIP codes: ${k.zips.join(', ')}` : 'Service ZIP codes: not limited'}${k.area ? `\nTowns served: ${k.area}` : ''}
 Hours: ${k.hours || 'not listed'}
-${sales ? `Consultation calls: a free call of about ${k.slotMinutes} minutes; ${k.name} calls the prospect at the number they give.` : `Appointments: ${k.visit ? `${k.name} comes to the customer's address` : `the customer comes to ${k.name}`}; each takes about ${k.slotMinutes} minutes.`}
+${k.closed?.length ? `Closed on (say closed, never fully booked): ${k.closed.join('; ')}\n` : ''}${sales ? `Consultation calls: a free call of about ${k.slotMinutes} minutes; ${k.name} calls the prospect at the number they give.` : `Appointments: ${k.visit ? `${k.name} comes to the customer's address` : `the customer comes to ${k.name}`}; each takes about ${k.slotMinutes} minutes.`}
 ${k.phone ? `Phone: ${k.phone}\n` : ''}${k.beforeVisit ? `Before the visit: ${k.beforeVisit}\n` : ''}${k.cancellation ? `Cancellation policy: ${k.cancellation}\n` : ''}${k.knowledge ? `Owner-approved answers (they add to the facts above; if they ever disagree with the services and prices list, the list wins):\n${k.knowledge}\n` : ''}
 # Rules you must follow
 - Never invent or estimate prices, discounts, availability, staff, guarantees, licenses, timelines or anything not in the facts above. If a price isn't listed or depends on the job, say the team will confirm it.${sales ? `\n- Never promise lead volume, bookings, revenue or results; never invent features, customer stories, integrations or case studies. Advertising spend is separate from the subscription and paid to the ad platform. If you don't know, say so and offer to record the question for the team. If they are not a fit (nothing to book, no inquiries to answer), say so kindly and don't push.` : ''}
-- ${sales ? 'Prospect' : 'Customer'} details: whenever the ${sales ? 'prospect' : 'customer'} gives their name, phone, email, ZIP${k.visit ? ', service address' : ''} or ${sales ? 'their business type and what they are looking for (save that as what they need)' : 'what they need'}, call save_customer_details right away. Email is optional; ask only if they want an email confirmation. If a detail needs a re-check, ask only for that one thing (for a phone number, read back what you heard and ask for the missing or unclear digits).
+- ${sales ? 'Prospect' : 'Customer'} details: whenever the ${sales ? 'prospect' : 'customer'} gives their name, phone, email, ZIP${k.visit ? ', service address' : ''} or ${sales ? 'their business type and what they are looking for (save that as what they need)' : 'what they need'}, call save_customer_details right away. Email is optional: offer it before booking, only as where Google sends the calendar invitation; never promise any other email. If a detail needs a re-check, ask only for that one thing (for a phone number, read back what you heard and ask for the missing or unclear digits).
 - Memory: the "Known so far" note lists everything the customer has already said (place, problem, day, name, number…). Never ask for any of it again, in any form. If they correct a detail, use the newest value without comment. Ask only for what is still missing, one thing at a time.
 - Location, only when needed: answer questions about services, prices, hours and how soon you can usually come directly, without asking where they are. Ask where they are only when they ask whether you serve them, when they want a visit or a time, or when you are collecting booking details; a town or neighbourhood is a fine answer, never demand a ZIP code first. If they decline, defer or don't know their ZIP code, accept that without comment, answer what they asked, and do not ask again; when they want a visit booked, say once that a ZIP code is needed to confirm the area and book, or offer to take their details for a service-area request instead.
 - Service area: ${k.zips.length ? 'the moment they say where they are, call check_service_area with what they said: zip for a 5-digit ZIP code, place for a town, neighbourhood, street address or description. Never ask for a ZIP code to check the area when they already named a place: the tool answers served, or tells you the ONE short question to ask next (for example "What part of Charleston?", or the ZIP code). When it answers served, state it plainly ("Yes, we service West Ashley. What\'s going on with your pool?") and move on. Never say a town or city is covered unless the tool answered served for it' : 'the business has not limited its area'}. A ZIP not on the list is never a dead end and never a booking: say "We may be able to help in your area. Leave your details and we'll confirm availability.", collect their name, phone and what they need, then call request_coverage. Never offer times, book, or promise service there; nearby or similar places and ZIP codes are not served unless the tool says so.

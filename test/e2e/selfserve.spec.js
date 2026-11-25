@@ -221,6 +221,22 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Cancel subscription' }).click()
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
   await expect.poll(async () => (await (await page.request.get('/api/dashboard/billing')).json()).subscription.cancelAtPeriodEnd).toBe(true)
+  // In the product: the cancellation made in Stripe shows, the owner keeps the plan (explicitly), then cancels it here.
+  await page.goto('/dashboard/settings')
+  const billingCard = page.locator('#plan')
+  await expect(billingCard.locator('[data-plan="ending"]')).toContainText('None. Ends')
+  await billingCard.getByRole('button', { name: 'Keep my plan' }).click()
+  await expect(billingCard).toContainText('You’ll be charged every month again')
+  await billingCard.getByRole('button', { name: 'Yes, keep charging me' }).click()
+  await expect(billingCard.locator('[data-plan-result]')).toContainText('Stripe confirmed it')
+  await expect(billingCard.locator('[data-plan="active"]')).toContainText('$499.00')
+  await expect(billingCard).toContainText('Visa ending 4242')
+  await expect(billingCard.locator('[data-invoices]')).toContainText('$499.00')
+  await billingCard.getByRole('button', { name: 'Cancel plan…' }).click()
+  await expect(billingCard).toContainText('your website stays online 14 more days')
+  await billingCard.getByRole('button', { name: 'Confirm: cancel plan' }).click()
+  await expect(billingCard.locator('[data-plan-result]')).toContainText('Cancelled. Stripe confirmed it')
+  await expect.poll(async () => (await (await page.request.get('/api/dashboard/billing')).json()).subscription.cancelAtPeriodEnd).toBe(true)
   // Duplicate webhook deliveries left exactly one subscription and one "started" event.
   expect((await (await page.request.get('/api/dashboard/billing')).json()).subscription.status).toBe('active')
   // A second checkout is refused while subscribed (no duplicate subscriptions).

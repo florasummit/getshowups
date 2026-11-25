@@ -11,6 +11,7 @@
 //     failing, so deploying this never requires the migration first.
 // Published content is never gated: a business losing access keeps its live website.
 import { businessEligible } from './eligibility.js'
+import { restricted } from './restrictions.js'
 
 export const studioEnabled = (env) => env?.WEBSITE_STUDIO_ENABLED !== 'false'
 
@@ -34,7 +35,7 @@ export async function studioSchemaReady(db) {
 // Eligibility is the shared rule in server/eligibility.js (the same one Ads and Teach Your AI use).
 export async function studioAccess(env, customer) {
   try {
-    if (!studioEnabled(env) || !(await businessEligible(env, customer))) return false
+    if (!studioEnabled(env) || !(await businessEligible(env, customer)) || (await restricted(env, customer.id, 'website_studio'))) return false
     return await studioSchemaReady(env.ONBOARDING_DB)
   } catch (err) {
     console.error('studio access check failed:', err?.name)
