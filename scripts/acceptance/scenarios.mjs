@@ -202,12 +202,22 @@ export const DEPLOYED = [
   { view: 'overview', q: 'what is needs your attention telling me', card: true, must: [/Vera Synthetic/] },
   { q: 'isnt the first one just an old visit', must: [/Vera Synthetic/, /call/i] },
   { q: 'what exactly do they need', must: [/15 ?x ?30/i] },
-  { view: 'settings', q: 'who else is waiting on me and for what', must: [/Owen Synthetic/], card: true },
+  { view: 'settings', q: 'who else is waiting on me and for what', must: [/Owen Synthetic/], never: [/nothing from you/i] },
   { view: 'receptionist', q: 'did walt ask for a call', must: [/no|not|message/i] },
   { view: 'overview', q: 'what would you do first and why', must: [/Vera Synthetic/] },
   { q: 'draft a reply to owen', proposal: 'follow_up' },
   { q: 'scrap that', pending: 0 },
   { q: 'i rang vera, all sorted', proposal: 'call_back_done', approve: true },
   { q: 'so is anyone waiting for a call now', must: [/no|nobody|none/i], never: [/Vera Synthetic (is|asked).*still waiting/i] },
-  { q: 'how much did poolthru make', never: [/\$/], must: [/only|can.t|don.t/i] },
+  { q: 'how much did poolthru make', never: [/\$|\d|recorded|payments?/i], must: [/only|can.t|don.t/i] },
+]
+// A shorter second run with other words (20 answers a day per business): --deployed --set again [--mobile].
+export const DEPLOYED_AGAIN = [
+  { view: 'receptionist', q: 'theres a number on my home screen, whats it about', must: [/Vera Synthetic/], never: [/nobody is waiting/i] },
+  { q: 'n the one after', must: [/Walt Synthetic/] },
+  { view: 'overview', q: 'is owen the same guy as iris', must: [/no|different|separate|not/i] },
+  { q: 'if i have ten minutes what do i do', must: [/Vera Synthetic/] },
+  { q: 'mark kai as done', proposal: 'outcome' },
+  { q: 'no leave that', pending: 0 },
+  { q: 'what did poolthru earn last month', never: [/\$|\d|recorded|payments?/i] },
 ]
