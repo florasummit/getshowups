@@ -9,24 +9,38 @@ const length = (s) => (s == null ? '' : s < 60 ? `${s}s` : `${Math.floor(s / 60)
 const when = (t) => new Date(`${t.replace(' ', 'T')}:00Z`).toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const STATUS = { RECEIVED: ['ok', 'Answered'], MISSED: ['warn', 'Missed'], UNKNOWN: ['neutral', 'Not reported'] }
 const LSA = { PHONE_CALL: 'Phone call', MESSAGE: 'Message', BOOKING: 'Booking', COUPON: 'Coupon' }
-const ERRORS = { invalid_name: 'Add their name.', invalid_phone: 'Add their phone number.', invalid_need: 'Add what they need.', already_linked: 'This call is already linked.', rate_limited: 'Too many tries. Please wait a few minutes.' }
+const ERRORS = { invalid_name: 'Add their name.', invalid_phone: 'Add their phone number.', invalid_need: 'Add what they need.', invalid_zip: 'Add a valid ZIP.', invalid_address: 'Add the service address.', already_linked: 'This call is already linked.', rate_limited: 'Too many tries. Please wait a few minutes.' }
 const of = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 
-function Row({ kind, c, title, detail, pill, people, post }) {
+function Row({ kind, c, title, detail, pill, people, needs, post }) {
   const [mode, setMode] = useState(null)
-  const [f, setF] = useState({ name: '', phone: '', need: '', zip: '' })
+  const [f, setF] = useState({ name: '', phone: '', need: '', street: '', city: '', state: '', zip: '' })
   const [pick, setPick] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const [book, setBook] = useState(null)
+  const [known, setKnown] = useState(null)
+  const [note, setNote] = useState('')
+  const fields = [
+    ['name', 'Name', 'text', true],
+    ['phone', 'Phone', 'tel', true],
+    ['need', 'What they need', 'text', true],
+    ...(needs.address ? [['street', 'Street address', 'text', true], ['city', 'City', 'text', true], ['state', 'State', 'text', true]] : []),
+    ['zip', 'ZIP', 'text', needs.zip || needs.address],
+  ]
   const send = async (body) => {
     setBusy(true)
     setErr(null)
     const { status, data } = await post({ kind, id: c.id, ...body })
     setBusy(false)
-    if (status !== 200) return setErr(ERRORS[data?.error] || 'That didn’t save. Try again in a moment.')
+    if (status !== 200) {
+      if (data?.error === 'already_customer') setKnown(data.lead)
+      return setErr(data?.error === 'already_customer' ? `${data.lead.name} is already recorded with this phone number.` : ERRORS[data?.error] || 'That didn’t save. Try again in a moment.')
+    }
     setMode(null)
-    if (data.bookUrl) setBook(data.bookUrl)
+    setKnown(null)
+    setBook(data.bookUrl || null)
+    setNote(data.notBookable ? 'Saved. Their ZIP isn’t in your service area, so there is no booking link.' : 'Saved.')
   }
   return (
     <li className="ai-proposal" data-call={c.id} data-call-kind={kind}>
@@ -36,7 +50,7 @@ function Row({ kind, c, title, detail, pill, people, post }) {
       {c.lead ? (
         <p className="fine">
           Customer: {c.lead.name}{' '}
-          <button type="button" className="link-btn" disabled={busy} onClick={() => send({ action: 'link', leadId: null })}>
+          <button type="button" className="link-btn" disabled={busy} aria-label={`Unlink the customer from ${title}`} onClick={() => send({ action: 'link', leadId: null })}>
             Unlink
           </button>
           {book && (
@@ -55,11 +69,11 @@ function Row({ kind, c, title, detail, pill, people, post }) {
               {c.handled ? 'Not called back' : 'I called back'}
             </button>
           )}
-          <button type="button" className="link-btn" onClick={() => setMode(mode === 'add' ? null : 'add')} aria-expanded={mode === 'add'}>
+          <button type="button" className="link-btn" onClick={() => setMode(mode === 'add' ? null : 'add')} aria-expanded={mode === 'add'} aria-label={`Add the caller, ${title}`}>
             Add the caller
           </button>
           {people.length > 0 && (
-            <button type="button" className="link-btn" onClick={() => setMode(mode === 'link' ? null : 'link')} aria-expanded={mode === 'link'}>
+            <button type="button" className="link-btn" onClick={() => setMode(mode === 'link' ? null : 'link')} aria-expanded={mode === 'link'} aria-label={`Already a customer, ${title}`}>
               Already a customer
             </button>
           )}
@@ -71,18 +85,13 @@ function Row({ kind, c, title, detail, pill, people, post }) {
           className="ai-change-controls"
           onSubmit={(e) => {
             e.preventDefault()
-            send({ action: 'add', ...f })
+            send({ action: 'add', name: f.name, phone: f.phone, need: f.need, zip: f.zip, ...(needs.address ? { address: { street: f.street, city: f.city, state: f.state, zip: f.zip } } : {}) })
           }}
         >
-          {[
-            ['name', 'Name', 'text'],
-            ['phone', 'Phone', 'tel'],
-            ['need', 'What they need', 'text'],
-            ['zip', 'ZIP', 'text'],
-          ].map(([k, label, type]) => (
+          {fields.map(([k, label, type, required]) => (
             <label className="field" key={k}>
               <span>{label}</span>
-              <input type={type} value={f[k]} maxLength={k === 'need' ? 300 : 80} autoComplete="off" onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+              <input type={type} required={Boolean(required)} inputMode={k === 'zip' ? 'numeric' : undefined} value={f[k]} maxLength={k === 'need' ? 300 : 80} autoComplete="off" onChange={(e) => setF({ ...f, [k]: e.target.value })} />
             </label>
           ))}
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
@@ -108,9 +117,17 @@ function Row({ kind, c, title, detail, pill, people, post }) {
           </button>
         </div>
       )}
+      <p className="fine" role="status">
+        {note}
+      </p>
       {err && (
         <p className="form-error" role="alert">
-          {err}
+          {err}{' '}
+          {known && (
+            <button type="button" className="link-btn" disabled={busy} onClick={() => send({ action: 'link', leadId: known.id })}>
+              Link this call to them
+            </button>
+          )}
         </p>
       )}
     </li>
@@ -134,14 +151,15 @@ export default function AdsCalls({ days, refreshed }) {
   }
   const { totals: t, results: r, setup } = d
   const lsaCalls = d.lsa
+  const needs = { address: d.addressNeeded, zip: d.zipNeeded }
   return (
     <section className="ai-calls" aria-label="Phone calls from Google ads" data-google-calls>
       <h3 className="ui-section-title">Phone calls from Google ads</h3>
       <p className="fine" data-call-setup>
         {setup.reporting === false
           ? 'Call reporting is off in your Google Ads account, so Google can’t count calls. Turn it on in Google Ads: Admin → Account settings → Call reporting.'
-          : setup.numbersOnAds === 0
-            ? 'No phone number is on your ads. In Google Ads, add a Call asset with your business number: people still reach your own phone, and Google counts the calls.'
+          : setup.numbersOnAds === 0 && t.calls === 0
+            ? 'We found no phone number on your ads. In Google Ads, add a Call asset with your business number: people still reach your own phone, and Google counts the calls.'
             : setup.reporting === null
               ? 'Google didn’t say whether call reporting is on.'
               : 'Google counts calls to the number shown on your ads and forwards them to your own phone.'}{' '}
@@ -162,7 +180,7 @@ export default function AdsCalls({ days, refreshed }) {
                 key={c.id}
                 kind="call"
                 c={c}
-                people={d.people}
+                people={d.people} needs={needs}
                 post={post}
                 title={when(c.localTime)}
                 pill={<Pill tone={(STATUS[c.status] || STATUS.UNKNOWN)[0]}>{(STATUS[c.status] || STATUS.UNKNOWN)[1]}</Pill>}
@@ -181,7 +199,7 @@ export default function AdsCalls({ days, refreshed }) {
           </summary>
           <ul className="ai-recs">
             {lsaCalls.map((c) => (
-              <Row key={c.id} kind="lsa" c={c} people={d.people} post={post} title={new Date(c.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' })} detail={c.charged ? 'charged' : 'not charged'} pill={<Pill tone="info">{LSA[c.type] || 'Lead'}</Pill>} />
+              <Row key={c.id} kind="lsa" c={c} people={d.people} needs={needs} post={post} title={new Date(c.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' })} detail={c.charged ? 'charged' : 'not charged'} pill={<Pill tone="info">{LSA[c.type] || 'Lead'}</Pill>} />
             ))}
           </ul>
         </details>

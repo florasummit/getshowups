@@ -69,6 +69,7 @@ export function forgetAll() {
 }
 // Sign-out: every business's conversations in this browser.
 export function clearMemory() {
+  owner = null // an answer still on its way is not kept either
   try {
     const s = store()
     for (const k of Object.keys(s || {})) if (k.startsWith('gsu:assistant:')) s.removeItem(k)

@@ -5,7 +5,7 @@
 // Data minimisation: the model sees references, times, statuses, ZIPs and what was asked for (contact details removed),
 // never names, phones, emails or addresses. The page shows the real names next to the references.
 import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
-import { callReport } from './ads/calls.js'
+import { callReport, callsOn } from './ads/calls.js'
 import { channels } from './ads/economics.js'
 import { INDUSTRIES, industryKey } from './intelligence/industries.js'
 import { taughtFor } from './intelligence/knowledge.js'
@@ -448,7 +448,7 @@ export const TOOLS = [
   tool('acquisition_by_source', 'Where inquiries come from and what they led to, per source: ad spend, inquiries, in area, booked, showed up, completed, payments, cost per step, where each source loses people, and an estimated profit after ads when the owner stated margins. Use for which ads work, what to improve, cost and profit questions.', { days: { type: 'integer', enum: [30, 90] } }, [], async (c, a) => {
     const t = await taughtFor(c.env, c.customer, 'analysis', c.now)
     const ads = await adsAccess(c.env, c.customer)
-    const calls = ads ? await callReport(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, now: c.now, list: 1 }).catch(() => ({ ready: false })) : { ready: false }
+    const calls = ads && callsOn(c.env) ? await callReport(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, now: c.now, list: 1 }).catch(() => ({ ready: false })) : { ready: false }
     const r = await channels(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, economics: t.economics, now: c.now })
     const m = (v) => usd(v) ?? 'not available'
     return {

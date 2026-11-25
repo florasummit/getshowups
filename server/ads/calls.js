@@ -29,45 +29,53 @@ const instant = (s, tz) => {
   }
 }
 
-// 90 days the first time, then the last 7 (a call's details can arrive late). Owner marks and links are never overwritten.
+// Off unless exactly 'true': the privacy policy has to name call records before any are read (approval).
+export const callsOn = (env) => env.GOOGLE_CALLS_ENABLED === 'true'
+
+// 90 days the first time (or for another Ads account), otherwise since a week before the last read. A few statements whatever
+// the number of calls: the scheduled job shares one query budget. Owner marks and links are never overwritten.
 export async function syncCalls(env, customerId, { now = Date.now() } = {}) {
   const db = env.ONBOARDING_DB
-  if (!(await callsReady(db))) return { ok: true, skipped: 'not_ready' }
-  const seen = await db.prepare('SELECT checked_at FROM google_call_setup WHERE customer = ?1').bind(customerId).first()
-  const r = await readCalls(env, customerId, day(now - (seen ? 7 : 90) * DAY))
+  if (!callsOn(env) || !(await callsReady(db))) return { ok: true, skipped: 'not_ready' }
+  const [seen, conn] = await Promise.all([
+    db.prepare('SELECT checked_at, account_id FROM google_call_setup WHERE customer = ?1').bind(customerId).first(),
+    db.prepare("SELECT account_id FROM ad_connections WHERE customer = ?1 AND platform = 'google'").bind(customerId).first(),
+  ])
+  const from = seen && seen.account_id === String(conn?.account_id) ? Math.max(now - 90 * DAY, Math.min(now, seen.checked_at) - 7 * DAY) : now - 90 * DAY
+  const r = await readCalls(env, customerId, day(from))
   if (!r.ok) return r
+  const rows = r.calls.map((c) => ({ ...c, at: instant(c.localTime, r.timeZone) })).filter((c) => c.at !== null)
   const stmts = []
-  for (const c of r.calls) {
-    const at = instant(c.localTime, r.timeZone)
-    if (at === null) continue
+  for (let i = 0; i < rows.length; i += 200)
     stmts.push(
       db
         .prepare(
-          `INSERT INTO google_calls (id, customer, campaign_external_id, local_time, started_at, duration_seconds, status, shown_on, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-           ON CONFLICT(customer, id) DO UPDATE SET campaign_external_id = ?3, local_time = ?4, started_at = ?5, duration_seconds = ?6, status = ?7, shown_on = ?8, synced_at = ?9`,
+          `INSERT INTO google_calls (id, customer, campaign_external_id, local_time, started_at, duration_seconds, status, shown_on, synced_at)
+           SELECT json_extract(j.value,'$.id'), ?1, json_extract(j.value,'$.campaignExternalId'), json_extract(j.value,'$.localTime'), json_extract(j.value,'$.at'), json_extract(j.value,'$.seconds'), json_extract(j.value,'$.status'), json_extract(j.value,'$.shownOn'), ?2 FROM json_each(?3) j WHERE true
+           ON CONFLICT(customer, id) DO UPDATE SET campaign_external_id = excluded.campaign_external_id, local_time = excluded.local_time, started_at = excluded.started_at, duration_seconds = excluded.duration_seconds, status = excluded.status, shown_on = excluded.shown_on, synced_at = excluded.synced_at`,
         )
-        .bind(c.id, customerId, c.campaignExternalId, c.localTime, at, c.seconds, c.status, c.shownOn, now),
+        .bind(customerId, now, JSON.stringify(rows.slice(i, i + 200))),
     )
-  }
   stmts.push(
     db
-      .prepare('INSERT INTO google_call_setup (customer, reporting, numbers_on_ads, time_zone, checked_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(customer) DO UPDATE SET reporting = ?2, numbers_on_ads = ?3, time_zone = ?4, checked_at = ?5')
-      .bind(customerId, r.reporting === null ? null : Number(r.reporting), r.numbersOnAds, r.timeZone, now),
+      .prepare('INSERT INTO google_call_setup (customer, account_id, reporting, numbers_on_ads, time_zone, checked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(customer) DO UPDATE SET account_id = ?2, reporting = ?3, numbers_on_ads = ?4, time_zone = ?5, checked_at = ?6')
+      .bind(customerId, r.accountId, r.reporting === null ? null : Number(r.reporting), r.numbersOnAds, r.timeZone, now),
   )
-  for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50))
-  return { ok: true, calls: stmts.length - 1 }
+  await db.batch(stmts)
+  return { ok: true, calls: rows.length }
 }
 
-const BOOKED = "a.status IN ('booked','showed','no_show')"
-// What the linked people did: only from records, each person counted once.
+// What the linked people did SINCE their first linked call (an older job isn't this call's result), each person once.
 async function outcomes(db, customerId, table, since, internal) {
+  const t = table === 'lsa_leads' ? 'created_at' : 'started_at'
+  const mine = 'JOIN p ON p.id = a.lead_id WHERE a.customer = ?1 AND a.created_at >= p.since - 3600000'
   return db
     .prepare(
-      `WITH p AS (SELECT DISTINCT l.id FROM ${table} g JOIN leads l ON l.id = g.lead_id AND l.customer = g.customer WHERE g.customer = ?1 AND g.${table === 'lsa_leads' ? 'created_at' : 'started_at'} >= ?2 AND NOT ${isTestLead('l', '?3')})
+      `WITH p AS (SELECT l.id, min(g.${t}) AS since FROM ${table} g JOIN leads l ON l.id = g.lead_id AND l.customer = g.customer WHERE g.customer = ?1 AND g.${t} >= ?2 AND NOT ${isTestLead('l', '?3')} GROUP BY l.id)
        SELECT (SELECT count(*) FROM p) AS people,
-              (SELECT count(*) FROM p WHERE EXISTS (SELECT 1 FROM appointments a WHERE a.customer = ?1 AND a.lead_id = p.id AND ${BOOKED})) AS booked,
-              (SELECT count(*) FROM p WHERE EXISTS (SELECT 1 FROM appointments a JOIN appointment_outcomes o ON o.appointment_id = a.id AND o.customer = a.customer WHERE a.customer = ?1 AND a.lead_id = p.id AND a.status = 'showed' AND o.work = 'completed')) AS completed,
-              (SELECT sum(x.amount_cents) FROM revenue_entries x JOIN appointments a ON a.id = x.appointment_id AND a.customer = x.customer WHERE x.customer = ?1 AND a.lead_id IN (SELECT id FROM p) AND a.status = 'showed' AND x.kind = 'paid'
+              (SELECT count(DISTINCT a.lead_id) FROM appointments a ${mine} AND a.status IN ('booked','showed','no_show')) AS booked,
+              (SELECT count(DISTINCT a.lead_id) FROM appointments a JOIN appointment_outcomes o ON o.appointment_id = a.id AND o.customer = a.customer ${mine} AND a.status = 'showed' AND o.work = 'completed') AS completed,
+              (SELECT sum(x.amount_cents) FROM appointments a JOIN revenue_entries x ON x.appointment_id = a.id AND x.customer = a.customer ${mine} AND a.status = 'showed' AND x.kind = 'paid'
                  AND x.id = (SELECT max(y.id) FROM revenue_entries y WHERE y.customer = x.customer AND y.appointment_id = x.appointment_id AND y.kind = 'paid')) AS paid`,
     )
     .bind(customerId, since, internal)
@@ -134,35 +142,47 @@ async function attribute(db, customerId, kind, row, leadId, now) {
 }
 
 // Links a call to someone already recorded (leadId null = unlink). Their source stays what it was: a person who first came
-// another way isn't moved to the ad because they also called. Unlinking removes only what adding this caller recorded.
-export async function linkCall(db, customerId, kind, id, leadId, now = Date.now()) {
+// another way isn't moved to the ad because they also called. Whoever it was linked to before loses only what adding them from
+// this call recorded. Refused when the link changed meanwhile.
+export async function linkCall(db, customerId, kind, id, leadId, now = Date.now(), expected) {
   const row = await find(db, customerId, kind, id)
   if (!row) return { ok: false, error: 'not_found' }
-  if (leadId) {
-    const lead = await db.prepare('SELECT id FROM leads WHERE id = ?1 AND customer = ?2').bind(String(leadId), customerId).first()
-    if (!lead) return { ok: false, error: 'lead_not_found' }
-  } else if (row.lead_id) {
+  const before = row.lead_id ?? null
+  if (expected !== undefined && expected !== before) return { ok: false, error: 'already_linked' }
+  if (leadId && !(await db.prepare('SELECT id FROM leads WHERE id = ?1 AND customer = ?2').bind(String(leadId), customerId).first())) return { ok: false, error: 'lead_not_found' }
+  const r = await db.prepare(`UPDATE ${TABLE[kind]} SET lead_id = ?3 WHERE customer = ?1 AND id = ?2 AND lead_id IS ?4`).bind(customerId, String(row.id), leadId ? String(leadId) : null, before).run()
+  if (!r?.meta?.changes) return { ok: false, error: 'already_linked' }
+  if (before && before !== leadId)
     await db
       .prepare("DELETE FROM lead_attribution WHERE customer = ?1 AND lead_id = ?2 AND json_extract(details, '$.via') = ?3 AND json_extract(details, '$.ref') = ?4")
-      .bind(customerId, row.lead_id, kind === 'lsa' ? 'local_services' : 'google_call', String(row.id))
+      .bind(customerId, before, kind === 'lsa' ? 'local_services' : 'google_call', String(row.id))
       .run()
-  }
-  await db.prepare(`UPDATE ${TABLE[kind]} SET lead_id = ?3${kind === 'call' ? ', handled_at = coalesce(handled_at, ?4)' : ''} WHERE customer = ?1 AND id = ?2`).bind(...[customerId, String(row.id), leadId ? String(leadId) : null, ...(kind === 'call' ? [leadId ? now : row.handled_at ?? null] : [])]).run()
   return { ok: true }
 }
 
-// The owner spoke to the caller and types who they are: one customer per call (a repeat finds the same one). No automatic
-// message goes out for it. → { ok, leadId, bookUrl: their own booking link }
+const DIGITS = ["' '", "'-'", "'('", "')'", "'.'", "'+'"].reduce((sql, c) => `replace(${sql}, ${c}, '')`, 'phone')
+// The owner spoke to the caller and types who they are. A phone number already on record is that person, never a second one;
+// the same call and number again is a retry. No automatic message and no notice goes out (the owner did this themselves). The
+// inquiry is dated when they called. → { ok, leadId, bookUrl: their own booking link, when times can be booked }
 export async function addCaller(env, customer, kind, id, body, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const row = await find(db, customer.id, kind, id)
   if (!row) return { ok: false, error: 'not_found' }
   if (row.lead_id) return { ok: false, error: 'already_linked' }
-  const [error, lead] = validateLead({ name: body?.name, phone: body?.phone, need: body?.need, zip: body?.zip, email: '' }, 'at_business', { requireEmail: false, lenientZip: true })
+  const [error, lead] = validateLead({ name: body?.name, phone: body?.phone, need: body?.need, zip: body?.zip, address: body?.address, email: '', zipConfirmed: true }, customer.appointmentMode, { requireEmail: false })
   if (error) return { ok: false, error }
-  const leadId = `gc${(await sha256Hex(`${customer.id}:${kind}:${row.id}`)).slice(0, 22)}`
-  if (!(await db.prepare('SELECT id FROM leads WHERE id = ?1 AND customer = ?2').bind(leadId, customer.id).first())) await createLead(env, customer, { ...lead, smsConsent: false, source: 'google_call' }, now, { id: leadId })
+  if (customer.serviceZips?.length && !lead.zip) return { ok: false, error: 'invalid_zip' }
+  const phone = lead.phone.replace(/\D/g, '').slice(-10)
+  const leadId = `gcall_${(await sha256Hex(`${customer.id}:${kind}:${row.id}:${phone}`)).slice(0, 22)}`
+  const known = await db.prepare(`SELECT id, name FROM leads WHERE customer = ?1 AND substr(${DIGITS}, -10) = ?2 AND id <> ?3 ORDER BY created_at LIMIT 1`).bind(customer.id, phone, leadId).first()
+  if (known) return { ok: false, error: 'already_customer', lead: { id: known.id, name: known.name } }
+  const read = () => db.prepare('SELECT id, status FROM leads WHERE id = ?1 AND customer = ?2').bind(leadId, customer.id).first()
+  if (!(await read()))
+    await createLead(env, customer, { ...lead, smsConsent: false, source: 'google_call' }, Math.min(now, kind === 'lsa' ? row.created_at : row.started_at), { id: leadId }).catch(async (err) => {
+      if (!(await read())) throw err // the same form sent twice at once: one of them made it
+    })
+  const linked = await linkCall(db, customer.id, kind, id, leadId, now, null)
+  if (!linked.ok) return linked
   await attribute(db, customer.id, kind, row, leadId, now)
-  await linkCall(db, customer.id, kind, id, leadId, now)
-  return { ok: true, leadId, bookUrl: await resumeUrl(env, customer.id, leadId) }
+  return { ok: true, leadId, ...((await read())?.status === 'new' ? { bookUrl: await resumeUrl(env, customer.id, leadId) } : { notBookable: true }) }
 }

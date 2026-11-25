@@ -447,10 +447,11 @@ export async function readCalls(env, customerId, sinceYmd, { limit = 1000 } = {}
     const q = (query) => call(env, token, 'POST', `/customers/${conn.account_id}/googleAds:searchStream`, { body: { query }, loginCustomerId: login(conn) })
     const r = await q(`SELECT call_view.resource_name, call_view.start_call_date_time, call_view.call_duration_seconds, call_view.call_status, call_view.call_tracking_display_location, campaign.id FROM call_view WHERE call_view.start_call_date_time >= '${sinceYmd} 00:00:00' ORDER BY call_view.start_call_date_time DESC LIMIT ${Number(limit)}`)
     if (!r.ok) return r
-    const [cust, onAccount, onCampaigns] = await Promise.all([
+    const [cust, onAccount, onCampaigns, onGroups] = await Promise.all([
       q('SELECT customer.time_zone, customer.call_reporting_setting.call_reporting_enabled FROM customer LIMIT 1'),
       q("SELECT customer_asset.asset FROM customer_asset WHERE customer_asset.field_type = 'CALL' AND customer_asset.status = 'ENABLED'"),
       q("SELECT campaign_asset.asset FROM campaign_asset WHERE campaign_asset.field_type = 'CALL' AND campaign_asset.status = 'ENABLED'"),
+      q("SELECT ad_group_asset.asset FROM ad_group_asset WHERE ad_group_asset.field_type = 'CALL' AND ad_group_asset.status = 'ENABLED'"),
     ])
     const c = cust.ok ? rowsOf(cust.data)[0]?.customer : null
     const calls = []
@@ -470,9 +471,10 @@ export async function readCalls(env, customerId, sinceYmd, { limit = 1000 } = {}
     return {
       ok: true,
       calls,
+      accountId: String(conn.account_id),
       timeZone: text(c?.timeZone, 60) || null,
       reporting: c ? c.callReportingSetting?.callReportingEnabled === true : null,
-      numbersOnAds: onAccount.ok && onCampaigns.ok ? new Set([...rowsOf(onAccount.data).map((x) => x.customerAsset?.asset), ...rowsOf(onCampaigns.data).map((x) => x.campaignAsset?.asset)].filter(Boolean)).size : null,
+      numbersOnAds: onAccount.ok && onCampaigns.ok && onGroups.ok ? new Set([...rowsOf(onGroups.data).map((x) => x.adGroupAsset?.asset), ...rowsOf(onAccount.data).map((x) => x.customerAsset?.asset), ...rowsOf(onCampaigns.data).map((x) => x.campaignAsset?.asset)].filter(Boolean)).size : null,
     }
   })
 }

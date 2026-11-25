@@ -185,7 +185,7 @@ export default function Dashboard() {
 
   const noBusiness = Boolean(me.data && !me.data.customer)
   const hasBusiness = Boolean(me.data?.customer)
-  // Signed in without a business (its account was deleted, here or elsewhere): nothing it said stays in this browser.
+  // Signed in without a business (its account was deleted): nothing said there stays in this browser.
   useEffect(() => {
     if (noBusiness) clearMemory()
   }, [noBusiness])

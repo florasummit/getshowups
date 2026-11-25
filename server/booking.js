@@ -374,7 +374,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
     await release().catch(() => {})
     return fail(503, 'storage_error')
   }
-  return { ok: true, appointment: { id, start, end, leadId: lead.id, smsConsent: await hasSmsConsent(db, lead.id) } }
+  return { ok: true, appointment: { id, start, end, leadId: lead.id, invited: Boolean(lead.email), smsConsent: await hasSmsConsent(db, lead.id) } }
 }
 
 // Owner records what happened after an appointment, or corrects it at any time.

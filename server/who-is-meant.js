@@ -1,19 +1,31 @@
-// Who "she", "him" or "that guy" is, from how the owner themselves referred to the people discussed. The records hold no
-// gender and a name never decides it: only the owner's own words do. → the reference, or null when it can't be told.
-const CUES = [/\b(he|hes|he['’]s|him|his|guy|man|gentleman|dude|mr)\b/i, /\b(she|shes|she['’]s|her|hers|lady|woman|gal|girl|mrs|ms|miss)\b/i]
-const cue = (t) => {
-  const hits = CUES.map((re) => re.test(t))
+// Who "she" or "him" is, from how the owner themselves referred to the people discussed ("that guy", "the lady", "she"). The
+// records hold no gender and a name never decides it. → { ref, sure } or null. Not sure = the only other person discussed.
+const PRONOUN = [/\b(he|hes|he['’]s|him|his)\b/i, /\b(she|shes|she['’]s|her|hers)\b/i]
+const CALLED = [/\b(?:he|hes|he['’]s|him|his)\b|\b(?:that|the|this)\s+(?:other\s+)?(?:guy|man|gentleman|dude)\b/i, /\b(?:she|shes|she['’]s|her|hers)\b|\b(?:that|the|this)\s+(?:other\s+)?(?:lady|woman|gal|girl)\b/i]
+// "the one after him": the pronoun is about someone other than the answer's person.
+const ASIDE = /\b(after|before|besides|than|except|instead of|not)\s+(him|her|that guy|that lady)\b/i
+const which = (res, t) => {
+  const hits = res.map((re) => re.test(t))
   return hits[0] === hits[1] ? null : hits[0] ? 0 : 1
 }
 
-// discussed: [{ ref, words, alone }] latest first; words = what the owner said in that turn, alone = the only person in it.
-export function whoIsMeant(question, discussed) {
-  const want = cue(question)
-  if (want === null || !discussed.length) return null
-  const called = discussed.map((d) => ({ ref: d.ref, cue: d.alone ? cue(d.words) : null }))
-  const same = called.find((d) => d.cue === want)
-  if (same) return same.ref
-  // Someone the owner called otherwise is ruled out; that settles it only when it leaves one person.
-  const left = called.filter((d) => d.cue === null)
-  return left.length < called.length && left.length === 1 ? left[0].ref : null
+// turns, latest first: [{ words: what the owner said, people: [{ ref, person }] in the answer }]; person = the same customer
+// under several references. A question that introduces someone ("the new lady") is not about anyone discussed.
+export function whoIsMeant(question, turns) {
+  const want = which(PRONOUN, question)
+  if (want === null || which(CALLED, question) === null || /\b(new|another|a)\s+(guy|man|lady|woman|gal|girl|customer|person)\b/i.test(question)) return null
+  const seen = new Map() // person → { ref, cue }, latest reference, newest unambiguous cue
+  for (const t of turns) {
+    const only = new Set(t.people.map((p) => p.person)).size === 1
+    for (const p of t.people) {
+      const known = seen.get(p.person) || { ref: p.ref, cue: null }
+      if (known.cue === null && only && !ASIDE.test(t.words)) known.cue = which(CALLED, t.words)
+      seen.set(p.person, known)
+    }
+  }
+  const all = [...seen.values()]
+  const same = all.find((x) => x.cue === want)
+  if (same) return { ref: same.ref, sure: true }
+  const left = all.filter((x) => x.cue === null)
+  return all.length === 2 && left.length === 1 ? { ref: left[0].ref, sure: false } : null
 }

@@ -2,19 +2,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { whoIsMeant } from '../server/who-is-meant.js'
 
-const d = (ref, words, alone = true) => ({ ref, words, alone })
-test('“she/he” follows the owner’s own words for people, by elimination; never a name; null when it can’t be told', () => {
-  for (const [q, people, want] of [
-    ['shes not in here tho', [d('A1', 'n the other guy from sunday'), d('R1', '1 what')], 'R1'],
-    ['did he pay', [d('R1', 'call her first?'), d('A1', 'and tuesday')], 'A1'],
-    ['when is she coming', [d('A2', 'who else'), d('A1', 'the lady with the dog')], 'A1'],
-    ['mark him done', [d('A1', 'that guy from sunday'), d('R1', 'she called')], 'A1'],
-    ['is she waiting', [d('A1', 'next one?'), d('R1', 'who called')], null], // nothing said about either
-    ['is she waiting', [d('A1', 'the guy'), d('A2', 'next'), d('R1', 'who')], null], // two left
-    ['he and she both came?', [d('A1', 'the guy'), d('R1', 'who')], null],
-    ['did she call', [d('A1', 'the guy', false), d('R1', 'the guy', false)], null], // words about two people settle nothing
-    ['what is on the schedule', [d('A1', 'the guy')], null], // "the", "this", "here" are no cue
+const t = (words, ...refs) => ({ words, people: refs.map((r) => (Array.isArray(r) ? { ref: r[0], person: r[1] } : { ref: r, person: r })) })
+test('“she/he” follows the owner’s own words, never a name; only a sole other person is inferred, as probable', () => {
+  for (const [q, turns, want] of [
+    ['shes not in here tho', [t('n the other guy from sunday', 'A1'), t('1 what', 'R1')], 'R1?'],
+    ['when is she coming', [t('who else', 'A2'), t('the lady with the dog', 'A1')], 'A1'],
+    ['mark him done', [t('that guy from sunday', 'A1'), t('she called', 'R1')], 'A1'],
+    ['mark him done', [t('all of them', 'A1', 'R1'), t('that guy from sunday', 'A1')], 'A1'], // an earlier clear cue survives a list
+    ['is she waiting', [t('next one?', 'A1'), t('who called', 'R1')], null],
+    ['is she waiting', [t('that guy', 'A1'), t('next', 'A2'), t('who', 'R1')], null], // two left
+    ['did she call', [t('the guy', 'A1', 'R1')], null],
+    ['what did i miss today', [t('the lady', 'A1')], null],
+    ['man, that is a lot of calls', [t('that guy', 'A1'), t('who', 'R1')], null],
+    ['who is the new lady, is she in my area', [t('that guy', 'A1'), t('who', 'R1')], null],
+    ['did he pay', [t('and who comes after him', 'L2'), t('the guy on top', 'L1')], 'L1'],
+    ['did she confirm', [t('has the guy booked', ['A1', 'x']), t('who asked', ['L1', 'x'])], null], // one person, two references
+    ['he and she both came?', [t('the guy', 'A1'), t('who', 'R1')], null],
     ['she', [], null],
-  ])
-    assert.equal(whoIsMeant(q, people), want, q)
+  ]) {
+    const r = whoIsMeant(q, turns)
+    assert.equal(r && r.ref + (r.sure ? '' : '?'), want, q)
+  }
 })

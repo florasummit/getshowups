@@ -319,6 +319,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TOKEN_ENCRYPTION_KEY="$E2E_TOKEN_ENCRYPTION_KEY" \
   --binding ADMIN_API_TOKEN="$E2E_ADMIN_API_TOKEN" \
   --binding ADS_ENABLED=true \
+  --binding GOOGLE_CALLS_ENABLED=true \
   --binding ACCEPTANCE_SESSIONS_ENABLED=true \
   --binding STRIPE_SECRET_KEY="$E2E_STRIPE_SECRET_KEY" \
   --binding STRIPE_WEBHOOK_SECRET="$E2E_STRIPE_WEBHOOK_SECRET" \

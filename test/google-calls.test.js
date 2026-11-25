@@ -19,7 +19,7 @@ beforeEach(async () => {
   const stmt = (q, args = []) => ({ q, args, bind: (...a) => stmt(q, a), first: async () => sql.prepare(q).get(...args) ?? null, all: async () => ({ results: sql.prepare(q).all(...args) }), run: async () => ({ meta: { changes: Number(sql.prepare(q).run(...args).changes) } }) })
   const kv = new Map()
   env = {
-    GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: 'https://getshowups.com/api/google/oauth/callback', TOKEN_ENCRYPTION_KEY: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))), GOOGLE_ADS_RETRY_MS: '1',
+    GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: 'https://getshowups.com/api/google/oauth/callback', TOKEN_ENCRYPTION_KEY: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))), GOOGLE_ADS_RETRY_MS: '1', GOOGLE_CALLS_ENABLED: 'true',
     ONBOARDING_DB: { prepare: (q) => stmt(q), batch: async (l) => l.map((s) => sql.prepare(s.q).run(...s.args)) },
     GOOGLE_TOKENS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async (k) => void kv.delete(k) },
   }
@@ -44,7 +44,7 @@ beforeEach(async () => {
 })
 afterEach(() => void (globalThis.fetch = orig))
 const db = () => env.ONBOARDING_DB
-const cust = { id: 'pools', name: 'pools', serviceZips: ['29401'], timezone: 'America/New_York', automations: true }
+const cust = { id: 'pools', name: 'pools', serviceZips: ['29401'], timezone: 'America/New_York', automations: true, appointmentMode: 'at_business' }
 
 test('reads only: no caller detail asked for or stored; unreadable rows skipped; owner marks survive the next read; 90 then 7 days', async () => {
   assert.deepEqual(await syncCalls(env, 'pools', { now }), { ok: true, calls: 3 })
@@ -90,12 +90,58 @@ test('an added caller becomes one customer with Google’s campaign, no automati
   assert.equal(sql.prepare('SELECT count(*) AS n FROM lead_attribution').get().n, 0)
   assert.equal((await addCaller(env, cust, 'call', 'c2', body, now)).leadId, r.leadId)
   assert.equal(sql.prepare('SELECT count(*) AS n FROM leads').get().n, 1)
+  assert.equal(sql.prepare('SELECT created_at FROM leads').get().created_at, Date.parse('2026-11-21T19:05:00Z')) // when they called
+  // Their second call: the same number is the same person, whatever way it is typed.
+  const again = await addCaller(env, cust, 'call', 'c4', { ...body, name: 'Other name', phone: '843.555.0142' }, now)
+  assert.deepEqual([again.error, again.lead.id], ['already_customer', r.leadId])
+  // Unlinked and someone else typed: a new person, never the first one's details.
+  await linkCall(db(), 'pools', 'call', 'c2', null, now)
+  const bob = await addCaller(env, cust, 'call', 'c2', { ...body, name: 'Bob', phone: '8435550199' }, now)
+  assert.notEqual(bob.leadId, r.leadId)
+  // Linked straight to someone else: the first one no longer counts for the campaign.
+  await linkCall(db(), 'pools', 'call', 'c2', r.leadId, now)
+  assert.equal(sql.prepare('SELECT count(*) AS n FROM lead_attribution WHERE lead_id = ?').get(bob.leadId).n, 0)
+  assert.equal((await linkCall(db(), 'pools', 'call', 'c2', bob.leadId, now, 'stale')).error, 'already_linked')
+  // Outside the area: kept, no booking link, no notice to the owner about what they did themselves.
+  const far = await addCaller(env, cust, 'call', 'c4', { ...body, phone: '8435550777', zip: '10001' }, now)
+  assert.deepEqual([far.ok, far.bookUrl, far.notBookable], [true, undefined, true])
+  assert.equal((await addCaller(env, { ...cust, appointmentMode: 'at_customer' }, 'call', 'c1', { ...body, phone: '8435550888' }, now)).ok, false)
   // Someone already recorded through the booking page also called: linked, not moved.
   sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES ('old', 'pools', 'Old', '', '', 'x', '29401', 'new', 'h', 1, 1)").run()
   sql.prepare("INSERT INTO lead_attribution (lead_id, customer, source, details, created_at) VALUES ('old', 'pools', 'booking_page', '{}', 1)").run()
   await linkCall(db(), 'pools', 'call', 'c1', 'old', now)
   await linkCall(db(), 'pools', 'call', 'c1', null, now)
   assert.equal(sql.prepare("SELECT source FROM lead_attribution WHERE lead_id = 'old'").get().source, 'booking_page')
+})
+
+test('off until switched on; a job from before the call is not its result; gaps and a new Ads account are read in full; few statements', async () => {
+  delete env.GOOGLE_CALLS_ENABLED
+  assert.deepEqual(await syncCalls(env, 'pools', { now }), { ok: true, skipped: 'not_ready' })
+  env.GOOGLE_CALLS_ENABLED = 'true'
+  rows = Array.from({ length: 1000 }, (_, i) => call(`k${i}`, '2026-11-22 09:15:00', 'RECEIVED', 10))
+  let n = 0
+  const batch = env.ONBOARDING_DB.batch
+  env.ONBOARDING_DB.batch = (l) => ((n += l.length), batch(l))
+  await syncCalls(env, 'pools', { now })
+  assert.equal(n, 6)
+  assert.equal(sql.prepare('SELECT count(*) AS n FROM google_calls').get().n, 1000)
+  queries = []
+  await syncCalls(env, 'pools', { now: now + 30 * 86400000 })
+  assert.ok(queries[0][1].includes("'2026-11-16"), 'a 30-day gap is read from before it')
+  sql.prepare("UPDATE google_call_setup SET account_id = '999'").run()
+  queries = []
+  await syncCalls(env, 'pools', { now })
+  assert.ok(queries[0][1].includes("'2026-08-25"))
+  sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES ('old', 'pools', 'Old', '', '1', 'x', '29401', 'booked', 'h', 1, 1)").run()
+  const visit = (id, created) => {
+    sql.prepare("INSERT INTO appointments (id, customer, lead_id, start_at, end_at, status, created_at, updated_at) VALUES (?, 'pools', 'old', ?, ?, 'showed', ?, 1)").run(id, created + 1, created + 2, created)
+    sql.prepare("INSERT INTO revenue_entries (customer, appointment_id, kind, amount_cents, recorded_by, recorded_at) VALUES ('pools', ?, 'paid', 500000, 'x', 1)").run(id)
+  }
+  visit('past', now - 300 * 86400000)
+  await linkCall(db(), 'pools', 'call', 'k1', 'old', now)
+  assert.deepEqual((await callReport(db(), 'pools', { now })).results, { people: 1, booked: 0, completed: 0, paidCents: null })
+  visit('after', now)
+  assert.deepEqual((await callReport(db(), 'pools', { now })).results, { people: 1, booked: 1, completed: 0, paidCents: 500000 })
 })
 
 test('another business’s call or customer is never reachable', async () => {

@@ -29,5 +29,5 @@ export async function onRequestPost({ request, env, params, waitUntil }) {
     waitUntil(dispatchBooked(env, result.appointment.id))
   } else await sync
   const { start: s, end } = result.appointment
-  return json(201, { start: new Date(s).toISOString(), end: new Date(end).toISOString(), timezone: customer.timezone, name: customer.name })
+  return json(201, { start: new Date(s).toISOString(), end: new Date(end).toISOString(), timezone: customer.timezone, name: customer.name, invited: result.appointment.invited })
 }

@@ -117,12 +117,10 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const known = await knownRecords(c, (req.history || []).map((h) => h.a).join(' '))
   c.pending = req.pending || []
   const pending = c.pending.map((p) => ({ type: p.type, ...(p.ref ? { ref: p.ref } : {}), change: p.change }))
-  const discussed = [] // latest first
-  for (const h of [...(req.history || [])].reverse()) {
-    const refs = [...new Set([...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
-    for (const ref of refs.reverse()) if (discussed.length < 12 && !discussed.some((d) => d.ref === ref)) discussed.push({ ref, words: h.q, alone: refs.length === 1 })
-  }
-  const meant = whoIsMeant(req.question, discussed)
+  const refsIn = (t) => [...new Set([...t.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
+  const turns = [...(req.history || [])].reverse().map((h) => ({ words: h.q, refs: refsIn(h.a) }))
+  const discussed = [...new Set(turns.flatMap((t) => [...t.refs].reverse()))].slice(0, 12)
+  const meant = whoIsMeant(req.question, turns.map((t) => ({ words: t.words, people: t.refs.map((ref) => ({ ref, person: c.shown.get(ref)?.leadId || ref })) })))
   const lastOrder = [...new Set([...((req.history || []).at(-1)?.a || '').matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
   const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])
@@ -131,7 +129,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const system = systemPrompt(c, req, known.filter((k) => !onScreen.includes(`"ref":"${k.ref}"`)), pending, before, screen, discussed, lastOrder)
   const messages = []
   for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
-  messages.push({ role: 'user', text: meant ? `${req.question}\n(From the application: unless the owner names someone here, “he” or “she” is [${meant}]. Answer about them.)` : req.question })
+  messages.push({ role: 'user', text: meant ? `${req.question}\n(From the application: unless the owner names someone here, “he” or “she” is ${meant.sure ? '' : 'probably '}[${meant.ref}]. Answer about them.)` : req.question })
   const results = []
   const tools = []
   let cost = 0

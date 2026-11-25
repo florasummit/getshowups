@@ -1,7 +1,7 @@
 -- Calls Google reports for a business's connected Google Ads account (call_view; docs/GOOGLE_ACQUISITION.md "Calls").
 -- Additive and idempotent. Google gives time, length, answered or missed, and the campaign; never the caller's number, and we
 -- do not store the area code it offers. handled_at = the owner says they called back; lead_id = the customer the owner linked.
--- Until it is applied, call reporting stays hidden.
+-- Off unless GOOGLE_CALLS_ENABLED is exactly 'true' (the privacy policy must name call records first). Until this is applied, call reporting stays hidden.
 CREATE TABLE IF NOT EXISTS google_calls (
   id                   TEXT NOT NULL,
   customer             TEXT NOT NULL REFERENCES customers(id),
@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS google_calls (
 CREATE INDEX IF NOT EXISTS google_calls_customer ON google_calls (customer, started_at);
 CREATE TABLE IF NOT EXISTS google_call_setup (
   customer        TEXT PRIMARY KEY REFERENCES customers(id),
+  account_id      TEXT,
   reporting       INTEGER,
   numbers_on_ads  INTEGER,
   time_zone       TEXT,

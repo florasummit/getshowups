@@ -23,6 +23,9 @@ const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(
 const notQueued = (kind, col, customerCol) =>
   `(SELECT count(*) FROM email_outbox o WHERE o.id >= '${kind}:' || ${col} || ':' AND o.id < '${kind}:' || ${col} || ';') < (SELECT count(*) FROM customer_users u WHERE u.customer = ${customerCol})`
 
+// Not a caller the owner added themselves (server/ads/calls.js).
+const byOwner = (t) => `substr(${t}.id, 1, 6) <> 'gcall_'`
+
 const BOOKINGS_SQL = `
   SELECT a.id AS item, a.customer, a.created_at, a.start_at, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
   FROM appointments a JOIN leads l ON l.id = a.lead_id JOIN customers c ON c.id = a.customer
@@ -33,7 +36,7 @@ const LEADS_SQL = `
   FROM leads l JOIN customers c ON c.id = l.customer
   WHERE l.created_at > ?1 AND l.created_at <= ?2 AND l.status = 'new' AND c.status = 'active'
     AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.lead_id = l.id AND a.status <> 'cancelled')
-    AND ${notQueued('owner_lead', 'l.id', 'l.customer')}
+    AND ${byOwner('l')} AND ${notQueued('owner_lead', 'l.id', 'l.customer')}
   ORDER BY l.created_at LIMIT ${LIMIT}`
 // Customer cancellations (from the link in their messages); owner cancellations need no notice.
 const CANCELS_SQL = `
@@ -66,7 +69,7 @@ const COVERAGE_SQL = `
   SELECT l.id AS item, l.customer, r.created_at, r.zip, r.zip_check, l.name, l.phone, l.email, l.need, c.name AS biz, c.timezone
   FROM coverage_requests r JOIN leads l ON l.id = r.lead_id AND l.customer = r.customer JOIN customers c ON c.id = r.customer
   WHERE r.created_at > ?1 AND r.status = 'pending' AND c.status = 'active'
-    AND ${notQueued('owner_coverage', 'l.id', 'l.customer')}
+    AND ${byOwner('l')} AND ${notQueued('owner_coverage', 'l.id', 'l.customer')}
   ORDER BY r.created_at LIMIT ${LIMIT}`
 const WHAT = { confirmation: 'booking confirmation', reminder_24h: 'reminder', reminder_2h: 'reminder', lead_followup_1: 'follow-up', lead_followup_2: 'follow-up', no_show_rebook: 'rebooking email' }
 

@@ -271,7 +271,7 @@ function adsRoute(path, raw, auth = '') {
       return [200, [{ results: EXISTING[acct] ? [view('c1', 1, '09:15:00', 0, 'MISSED', 'AD', '70000000001'), view('c2', 2, '14:05:00', 184, 'RECEIVED', 'AD', '70000000001'), view('c3', 4, '11:00:00', 0, 'MISSED', 'LANDING_PAGE', '70000000001')] : [] }]]
     }
     if (/^SELECT customer\.time_zone/.test(q)) return [200, [{ results: [{ customer: { timeZone: 'America/New_York', callReportingSetting: { callReportingEnabled: true } } }] }]]
-    if (/FROM (customer|campaign)_asset /.test(q)) return [200, [{ results: /FROM campaign_asset/.test(q) && EXISTING[acct] ? [{ campaignAsset: { asset: `customers/${acct}/assets/1` } }] : [] }]]
+    if (/FROM (customer|campaign|ad_group)_asset /.test(q)) return [200, [{ results: /FROM campaign_asset/.test(q) && EXISTING[acct] ? [{ campaignAsset: { asset: `customers/${acct}/assets/1` } }] : [] }]]
     if (/FROM geo_target_constant/.test(q)) {
       const ids = q.match(/geo_target_constant\.id IN \(([^)]*)\)/)?.[1]?.split(',').map((s) => s.trim()) || []
       return [200, [{ results: ids.filter((g) => GEO_NAMES[g]).map((g) => ({ geoTargetConstant: { id: g, name: GEO_NAMES[g].split(',')[0], canonicalName: GEO_NAMES[g], targetType: 'City' } })) }]]

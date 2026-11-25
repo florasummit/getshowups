@@ -174,3 +174,26 @@ server/ads/google.js and server/ads/campaigns.js: same OAuth, same campaign mode
    --file=migrations/0037_google_acquisition.sql`).
 2. Google Ads API Explorer access for the Cloud project (needed for any real, non-test account).
 3. Google Business Profile API access application (needed before step D can call Google).
+
+## Calls (2026-11-25; migration 0040; OFF: GOOGLE_CALLS_ENABLED)
+
+Read-only, from Google's `call_view` (v26 reference read 2026-11-25): start time, length, RECEIVED or MISSED, campaign, and whether the
+number was shown on the ad or the landing page. The business keeps its own number: Google shows a forwarding number and passes the call
+on. Nothing is built for lines, routing, porting or recording.
+
+| Question | Answer |
+| --- | --- |
+| Who called? | Not available. The API has an area code and country only; we select neither. So no automatic matching: the owner links a call or adds the caller |
+| Answered or missed | Yes, per call |
+| Calls from the landing page | Only where Google's own website call conversion is set up on that page; our pages carry no script, so calls dialed from a GetShowUps page are not counted |
+| Callback | Owner's own mark ("I called back") |
+| Booking, completed job, payment | From the linked person's own records, only appointments made since that call |
+| Source | A caller added from a call gets Google's campaign; someone already recorded (same phone number) keeps their first source |
+| Local Services | Leads, type, status, charged, credited (existing) and now linking to customers. Google reports no missed/answered for them; conversations, recordings and messages are not read |
+| Time zone of the call time | Not documented by Google: shown as given, sorted as the Ads account's zone |
+| Creating call assets, turning on call reporting | Owner, in Google Ads: Admin → Account settings → Call reporting; Assets → Call |
+| Verified | Unit tests and a Google stand-in. NOT against a real account: needs Google API access level and the switch |
+
+Approval that unlocks it: (1) privacy policy names call records (proposed sentence, in src/legal/Privacy.jsx after "Local Services Ads … message
+contents": "If call reporting is on, we read when calls from ads happened, how long they lasted, whether they were answered and which campaign they came from, not who called."), with docs/GOOGLE_PRIVACY_RESUBMISSION.md changed together;
+(2) migration 0040; (3) `GOOGLE_CALLS_ENABLED=true`.
