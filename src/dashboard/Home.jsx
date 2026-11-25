@@ -25,8 +25,8 @@ const TeachAI = lazyPage(() => import('./TeachAI.jsx'))
 
 export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = null }) {
   const signOut = async () => {
+    clearMemory() // first: also when the page is closed before the server answers
     await api('/api/auth/logout', { method: 'POST' })
-    clearMemory()
     location.replace(to)
   }
   return (

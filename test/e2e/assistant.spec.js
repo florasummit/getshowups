@@ -242,10 +242,10 @@ test('a conversation survives reload and closing, names are read again, can be s
   await expect(panelOf(page).getByText('Earlier conversations')).toHaveCount(0)
   expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('gsu:assistant')).length)).toBe(0)
   await ask('their own question')
-  await page.route('**/api/auth/logout', (r) => r.fulfill({ json: { ok: true } }))
+  await page.route('**/api/auth/logout', () => {}) // never answered
   expect(await wide(page)).toBeLessThanOrEqual(0)
   await panelOf(page).getByRole('button', { name: 'Close' }).click()
+  // Cleared even if the server never answers the sign-out.
   await page.getByRole('button', { name: 'Sign out' }).click()
-  await page.waitForLoadState('load')
-  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('gsu:assistant')).length)).toBe(0)
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('gsu:assistant')).length)).toBe(0)
 })
