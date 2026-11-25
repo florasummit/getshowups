@@ -163,6 +163,43 @@ function FounderAlerts() {
   )
 }
 
+const FEEDBACK = { wrong_fact: 'Wrong fact', misunderstood: 'Misunderstood', wrong_action: 'Wrong action', missing: 'Missing something', not_useful: 'Not useful' }
+// Codes and counts only: no question or answer is stored, so a reason is followed up with the owner or a new test.
+function AssistantQuality({ a }) {
+  if (!a) return null
+  return (
+    <Section title="Assistant answers" id="cc-assistant">
+      <div data-assistant-quality>
+        <p className="cc-status-line">
+          Last {a.days} days, real businesses: {plural(a.asked, 'question')}, {a.answered} answered, {a.heldBack} held back by the checks. {a.testFeedback ? `${plural(a.testFeedback, 'report')} from test businesses not counted.` : ''}
+        </p>
+        {a.feedback.length > 0 && (
+          <ul>
+            {a.feedback.map((f) => (
+              <li key={`${f.reason}:${f.view}`}>
+                {FEEDBACK[f.reason] || f.reason} on {f.view || 'unknown page'}: {f.count}, last {ago(f.last)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {a.checks.length > 0 && (
+          <details>
+            <summary>Why drafts were corrected or held back</summary>
+            <ul>
+              {a.checks.map((c) => (
+                <li key={c.check}>
+                  {c.check}… {c.count}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {!a.feedback.length && !a.checks.length && <p className="cc-status-line">No owner reports and no held-back drafts recorded.</p>}
+      </div>
+    </Section>
+  )
+}
+
 function Overview({ o, go }) {
   const problems = o.integrations.filter((c) => ['failed', 'degraded'].includes(c.state))
   const counts = o.integrations.reduce((m, c) => ({ ...m, [c.state]: (m[c.state] || 0) + 1 }), {})
@@ -191,6 +228,7 @@ function Overview({ o, go }) {
           </Empty>
         )}
       </Section>
+      <AssistantQuality a={o.assistant} />
       <div className="cc-grid-2">
         <Section title="Integrations" id="cc-int" action={<Link to={{ view: 'integrations' }} go={go} className="cc-more">All integrations →</Link>} sub={`${counts.healthy || 0} healthy · ${counts.failed || 0} failed · ${counts.testing || 0} test mode · ${(counts.disabled || 0) + (counts.setup_required || 0)} off or not set up · ${counts.unknown || 0} not verified`}>
           {problems.length ? (

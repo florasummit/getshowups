@@ -7,6 +7,7 @@ import { useEnrollmentOpen } from '../lib/enrollment.js'
 import { HelpPanel } from './Help.jsx'
 import Setup from './Setup.jsx'
 import Home, { SignOut } from './Home.jsx'
+import { clearMemory } from './assistant-memory.js'
 import '../app.css'
 
 const LOGIN_ERRORS = {
@@ -184,6 +185,10 @@ export default function Dashboard() {
 
   const noBusiness = Boolean(me.data && !me.data.customer)
   const hasBusiness = Boolean(me.data?.customer)
+  // Signed in without a business (its account was deleted): nothing said there stays in this browser.
+  useEffect(() => {
+    if (noBusiness) clearMemory()
+  }, [noBusiness])
   useEffect(() => {
     if (hasBusiness) clearPlan()
   }, [hasBusiness])

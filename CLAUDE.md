@@ -196,7 +196,7 @@ test/*.test.js       node:test unit/integration tests for functions/ and server/
 test/e2e/            Playwright specs, fake fixtures, local server script, test-only wrangler config.
                      journey.js + journey.spec.js: state-aware NEW-customer journey (detect → act → verify, fixture
                      testers listed in serve.sh, mock Google/Stripe); docs/LAUNCH_DECISION.md = readiness verdict
-docs/                WORKFLOW.md (how we build), STATUS.md (decisions, progress, next actions)
+docs/                SYSTEM_OVERVIEW.md (start here), WORKFLOW.md (how we build), STATUS.md (decisions, progress, next actions)
 ```
 
 Production bindings live in the **Cloudflare dashboard**, not in a file:
@@ -333,6 +333,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Google Ads disconnect (owner, confirm): deletes our stored Ads token + connection, never revokes at Google (the grant
   may be shared with Calendar). Running campaigns: the owner chooses pause-first or leave-running; never implied
   stopped. Ad payments are set up in Google Ads; we only show billing status (ready/pending/missing/unknown).
+- Calls from Google ads (server/ads/calls.js, migration 0040, docs/GOOGLE_ACQUISITION.md): read-only, OFF unless GOOGLE_CALLS_ENABLED is
+  exactly 'true' (approval: the privacy policy must name call records). Google never says who called: never match calls to people
+  automatically; a known phone number keeps its first source; results count only appointments made since the call.
 - Conversion feedback (server/ads/conversions.js) is OFF unless ADS_CONVERSIONS_ENABLED is exactly 'true' (approval: it
   adds the sensitive Data Manager scope to the Ads sign-in). When on: click ids of GetShowUps Google campaign leads are
   kept encrypted ≤90 days (purged by cron); lead/booking/completed-job events go to the Data Manager API

@@ -129,7 +129,7 @@ export default function BookingPage({ id }) {
                 {biz.name} will visit {lead.street}.
               </p>
             )}
-            <p className="lede">A calendar invitation is on its way to {lead.email || 'your email'}.</p>
+            {booked.invited !== false && <p className="lede">A calendar invitation is on its way to {lead.email || 'your email'}.</p>}
             <GoodToKnow policies={biz.policies} />
           </div>
         )}

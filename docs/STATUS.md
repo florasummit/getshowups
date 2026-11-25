@@ -3,6 +3,12 @@
 _Update at the end of every task. Newest first._
 
 
+## V1 finish and feature freeze (2026-11-25)
+
+docs/SYSTEM_OVERVIEW.md is the founder's starting page. Google call reading (server/ads/calls.js, migration 0040) built and OFF
+(GOOGLE_CALLS_ENABLED; the privacy policy must name call records first; 0040 not applied). server/who-is-meant.js, assistant
+feedback on /admin/control, own-key designer reads published knowledge. Independent review: all findings fixed.
+
 ## Homepage funnel through our own booking page; sales answers (2026-11-25, founder-approved)
 
 While enrollment is closed and GetShowUps' own sales booking runs (enrollment.salesChat: bookable + receptionist on),

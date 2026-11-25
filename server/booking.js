@@ -201,7 +201,7 @@ export async function bookAppointment(env, customer, input, now = Date.now()) {
     await scheduleAppointmentMessages(env, customer, { id, leadId, smsConsent, start }, now)
     // Booked: the conversation moves on and every pending sales follow-up retires itself (lead status 'booked').
     await markStage(env, customer.id, leadId, 'booked', now)
-    result.appointment = { id, start, end: result.appointment.end }
+    result.appointment = { id, start, end: result.appointment.end, invited: result.appointment.invited }
     if ((await lastBookingOutcome(db, customer.id)) === 'failure') {
       await recordEvent(db, { type: 'booking.recovered', actor: 'system:booking', customer: customer.id, capability: BOOKING_CAPABILITY, resource: { type: 'business', id: customer.id }, outcome: 'success', details: {}, at: now })
     }
@@ -374,7 +374,7 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
     await release().catch(() => {})
     return fail(503, 'storage_error')
   }
-  return { ok: true, appointment: { id, start, end, leadId: lead.id, smsConsent: await hasSmsConsent(db, lead.id) } }
+  return { ok: true, appointment: { id, start, end, leadId: lead.id, invited: Boolean(lead.email), smsConsent: await hasSmsConsent(db, lead.id) } }
 }
 
 // Owner records what happened after an appointment, or corrects it at any time.

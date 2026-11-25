@@ -21,9 +21,12 @@ test('owner permanently deletes the account: typed confirmation; site, booking a
   await expect(confirm).toBeDisabled()
   await card.getByLabel(/Type the business name/).fill('e2e delete pools')
   await expect(confirm).toBeEnabled()
+  // The assistant's conversations in this browser go with the account.
+  await page.evaluate(() => localStorage.setItem('gsu:assistant:v1:e2e-delete:o', '[]'))
   await confirm.click()
   await expect(page.locator('[data-account-deleted]')).toContainText('Your account is being deleted')
 
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('gsu:assistant')))).toEqual([])
   // At once: no access to the business, booking page and public API gone.
   expect((await page.request.get('/api/dashboard/me')).status()).toBe(401) // signed out everywhere
   expect((await page.request.get(`/api/book/${id}`)).status()).toBe(404)

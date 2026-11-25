@@ -3,6 +3,7 @@
 // no calls to outside services), what it is needed for (tier: operate | payments | advertising | optional | later,
 // the founder's 2026-11-21 operating classification) and the existing screen where it is set up (action). A new feature adds its own registerCapability() call (here or in its module,
 // imported below) and appears in Business Review with no UI change.
+import { callsOn } from '../ads/calls.js'
 import { feedbackConfigured } from '../email-feedback.js'
 import { registerCapability } from './registry.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
@@ -365,6 +366,16 @@ registerCapability({
   external: 'Google Data Manager API',
   dependsOn: ['ads.google'],
   state: (env) => (conversionsEnabled(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Needs a new sensitive OAuth scope', approval: 'ADS_CONVERSIONS_ENABLED + datamanager scope verification' }),
+})
+
+registerCapability({
+  id: 'ads.google_calls',
+  tier: 'later',
+  name: 'Calls from Google ads (read-only)',
+  journey: 'results',
+  external: 'Google Ads API call reports',
+  dependsOn: ['ads.google'],
+  state: (env) => (callsOn(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Privacy policy must name call records first', approval: 'privacy sentence + migration 0040 + GOOGLE_CALLS_ENABLED' }),
 })
 
 // ---------- lead / booking / show-up / results ----------
