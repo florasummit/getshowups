@@ -7,6 +7,17 @@ _Update at the end of every task. Newest first._
 docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser (V1 decision; the privacy policy says we don't store
 them): per business and account, cleared on sign-out, account switch, account deletion and after 30 days. voice-core midnight test fixed.
 
+## ChatGPT Ads, third ad platform (2026-11-24, draft PR, not released)
+
+server/ads/openai.js + docs/OPENAI_ADS.md. Migration 0039 rebuilds ad_connections/ad_campaigns/ad_metrics_daily to allow
+platform 'openai' (the one reviewed exception to additive-only; test/migration-0039.test.js; rollback in scripts/rollback/).
+Off: OPENAI_ADS_ENABLED. No OpenAI sandbox → OPENAI_ADS_VERIFY_BUSINESSES (paused creation only). Not verified against a
+real ChatGPT Ads account. 0039 applied to production 2026-11-25 (founder's conditional approval: fresh backup restored and
+checked, rehearsal on SQLite + local D1, before/after fingerprint identical except the CHECK and ad_platforms). Next: founder
+creates the OpenAI ad account + key (docs/OPENAI_ADS.md); approvals: OPENAI_ADS_ENABLED + OPENAI_ADS_VERIFY_BUSINESSES.
+
+
+
 ## GetShowUps sales attribution, closed loop (2026-11-24, draft PR)
 
 server/sales-attribution.js: prospects of the `getshowups` sales business by source → business created (owner sign-in =

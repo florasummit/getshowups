@@ -2530,6 +2530,9 @@
 .conn-status--info .conn-icon, .conn-status--off .conn-icon { background: var(--ink-100); color: var(--ink-700); }
 .conn-status--off { color: var(--text-muted); }
 .conn-links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; }
+/* ChatGPT Ads key field and area search: input + button on one line, wrapping on a phone. */
+.inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.inline-form input { flex: 1 1 14rem; min-width: 0; }
 .setup-steps { margin: 0; padding-left: 20px; }
 .setup-steps li + li { margin-top: 6px; }
 .conn-secondary { display: inline-block; font-size: 0.85rem; color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }

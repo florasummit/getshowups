@@ -104,7 +104,7 @@ const LEAD = `SELECT l.id, l.name, l.need, l.zip, l.status, l.created_at, l.emai
 
 const apptState = (r, now) =>
   r.status === 'showed' ? (r.work === 'completed' ? 'happened, job completed' : r.work === 'not_completed' ? 'happened, job not finished' : 'happened') : r.status === 'no_show' ? 'no-show' : r.status === 'cancelled' ? 'cancelled' : r.start_at > now ? 'upcoming' : 'past, outcome not recorded'
-const SOURCE = { google_ads: 'your Google ad', meta_ad_click: 'your Meta ad', meta_lead_form: 'your Meta ad', google_ads_imported: 'a Google campaign you run yourself' }
+const SOURCE = { google_ads: 'your Google ad', meta_ad_click: 'your Meta ad', meta_lead_form: 'your Meta ad', openai_ad_click: 'your ChatGPT ad', google_ads_imported: 'a Google campaign you run yourself' }
 
 // References: A = appointment, L = inquiry, R = a call-back request or message left with the receptionist. The map lives in the conversation (the browser holds it); an id in it is
 // only ever used in a query that also names the session's business.

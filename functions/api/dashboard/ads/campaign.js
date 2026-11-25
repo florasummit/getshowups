@@ -1,5 +1,6 @@
 // POST /api/dashboard/ads/campaign — owner actions on one campaign.
 //   { action: 'save', id?, spec }      edit a draft (returns validation errors for the editor)
+//   { action: 'start_openai' }         a ChatGPT Ads starter draft from the business's records (OPENAI_ADS_ENABLED only)
 //   { action: 'approve', id }         owner approval (strict validation, within approved budget)
 //   { action: 'validate', id }        non-spending platform check (Google validateOnly / Meta dry run)
 //   { action: 'launch', id, confirm } create on the platform, PAUSED (ADS_LIVE_LAUNCH, or a Google Ads test account)
@@ -10,10 +11,11 @@
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession } from '../../../../server/auth.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
-import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction, confirmPausedExternally, requestTestLead } from '../../../../server/ads/campaigns.js'
+import { saveDraft, approveCampaign, launch, setCampaignStatus, setCampaignBudget, logAction, confirmPausedExternally, requestTestLead, getProfile } from '../../../../server/ads/campaigns.js'
+import { starterSpec as openaiStarter } from '../../../../server/ads/openai.js'
 import { adsAccess, adsEnabled } from '../../../../server/ads/access.js'
 
-const STATUS = { test_account_required: 409, invalid_budget: 400, invalid_status: 409, not_found: 404, live_launch_disabled: 409, approval_required: 409, budget_approval_required: 409, exceeds_approved_budget: 409, monthly_budget_reached: 409, not_editable: 409, not_launched: 409, needs_account: 409, profile_required: 409, too_many_campaigns: 409, creative_not_approved: 409, subscription_required: 402 }
+const STATUS = { platform_unavailable: 404, draft_exists: 409, not_paused: 502, account_changed: 409, test_account_required: 409, invalid_budget: 400, invalid_status: 409, not_found: 404, live_launch_disabled: 409, approval_required: 409, budget_approval_required: 409, exceeds_approved_budget: 409, monthly_budget_reached: 409, not_editable: 409, not_launched: 409, needs_account: 409, profile_required: 409, too_many_campaigns: 409, creative_not_approved: 409, subscription_required: 402 }
 
 export async function onRequestPost({ request, env }) {
   if (!adsEnabled(env)) return json(404, { error: 'not_found' })
@@ -31,6 +33,18 @@ export async function onRequestPost({ request, env }) {
       case 'save':
         r = await saveDraft(env, customer, { id: body.id, spec: body.spec })
         break
+      case 'start_openai': {
+        // A ChatGPT Ads starter draft from the business's own records (one open draft per platform, like "Draft my plan").
+        const profile = await getProfile(env.ONBOARDING_DB, customer.id)
+        if (!profile) return json(409, { error: 'profile_required' })
+        // Lands on the business's own booking page (leads are captured, screened and attributed there); a local or
+        // non-https deployment falls back to the website in the ad profile (ads need an https landing page).
+        const booking = `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${customer.id}`
+        const finalUrl = booking.startsWith('https://') ? booking : /^https:\/\//.test(profile.website || '') ? profile.website : booking
+        const spec = { ...openaiStarter({ name: customer.name, services: profile.services, zips: profile.serviceArea?.zips || [] }), finalUrl }
+        r = await saveDraft(env, customer, { spec, onlyIfNone: true })
+        break
+      }
       case 'approve':
         r = await approveCampaign(env, customer, body.id, session.email)
         break

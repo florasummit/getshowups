@@ -2,9 +2,11 @@
 // metrics sync, and the dashboard results summary. Routes stay thin and call these.
 import { randomToken } from '../google-oauth.js'
 import { providerSpendAllowed } from '../business-accounts.js'
-import { validateSpec, dailyCeilingCents, LIMITS } from './spec.js'
+import { validateSpec, dailyCeilingCents, LIMITS, PLATFORMS } from './spec.js'
 import { currentApproval, remainingDailyCents } from './budget.js'
 import * as meta from './meta.js'
+import * as openai from './openai.js'
+import { openaiAdsEnabled, verifyBusinesses } from './openai.js'
 import { stripeConfigured, billingSubscription } from '../stripe.js'
 import { sandboxed, testStatus } from '../testbusiness.js'
 import { normalizeWebsiteUrl } from '../url.js'
@@ -16,13 +18,19 @@ import { funnel } from './funnel.js'
 const ZIP_RE = /^\d{5}$/
 const OBJECTIVES = ['leads', 'bookings']
 let googleAdapter = null
-// Adapters are loaded lazily so a missing optional adapter never breaks the dashboard.
+// Adapters are loaded lazily so a missing optional adapter never breaks the dashboard. ChatGPT Ads is always
+// reachable for PAUSING and reading back (a safety stop must work even after OPENAI_ADS_ENABLED is switched off);
+// drafting, creating, starting and budget increases are refused unless the switch is exactly 'true' (openaiGate).
 export async function adapter(platform) {
   if (platform === 'meta') return meta
   if (platform === 'google') return (googleAdapter ||= await import('./google.js'))
+  if (platform === 'openai') return openai
   return null
 }
-const PLATFORM_STATUS = { google: { paused: 'PAUSED', active: 'ENABLED' }, meta: { paused: 'PAUSED', active: 'ACTIVE' } }
+const openaiGate = (env, platform) => platform === 'openai' && !openaiAdsEnabled(env)
+const getConnectionRow = (db, customer, platform) => db.prepare('SELECT status, account_id FROM ad_connections WHERE customer = ?1 AND platform = ?2').bind(customer, platform).first()
+const PLATFORM_STATUS = { google: { paused: 'PAUSED', active: 'ENABLED' }, meta: { paused: 'PAUSED', active: 'ACTIVE' }, openai: { paused: 'paused', active: 'active' } }
+export const PLATFORM_LABEL = { google: 'Google', meta: 'Meta', openai: 'ChatGPT Ads' }
 
 // ---------- profile ----------
 const list = (v, max, len) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean))].filter((x) => x.length <= len).slice(0, max) : [])
@@ -160,7 +168,8 @@ export async function saveDraft(env, customer, { id, spec, onlyIfNone = false },
   const db = env.ONBOARDING_DB
   const profile = await getProfile(db, customer.id)
   if (!profile) return { ok: false, error: 'profile_required' }
-  if (!spec || !['google', 'meta'].includes(spec.platform)) return { ok: false, error: 'invalid_spec' }
+  if (!spec || !PLATFORMS.includes(spec.platform)) return { ok: false, error: 'invalid_spec' }
+  if (openaiGate(env, spec.platform)) return { ok: false, error: 'platform_unavailable' }
   const [errors] = validateSpec(spec, { approvedClaims: profile.approvedClaims })
   const daily = Number.isInteger(spec.dailyBudgetCents) && spec.dailyBudgetCents > 0 ? spec.dailyBudgetCents : 500
   const body = JSON.stringify(spec).slice(0, 60000)
@@ -241,6 +250,18 @@ async function serveMode(env, platform, customerId, a, row) {
   return null
 }
 
+// ChatGPT Ads has no sandbox. Its only no-spend path is 'verify': a business listed in OPENAI_ADS_VERIFY_BUSINESSES
+// (approval) may CREATE the campaign paused in its real account to prove the integration; starting it, resuming it or
+// changing its budget still needs 'live'. Test businesses never get it (they must never touch a real ad account).
+async function createMode(env, platform, customerId, a, row) {
+  if (openaiGate(env, platform)) return null
+  const mode = await serveMode(env, platform, customerId, a, row)
+  if (mode || platform !== 'openai') return mode
+  if (!verifyBusinesses(env).includes(customerId)) return null
+  if (!(await providerSpendAllowed(env, customerId))) return null
+  return sandboxed(await testStatus(env, customerId), row.created_at) ? null : 'verify'
+}
+
 // Access rule: once billing is configured, starting LIVE ads needs an active or trialing subscription.
 // Before billing exists (pilot) this is not enforced. Pausing is always allowed. Sandbox (Google Ads
 // test account) launches/resumes skip it: they cannot spend, and pilots such as PoolThru are never billed.
@@ -256,7 +277,7 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
   if (!row) return { ok: false, error: 'not_found' }
   const spec = JSON.parse(row.spec)
   const a = await adapter(row.platform)
-  if (!a) return { ok: false, error: 'platform_unavailable' }
+  if (!a || openaiGate(env, row.platform)) return { ok: false, error: 'platform_unavailable' }
   const campaign = { id: row.id, spec, createdAt: row.created_at, platformIds: JSON.parse(row.platform_ids || '{}'), platform_ids: row.platform_ids }
   if (!live) {
     // Validation path: never spends, never creates objects.
@@ -264,12 +285,14 @@ export async function launch(env, customer, id, ownerEmail, { live = false } = {
     await logAction(db, { customer: customer.id, campaignId: id, actor: `owner:${ownerEmail}`, kind: 'validate', status: r.ok ? 'applied' : 'failed', reason: r.ok ? 'Validation passed (nothing created, no spend)' : `Validation failed: ${r.error}` }, now)
     return r.ok ? { ok: true, validated: true, live: false } : { ok: false, error: r.error }
   }
-  const mode = await serveMode(env, row.platform, customer.id, a, row)
+  const mode = await createMode(env, row.platform, customer.id, a, row)
   if (!mode) return { ok: false, error: 'live_launch_disabled' }
   const hold = await adsHold(env, customer.id)
   if (hold) return { ok: false, error: 'ads_on_hold', hold: hold.reason }
   if (mode === 'live' && !(await billingAllowsAds(env, customer.id))) return { ok: false, error: 'subscription_required' }
   if (row.status !== 'approved') return { ok: false, error: 'approval_required' }
+  // A real (paused) object needs the account connected; the dry run above did not.
+  if (row.platform === 'openai' && (await getConnectionRow(db, customer.id, 'openai'))?.status !== 'connected') return { ok: false, error: 'needs_account' }
   // Re-check the ceiling at launch time (another campaign may have been approved meanwhile).
   if (row.daily_budget_cents > (await remainingDailyCents(db, customer.id, id))) return { ok: false, error: 'exceeds_approved_budget' }
   const claimed = await db.prepare("UPDATE ad_campaigns SET status = 'launching', updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'approved' RETURNING id").bind(id, customer.id, now).first()
@@ -317,6 +340,7 @@ export async function setCampaignStatus(env, customer, id, target, actor, now = 
   if (!row.platform_campaign_id && !JSON.parse(row.platform_ids || '{}').campaignId) return { ok: false, error: 'not_launched' }
   const a = await adapter(row.platform)
   if (target === 'active') {
+    if (openaiGate(env, row.platform)) return { ok: false, error: 'platform_unavailable' }
     const mode = await serveMode(env, row.platform, customer.id, a, row)
     if (!mode) return { ok: false, error: 'live_launch_disabled' }
     if (row.status !== 'paused') return { ok: false, error: 'invalid_status' }
@@ -357,6 +381,7 @@ export async function setCampaignBudget(env, customer, id, dailyCents, actor, no
     if (hold) return { ok: false, error: 'ads_on_hold', hold: hold.reason }
   }
   const a = await adapter(row.platform)
+  if (openaiGate(env, row.platform)) return { ok: false, error: 'platform_unavailable' }
   if (!(await serveMode(env, row.platform, customer.id, a, row))) return { ok: false, error: 'live_launch_disabled' }
   const r = await a.setDailyBudget(env, customer.id, row, dailyCents)
   if (!r.ok) {
@@ -376,7 +401,7 @@ export async function verifyAndRecord(env, row, now = Date.now()) {
   const a = await adapter(row.platform)
   if (!a?.verifyCampaign) return { ok: false, error: 'platform_unavailable' }
   const r = await a.verifyCampaign(env, row.customer, row)
-  const platformName = row.platform === 'google' ? 'Google' : 'Meta'
+  const platformName = PLATFORM_LABEL[row.platform] || row.platform
   if (!r.ok) {
     await logAction(db, { customer: row.customer, campaignId: row.id, actor: 'system', kind: 'verify', status: 'failed', reason: `Couldn't read the campaign from ${platformName} (${r.error})`, details: { error: r.error } }, now)
     return r
@@ -438,7 +463,7 @@ export async function verifyLaunched(env, { now = Date.now(), limit = 10 } = {})
   const db = env.ONBOARDING_DB
   const { results } = await db
     .prepare(
-      `SELECT c.* FROM ad_campaigns c WHERE c.platform IN ('google', 'meta') AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
+      `SELECT c.* FROM ad_campaigns c WHERE c.platform IN ('google', 'meta', 'openai') AND c.platform_campaign_id IS NOT NULL AND c.status IN ('paused', 'active')
        AND EXISTS (SELECT 1 FROM ad_connections x WHERE x.customer = c.customer AND x.platform = c.platform AND x.status = 'connected')
        AND coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) < ?1
        ORDER BY coalesce((SELECT max(a.at) FROM ad_actions a WHERE a.campaign_id = c.id AND a.kind = 'verify'), 0) LIMIT ?2`,
@@ -508,7 +533,7 @@ export async function confirmPausedExternally(env, customerId, id, actor, now = 
   }
   if (!UNREACHABLE.includes(probe.error)) return { ok: false, error: 'still_reachable_retry' }
   await db.prepare("UPDATE ad_campaigns SET status = 'paused', last_error = 'paused_outside_getshowups', updated_at = ?3 WHERE id = ?1 AND customer = ?2").bind(id, customerId, now).run()
-  await logAction(db, { customer: customerId, campaignId: id, actor, kind: 'pause', reason: `Confirmed paused in ${row.platform === 'google' ? 'Google Ads' : 'Meta'} by ${actor.split(':')[0]} (GetShowUps has no access: ${probe.error})`, details: { attested: true, unreachable: probe.error } }, now)
+  await logAction(db, { customer: customerId, campaignId: id, actor, kind: 'pause', reason: `Confirmed paused in ${row.platform === 'google' ? 'Google Ads' : PLATFORM_LABEL[row.platform] || row.platform} by ${actor.split(':')[0]} (GetShowUps has no access: ${probe.error})`, details: { attested: true, unreachable: probe.error } }, now)
   return { ok: true, attested: true }
 }
 
