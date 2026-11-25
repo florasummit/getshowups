@@ -257,7 +257,7 @@ test('undo always wins over a run that was already under way, and an undone dele
   const prepare = db.prepare
   let once = true
   db.prepare = (sqlText) => {
-    if (once && sqlText.includes("json_set(report, '$.claimed'")) {
+    if (once && sqlText.includes("'$.claimed', ?2")) {
       once = false
       q("DELETE FROM account_deletions WHERE customer = 'alpha-co'")
     }
@@ -302,12 +302,72 @@ test('a suspension recorded while a closing is being held survives; a claim only
   assert.equal(JSON.parse(one("SELECT report FROM account_deletions").report).wasStatus, 'suspended')
   const prepare = env.ONBOARDING_DB.prepare
   env.ONBOARDING_DB.prepare = (x) => {
-    if (x.includes("json_set(report, '$.claimed'")) q("UPDATE account_deletions SET requested_at = requested_at + 1, next_attempt_at = next_attempt_at + 1 WHERE customer = 'alpha-co'")
+    if (x.includes("'$.claimed', ?2")) q("UPDATE account_deletions SET requested_at = requested_at + 1, next_attempt_at = next_attempt_at + 1 WHERE customer = 'alpha-co'")
     return prepare(x)
   }
   assert.equal((await advanceDeletion(env, 'alpha-co', Date.now() + 15 * DAY)).status, 'not_found')
   env.ONBOARDING_DB.prepare = prepare
   assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 1)
+})
+
+const del = () => one("SELECT status, step, last_error, next_attempt_at t FROM account_deletions WHERE customer = 'alpha-co'")
+
+test('leftovers found at the end are cleared and checked again, never stuck: an incident opened by the failure, a late lead', async () => {
+  const get = env.GOOGLE_TOKENS.get
+  let broken = true
+  env.GOOGLE_TOKENS.get = async (k) => {
+    if (broken && k === 'ads:meta:alpha-co' && del().step === 'verify') {
+      q("INSERT INTO leads (id, customer, name, email, phone, need, status, token_hash, created_at, updated_at) VALUES ('late', 'alpha-co', 'n', 'l@x.example', '1', 'x', 'new', 'x', 1, 1)")
+      throw new Error('kv down')
+    }
+    return get(k)
+  }
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  assert.equal(del().status, 'in_progress')
+  broken = false
+  for (let i = 0; i < 4 && del().status !== 'completed'; i++) await processDeletions(env, { now: del().t + 400000 })
+  assert.equal(del().status, 'completed')
+  assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 0)
+})
+
+test('a live subscription is never called ended with a test key or in the wrong Stripe account', async () => {
+  q("INSERT INTO subscription_modes (customer, livemode, updated_at) VALUES ('alpha-co', 1, 1)")
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  assert.deepEqual([del().step, del().last_error], ['billing', 'stripe_mode_mismatch'])
+  assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 1)
+  env.STRIPE_SECRET_KEY = 'sk_live_x'
+  env.STRIPE_LIVE_ENABLED = 'true'
+  const f = globalThis.fetch
+  globalThis.fetch = async (u, i) => (String(u).includes('/subscriptions/sub_A') ? new Response(JSON.stringify({ error: { code: 'resource_missing' } }), { status: 404 }) : f(u, i))
+  await processDeletions(env, { now: del().t + 400000 })
+  assert.deepEqual([del().step, del().last_error], ['billing', 'stripe_resource_missing'])
+  globalThis.fetch = f
+})
+
+test('switching deletion off never strands a closing; a business made ours meanwhile is not deleted; a bad record blocks nobody', async () => {
+  env.ACCOUNT_RECOVERY_DAYS = '14'
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  const later = Date.now() + 20 * DAY
+  delete env.ACCOUNT_DELETION_ENABLED
+  assert.equal((await cancelDeletion(env, 'alpha-co', { type: 'admin', id: ADMIN }, later)).ok, true)
+  assert.equal(one("SELECT status FROM customers WHERE id = 'alpha-co'").status, 'active')
+  env.ACCOUNT_DELETION_ENABLED = 'true'
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  q("INSERT INTO business_accounts (customer, classification, billing, environment, set_by, set_at) VALUES ('alpha-co', 'internal_live', 'complimentary', 'production', 'x', 1)")
+  assert.equal((await advanceDeletion(env, 'alpha-co', later)).error, 'protected_business')
+  assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 1)
+  q("DELETE FROM business_accounts")
+  q("UPDATE account_deletions SET report = 'not json', next_attempt_at = 1, last_error = NULL")
+  q("INSERT INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at, report) VALUES ('beta-co', 1, 'x', 'in_progress', 'lockout', 2, '{}')")
+  await processDeletions(env, { now: later })
+  assert.equal(one("SELECT status FROM account_deletions WHERE customer = 'beta-co'").status, 'completed')
+})
+
+test('a far-off end date in Stripe doesn’t count as ended for a closing', async () => {
+  env.ACCOUNT_RECOVERY_DAYS = '14'
+  stripe.sub.cancel_at = 1900000000 + 90 * 86400
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  assert.equal(stripe.sub.cancel_at_period_end, true)
 })
 
 test('the restore marker is written before a deletion can be called completed', async () => {

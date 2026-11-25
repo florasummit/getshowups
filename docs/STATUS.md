@@ -2,6 +2,36 @@
 
 _Update at the end of every task. Newest first._
 
+## Account lifecycle, platform controls, booking settings (2026-11-25, PR #169)
+- **Live:** main 1c96237, deployment 70991926, rollback 58ee24a0. CI: 1,042 unit and 306 browser tests. Release check healthy: 7 customer
+  pages unchanged, 0 exceptions, records and secret names unchanged (one logged line: the daily reconciliation's known sandbox leftovers, real 0).
+- **Migration 0041 applied 2026-11-25 about 19:05 UTC (founder approved).** Four new empty tables (booking_rules, business_closures,
+  owner_notice_off, business_restrictions). Before: export ~/getshowups-backups/prod-20261125T190245Z-pre-0041.sql, loaded and
+  compared (94 tables, every count equal to production, integrity ok, 0 broken references), migration rehearsed on it twice
+  (existing rows and schema byte-identical). After: 98 tables, existing counts and schema unchanged, health ok, booking page
+  answering with times, PoolThru pages 200.
+- **Recovery:** the code works without the tables, so a code rollback (58ee24a0) needs no database change; leave the tables. A
+  mistake in the rows is fixed by the owner in Settings. Damage to the database itself: docs/BACKUPS.md, or Time Travel bookmark
+  `000012c8-00000000-0000512e-d18f71251c3298ceb0c0e722b599a47d` (before 0041; **restoring loses every later write**; approval).
+  Never drop the tables while rows exist: closed dates would silently reopen.
+- **Built:** Settings (services editor, closed dates and notice, setup check, people, sessions, plan/cancel/keep, connections,
+  notices, export, closing request), /admin (closings, sign-outs, restrictions, reasons). docs/legal/POLICY_MAP.md.
+- **Verified how:** unit and browser tests with Stripe and Google stand-ins; production: signed-out refusals, test-session refusals,
+  Settings page opens on desktop and phone. **Not verified in production:** the new controls signed in as an owner; live Stripe;
+  deletion (off).
+- **Independent review for enabling deletion (round 3, on the live code):** earlier fixes verified; no path found that erases a business whose
+  owner undid it. NOT safe to enable then: a failed final check could stay stuck with data left (F1), and a live subscription could be
+  called ended with a test key or the wrong Stripe account (F2), plus F3–F7. Fixed in the follow-up PR that adds this entry, with tests;
+  **re-review of those fixes and the founder's approval of implementation and retention are required before switching on.**
+- **Off:** ACCOUNT_DELETION_ENABLED, ACCOUNT_RECOVERY_DAYS, STRIPE_LIVE_ENABLED, MESSAGES_LIVE, SMS_LIVE, ADS_LIVE_LAUNCH.
+- **Limitations:** no per-service length (Claude 2's booking branch extends the one catalog, business_profiles.services, with 0042);
+  no one-step reschedule; owners can't pause their own business; export is capped by rows (10,000 a table, 1,500 conversations,
+  100 website versions), not bytes; "recent sign-in" is Google account choice, not a password prompt; after a database restore a
+  business deleted earlier is taken offline and is erased when deletion is on; no restore into D1 or key rotation exercised.
+- **Google Ads, real accounts (read-only evaluation):** blocked by two things. (1) The Cloud project's Google Ads API level: Test
+  refuses production accounts; Explorer is an application in Cloud Console. (2) Our own rule: with ADS_LIVE_LAUNCH off only test
+  accounts can be chosen, and switching it on would also allow campaign changes. PoolThru is connected to a Google Ads test account.
+
 
 ## Brand icon: Calendar + Growth (2026-11-25, founder-approved icon replacement, not a rebrand)
 - **New icon:** an orange calendar outline whose top-right corner opens for a white check that continues into an upward arrow, on the same near-black rounded square, with the same stroke weights. It won over Calendar + Speed (whose motion lines turn to noise at 16 px). Comparison sheets are in `brand/archive/`.
