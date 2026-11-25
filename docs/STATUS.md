@@ -2,11 +2,10 @@
 
 _Update at the end of every task. Newest first._
 
-## Known test issue: voice ceiling test fails 00:00 to 00:05 UTC (2026-11-25)
+## Shared knowledge, industries, ads outcomes, kept conversations (2026-11-25)
 
-test/voice-core.test.js "gates: a real (non-test) business is refused": it starts a Lab session at Date.now() minus 5 minutes and
-expects the DAILY ceiling, so in the first five minutes of the UTC day that session belongs to yesterday (lab_busy, not
-lab_daily_limit). Fails the same on main before #161. Product code is right. Narrow fix, not done: use a fixed time around noon UTC for both calls.
+docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser: the privacy policy says we don't store them;
+server-side history is an owner decision (policy text first). voice-core midnight test fixed (fixed time of day).
 
 ## Test sessions for acceptance (2026-11-25)
 

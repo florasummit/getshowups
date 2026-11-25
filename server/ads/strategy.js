@@ -4,6 +4,7 @@
 // ad platform unvalidated. Without ANTHROPIC_API_KEY a clearly labelled template draft is produced.
 import Anthropic from '@anthropic-ai/sdk'
 import { LIMITS, unapprovedClaims } from './spec.js'
+import { taughtFor, taughtLines } from '../intelligence/knowledge.js'
 import { recordTextUsage } from './creative.js'
 
 export const STRATEGY_MODEL = 'claude-opus-5-5'
@@ -62,7 +63,8 @@ Hard rules:
 - Image and video concepts must be producible by an AI generator without depicting real customers, logos of other brands, or fabricated results.
 - Recommend Google when people search for this service when they need it; add Meta for awareness-heavy or visual services. Explain briefly why.`
 
-function profilePrompt(customer, profile) {
+// taught: the owner's published knowledge in the ads scope. Internal lines shape the plan and are never ad text facts.
+function profilePrompt(customer, profile, taught) {
   return [
     `Business: ${customer.name}`,
     `Website: ${profile.website || 'none (use the GetShowUps booking page)'}`,
@@ -74,6 +76,7 @@ function profilePrompt(customer, profile) {
     `Objective: ${profile.objective}`,
     `Monthly ad budget: ${profile.monthlyBudgetCents ? `$${Math.round(profile.monthlyBudgetCents / 100)}` : 'not stated'}`,
     `Approved claims: ${profile.approvedClaims.length ? profile.approvedClaims.join('; ') : 'none'}`,
+    ...(taught.version ? ['Planning knowledge from the owner (choose services, seasons and wording by it; never state internal lines, figures or margins in ads):', ...taughtLines(taught, { planning: true }).map((x) => `- ${x}`), ...(taught.excluded.length ? [`- Not offered: ${taught.excluded.join(', ')}`] : [])] : []),
   ].join('\n')
 }
 
@@ -217,6 +220,7 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
   if (!env.ANTHROPIC_API_KEY && !client) return { ok: true, plan: templatePlan(customer, profile), source: 'template', costCents: 0 }
   const reserved = await recordTextUsage(env, customer.id, 15, now) // reserve ~15¢; adjusted below
   if (!reserved.ok) return reserved
+  const taught = await taughtFor(env, customer, 'ads', now)
   const anthropic = client || new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 120000 })
   let response
   try {
@@ -227,7 +231,7 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
       fallbacks: 'default',
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: PLAN_SCHEMA } },
       system: SYSTEM,
-      messages: [{ role: 'user', content: profilePrompt(customer, profile) }],
+      messages: [{ role: 'user', content: profilePrompt(customer, profile, taught) }],
     })
   } catch (err) {
     await env.ONBOARDING_DB.prepare('DELETE FROM ai_usage WHERE id = ?1').bind(reserved.usageId).run()

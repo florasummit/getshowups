@@ -5,6 +5,10 @@
 // Data minimisation: the model sees references, times, statuses, ZIPs and what was asked for (contact details removed),
 // never names, phones, emails or addresses. The page shows the real names next to the references.
 import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
+import { channels } from './ads/economics.js'
+import { INDUSTRIES, industryKey } from './intelligence/industries.js'
+import { taughtFor } from './intelligence/knowledge.js'
+import { economicsText, MONTHS } from './intelligence/schema.js'
 import { openSlots } from './booking.js'
 import { zonedToUtc } from './calendar.js'
 import { diagnose, funnel } from './ads/funnel.js'
@@ -435,6 +439,24 @@ export const TOOLS = [
       not_in_getshowups: ['phone calls', 'why someone did not book', 'costs other than reported ad spend', 'payments nobody recorded'],
     }
   }),
+  tool('business_knowledge', 'What the owner taught and published about the business: facts for customers, internal notes, qualification questions, seasons, typical job values and margins, the goal. Use for advice about services, seasons, which work is worth most, or what the AI tells customers. Owner-stated, not measured.', {}, [], async (c) => {
+    const t = await taughtFor(c.env, c.customer, 'owner', c.now)
+    const kind = industryKey((await getProfile(c.db, c.customer.id).catch(() => null))?.industry)
+    return { kind_of_business: kind === 'general' ? 'not recognised; use what the owner says' : kind, ...(t.qualify.length ? { asks_callers: t.qualify, asks_callers_source: 'published by the owner (replaces the usual questions for this kind of business)' } : { asks_callers: INDUSTRIES[kind].qualify, asks_callers_source: 'usual questions for this kind of business; the owner has published none' }), usually_urgent_in_this_trade: INDUSTRIES[kind].urgent, ...(t.version ? { published_version: t.version, told_to_customers: t.facts, internal_notes: t.team,  urgent: t.urgent, not_offered: t.excluded, owner_stated_job_figures: t.economics.map(economicsText), seasons: t.seasons.map((s) => ({ months: s.months.map((m) => MONTHS[m - 1]).join(', '), now: s.now, note: s.note })), goal: t.objective || 'not stated' } : { taught: 'nothing published yet (Teach Your AI)' }) }
+  }),
+  tool('acquisition_by_source', 'Where inquiries come from and what they led to, per source: ad spend, inquiries, in area, booked, showed up, completed, payments, cost per step, where each source loses people, and an estimated profit after ads when the owner stated margins. Use for which ads work, what to improve, cost and profit questions.', { days: { type: 'integer', enum: [30, 90] } }, [], async (c, a) => {
+    const t = await taughtFor(c.env, c.customer, 'analysis', c.now)
+    const ads = await adsAccess(c.env, c.customer)
+    const r = await channels(c.db, c.customer.id, { days: a.days || 90, internal: c.internal, economics: t.economics, now: c.now })
+    const m = (v) => usd(v) ?? 'not available'
+    return {
+      last_days: r.days,
+      basis: 'Inquiries created in the period, followed to what became of each.',
+      ...(r.spendReadable ? {} : { ad_spend: 'could not be read' }),
+      sources: r.channels.filter((x) => ads || !x.ad).map((x) => ({ source: x.channel, ...(x.ad ? { ad_spend: m(x.spendCents), clicks: x.clicks ?? 'not available' } : {}), inquiries: x.inquiries, in_service_area: x.qualified, booked: x.booked, showed_up: x.showed, jobs_completed: x.completed, payments_recorded: usd(x.paidCents) ?? 'none recorded', ...(x.ad ? { cost_per_inquiry: m(x.costPerInquiry), cost_per_qualified_inquiry: m(x.costPerQualified), cost_per_booking: m(x.costPerBooking), cost_per_completed_job: m(x.costPerCompleted), estimated_profit_after_ads: x.estimatedProfitAfterAdsCents === null ? 'cannot be estimated: needs recorded payments and a margin the owner stated for each paid job' : `${m(x.estimatedProfitAfterAdsCents)} (estimate: recorded payments times the owner’s stated margin, minus reported spend; not proof the ads caused the jobs)` } : {}), where_it_loses_people: x.bottleneck })),
+      rules: ['A traced inquiry came through an ad link; that is not proof the ad caused the job.', 'Budgets and campaigns are changed only by the owner on Ads; never offer to change spend.', 'Say what is evidence and what is the owner’s assumption.'],
+    }
+  }),
   tool('who_is_waiting', 'Everyone and everything waiting for the owner, by kind, exactly as the Needs your attention card counts it: call-back requests and messages left with the receptionist, conversations needing the owner, people who asked but have not booked, outside-area requests to decide, visits without an outcome. Use before saying who or how many are waiting, or that nobody is.', {}, [], (c) => waitingNow(c)),
   tool('page_state', 'What a dashboard page shows right now (any page, whichever one the owner is on): its sections, tiles, alerts, statuses and what can be done there.', { page: { type: 'string', enum: PAGE_IDS } }, ['page'], (c, a) => pageState(c, a.page)),
   tool('get_call_back', 'One call-back request or receptionist message in full.', { ref: REF }, ['ref'], async (c, a) => {
@@ -586,8 +608,16 @@ export async function knownRecords(c, said = '', limit = 10) {
   return out
 }
 
+// Reference → the person's name now, for references of this business that still exist.
+export async function namesFor(env, customer, refs) {
+  const given = refs && typeof refs === 'object' && !Array.isArray(refs) ? { A: refs.A, L: refs.L, R: refs.R } : {}
+  const c = toolContext(env, customer, given)
+  await knownRecords(c, '', 60)
+  return Object.fromEntries([...c.shown.values()].map((r) => [r.ref, r.name]))
+}
+
 // Lookups whose results a follow-up question needs again. Only these are ever repeated: reads of our own records.
-export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings', 'page_state', 'get_call_back']
+export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings', 'page_state', 'get_call_back', 'business_knowledge', 'acquisition_by_source']
 export async function repeatLookups(c, list) {
   return Promise.all(list.map(async (x) => ({ tool: x.name, args: x.args, result: await runTool(c, x.name, x.args) })))
 }

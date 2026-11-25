@@ -24,8 +24,9 @@ is merged or written. Names alone never identify anyone.
 ## 2. Context and conversation
 Every turn: who is waiting, the page on screen, the record open, people discussed (latest first), changes waiting for approval,
 and the last lookups read again (`server/operator.js`). Other pages and records on demand by tool. The model gets references
-(A1, L2, R1), never names or contact details. The conversation lives in the browser; the server re-reads every reference inside
-the session's business. Ambiguity that changes the action: one question (instructed); withdrawing: enforced (§4).
+(A1, L2, R1), never names or contact details. The conversation is kept in the owner's browser only
+(`src/dashboard/assistant-memory.js`: references, never names; 30 days; cleared on sign-out; the privacy policy says we store none);
+the server re-reads every reference inside the session's business. Earlier answers are what was said, never evidence. Ambiguity that changes the action: one question (instructed); withdrawing: enforced (§4).
 
 ## 3. Business reasoning
 Figures are calculated in code; the model interprets. The principles (responsiveness, freshness, attendance, completion, money
@@ -78,3 +79,24 @@ test business. Off unless `ACCEPTANCE_SESSIONS_ENABLED` is exactly `true`; every
 | Only hashes stored; the secret lives in the runner's Keychain | `migrations/0038_acceptance_sessions.sql`, `scripts/acceptance/grant.mjs` |
 | Approve, refuse, session, refused write and revoke are in the permanent audit log | `server/acceptance.js` |
 Tests: `test/acceptance.test.js`. Renew: `node scripts/acceptance/pair.mjs`, then Admin, Acceptance testing.
+
+## 9. Shared knowledge
+One body of taught knowledge, one industry table, read per role; each capability keeps its own instructions and permissions.
+| Rule | Where | Test |
+| --- | --- | --- |
+| Source: the owner's PUBLISHED rules only (drafted, reviewed, versioned, rolled back). Never a draft, a customer conversation or an AI answer | `server/intelligence/knowledge.js`, `server/intelligence/store.js` | `test/unified.test.js` |
+| Records (services, prices, hours, area, policies) win; prices and discounts can't be taught | `server/intelligence/schema.js` | `test/unified.test.js` |
+| Customer-facing roles see only what may be told to customers, and only where published rules are released; planning roles also see internal notes, job figures, seasons, goal | `server/intelligence/knowledge.js` (roles) | `test/unified.test.js` |
+| Ways around platform rules, instructions and links are refused when taught and again when read | `server/intelligence/platform-rules.js`, `server/intelligence/schema.js` | `test/unified.test.js` |
+| Kinds of business: defaults in one table; the owner's published questions replace them | `server/intelligence/industries.js` | `test/unified.test.js` |
+| A correction becomes a general fact to review; nothing is saved or published by it | `server/intelligence/teach.js` | `test/unified.test.js` |
+| Ads: every source followed to money; cost only with spend; profit only with the owner's margins and labelled an estimate; no authority to spend | `server/ads/economics.js` | `test/unified.test.js` |
+
+| Capability | Role | Reads it in |
+| --- | --- | --- |
+| Receptionist (chat and voice), lead qualification, scheduling | receptionist | `server/receptionist/knowledge.js` |
+| Follow-up texts | followups | `server/followups/engine.js` |
+| Website copy, writing help | website, writing | `server/website-ai.js`, `server/writing.js` |
+| Ads plans (Google, Meta) | ads | `server/ads/strategy.js` |
+| Owner assistant, performance analysis | owner, analysis | `server/operator-tools.js` |
+Not yet: the Claude/OpenAI website designer, ChatGPT ads plans (they can call `taughtFor(env, customer, 'ads')`).

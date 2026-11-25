@@ -1,6 +1,6 @@
 // Browser acceptance for the dashboard assistant: opens the dashboard, types questions, reads what is rendered, compares it
 // with the records and the page, tries supported actions, and writes a Markdown report with screenshots.
-//   node scripts/acceptance/run.mjs --local <dist dir> [--set fresh|known|arch] [--only <biz>] [--cap 0.50]   synthetic businesses, real model
+//   node scripts/acceptance/run.mjs --local <dist dir> [--set fresh|known|arch|unified] [--only <biz>] [--cap 0.50]   synthetic businesses, real model
 //   node scripts/acceptance/run.mjs --deployed [--approve] [--mobile]                https://getshowups.com, test session
 // Deployed runs: pair.mjs once (an admin approves a code). They refuse to start unless the business is on ALLOWED and
 // admin-marked as a test business, and every request that could change anything is blocked in the browser
@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 import { chromium, devices } from '@playwright/test'
 import { explain, verdict } from './accounts.mjs'
 import { openSession } from './grant.mjs'
-import { ARCH, DEPLOYED, DEPLOYED_AGAIN, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
+import { ARCH, UNIFIED, DEPLOYED, DEPLOYED_AGAIN, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
 import { BUSINESSES, token } from './worlds.mjs'
 
 const arg = (k, d = null) => (process.argv.includes(k) ? (process.argv[process.argv.indexOf(k) + 1] ?? true) : d)
@@ -110,7 +110,7 @@ async function local(dist) {
   const cap = Number(arg('--cap', '0.50'))
   const names = Object.fromEntries(Object.keys(BUSINESSES).map((id) => [id, s.sql.prepare('SELECT name FROM leads WHERE customer = ?1 UNION SELECT name FROM receptionist_requests WHERE customer = ?1').all(id).map((r) => r.name)]))
   const browser = await chromium.launch()
-  for (const [i, sc] of ({ fresh: FRESH, known: KNOWN, arch: ARCH }[arg('--set')] || SCENARIOS).entries()) {
+  for (const [i, sc] of ({ fresh: FRESH, known: KNOWN, arch: ARCH, unified: UNIFIED }[arg('--set')] || SCENARIOS).entries()) {
     if (arg('--only') && ![sc.biz].includes(arg('--only'))) continue
     const mobile = i % 3 === 1
     const ctx = await browser.newContext(mobile ? { ...devices['Pixel 7'] } : { viewport: { width: 1440, height: 950 } })

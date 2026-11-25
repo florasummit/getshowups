@@ -9,6 +9,7 @@ import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
 import { AssistantButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
+import { clearMemory, setMemoryOwner } from './assistant-memory.js'
 import { setAssistantView } from './assistant-store.js'
 import Insight from './Insight.jsx'
 import Scorecard from './Scorecard.jsx'
@@ -25,6 +26,7 @@ const TeachAI = lazyPage(() => import('./TeachAI.jsx'))
 export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = null }) {
   const signOut = async () => {
     await api('/api/auth/logout', { method: 'POST' })
+    clearMemory()
     location.replace(to)
   }
   return (
@@ -604,6 +606,7 @@ export default function Home({ me, reload }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   useEffect(() => setAssistantView(view), [view])
+  setMemoryOwner(`${me.customer.id}:${me.email}`)
   useEffect(() => {
     const on = () => {
       reload()

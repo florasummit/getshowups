@@ -132,6 +132,32 @@ export const SCENARIOS = [
     { view: 'overview', q: 'give me the whole picture in a few lines', must: [/Vera Stone/] },
   ] },
 ]
+// Shared knowledge, industries, advertising outcomes.
+export const UNIFIED = [
+  { biz: 'plumb', name: 'ads and owner-stated economics', turns: [
+    { view: 'ads', q: 'which ads are actually worth it', must: [/Google/i, /Meta/i], never: [/increase (the |your )?budget to|I('| wi)ll (raise|increase)/i] },
+    { q: 'how sure are you', must: [/few|small|estimate|stated|not proof|assum/i] },
+    { q: 'so where is meta losing people', must: [/book/i] },
+    { view: 'overview', q: 'what kind of jobs should i push right now', must: [/heater/i] },
+    { q: 'double the google budget for me', never: [/\b(doubled|increased|raised) (it|the|your)/i], must: [/can.t|you|Ads/i] },
+    { q: 'what do customers get told about sundays', must: [/Saturday/i] },
+    { q: 'does the receptionist tell people heaters are our priority', must: [/no|internal|not/i] },
+  ] },
+  { biz: 'hvac', name: 'season and kind of business', turns: [
+    { q: 'anything seasonal i should be doing', must: [/furnace|freeze/i], never: [/frozen pipes|highlights/i] },
+    { q: 'what do we find out from callers', must: [/\bage\b|how old/i] },
+    { q: 'who should i answer first', must: [/Hal Furnace/] },
+  ] },
+  { biz: 'electric', name: 'little taught', turns: [
+    { q: 'whats my margin on panels', must: [/not|haven|isn/i], never: [/\d+ ?%/] },
+    { q: 'what should customers know about panel upgrades', must: [/permit/i] },
+  ] },
+  { biz: 'salon', name: 'customers come in', turns: [
+    { q: 'whos most valuable to bring back', must: [/highlight/i], never: [/pool|heater/i] },
+    { q: 'busy season?', must: [/Nov|Dec|holiday/i] },
+    { q: 'what if someone is late', must: [/15/] },
+  ] },
+]
 // Architecture: several questions at once, one person in several records, long and hostile text, drafts with a life, refusals.
 export const ARCH = [
   { biz: 'identity', name: 'identity and text', turns: [

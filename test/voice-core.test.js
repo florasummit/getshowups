@@ -171,9 +171,11 @@ test('gates: a real (non-test) business is refused, an unconfigured provider is 
   assert.equal((await startLabSession(env, admin, { customer: 'alpha', provider: 'retell' })).error, 'retell_not_configured')
   assert.equal((await startLabSession(env, admin, { customer: 'alpha', provider: 'other' })).error, 'invalid_provider')
   assert.equal((await startLabSession({ ...env, VOICE_LAB_ENABLED: 'false' }, admin, { customer: 'alpha', provider: 'openai' })).httpStatus, 404)
-  const a = await startLabSession({ ...env, VOICE_LAB_DAILY_MINUTES: '1' }, admin, { customer: 'alpha', provider: 'openai' }, Date.now() - 5 * 60_000)
+  // A fixed time of day: the ceiling counts a UTC day, so five minutes back must be the same day.
+  const noon = Math.floor(Date.now() / 864e5) * 864e5 + 432e5
+  const a = await startLabSession({ ...env, VOICE_LAB_DAILY_MINUTES: '1' }, admin, { customer: 'alpha', provider: 'openai' }, noon - 5 * 60_000)
   assert.equal(a.ok, true)
-  assert.equal((await startLabSession({ ...env, VOICE_LAB_DAILY_MINUTES: '1' }, admin, { customer: 'alpha', provider: 'openai' })).error, 'lab_daily_limit')
+  assert.equal((await startLabSession({ ...env, VOICE_LAB_DAILY_MINUTES: '1' }, admin, { customer: 'alpha', provider: 'openai' }, noon)).error, 'lab_daily_limit')
 })
 
 test('routes: platform admin only, same-origin writes, 404 when the Lab is off, the tool route runs the engine tool for the session and the transcript is kept as text', async () => {

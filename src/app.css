@@ -4830,6 +4830,18 @@ html.help-open .app {
   font-size: 0.95rem;
 }
 
+.ask-memory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+}
+.ask-memory details[open] {
+  width: 100%;
+}
+.ask-memory summary {
+  cursor: pointer;
+}
 .ask-feedback > summary {
   cursor: pointer;
   width: fit-content;

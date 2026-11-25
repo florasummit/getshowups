@@ -1,11 +1,12 @@
 // The assistant's conversation (server/assist.js), at the bottom of the one panel (Help.jsx). It stays while the owner
-// moves between pages and selections, lives in this page only (nothing is stored) and is gone on reload or sign-out.
+// moves between pages and selections and is kept in this browser only (assistant-memory.js); our servers store none of it.
 // Opening anything sends nothing: pressing a suggestion or Send asks once, with the page, the selected topic and the
 // period on screen. Every answer says what it is and which period it is about. A prepared change is saved only by its button.
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { HELP } from '../content/help.js'
+import { asTalk, conversations, forget, forgetAll, hasRefs, keep, newId, snapshot, subscribe } from './assistant-memory.js'
 import { getSelected, setDraft } from './assistant-store.js'
 
 const ERRORS = {
@@ -293,9 +294,46 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
   const live = useRef(null)
   const [off, setOff] = useState(false)
   const [q, setQ] = useState('')
-  const [talk, setTalk] = useState([])
-  const looked = useRef([]) // the lookups behind the last answer, read again for a follow-up question
-  const refs = useRef({}) // which records A1, L2… are, for this conversation
+  // Opening the panel again continues the latest conversation (kept in this browser only), unless a question came with it.
+  const [start] = useState(() => {
+    const last = first || topic ? null : conversations()[0]
+    return last && Date.now() - last.at < 12 * 3_600_000 ? last : null
+  })
+  const [talk, setTalk] = useState(() => (start ? asTalk(start, {}) : []))
+  const [convId, setConvId] = useState(() => start?.id ?? newId())
+  const stored = useSyncExternalStore(subscribe, snapshot)
+  const past = useMemo(() => (stored ? conversations() : []), [stored])
+  const looked = useRef(start?.looked || []) // the lookups behind the last answer, read again for a follow-up question
+  const refs = useRef(start?.refs || {}) // which records A1, L2… are, for this conversation
+  // The names behind kept references, as the records are now.
+  const fillIn = async (c) => {
+    if (!hasRefs(c.talk)) return
+    const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { restore: true, refs: c.refs } })
+    if (status === 200 && data.names) setTalk((t) => (t.length && t.every((e) => e.kept) && t[0].id === c.talk[0].id ? asTalk(c, data.names) : t))
+  }
+  useEffect(() => {
+    if (start) Promise.resolve().then(() => fillIn(start))
+  }, [start])
+  const open = (c) => {
+    setConvId(c.id)
+    refs.current = c.refs || {}
+    looked.current = c.looked || []
+    setTalk(asTalk(c, {}))
+    fillIn(c)
+  }
+  useEffect(() => {
+    if (talk.length && !talk.some((e) => e.busy) && !talk.every((e) => e.kept)) keep(convId, talk, refs.current, looked.current)
+  }, [talk, convId])
+  const startNew = () => {
+    setConvId(newId())
+    refs.current = {}
+    looked.current = []
+    setTalk([])
+  }
+  const drop = (id) => {
+    forget(id)
+    if (id === convId) startNew()
+  }
   const onState = (id, p, state) => setTalk((t) => t.map((e) => (e.id === id ? { ...e, proposals: e.proposals.map((x) => (x.key === p.key ? { ...x, state } : x)) } : e)))
   const busy = talk.some((e) => e.busy)
   const send = async (question, { replace = null, fromBox = false } = {}) => {
@@ -304,7 +342,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
     const ctx = replace?.ctx ?? { topic, view, days }
     const entry = { id: key, ctx, q: question, about: replace ? replace.about : title || VIEW[view], days: ctx.days, busy: true }
     // A question the AI couldn't answer still counts as said, and a bare list is never replayed as the AI's own reading.
-    const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}${(e.proposals || []).some((p) => p.state === 'saved') ? ' (Since then the owner approved it: saved.)' : ''}` }))
+    const history = talk.filter((e) => (e.answer || e.error) && e.id !== key).slice(-6).map((e) => ({ q: e.q, a: e.error ? '(not answered: the AI was unavailable)' : `${e.kept ? '(said earlier) ' : ''}${e.aiOut ? '(the AI was unavailable; records were only listed) ' : ''}${e.raw || e.answer}${(e.proposals || []).some((p) => p.state === 'saved') ? ' (Since then the owner approved it: saved.)' : ''}` }))
     const pending = talk.flatMap((e) => e.proposals || []).filter((p) => !p.state && p.pid).slice(-8).map((p) => ({ id: p.pid, type: p.type, ref: p.ref, change: p.to || p.message || (p.after ? `ZIPs ${p.before.join(' ')} -> ${p.after.join(' ')}` : '') }))
     setTalk((t) => (replace ? t.map((e) => (e.id === key ? entry : e)) : [...t.slice(-19), entry]))
     const { status, data } = await api('/api/dashboard/assist', { method: 'POST', body: { ...ctx, question, history, refs: refs.current, looked: looked.current, pending, ...(view === 'followups' && getSelected() ? { selected: getSelected() } : {}) } })
@@ -359,6 +397,46 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
         <Icon name="sparkles" size={15} /> {topic ? 'Ask a follow-up' : 'Ask about your business'}
       </p>
       {!topic && !talk.length && <p className="fine">Ask in your own words. I look up your appointments, inquiries, numbers and settings, and get changes ready for you to approve.</p>}
+      {(talk.length > 0 || past.length > 0) && (
+        <div className="ask-memory" data-ask-memory>
+          {talk.length > 0 && (
+            <button type="button" className="link-btn" disabled={busy} onClick={startNew}>
+              New conversation
+            </button>
+          )}
+          {past.some((c) => c.id !== convId || !talk.length) && (
+            <details>
+              <summary className="fine">Earlier conversations</summary>
+              <ul className="ask-list">
+                {past
+                  .filter((c) => c.id !== convId || !talk.length)
+                  .map((c) => (
+                    <li key={c.id}>
+                      <button type="button" className="link-btn" disabled={busy} onClick={() => open(c)}>
+                        {c.title}
+                      </button>{' '}
+                      <span className="fine">{new Date(c.at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>{' '}
+                      <button type="button" className="link-btn" aria-label={`Delete conversation: ${c.title}`} onClick={() => drop(c.id)}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  forgetAll()
+                  startNew()
+                }}
+              >
+                Delete all
+              </button>
+              <p className="fine">Kept in this browser only, for 30 days. Signing out deletes them.</p>
+            </details>
+          )}
+        </div>
+      )}
       <div className="ask-live" ref={live} tabIndex={-1} role="log" aria-live="polite" aria-busy={busy}>
         {talk.map((e) => (
           <Entry key={e.id} e={e} newest={e === talk.at(-1)} retry={() => send(e.q, { replace: e })} ask={suggest} onState={onState} />

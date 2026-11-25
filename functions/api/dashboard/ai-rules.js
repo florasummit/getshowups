@@ -84,7 +84,7 @@ export async function onRequestPost({ request, env }) {
       if (b.action === 'apply') {
         if (!Array.isArray(b.ops) || b.ops.length > 30 || !b.ops.every((o) => o && OP_KINDS.includes(o.kind) && o.kind !== 'refuse')) return json(400, { error: 'invalid_request' })
         if (base !== current.draftUpdatedAt) return conflict()
-        candidate = applyOps(current.draft, b.ops.map((o) => ({ kind: o.kind, item: o.item, other: o.other, value: typeof o.value === 'string' ? o.value.slice(0, 120) : undefined, phrase: typeof o.phrase === 'string' ? o.phrase.slice(0, 120) : undefined }))).config
+        candidate = applyOps(current.draft, b.ops.map((o) => ({ kind: o.kind, item: o.item, other: o.other, value: typeof o.value === 'string' ? o.value.slice(0, 300) : undefined, phrase: typeof o.phrase === 'string' ? o.phrase.slice(0, 120) : undefined }))).config
       } else candidate = b.config
       const v = validateConfig(candidate, records)
       if (v.errors.length) return json(422, { error: 'invalid_config', errors: v.errors })

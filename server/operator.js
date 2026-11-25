@@ -21,7 +21,7 @@ const SPECS = TOOLS.map(({ name, description, parameters }) => ({ name, descript
 const PAGE = { overview: 'Overview', appointments: 'Appointments', followups: 'Follow-ups', receptionist: 'Receptionist', teach: 'Teach Your AI', website: 'Website', ads: 'Ads', settings: 'Settings' }
 
 // [fixed instructions (operator-instructions.js; the same for every business: a cached prefix), what is true this turn]
-export function systemPrompt(c, { view, topic, days, results }, known, pending, before = [], screen = null, discussed = []) {
+export function systemPrompt(c, { view, topic, days, results }, known, pending, before = [], screen = null, discussed = [], lastOrder = []) {
   const t = topic ? HELP[topic] : null
   const tz = c.tz
   return [
@@ -34,7 +34,10 @@ WAITING NOW (whole business; card.items are the lines of the Needs your attentio
 ${fit(screen.waiting, 6000)}
 
 ON SCREEN (${PAGE[view]} page)
-${fit(screen.page, 5000)}${screen.selected ? `\nSELECTED ${JSON.stringify(screen.selected)}` : ''}` : ''}${discussed.length ? `
+${fit(screen.page, 5000)}${screen.selected ? `\nSELECTED ${JSON.stringify(screen.selected)}` : ''}` : ''}${lastOrder.length ? `
+
+IN YOUR LAST ANSWER, IN ORDER
+${lastOrder.map((r, i) => `${i + 1}: [${r}]`).join(', ')} (the first is its main subject; "after that" means the next one after the subject the owner asked about)` : ''}${discussed.length ? `
 
 PEOPLE DISCUSSED (latest first)
 ${discussed.map((r) => `[${r}]`).join(', ')}` : ''}${known.length ? `
@@ -56,7 +59,7 @@ const NOT_DONE = /\b(not|never|no|hasn['’]?t|haven['’]?t|isn['’]?t|aren['�
 const NOBODY = /\b(nobody|no one|no customers?|no-one) (else )?(is|are|seems?|appears?)( \w+)? (waiting|needing|in need)( (on|for) you)?\s*(right now|at the moment|today|currently)?[.!]?$|\b(all caught up|nothing needs (you|your attention))\b/i
 const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more|will (keep|continue to) grow\w*)\b/i
 // How it works is never part of an answer, nor is doubting an answer nobody questioned.
-const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups)\b( (says?|shows?|returned|found|reports?))|\b(funnel tool|lookup)\b|\b(found|is the) (one|a|only|the only) match\b|\bonly match\b|\bmatch(es|ing) only\b|\b(only|one) record match|\bonly record (matching|under)\b|\bhaven['’]?t looked (up|for)\b|\bfind (her|his|their) record\b|\bmy (earlier|last|previous) (reply|answer|message) was (wrong|incorrect|mistaken)\b|\bI (shouldn['’]t|should not) have (said|linked|told)\b/i
+const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups)\b( (says?|shows?|returned|found|reports?))|\b(funnel tool|lookup)\b|\b(found|is the) (one|a|only|the only) match\b|\bonly match\b|\bmatch(es|ing) only\b|\b(only|one) record match|\bonly record (matching|under)\b|\bhaven['’]?t looked (up|for)\b|\bfind (her|his|their) record\b|\bmy (earlier|last|previous) (reply|answer|message) was (wrong|incorrect|mistaken)\b|\bI (shouldn['’]t|should not) have (said|linked|told)\b|\b(yes,? )?I['’]m (here|on|working)\b(?=[ ,.!])|\bI (also |just )?(overstated|misstated|misspoke)\b/i
 const CREDITED = /\b(ads?|advertising|campaigns?) (have |has )?(generated|earned|produced|brought in|made|drove|caused|returned)\b[^.]*\$|\$[\d,.]+[^.]*\b(generated|earned|produced|caused|driven) (by|from|through) (your |the )?(ads?|advertising|campaigns?)\b|\b(ROI|ROAS|return on (ad spend|investment))\b[^.]*\d/i
 
 // → null | what is wrong, in words the model can act on
@@ -79,9 +82,9 @@ export function problemWith(text, { facts, looked, refs, waiting = null, quoted 
   if (waiting?.some((n) => n > 0) && sentences.some((x) => NOBODY.test(x))) return 'WAITING NOW shows people waiting, so do not say that nobody is waiting or all is caught up. Say which kind of waiting is meant.'
   if (sentences.some((x) => DONE.test(x) && !NOT_DONE.test(x))) return 'It says something was done. You cannot save or send anything: say what is prepared, or what the records show happened, without "I" having done it.'
   if (/[[\]]/.test(text.replace(/\[[ALR]\d{1,3}\]/g, ''))) return 'Square brackets are only for one reference, like [A1]. Remove the others.'
-  if (INSIDE.test(text)) return 'It talks about how you work, or calls an earlier answer wrong. Say only what the records show now. An owner may have approved something since: that does not make an earlier answer wrong.'
+  if (INSIDE.test(text)) return 'It talks about you or how you work, or calls an earlier answer wrong. "This" is what the page is about, not you. Say only what the records show now. An owner may have approved something since: that does not make an earlier answer wrong.'
   if (PROMISE.test(text)) return 'It promises or predicts a result. Remove that.'
-  if (sentences.some((x) => CREDITED.test(x) && !NOT_DONE.test(x))) return 'It credits money to ads or gives a return. Say what was recorded for jobs traced to ads, and that the ads’ effect isn’t measured.'
+  if (sentences.some((x) => CREDITED.test(x) && !NOT_DONE.test(x))) return 'It credits money to ads or gives a return. Write it like this: “$X in payments is recorded for jobs traced to these ads; that isn’t proof the ads caused them.” Never “the ads made, earned, brought in or returned $X”, and no ROI or ROAS figure.'
   const bare = text.replace(/\[[ALR]\d{1,3}\]/g, ' ').replace(/^\s*\d+[.)]\s/gm, ' ')
   const check = looked ? bare : sentences.filter((x) => /\byou(r|['’]ve|['’]re)?\b/i.test(x)).join(' ').replace(/\[[ALR]\d{1,3}\]/g, ' ').replace(/^\s*\d+[.)]\s/gm, ' ')
   const strict = check.split(/(?<=[.!?])\s+|\n/)
@@ -115,11 +118,12 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const pending = c.pending.map((p) => ({ type: p.type, ...(p.ref ? { ref: p.ref } : {}), change: p.change }))
   const said = (req.history || []).flatMap((h) => [...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))
   const discussed = [...new Set(said.reverse())].slice(0, 12)
+  const lastOrder = [...new Set([...((req.history || []).at(-1)?.a || '').matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
   const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])
   const screen = { waiting, page: shownPage, selected }
   const onScreen = JSON.stringify(screen) // already in front of the model: not repeated as "discussed"
-  const system = systemPrompt(c, req, known.filter((k) => !onScreen.includes(`"ref":"${k.ref}"`)), pending, before, screen, discussed)
+  const system = systemPrompt(c, req, known.filter((k) => !onScreen.includes(`"ref":"${k.ref}"`)), pending, before, screen, discussed, lastOrder)
   const messages = []
   for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
   messages.push({ role: 'user', text: req.question })
