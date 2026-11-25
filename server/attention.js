@@ -18,8 +18,9 @@ export async function resolveRequest(db, customerId, id, now = Date.now()) {
   return r?.meta?.changes > 0
 }
 
-// An inquiry nothing was ever sent to and that never booked (leads l, lead_threads t). Every use of "unanswered" is this one.
-export const UNANSWERED = "l.status = 'new' AND t.last_outbound_at IS NULL AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status IN ('booked','showed','no_show'))"
+// An inquiry nothing was ever sent to and that never booked (leads l, lead_threads t); not a caller the owner added after
+// speaking with them (server/ads/calls.js). Every use of "unanswered" is this one.
+export const UNANSWERED = "l.status = 'new' AND substr(l.id, 1, 6) <> 'gcall_' AND t.last_outbound_at IS NULL AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.lead_id = l.id AND x.customer = l.customer AND x.status IN ('booked','showed','no_show'))"
 
 const n = (x) => Number(x) || 0
 // → { callbacks, messages, replies, unbooked, coverage, outcomes } each { total, urgent? } | null

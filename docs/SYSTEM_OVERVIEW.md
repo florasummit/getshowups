@@ -37,7 +37,7 @@ Deploys come from `main` (docs/WORKFLOW.md); migrations are applied by hand firs
 **Shared intelligence** (docs/INTELLIGENCE.md): one body of facts per business, records plus what the owner published in Teach Your
 AI, read per role. Receptionist and website see customer-facing facts; ads planning and the owner's assistant also see internal
 notes, seasons, margins. `server/ads/economics.js` follows every source to booked, completed and paid. The models write words;
-code checks claims, numbers, references and permissions, and only the owner's button saves. ChatGPT ads plans don't read the
+code checks claims, numbers, references and permissions, and the assistant only prepares what the owner's button saves; the receptionist books on the customer's own yes. ChatGPT ads plans don't read the
 shared knowledge yet. The assistant's conversations stay in the owner's browser.
 
 **Outside services:** Cloudflare, Google (Calendar, sign-in, Ads), Anthropic, OpenAI or Retell or ElevenLabs (voice, one at a time),
@@ -54,7 +54,7 @@ Stripe, Resend. Twilio, Meta and OpenAI Ads are built but unused.
 | Money reports use recorded payments only; cost only with measured spend | server/ads/funnel.js, economics.js |
 | Payment, deletion and admin actions leave a permanent trail | audit_log, hash-chained |
 | Customers' words and imported text are never instructions | engine rules, fixed tools |
-| AI can propose; only the owner's button changes anything | proposals.js |
+| The owner's assistant only proposes; the owner's button changes things. The receptionist books or records a request only with the customer's own confirmation | proposals.js, receptionist/engine.js |
 | Test sessions reach only the test business and a short list of routes | server/acceptance.js, acceptance-routes.js |
 
 ## Watching it

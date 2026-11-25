@@ -7,6 +7,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { saveToken, upsertConnection } from '../server/ads/connections.js'
 import { ADS_SCOPE } from '../server/ads/google.js'
 import { addCaller, callReport, linkCall, markHandled, syncCalls } from '../server/ads/calls.js'
+import { unanswered } from '../server/insights.js'
+import { responseTime } from '../server/response-time.js'
 import { channels } from '../server/ads/economics.js'
 
 const now = Date.parse('2026-11-23T15:00:00Z')
@@ -81,7 +83,13 @@ test('an added caller becomes one customer with Google’s campaign, no automati
   const body = { name: 'Ann Caller', phone: '(843) 555-0142', need: 'Opening', zip: '29401' }
   const r = await addCaller(env, cust, 'call', 'c2', body, now)
   assert.ok(r.ok && /\/book\/pools/.test(r.bookUrl))
-  assert.equal((await addCaller(env, cust, 'call', 'c2', body, now)).error, 'already_linked')
+  // The same form again (a retry, also after a failure between linking and the source): one person, source in place.
+  sql.prepare('DELETE FROM lead_attribution').run()
+  assert.equal((await addCaller(env, cust, 'call', 'c2', body, now)).leadId, r.leadId)
+  assert.equal((await addCaller(env, cust, 'call', 'c2', { ...body, phone: '8435550001' }, now)).error, 'already_linked')
+  // The owner spoke with them: not an unanswered inquiry, and no response time is made up.
+  assert.equal(await unanswered(env, cust, now), 0)
+  assert.deepEqual((await responseTime(db(), 'pools', { now })).inquiries, 0)
   assert.deepEqual({ ...sql.prepare('SELECT source, campaign_id FROM lead_attribution WHERE lead_id = ?').get(r.leadId) }, { source: 'google_ads_imported', campaign_id: 'imp1' })
   assert.equal(sql.prepare('SELECT count(*) AS n FROM messages').get().n, 0)
   assert.deepEqual((await channels(db(), 'pools', { now })).channels.map((c) => [c.key, c.inquiries]), [['google_ads_imported', 1]])
@@ -104,7 +112,7 @@ test('an added caller becomes one customer with Google’s campaign, no automati
   assert.equal((await linkCall(db(), 'pools', 'call', 'c2', bob.leadId, now, 'stale')).error, 'already_linked')
   // Outside the area: kept, no booking link, no notice to the owner about what they did themselves.
   const far = await addCaller(env, cust, 'call', 'c4', { ...body, phone: '8435550777', zip: '10001' }, now)
-  assert.deepEqual([far.ok, far.bookUrl, far.notBookable], [true, undefined, true])
+  assert.deepEqual([far.ok, far.bookUrl, far.notBookable], [true, undefined, 'outside_area'])
   assert.equal((await addCaller(env, { ...cust, appointmentMode: 'at_customer' }, 'call', 'c1', { ...body, phone: '8435550888' }, now)).ok, false)
   // Someone already recorded through the booking page also called: linked, not moved.
   sql.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES ('old', 'pools', 'Old', '', '', 'x', '29401', 'new', 'h', 1, 1)").run()

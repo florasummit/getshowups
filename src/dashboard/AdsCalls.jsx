@@ -9,7 +9,7 @@ const length = (s) => (s == null ? '' : s < 60 ? `${s}s` : `${Math.floor(s / 60)
 const when = (t) => new Date(`${t.replace(' ', 'T')}:00Z`).toLocaleString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const STATUS = { RECEIVED: ['ok', 'Answered'], MISSED: ['warn', 'Missed'], UNKNOWN: ['neutral', 'Not reported'] }
 const LSA = { PHONE_CALL: 'Phone call', MESSAGE: 'Message', BOOKING: 'Booking', COUPON: 'Coupon' }
-const ERRORS = { invalid_name: 'Add their name.', invalid_phone: 'Add their phone number.', invalid_need: 'Add what they need.', invalid_zip: 'Add a valid ZIP.', invalid_address: 'Add the service address.', already_linked: 'This call is already linked.', rate_limited: 'Too many tries. Please wait a few minutes.' }
+const ERRORS = { invalid_name: 'Add their name.', invalid_phone: 'Add their phone number.', invalid_need: 'Add what they need.', invalid_zip: 'Add a valid ZIP.', invalid_street: 'Add the street address.', invalid_city: 'Add the city.', invalid_state: 'Use the two-letter state.', already_linked: 'This call is already linked.', rate_limited: 'Too many tries. Please wait a few minutes.' }
 const of = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 
 function Row({ kind, c, title, detail, pill, people, needs, post }) {
@@ -40,7 +40,7 @@ function Row({ kind, c, title, detail, pill, people, needs, post }) {
     setMode(null)
     setKnown(null)
     setBook(data.bookUrl || null)
-    setNote(data.notBookable ? 'Saved. Their ZIP isn’t in your service area, so there is no booking link.' : 'Saved.')
+    setNote(data.notBookable === 'outside_area' ? 'Saved. Their ZIP isn’t in your service area, so there is no booking link.' : data.notBookable ? 'Saved. They already have a booking.' : 'Saved.')
   }
   return (
     <li className="ai-proposal" data-call={c.id} data-call-kind={kind}>
@@ -91,7 +91,7 @@ function Row({ kind, c, title, detail, pill, people, needs, post }) {
           {fields.map(([k, label, type, required]) => (
             <label className="field" key={k}>
               <span>{label}</span>
-              <input type={type} required={Boolean(required)} inputMode={k === 'zip' ? 'numeric' : undefined} value={f[k]} maxLength={k === 'need' ? 300 : 80} autoComplete="off" onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+              <input type={type} required={Boolean(required)} inputMode={k === 'zip' ? 'numeric' : undefined} value={f[k]} maxLength={k === 'need' ? 300 : k === 'state' ? 2 : 80} autoComplete="off" onChange={(e) => setF({ ...f, [k]: e.target.value })} />
             </label>
           ))}
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>

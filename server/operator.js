@@ -120,7 +120,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const refsIn = (t) => [...new Set([...t.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const turns = [...(req.history || [])].reverse().map((h) => ({ words: h.q, refs: refsIn(h.a) }))
   const discussed = [...new Set(turns.flatMap((t) => [...t.refs].reverse()))].slice(0, 12)
-  const meant = whoIsMeant(req.question, turns.map((t) => ({ words: t.words, people: t.refs.map((ref) => ({ ref, person: c.shown.get(ref)?.leadId || ref })) })))
+  const meant = req.selected ? null : whoIsMeant(req.question, turns.map((t) => ({ words: t.words, people: t.refs.map((ref) => ({ ref, person: c.shown.get(ref)?.leadId || ref })) })))
   const lastOrder = [...new Set([...((req.history || []).at(-1)?.a || '').matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
   const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])

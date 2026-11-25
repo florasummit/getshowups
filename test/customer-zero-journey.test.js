@@ -62,6 +62,7 @@ test('advertisement → inquiry → qualified → booked at the address → conf
     const told1 = await runTool(toolContext(env, customer, {}, now), 'open_times', { period: 'this_week' })
     assert.ok(told1.open_times > 10 && told1.first_times.length === 8, JSON.stringify(told1))
     const b = await bookAppointment(env, customer, { leadId: l.id, leadToken: l.token, start }, now)
+    assert.equal(b.appointment.invited, Boolean(sql.prepare('SELECT email FROM leads WHERE id = ?').get(l.id).email)) // only who can get an invitation is promised one
     assert.equal(b.ok, true, JSON.stringify(b))
     assert.match(JSON.stringify(events[0].body), /1 Test Dock Rd/) // the address is on the calendar event
     // The same time can't be sold twice, and a wrong token books nothing.

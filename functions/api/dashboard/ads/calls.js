@@ -51,7 +51,7 @@ export async function onRequestPost({ request, env }) {
     else if (b?.action === 'add') r = await addCaller(env, session.customer, kind, b.id, b)
     else return json(400, { error: 'invalid_request' })
     if (!r.ok) return json(/not_found/.test(r.error) ? 404 : /^already/.test(r.error) ? 409 : 400, { error: r.error, ...(r.lead ? { lead: r.lead } : {}) })
-    return json(200, { ...(await report(env, session.customer, daysOf(b.days))), ...(r.bookUrl ? { bookUrl: r.bookUrl } : {}), ...(r.notBookable ? { notBookable: true } : {}) })
+    return json(200, { ...(await report(env, session.customer, daysOf(b.days))), ...(r.bookUrl ? { bookUrl: r.bookUrl } : {}), ...(r.notBookable ? { notBookable: r.notBookable } : {}) })
   } catch (err) {
     console.error('calls save failed:', err?.name)
     return json(503, { error: 'storage_error' })

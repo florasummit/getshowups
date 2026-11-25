@@ -168,21 +168,25 @@ export async function addCaller(env, customer, kind, id, body, now = Date.now())
   const db = env.ONBOARDING_DB
   const row = await find(db, customer.id, kind, id)
   if (!row) return { ok: false, error: 'not_found' }
-  if (row.lead_id) return { ok: false, error: 'already_linked' }
   const [error, lead] = validateLead({ name: body?.name, phone: body?.phone, need: body?.need, zip: body?.zip, address: body?.address, email: '', zipConfirmed: true }, customer.appointmentMode, { requireEmail: false })
   if (error) return { ok: false, error }
   if (customer.serviceZips?.length && !lead.zip) return { ok: false, error: 'invalid_zip' }
   const phone = lead.phone.replace(/\D/g, '').slice(-10)
   const leadId = `gcall_${(await sha256Hex(`${customer.id}:${kind}:${row.id}:${phone}`)).slice(0, 22)}`
-  const known = await db.prepare(`SELECT id, name FROM leads WHERE customer = ?1 AND substr(${DIGITS}, -10) = ?2 AND id <> ?3 ORDER BY created_at LIMIT 1`).bind(customer.id, phone, leadId).first()
+  // Already added by the same call and number (a retry after a failure in between): finished, never a second one.
+  if (row.lead_id && row.lead_id !== leadId) return { ok: false, error: 'already_linked' }
+  const known = await db.prepare(`SELECT id, name FROM leads l WHERE NOT ${isTestLead('l', "'[]'")} AND customer = ?1 AND substr(${DIGITS}, -10) = ?2 AND id <> ?3 ORDER BY created_at LIMIT 1`).bind(customer.id, phone, leadId).first()
   if (known) return { ok: false, error: 'already_customer', lead: { id: known.id, name: known.name } }
   const read = () => db.prepare('SELECT id, status FROM leads WHERE id = ?1 AND customer = ?2').bind(leadId, customer.id).first()
   if (!(await read()))
     await createLead(env, customer, { ...lead, smsConsent: false, source: 'google_call' }, Math.min(now, kind === 'lsa' ? row.created_at : row.started_at), { id: leadId }).catch(async (err) => {
       if (!(await read())) throw err // the same form sent twice at once: one of them made it
     })
-  const linked = await linkCall(db, customer.id, kind, id, leadId, now, null)
-  if (!linked.ok) return linked
+  if (!row.lead_id) {
+    const linked = await linkCall(db, customer.id, kind, id, leadId, now, null)
+    if (!linked.ok) return linked
+  }
   await attribute(db, customer.id, kind, row, leadId, now)
-  return { ok: true, leadId, ...((await read())?.status === 'new' ? { bookUrl: await resumeUrl(env, customer.id, leadId) } : { notBookable: true }) }
+  const status = (await read())?.status
+  return { ok: true, leadId, ...(status === 'new' ? { bookUrl: await resumeUrl(env, customer.id, leadId) } : { notBookable: status === 'unqualified' ? 'outside_area' : 'booked' }) }
 }
