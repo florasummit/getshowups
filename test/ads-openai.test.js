@@ -33,7 +33,11 @@ function d1() {
   const stmt = (q, args = []) => ({
     q,
     args,
-    bind: (...a) => stmt(q, a),
+    // D1 (and Node 24's SQLite) refuse undefined parameters; Node 26 binds them as NULL, so check like production does.
+    bind: (...a) => {
+      if (a.some((x) => x === undefined)) throw new TypeError(`undefined bound in: ${q.slice(0, 60)}`)
+      return stmt(q, a)
+    },
     first: async () => sql.prepare(q).get(...args) ?? null,
     all: async () => ({ results: sql.prepare(q).all(...args) }),
     run: async () => ({ meta: { changes: sql.prepare(q).run(...args).changes } }),

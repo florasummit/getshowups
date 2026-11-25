@@ -40,7 +40,7 @@ export async function onRequestPost({ request, env }) {
     // Never strand a running campaign: pause it first (Ads → Pause), then disconnect.
     if ((running?.n ?? 0) > 0) return json(409, { error: 'campaigns_running' })
     await forgetConnection(env, 'openai', id)
-    await logAction(env.ONBOARDING_DB, { customer: id, actor: `owner:${session.email}`, kind: 'disconnect', reason: 'ChatGPT Ads key removed from GetShowUps (revoke it in Ads Manager)', platform: 'openai' })
+    await logAction(env.ONBOARDING_DB, { customer: id, campaignId: null, actor: `owner:${session.email}`, kind: 'disconnect', reason: 'ChatGPT Ads key removed from GetShowUps (revoke it in Ads Manager)', platform: 'openai' })
     return json(200, { ok: true, ...view(null) })
   }
   if (body?.action !== 'save') return json(400, { error: 'invalid_request' })
@@ -48,6 +48,6 @@ export async function onRequestPost({ request, env }) {
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const r = await connectWithKey(env, id, body.apiKey)
   if (!r.ok) return json(STATUS[r.error] || 400, { error: r.error })
-  await logAction(env.ONBOARDING_DB, { customer: id, actor: `owner:${session.email}`, kind: 'connect', reason: `ChatGPT Ads account connected (key …${r.last4})${r.accountChanged ? '; a different ad account than before' : ''}`, platform: 'openai' })
+  await logAction(env.ONBOARDING_DB, { customer: id, campaignId: null, actor: `owner:${session.email}`, kind: 'connect', reason: `ChatGPT Ads account connected (key …${r.last4})${r.accountChanged ? '; a different ad account than before' : ''}`, platform: 'openai' })
   return json(200, { ok: true, ...view(await getConnection(env, id, 'openai')), accountChanged: r.accountChanged })
 }
