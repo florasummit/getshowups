@@ -14,8 +14,13 @@ test.beforeEach(async ({ page }) => {
 const demo = (page) => page.locator('#demo')
 const events = (page) => page.evaluate(() => window.__gsuEvents || [])
 
-test('the logo is the protected brand asset: exact SVG, orange and wordmark in header and footer @mobile', async ({ page }) => {
-  for (const where of ['header', 'footer']) {
+test('the homepage navigation shows the wordmark alone, same type and colours; the footer keeps the full logo @mobile', async ({ page }) => {
+  const nav = page.locator('header .logo').first()
+  await expect(nav).toHaveText('GetShowUps')
+  expect(await nav.locator('svg').count()).toBe(0)
+  const type = await nav.evaluate((l) => { const s = getComputedStyle(l); return [s.fontWeight, s.fontSize, s.letterSpacing, getComputedStyle(l.querySelector('.logo-accent')).color] })
+  expect(type).toEqual(['750', '18.4px', '-0.368px', 'rgb(194, 65, 12)'])
+  for (const where of ['footer']) {
     const logo = page.locator(`${where} .logo`).first()
     expect((await logo.locator('svg').evaluate((s) => s.outerHTML)).replace(/\s+/g, ' ')).toBe(LOGO_SVG)
     await expect(logo).toHaveText('GetShowUps')

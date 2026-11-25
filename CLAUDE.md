@@ -216,7 +216,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   Icon = Calendar + Growth A (2026-11-25; geometry from brand/source/icon.py): brand/icon/getshowups-icon.svg; full logo = brand/logo/getshowups-logo-on-{light,dark}.svg
   (wordmark outlined, identical to the live text); PNG 16-1024 + 2400w logos in brand/png/, social image in brand/social/,
   previous logo + rejected concepts in brand/archive/. In the product use <Logo /> (src/components/Logo.jsx, the only
-  in-app logo; test/brand.test.js keeps it = the brand icon). Web copies in public/ (favicon.svg/.ico, apple-touch-icon,
+  in-app logo; test/brand.test.js keeps it = the brand icon). Homepage navigation = wordmark alone (<Logo mark={false} />);
+  icon stays in the footer, dashboard, admin, favicons and app icons (brand/README.md "Which version where"). Web copies in public/ (favicon.svg/.ico, apple-touch-icon,
   icon-192/512, maskable, og-image, site.webmanifest) are generated: node scripts/build-brand.mjs, which also stamps
   ?v=<icon hash> on every icon link (index.html, manifest, server/brand.js FAVICON_HREF); never link an icon unversioned. Ads, videos, decks
   and marketing take files from brand/. A brand change needs the founder's approval (steps in brand/README.md).

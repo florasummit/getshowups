@@ -40,7 +40,7 @@ test('every SVG variant and the favicon carry the same artwork', () => {
 
 test('the generated raster files exist and are real PNG/ICO files', () => {
   const PNG = '89504e470d0a1a0a'
-  for (const f of ['public/apple-touch-icon.png', 'public/icon-192.png', 'public/icon-512.png', 'public/icon-maskable-512.png', 'public/og-image.png', 'brand/png/icon/getshowups-icon-1024.png', 'brand/png/logo/getshowups-logo-on-light-transparent-2400w.png', 'brand/social/getshowups-og-1200x630.png']) {
+  for (const f of ['public/apple-touch-icon.png', 'public/icon-192.png', 'public/icon-512.png', 'public/icon-maskable-512.png', 'public/og-image.png', 'brand/png/icon/getshowups-icon-1024.png', 'brand/png/logo/getshowups-logo-on-light-transparent-2400w.png', 'brand/social/getshowups-og-1200x630.png', 'brand/png/logo/getshowups-wordmark-on-light-transparent-2400w.png']) {
     assert.ok(existsSync(new URL(`../${f}`, import.meta.url)), f)
     assert.equal(bytes(f).subarray(0, 8).toString('hex'), PNG, f)
   }
@@ -67,4 +67,14 @@ test('every icon link carries the current icon version, so browsers never keep s
   for (const i of JSON.parse(read('public/site.webmanifest')).icons) assert.ok(i.src.endsWith(`?v=${v}`), i.src)
   assert.equal(FAVICON_HREF, `/favicon.svg?v=${v}`)
   assert.ok((await page(200, 'Done', 'ok').text()).includes(`<link rel="icon" href="/favicon.svg?v=${v}">`))
+})
+
+test('the wordmark alone is the same outlined artwork as in the full logo, without the icon', () => {
+  const full = read('brand/logo/getshowups-logo-on-light.svg')
+  const word = read('brand/logo/getshowups-wordmark-on-light.svg')
+  const outlines = (s) => [...s.matchAll(/<path fill="[^"]+" d="([^"]+)"/g)].map((m) => m[1])
+  assert.equal(outlines(word).length, 2)
+  assert.deepEqual(outlines(word), outlines(full), 'the GetShow and Ups outlines')
+  assert.doesNotMatch(word, /<rect|#FF6A1A/, 'no icon')
+  assert.match(read('src/components/Header.jsx'), /<Logo mark=\{false\} \/>/, 'homepage navigation uses the wordmark alone')
 })

@@ -23,6 +23,9 @@ const MARK_DARK = svg('icon/getshowups-mark-transparent-on-dark.svg')
 const MARK_LIGHT = svg('icon/getshowups-mark-transparent-on-light.svg')
 const LOGO_LIGHT = svg('logo/getshowups-logo-on-light.svg')
 const LOGO_DARK = svg('logo/getshowups-logo-on-dark.svg')
+const WORD_LIGHT = svg('logo/getshowups-wordmark-on-light.svg')
+const WORD_DARK = svg('logo/getshowups-wordmark-on-dark.svg')
+const wordW = Number(WORD_LIGHT.match(/viewBox="0 0 ([\d.]+) 28"/)[1])
 const logoW = Number(LOGO_LIGHT.match(/viewBox="0 0 ([\d.]+) 28"/)[1])
 
 const browser = await chromium.launch()
@@ -53,6 +56,14 @@ for (const [name, s, bg] of [['on-light', LOGO_LIGHT, '#FFFFFF'], ['on-dark', LO
   out(B(`png/logo/getshowups-logo-${name}-transparent-${LW}w.png`), await png(sized(s, LW, LH), LW, LH))
   const pad = Math.round(LH * 0.6)
   out(B(`png/logo/getshowups-logo-${name}-background-${LW}w.png`), await png(sized(s, LW, LH), LW + pad * 2, LH + pad * 2, bg))
+}
+
+// The wordmark alone, high resolution.
+const WH = Math.round((LW * 28) / wordW)
+for (const [name, s, bg] of [['on-light', WORD_LIGHT, '#FFFFFF'], ['on-dark', WORD_DARK, '#101114']]) {
+  out(B(`png/logo/getshowups-wordmark-${name}-transparent-${LW}w.png`), await png(sized(s, LW, WH), LW, WH))
+  const pad = Math.round(WH * 0.6)
+  out(B(`png/logo/getshowups-wordmark-${name}-background-${LW}w.png`), await png(sized(s, LW, WH), LW + pad * 2, WH + pad * 2, bg))
 }
 
 // Social sharing image (1200x630): the logo centred on the product's dark stage.

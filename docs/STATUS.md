@@ -3,6 +3,12 @@
 _Update at the end of every task. Newest first._
 
 
+## Homepage navigation: wordmark alone (2026-11-25, founder decision)
+- The public homepage header shows the GetShowUps wordmark without the icon: `<Logo mark={false} />`, with the same type, colours and size.
+- The icon stays in the footer, dashboard, admin, sign-in, favicons and app icons.
+- New brand files: `brand/logo/getshowups-wordmark-on-{light,dark}.svg` plus 2400 px PNGs.
+- `brand/README.md` gains a "Which version where" table. `flagship.spec` checks the header (no icon, same type) and the footer (exact icon).
+
 ## Brand icon refinement: concept A, solid arrowhead; stale favicon fixed (2026-11-25, founder-approved)
 - **Icon:** the check now sweeps up through the calendar's open corner into a solid, pointed arrowhead beyond the outline. The calendar is slightly more compact (17 × 16), and the whole mark is centred. Colours, strokes, the rounded square and the wordmark are unchanged.
   - Chosen from three bolder variants (A, B, C) reviewed by the founder; all three are archived.
