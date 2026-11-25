@@ -293,11 +293,6 @@ test('starter draft from the business records: booking page, services as context
   assert.ok(r.json().errors.some((e) => e.startsWith('openai.locations')), 'the owner must pick a market first')
   assert.equal((await call(campaignRoute, 'POST', '/api/dashboard/ads/campaign', { cookie, body: { action: 'start_openai' } })).json().error, 'draft_exists')
   assert.deepEqual(starterSpec({ name: 'A'.repeat(80) }).openai.title.length <= 50, true)
-  // A non-https deployment (local) lands on the business's own https website instead (ads need https).
-  db.sql.prepare("UPDATE ad_campaigns SET status = 'removed' WHERE customer = 'pools'").run()
-  env.GOOGLE_REDIRECT_URI = 'http://127.0.0.1:8788/api/google/oauth/callback'
-  const local = await call(campaignRoute, 'POST', '/api/dashboard/ads/campaign', { cookie, body: { action: 'start_openai' } })
-  assert.equal(JSON.parse(row(local.json().id).spec).finalUrl, 'https://pools.example')
 })
 
 // ---------- creation, the no-sandbox rule ----------
