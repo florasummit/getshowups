@@ -49,7 +49,7 @@ test('ChatGPT ads: connect with the owner’s key, draft, choose a metro area, a
   await expect(card.getByText('ChatGPT Ads has no test account')).toBeVisible()
   await card.getByRole('button', { name: 'Confirm: approve and create (paused)' }).click()
   await expect(card.getByText('Created on ChatGPT Ads, paused. Nothing runs until you press Start.')).toBeVisible()
-  await expect(card.locator('.chip')).toHaveText('Paused')
+  await expect(card.locator('.campaign-head .chip')).toHaveText('Paused')
   await expect(card.getByRole('button', { name: 'Start ads' })).toBeDisabled()
 
   const events = await (await page.request.get(`http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}/__events`)).json()

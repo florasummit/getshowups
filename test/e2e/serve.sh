@@ -105,6 +105,8 @@ d1 "
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_OPENAI_SESSION_TOKEN")', 'owner@e2e-openai.example', $NOW, $FAR);
   INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
     ('$E2E_OPENAI_CUSTOMER', 'Pool service', '[\"Pool repair\",\"Green pool cleanup\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
+  INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, currency, current_period_end, updated_at) VALUES
+    ('$E2E_OPENAI_CUSTOMER', 'cus_E2EOPENAI', 'sub_E2EOPENAI', 'founding', 'active', 49900, 'usd', $FAR, $NOW);
   INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-openai-budget', '$E2E_OPENAI_CUSTOMER', 60000, 'owner@e2e-openai.example', $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_AREA_CUSTOMER', 'E2E Area Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
@@ -261,7 +263,7 @@ d1 "$VOICE_SQL
   INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('conv-$VS-test', '$VS', 'voice', '{\"voice\":{\"provider\":\"retell\",\"startedAt\":$((NOW - 120000)),\"endedAt\":$((NOW - 60000)),\"test\":true,\"metrics\":{\"micLive\":1,\"audioReceived\":1}},\"tools\":[{\"name\":\"find_available_times\",\"ok\":true},{\"name\":\"book_appointment\",\"ok\":true,\"simulated\":true}],\"booked\":{\"simulated\":true}}', '[]', $((NOW - 120000)), $((NOW - 60000)));
   INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES ('call_seed_$VS', '$VS', 'conv-$VS-test', 'retell', $((NOW - 120000)), $((NOW - 60000)));"
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_AREA_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_ADVERTISER_CUSTOMER" "$E2E_ADVERTISER_M_CUSTOMER" "$E2E_STARTER_CUSTOMER" "$E2E_STARTER_M_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_AREA_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_OPENAI_CUSTOMER" "$E2E_ADVERTISER_CUSTOMER" "$E2E_ADVERTISER_M_CUSTOMER" "$E2E_STARTER_CUSTOMER" "$E2E_STARTER_M_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
