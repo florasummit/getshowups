@@ -9,6 +9,12 @@ platform 'openai' (the one reviewed exception to additive-only; test/migration-0
 Off: OPENAI_ADS_ENABLED. No OpenAI sandbox → OPENAI_ADS_VERIFY_BUSINESSES (paused creation only). Not verified against a
 real ChatGPT Ads account. Next: founder creates the account + key; approvals: 0039 (backup + rehearsal), the two switches.
 
+## Known test issue: voice ceiling test fails 00:00 to 00:05 UTC (2026-11-25)
+
+test/voice-core.test.js "gates: a real (non-test) business is refused": it starts a Lab session at Date.now() minus 5 minutes and
+expects the DAILY ceiling, so in the first five minutes of the UTC day that session belongs to yesterday (lab_busy, not
+lab_daily_limit). Fails the same on main before #161. Product code is right. Narrow fix, not done: use a fixed time around noon UTC for both calls.
+
 ## Test sessions for acceptance (2026-11-25)
 
 docs/INTELLIGENCE.md §8. Migration 0038 (additive). ACCEPTANCE_SESSIONS_ENABLED off until the owner sets it. Pairing: scripts/acceptance/pair.mjs.
