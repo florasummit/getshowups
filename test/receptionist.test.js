@@ -623,6 +623,8 @@ test('owner screen: real capability statuses (phone line never claimed), setting
   // and the page's policy allows that one frame only.
   const res = () => site.onRequestGet({ request: new Request(`${ORIGIN}/p/alpha?utm_source=google`, { headers: { 'CF-Connecting-IP': '203.0.113.9' } }), env, params: { customer: 'alpha' } })
   const linkPage = await page()
+  const heads = (r) => JSON.stringify([...r.headers].sort())
+  const linkHeaders = heads(await res())
   assert.deepEqual((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json().websitePanel, { on: false })
   assert.doesNotMatch((await res()).headers.get('Content-Security-Policy'), /frame-src/)
   assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie, body: { action: 'website_panel', on: 'yes' } })).status, 400)
@@ -642,6 +644,7 @@ test('owner screen: real capability statuses (phone line never claimed), setting
   // Off again = the link, byte for byte; before the migration = the link, and the setting is hidden and refused.
   await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie, body: { action: 'website_panel', on: false } })
   assert.equal(await page(), linkPage)
+  assert.equal(heads(await res()), linkHeaders, 'off = the same response headers too (policy included)')
   await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie, body: { action: 'website_panel', on: true } })
   db.sql.exec('DROP TABLE website_chat_settings')
   assert.equal(await page(), linkPage)
