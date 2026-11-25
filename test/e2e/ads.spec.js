@@ -698,11 +698,21 @@ test('Journey A: an established advertiser connects and the campaigns already in
   await answered.getByLabel('Name', { exact: true }).fill('Phone Caller')
   await answered.getByLabel('Phone', { exact: true }).fill('(843) 555-0142')
   await answered.getByLabel('What they need').fill('Pool opening')
-  await answered.getByLabel('ZIP', { exact: true }).fill('29401')
+  await answered.getByLabel('ZIP', { exact: true }).fill('29403')
   await answered.getByRole('button', { name: 'Save customer' }).click()
   await expect(answered).toContainText('Customer: Phone Caller')
   await expect(answered.getByRole('link', { name: 'Book a time for them' })).toHaveAttribute('href', /\/book\//)
   await expect(callsBox.locator('[data-call-totals]')).toContainText('1 caller linked to customers')
+  // Outside the service area: kept as a customer, told plainly, no link that couldn't work.
+  const far = callsBox.locator('[data-call="c3"]')
+  await far.getByRole('button', { name: /^Add the caller/ }).click()
+  await far.getByLabel('Name', { exact: true }).fill('Far Caller')
+  await far.getByLabel('Phone', { exact: true }).fill('(843) 555-0143')
+  await far.getByLabel('What they need', { exact: true }).fill('Pool opening')
+  await far.getByLabel('ZIP', { exact: true }).fill('29401')
+  await far.getByRole('button', { name: 'Save customer' }).click()
+  await expect(far).toContainText('isn’t in your service area, so there is no booking link')
+  await expect(far.getByRole('link', { name: 'Book a time for them' })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   // Nothing changes by itself: the only controls are proposals that need the owner's approval. The Search campaign
   // can become a template.
