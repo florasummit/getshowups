@@ -221,6 +221,7 @@ export default function Receptionist() {
   const [form, setForm] = useState(null)
   const [saved, setSaved] = useState(null)
   const [msg, setMsg] = useState('')
+  const [panelMsg, setPanelMsg] = useState('')
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
   const [filter, setFilter] = useState('all')
@@ -287,6 +288,15 @@ export default function Receptionist() {
       setSaved(d.settings)
       load()
     }
+  }
+  // Website chat panel: its own small save (not part of the settings form), so flipping it never saves a half-edited greeting.
+  const setPanel = async (value) => {
+    setPanelMsg('')
+    setBusy(true)
+    const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'website_panel', on: value } })
+    setBusy(false)
+    setPanelMsg(status === 200 ? (value ? 'Saved. Your website now opens the chat in a panel.' : 'Saved. Your website shows the chat link.') : 'Couldn’t save. Please try again.')
+    if (status === 200) load()
   }
   const resolve = async (requestId) => {
     setBusy(true)
@@ -431,6 +441,29 @@ export default function Receptionist() {
           </>
         )}
       </Section>
+
+      {data.websitePanel && (
+        <Section title="On your website" label="Website chat panel">
+          <div className="ui-settings">
+            <fieldset className="ui-group">
+              <legend>How customers open the chat</legend>
+              <label className="ui-switch-row">
+                <input type="checkbox" role="switch" checked={data.websitePanel.on} disabled={busy} onChange={(e) => setPanel(e.target.checked)} />
+                <span>
+                  <strong>Open the chat in a panel on my website</strong>
+                  <span className="ui-hint">
+                    {data.websitePanel.on ? 'Visitors chat without leaving your site.' : 'Off: your website shows a “Chat or talk with us” button that opens the chat page.'} It’s the same receptionist either way, and it only appears while the receptionist is
+                    on.
+                  </span>
+                </span>
+              </label>
+              <p className="fine" role="status" aria-live="polite">
+                {panelMsg}
+              </p>
+            </fieldset>
+          </div>
+        </Section>
+      )}
 
       <Section title="Settings" label="Receptionist settings">
         <form className="ui-settings" onSubmit={save}>

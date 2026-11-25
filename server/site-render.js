@@ -172,13 +172,14 @@ export function renderNotice(title, text) {
 // Strict headers: no scripts at all on business sites, images only from this origin.
 // noindex: test businesses' public sites must never be indexed by search engines.
 // formAction: the origin a page's contact/quote forms post to (server/site-form.js); else forms are refused.
-export function htmlResponse(status, html, { preview = false, noindex = false, cache = 'public, max-age=60', formAction = null } = {}) {
+export function htmlResponse(status, html, { preview = false, noindex = false, cache = 'public, max-age=60', formAction = null, frame = null } = {}) {
+  // frame: the one origin a page may show in a frame (our own chat page, when the owner chose the website chat panel).
   return new Response(html, {
     status,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': preview ? 'private, no-store' : cache,
-      'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action ${formAction ? `'self' ${formAction}` : "'none'"}; frame-ancestors ${preview ? "'self'" : "'none'"}`,
+      'Content-Security-Policy': `default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action ${formAction ? `'self' ${formAction}` : "'none'"}; frame-ancestors ${preview ? "'self'" : "'none'"}${frame ? `; frame-src ${frame}` : ''}`,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       ...((preview || noindex) && { 'X-Robots-Tag': 'noindex' }),

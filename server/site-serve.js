@@ -6,6 +6,7 @@ import { CUSTOMER_RE } from './invites.js'
 import { customerFromRow, siteOrigin } from './auth.js'
 import { offerSmsFor } from './followups/settings.js'
 import { receptionistOn } from './receptionist/engine.js'
+import { chatPanel, chatPanelSetting } from './chat-panel.js'
 
 // Floating "Chat or talk with us" link (inline styles only; the site CSP allows no scripts and no frames).
 export const chatLink = (href) =>
@@ -71,8 +72,16 @@ export async function serveSite(env, request, id, page = '') {
     const info = { ...(await siteBusinessInfo(db, customer)), offerSms: await offerSmsFor(env, customer), smsTermsUrl: `${origin}/sms-terms/${customer.id}` }
     let html = renderSite(info, live.content, { canonical, bookUrl, privacyUrl: `${origin}/privacy`, noindex, page, pageBase: host ? '' : `/p/${customer.id}`, form })
     // AI receptionist on: one plain link to the business's chat/voice page on GetShowUps (no script on the site).
-    if (await receptionistOn(env, customer).catch(() => false)) html = html.replace('</body>', `${chatLink(`${origin}/chat/${customer.id}${carried}`)}</body>`)
-    return htmlResponse(200, html, { noindex, formAction: origin, ...(state ? { cache: 'no-store' } : {}) })
+    // The owner may show the same chat page in a panel instead (server/chat-panel.js; off = the link, unchanged). A
+    // setting that can't be read is the link.
+    let frame = null
+    if (await receptionistOn(env, customer).catch(() => false)) {
+      const href = `${origin}/chat/${customer.id}${carried}`
+      const panel = (await chatPanelSetting(db, customer.id).catch(() => ({ on: false }))).on
+      if (panel) frame = origin
+      html = html.replace('</body>', `${panel ? chatPanel(href) : chatLink(href)}</body>`)
+    }
+    return htmlResponse(200, html, { noindex, formAction: origin, ...(frame ? { frame } : {}), ...(state ? { cache: 'no-store' } : {}) })
   } catch (err) {
     console.error('site render failed:', err?.message)
     return htmlResponse(503, renderNotice('We can’t load this website right now', 'Please try again in a moment.'), { cache: 'no-store' })
