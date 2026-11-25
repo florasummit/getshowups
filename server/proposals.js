@@ -1,6 +1,7 @@
 // Changes the assistant may PREPARE for the owner to review: service ZIPs, an appointment outcome, booking hours. The proposal is built by code
 // from the owner's own words and recorded requests  and changes nothing. Applying is a separate,
 // explicit owner action: re-validated, refused if the list changed meanwhile, audited, and read back.
+import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
 import { recordEvent } from './auditlog.js'
 import { checkZip } from './zipcode.js'
 import { outsideZips } from './insights.js'
@@ -100,7 +101,7 @@ export async function applyOutcome(env, session, body, now = Date.now()) {
   if (cur.status !== b.status || (cur.work ?? null) !== (b.work ?? null)) return { ok: false, error: 'stale', status: 409 }
   const r = await setOutcome(env, session.customer, body.id, o.status === 'booked' ? 'clear' : o.status, { work: o.work ?? undefined, by: session.email }, now)
   if (!r.ok) return { ok: false, error: r.error === 'changed' ? 'stale' : r.error, status: r.httpStatus }
-  if (r.appointment.status !== 'booked') await syncStage(env, session.customer.id, r.leadId, r.appointment.status === 'no_show' ? 'noShow' : r.appointment.work === 'completed' ? 'completed' : 'showed').catch(() => null)
+  if (r.appointment.status !== 'booked' && !env[ACCEPTANCE]) await syncStage(env, session.customer.id, r.leadId, r.appointment.status === 'no_show' ? 'noShow' : r.appointment.work === 'completed' ? 'completed' : 'showed').catch(() => null)
   await recordEvent(db, { type: 'appointment.outcome', actor: `owner:${session.email}`, customer: session.customer.id, capability: 'assist.ask', outcome: 'success', resource: { type: 'appointment', id: body.id }, details: { outcome: body.outcome, via: 'assistant' } })
   return { ok: true, state: o.label }
 }
@@ -132,6 +133,7 @@ export async function applyCallBackDone(env, session, body, now = Date.now()) {
   return { ok: true, state: 'dealt with' }
 }
 
-export function applyProposal(env, session, body) {
+export async function applyProposal(env, session, body) {
+  if (!(await stillAllowed(env))) return { ok: false, error: 'not_allowed', status: 403 }
   return body?.type === 'call_back_done' ? applyCallBackDone(env, session, body) : body?.type === 'outcome' ? applyOutcome(env, session, body) : body?.type === 'hours' ? applyHours(env, session, body) : applyServiceArea(env, session, body)
 }

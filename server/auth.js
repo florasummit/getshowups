@@ -1,6 +1,7 @@
 // Dashboard authentication: "Sign in with Google" (openid + email). Any Google-verified email may
 // sign in; business access comes only from customer_users, resolved on every request. Session tokens
 // are opaque and stored only as SHA-256. The customer for a dashboard request always comes from here.
+import { ACCEPTANCE } from './acceptance-env.js'
 import { json, missingConfig, randomToken, readCookie, sha256Hex } from './google-oauth.js'
 
 export const LOGIN_COOKIE = '__Host-gsu_login'
@@ -52,6 +53,8 @@ export function customerFromRow(row) {
 
 // Signed-in user (and their business, if any), or null.
 export async function getSession(request, env, now = Date.now()) {
+  // Set only by server/acceptance.js on an environment it built itself (a symbol, so no setting or request can carry it).
+  if (env[ACCEPTANCE]) return env[ACCEPTANCE].session
   const token = readCookie(request, SESSION_COOKIE)
   if (!token || !TOKEN_RE.test(token)) return null
   const row = await env.ONBOARDING_DB.prepare(

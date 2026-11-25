@@ -2,6 +2,11 @@
 
 _Update at the end of every task. Newest first._
 
+## Test sessions for acceptance (2026-11-25)
+
+docs/INTELLIGENCE.md §8. Migration 0038 (additive). ACCEPTANCE_SESSIONS_ENABLED off until the owner sets it. Pairing: scripts/acceptance/pair.mjs.
+Founder alerts no longer count assistant failures of test businesses.
+
 ## Intelligence foundation (2026-11-24)
 
 docs/INTELLIGENCE.md governs. New: server/claims.js (statements checked against records), proposal-set.js (prepared changes have

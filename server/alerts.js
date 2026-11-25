@@ -139,7 +139,7 @@ async function otherIncidents(db, now) {
     .catch(() => ({ results: [] }))
   for (const r of inc.results) out.push({ kind: 'incident', customer: r.customer || PLATFORM, key: r.id, facts: { feature: r.feature, error: r.code, firstSeen: r.first_seen, lastSeen: r.last_seen } })
   const a = await db
-    .prepare("SELECT coalesce(sum(json_extract(props, '$.ok') = 0 AND json_extract(props, '$.reason') IN ('unavailable','timeout','busy','quota','setup')), 0) AS bad, coalesce(sum(json_extract(props, '$.reason') IN ('quota','setup')), 0) AS down, max(CASE WHEN json_extract(props, '$.ok') = 0 THEN json_extract(props, '$.reason') END) AS reason, coalesce(sum(json_extract(props, '$.ok') = 1), 0) AS good FROM events WHERE type = 'ai_ask' AND at >= ?1")
+    .prepare("SELECT coalesce(sum(json_extract(props, '$.ok') = 0 AND json_extract(props, '$.reason') IN ('unavailable','timeout','busy','quota','setup')), 0) AS bad, coalesce(sum(json_extract(props, '$.reason') IN ('quota','setup')), 0) AS down, max(CASE WHEN json_extract(props, '$.ok') = 0 THEN json_extract(props, '$.reason') END) AS reason, coalesce(sum(json_extract(props, '$.ok') = 1), 0) AS good FROM events WHERE type = 'ai_ask' AND at >= ?1 AND NOT EXISTS (SELECT 1 FROM test_businesses tb WHERE tb.customer = events.customer AND tb.is_test = 1)")
     .bind(now - HOUR)
     .first()
     .catch(() => null)

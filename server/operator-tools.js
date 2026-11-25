@@ -4,6 +4,7 @@
 // conversation was given, and every reference is looked up again inside the business.
 // Data minimisation: the model sees references, times, statuses, ZIPs and what was asked for (contact details removed),
 // never names, phones, emails or addresses. The page shows the real names next to the references.
+import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
 import { openSlots } from './booking.js'
 import { zonedToUtc } from './calendar.js'
 import { diagnose, funnel } from './ads/funnel.js'
@@ -558,6 +559,9 @@ export async function runTool(c, name, args) {
   }
   for (const k of t.parameters.required) if (clean[k] === undefined) return { error: 'missing_argument', field: k }
   try {
+    // A test session that ended meanwhile stops here; calendars are never read for one.
+    if (!(await stillAllowed(c.env))) return { error: 'not_allowed' }
+    if (c.env[ACCEPTANCE] && name === 'open_times') return { error: 'calendar_unavailable', note: 'The calendar is not read in this test session, so open times are unknown.' }
     return await t.run(c, clean)
   } catch (err) {
     console.error('operator tool failed:', name, err?.name)

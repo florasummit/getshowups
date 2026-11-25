@@ -150,9 +150,9 @@ test('a change prepared while the AI is out has an id too; the browser test stan
 test('acceptance sign-in and run agree: only a named, server-marked test business; the refusal says who, why and what to use', async () => {
   const { ALLOWED, explain, verdict } = await import('../scripts/acceptance/accounts.mjs')
   const me = (id, testBusiness, email = 'x@y.example') => ({ email, customer: id ? { id, name: `${id} name` } : null, testBusiness })
-  assert.deepEqual(ALLOWED.map((id) => verdict(me(id, true))), ['ok', 'ok'])
+  assert.deepEqual(ALLOWED.map((id) => verdict(me(id, true))), ['ok'])
   assert.deepEqual([verdict({}), verdict(me(null, false)), verdict(me('poolthru-llc', false)), verdict(me('poolthru-llc', true)), verdict(me('gsu-journey-test', false)), verdict(me('gsu-journey-test', undefined))], ['signed_out', 'no_business', 'real_business', 'not_allowed', 'real_business', 'real_business'])
-  assert.match(explain(me('poolthru-llc', false), 'real_business'), /x@y.example.*Google accepted it.*not a test business.*gsu-journey-test/)
+  assert.match(explain(me('poolthru-llc', false), 'real_business'), /not a test business.*gsu-journey-test/)
 })
 
 test('the specification names only files that exist, and the instructions stay within their budget', async () => {

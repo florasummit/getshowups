@@ -9,6 +9,7 @@
 // Honesty rules: a message is 'sent' only when the provider accepted it. Without a configured
 // provider a due message is marked skipped/no_provider (never sent later in a burst); before launch
 // (MESSAGES_LIVE unset) messages to non-test recipients are skipped as test_mode.
+import { ACCEPTANCE } from './acceptance-env.js'
 import { policiesOrEmpty } from './policies.js'
 import { isSuppressed } from './email-feedback.js'
 import { emailConfigured, messagesLive, recipientAllowed, sendEmail } from './email.js'
@@ -44,6 +45,7 @@ const STUCK_SENDING_MS = 10 * MIN
 const channelsFor = (smsConsent) => ['email', ...(smsConsent ? ['sms'] : [])]
 
 async function insert(env, rows, now) {
+  if (env[ACCEPTANCE]) return 0 // a test session never queues anything
   const db = env.ONBOARDING_DB
   const stmts = rows.map((r) =>
     db
