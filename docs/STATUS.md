@@ -3,6 +3,27 @@
 _Update at the end of every task. Newest first._
 
 
+## Booking and chat experience (2026-11-25, branch booking/premium, awaiting the founder's approval of the previews)
+- **Booking page:**
+  - **Flow:** service (owner's own cards, search above 6) → ZIP area check before any time → real times for that service's length → name, phone and email → booked.
+  - Request services skip the time. A ZIP the owner must approve goes straight to details. No times (calendar down or full) → details are still taken.
+  - The page wears the business's published logo and accent. GetShowUps' own page shows the canonical logo and offers the 20-minute "Product demo" with one question.
+- **One catalog** (`server/services.js`, `business_profiles.services`):
+  - Per service: stable ids, length (1–4 slots), hide, book / request / off, one question.
+  - Owner editor in Settings → Services and prices, with "Other / Not sure" and a preview link.
+  - Hidden services leave the booking page, the receptionist and the assistant.
+- **Server rules:**
+  - Length is read only from the `lead_services` snapshot (migration 0042).
+  - `computeSlots` / `isOfferedSlot` / `openSlots` take a span (1 = unchanged).
+  - `book()` refuses overlapping bookings even when they start at different times.
+- **Measurement:** booking-page stages per visit (`booking_stage` events, codes only), shown to the owner as a last-30-days line. Ad click-through stays separate.
+- **Chat:** same public system, quick replies from the business's own services, `?embed=1` panel layout. AI, voice, test sessions and privacy notes are unchanged.
+- **Showing the panel on customer websites** changes every live site and needs a separate approval.
+- **Before release:**
+  - founder approval of the previews;
+  - migration 0042 applied (after 0041);
+  - then Admin → "GetShowUps sells itself" → Apply approved answers, so the GetShowUps page offers the demo.
+
 ## Homepage navigation: wordmark alone (2026-11-25, founder decision)
 - The public homepage header shows the GetShowUps wordmark without the icon: `<Logo mark={false} />`, with the same type, colours and size.
 - The icon stays in the footer, dashboard, admin, sign-in, favicons and app icons.

@@ -4,18 +4,11 @@
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
+import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 
 const site = `http://127.0.0.1:${fixtures.E2E_PORT}`
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 
-async function fillLead(page, { name, email, need = 'Weekly pool cleaning' }) {
-  await page.getByLabel('What do you need?').fill(need)
-  await page.getByLabel('Name').fill(name)
-  await page.getByLabel('Phone').fill('(555) 010-0123')
-  await page.getByLabel('Email').fill(email)
-  await page.getByRole('button', { name: 'Choose a time' }).click()
-  await expect(page.getByRole('heading', { name: 'Pick a time' })).toBeVisible()
-}
 
 // Serial (shared state) and generous timeouts: each step makes several real Function → mock-Google calls.
 test.describe.configure({ mode: 'serial', timeout: 60_000 })
@@ -25,9 +18,9 @@ test.describe.configure({ mode: 'serial', timeout: 60_000 })
 test('lead books a real appointment; owner sees it', async ({ page, context }) => {
   await page.goto(`/book/${fixtures.E2E_CUSTOMER}`)
   await expect(page.getByText(fixtures.E2E_CUSTOMER_NAME)).toBeVisible()
-  await fillLead(page, { name: 'Jordan Lead', email: 'jordan@example.net' })
-  await page.locator('.slot').first().click()
-  await page.getByRole('button', { name: /^Book / }).click()
+  await chooseService(page)
+  await chooseTime(page)
+  await fillDetails(page, { name: 'Jordan Lead', email: 'jordan@example.net' })
   await expect(page.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
   await expect(page.getByText('A calendar invitation is on its way to jordan@example.net.')).toBeVisible()
 
@@ -45,28 +38,37 @@ test('lead books a real appointment; owner sees it', async ({ page, context }) =
 test('the same slot cannot be booked twice', async ({ browser }) => {
   const [a, b] = await Promise.all([browser.newContext(), browser.newContext()])
   const [pa, pb] = await Promise.all([a.newPage(), b.newPage()])
-  for (const [p, n] of [[pa, 'Ari'], [pb, 'Bea']]) {
+  for (const p of [pa, pb]) {
     await p.goto(`${site}/book/${fixtures.E2E_CUSTOMER}`)
-    await fillLead(p, { name: `${n} Racer`, email: `${n.toLowerCase()}@example.net` })
+    await chooseService(p)
+    await expect(p.getByRole('heading', { level: 1, name: /^Pick a/ })).toBeVisible()
   }
-  const slotA = pa.locator('.slot').first()
+  const slotA = pa.locator('.bk-slot').first()
   const label = await slotA.textContent()
-  const date = await pa.locator('.fine:not(.booking-foot)').textContent()
+  const date = await pa.locator('.bk-day-label').textContent()
   await slotA.click()
-  await expect(pb.locator('.fine:not(.booking-foot)')).toHaveText(date)
-  await pb.locator('.slot', { hasText: label }).first().click()
-
-  await pa.getByRole('button', { name: /^Book / }).click()
+  await expect(pb.locator('.bk-day-label')).toHaveText(date)
+  await pb.locator('.bk-slot', { hasText: label }).first().click()
+  for (const [p, n] of [[pa, 'Ari'], [pb, 'Bea']]) {
+    await p.getByRole('button', { name: /^Continue with / }).click()
+    await fillDetails(p, { name: `${n} Racer`, email: `${n.toLowerCase()}@example.net`, submit: false })
+  }
+  await pa.getByRole('button', { name: /^Confirm/ }).click()
   await expect(pa.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
-  await pb.getByRole('button', { name: /^Book / }).click()
-  await expect(pb.getByRole('alert')).toHaveText('That time was just taken. Please pick another.')
+  await pb.getByRole('button', { name: /^Confirm/ }).click()
+  await expect(pb.getByRole('alert')).toHaveText('That time was just taken. Please pick another. We kept your details.')
+  await expect(pb.getByRole('heading', { level: 1, name: /^Pick a/ })).toBeVisible()
   // The taken slot is no longer offered on that date. If it was the date's last slot, the date itself is
   // gone and the page shows another date; it never shows the same time on a different date as if unchanged.
-  if ((await pb.locator('.fine:not(.booking-foot)').textContent()) === date) {
-    await expect(pb.locator('.slot', { hasText: label })).toHaveCount(0)
+  if ((await pb.locator('.bk-day-label').textContent()) === date) {
+    await expect(pb.locator('.bk-slot', { hasText: label })).toHaveCount(0)
   } else {
     await expect(pb.getByText(date, { exact: true })).toHaveCount(0)
   }
+  // Picking another time books straight away: the details are kept (no second form).
+  await pb.locator('.bk-slot').last().click()
+  await pb.getByRole('button', { name: /^Book / }).click()
+  await expect(pb.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
   await Promise.all([a.close(), b.close()])
 })
 

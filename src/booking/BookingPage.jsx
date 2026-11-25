@@ -47,6 +47,7 @@ export default function BookingPage({ id }) {
   const [lead, setLead] = useState(resume)
   const [booked, setBooked] = useState(null)
   const [state, setState] = useState({})
+  const [area, setArea] = useState(null) // 'in' | 'review': a ZIP the owner must approve first (no times shown)
   const visit = useRef(visitId())
   const sent = useRef(new Set())
 
@@ -124,7 +125,7 @@ export default function BookingPage({ id }) {
   const minutes = service?.minutes || times?.minutes || biz.slotMinutes
   const one = services.length === 1 && !biz.allowOther
   const hadServiceStep = !(step === 'time' && !lead && !choice.serviceId && services.length === 0 && !biz.areaCheck) && !(one && !service?.question && !biz.areaCheck && !request)
-  const flowSteps = [...(hadServiceStep && !resume ? ['service'] : []), ...(request ? [] : ['time']), ...(resume ? [] : ['details'])]
+  const flowSteps = [...(hadServiceStep && !resume ? ['service'] : []), ...(request || area === 'review' ? [] : ['time']), ...(resume ? [] : ['details'])]
   const stepNo = flowSteps.indexOf(step) + 1
   const product = biz.brand?.product
   const title = product ? `Book a ${minutes}-minute call` : `Book with ${biz.name}`
@@ -141,17 +142,27 @@ export default function BookingPage({ id }) {
     if (status === 200) setTimes({ slots: data.slots, status: data.status, minutes: data.minutes })
   }
 
-  // Step 1 → next
-  const continueService = (e) => {
-    e.preventDefault()
+  // Step 1 → next. With a service area, the ZIP is checked before any time is shown: a ZIP the business doesn't list
+  // goes straight to details (the owner decides), as the page always did; an unknown ZIP is confirmed first.
+  const continueService = async (e, zipConfirmed = false) => {
+    e?.preventDefault()
     if (choice.serviceId === null && services.length) return setState({ error: 'Choose what you need.', field: 'service' })
     if (isOther && !choice.other.trim()) return setState({ error: 'Tell us briefly what you need.', field: 'other' })
     if (service?.question?.required && !choice.answer.trim()) return setState({ error: FIELD_ERRORS.invalid_answer, field: 'answer' })
     if (biz.areaCheck && !/^\d{5}(-\d{4})?$/.test(zip.trim())) return setState({ error: FIELD_ERRORS.invalid_zip, field: 'zip' })
     setState({})
-    if (visitMode && biz.areaCheck && !address.zip) setAddress((a) => ({ ...a, zip: zip.trim().slice(0, 5) }))
+    if (visitMode && biz.areaCheck) setAddress((a) => ({ ...a, zip: zip.trim().slice(0, 5) }))
+    let review = false
+    if (biz.areaCheck && !preview) {
+      setState({ saving: true })
+      const { status, data } = await api(`/api/book/${id}/area?zip=${encodeURIComponent(zip.trim())}`)
+      if (status === 200 && data.area === 'unknown' && !zipConfirmed) return setState({ unknownZip: zip.trim(), at: 'service' })
+      review = status === 200 && data.area !== 'in'
+      setState({})
+    }
+    setArea(review ? 'review' : 'in')
     report('service', service?.id)
-    if (request) {
+    if (request || review) {
       report('details', service?.id)
       return setStep('details')
     }
@@ -161,7 +172,7 @@ export default function BookingPage({ id }) {
   }
 
   const book = async (l) => {
-    const { status, data } = await api(`/api/book/${id}/appointment`, { method: 'POST', body: { leadId: l.leadId, leadToken: l.leadToken, start: Date.parse(slot) } })
+    const { status, data } = await api(`/api/book/${id}/appointment`, { method: 'POST', body: { leadId: l.leadId, leadToken: l.leadToken, start: slot } })
     if (status === 201) {
       report('booked', service?.id)
       setBooked(data)
@@ -199,7 +210,7 @@ export default function BookingPage({ id }) {
       ...(services.length ? { serviceId: choice.serviceId ?? '', answer: choice.answer } : {}),
       ...(biz.askZip ? { zip: typedZip } : {}),
       ...(visitMode ? { address } : {}),
-      ...(zipConfirmed ? { zipConfirmed: true } : {}),
+      ...(zipConfirmed || area === 'review' ? { zipConfirmed: true } : {}),
       ...(Object.keys(attribution).length ? { attribution } : {}),
     }
     const { status, data } = await api(`/api/book/${id}/lead`, { method: 'POST', body })
@@ -207,7 +218,7 @@ export default function BookingPage({ id }) {
       const l = { ...data, email: form.email.trim(), firstName: form.name.trim().split(' ')[0], street: visitMode ? address.street.trim() : null, zip: typedZip.slice(0, 5) }
       setLead(l)
       if (!data.qualified) return setStep('outside')
-      if (data.flow === 'request') {
+      if (data.flow === 'request' || area === 'notimes') {
         report('requested', service?.id)
         return setStep('requested')
       }
@@ -277,7 +288,17 @@ export default function BookingPage({ id }) {
                   {state.error}
                 </p>
               )}
-              <button className="pub-btn pub-btn--primary pub-btn--block">{request ? 'Continue to your details' : 'See open times'}</button>
+              {state.unknownZip && state.at === 'service' && state.unknownZip === zip.trim() && (
+                <div className="pub-note" role="alert">
+                  <p>We couldn’t find ZIP {state.unknownZip}. Please check it, or continue with it as typed.</p>
+                  <button type="button" className="pub-btn pub-btn--quiet" onClick={() => continueService(null, true)}>
+                    Continue with {state.unknownZip}
+                  </button>
+                </div>
+              )}
+              <button className="pub-btn pub-btn--primary pub-btn--block" disabled={state.saving}>
+                {request ? 'Continue to your details' : 'See open times'}
+              </button>
             </form>
           )}
 
@@ -294,6 +315,11 @@ export default function BookingPage({ id }) {
               saving={state.saving}
               resume={Boolean(lead)}
               visitMode={visitMode}
+              onNoTimes={() => {
+                setArea('notimes')
+                report('details', service?.id)
+                setStep('details')
+              }}
               onContinue={() => {
                 report('time', service?.id)
                 if (lead) return submit()
@@ -305,8 +331,16 @@ export default function BookingPage({ id }) {
 
           {step === 'details' && (
             <form className="bk-form" onSubmit={submit} noValidate>
-              <h1 className="pub-h1">{request ? 'Where should we reply?' : 'Your details'}</h1>
-              <p className="pub-lede bk-sub">{request ? `${biz.name} will get back to you about ${service.name.toLowerCase()}.` : 'We’ll send your calendar invitation to your email.'}</p>
+              <h1 className="pub-h1">{area === 'review' ? 'We may be able to help in your area' : area === 'notimes' ? 'Leave your details' : request ? 'Where should we reply?' : 'Your details'}</h1>
+              <p className="pub-lede bk-sub">
+                {area === 'review'
+                  ? `Leave your details and ${biz.name} will confirm availability for ZIP ${zip.trim()} with you.`
+                  : area === 'notimes'
+                    ? `${biz.name} will reach out to arrange a time.`
+                    : request
+                    ? `${biz.name} will get back to you about ${service.name.toLowerCase()}.`
+                    : 'We’ll send your calendar invitation to your email.'}
+              </p>
               {services.length === 0 && !hadServiceStep && (
                 <label className="pub-field">
                   <span>What do you need?</span>
@@ -353,7 +387,7 @@ export default function BookingPage({ id }) {
                   {state.error}
                 </p>
               )}
-              {state.unknownZip && (
+              {state.unknownZip && state.at !== 'service' && (
                 <div className="pub-note" role="alert">
                   <p>We couldn’t find ZIP {state.unknownZip}. Please check it, or continue with it as typed.</p>
                   <button type="button" className="pub-btn pub-btn--quiet" onClick={() => submit(null, true)}>
@@ -362,7 +396,7 @@ export default function BookingPage({ id }) {
                 </div>
               )}
               <button className="pub-btn pub-btn--primary pub-btn--block" disabled={state.saving}>
-                {state.saving ? 'One moment…' : request ? 'Send request' : slot ? `Confirm ${fmt(slot, tz, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Confirm booking'}
+                {state.saving ? 'One moment…' : request || area === 'review' || area === 'notimes' ? 'Send request' : slot ? `Confirm ${fmt(slot, tz, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Confirm booking'}
               </button>
             </form>
           )}
@@ -406,7 +440,7 @@ export default function BookingPage({ id }) {
               </span>
               <h1 className="pub-h1">Request sent</h1>
               <p className="pub-lede">
-                {biz.name} has your request{service ? ` for ${service.name.toLowerCase()}` : ''} and will get back to you. You won’t need to fill this in again.
+                {biz.name} has your request{service ? ` for ${service.name.toLowerCase()}` : ''} and will {area === 'notimes' ? 'reach out to arrange a time' : 'get back to you'}. You won’t need to fill this in again.
               </p>
               <GoodToKnow policies={biz.policies} />
             </div>
@@ -466,7 +500,7 @@ function Summary({ biz, product, service, isOther, minutes, request, slot, tz, s
         <p className="bk-change">
           {canChangeService && (
             <button type="button" className="pub-btn pub-btn--link" onClick={() => onChange('service')}>
-              Change service
+              {biz.services.length ? 'Change service' : 'Change request'}
             </button>
           )}
           {canChangeTime && slot && step === 'details' && (
@@ -527,7 +561,7 @@ function ServicePicker({ services, allowOther, choice, setChoice, invalid }) {
   )
 }
 
-function PickTime({ biz, times, slot, setSlot, error, saving, resume, visitMode, onContinue }) {
+function PickTime({ biz, times, slot, setSlot, error, saving, resume, visitMode, onContinue, onNoTimes }) {
   const tz = biz.timezone
   const days = useMemo(() => {
     const map = new Map()
@@ -541,12 +575,22 @@ function PickTime({ biz, times, slot, setSlot, error, saving, resume, visitMode,
   const [day, setDay] = useState(0)
   if (!times) return <div className="bk-loading" aria-busy="true" aria-label="Loading open times" />
   if (!days.length) {
+    // No time to offer (calendar unreachable, or fully booked): the request is still taken, never lost.
     const outage = times.status === 'unavailable'
     return (
-      <>
+      <div className="bk-form">
         <h1 className="pub-h1">{outage ? 'Online booking isn’t available right now' : 'No open times in the next two weeks'}</h1>
-        <p className="pub-lede">{resume ? `${biz.name} has your request and will reach out to arrange a time.` : `Please check back soon${outage ? '' : ', or contact ' + biz.name + ' directly'}.`}</p>
-      </>
+        {resume ? (
+          <p className="pub-lede">{biz.name} has your request and will reach out to arrange a time.</p>
+        ) : (
+          <>
+            <p className="pub-lede">Leave your details and {biz.name} will reach out to arrange a time.</p>
+            <button type="button" className="pub-btn pub-btn--primary pub-btn--block" onClick={onNoTimes}>
+              Leave your details
+            </button>
+          </>
+        )}
+      </div>
     )
   }
   const current = days[Math.min(day, days.length - 1)]

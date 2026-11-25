@@ -23,31 +23,35 @@ test('outside the service area: kept, owner approves, the same visitor books wit
     await p.screenshot({ path: `${shots}/${testInfo.project.name}-${name}.png`, fullPage: true })
   }
   await page.goto(`/book/${fixtures.E2E_AREA_CUSTOMER}?utm_source=google&utm_medium=cpc&utm_campaign=e2e-campaign`)
+  // The ZIP comes before any time: a business with a service area never shows times to a ZIP it must approve first.
   await page.getByLabel('What do you need?').fill('Green pool cleanup')
-  await page.getByLabel('Name').fill(who)
-  await page.getByLabel('Phone').fill('(555) 010-0177')
-  await page.getByLabel('Email').fill('casey@example.net')
-  const zip = page.getByLabel('ZIP')
+  const zip = page.getByLabel(/Your ZIP code/)
+  const next = page.getByRole('button', { name: 'See open times' })
   // A typo: asked again, nothing cleared.
   await zip.fill('2940')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
+  await next.click()
   await expect(page.getByRole('alert')).toHaveText('Please check your ZIP code: it should be 5 digits.')
-  await expect(page.getByLabel('Name')).toHaveValue(who)
   await expect(page.getByLabel('What do you need?')).toHaveValue('Green pool cleanup')
   // Not a ZIP we know: check it, or keep it as typed.
   await zip.fill('00000')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
+  await next.click()
   await expect(page.getByText('We couldn’t find ZIP 00000. Please check it, or continue with it as typed.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Continue with 00000' })).toBeVisible()
   await shot(page, 'zip-check')
-  // The real ZIP: next to the served one, but not on the list → a request, not a dead end and not times.
+  // The real ZIP: next to the served one, but not on the list → details for the owner to decide, never times.
   await zip.fill('29407')
   await expect(page.getByRole('button', { name: 'Continue with 00000' })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Choose a time' }).click()
+  await next.click()
+  await expect(page.getByRole('heading', { name: 'We may be able to help in your area' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Pick a/ })).toHaveCount(0)
+  await page.getByLabel('Name').fill(who)
+  await page.getByLabel('Phone').fill('(555) 010-0177')
+  await page.getByLabel('Email').fill('casey@example.net')
+  await page.getByRole('button', { name: 'Send request' }).click()
   await expect(page.getByRole('heading', { name: `Thanks, Casey` })).toBeVisible()
   await expect(page.getByText('We may be able to help in your area.')).toBeVisible()
   await expect(page.getByText(/has your details for ZIP 29407 and will confirm availability with you\. You won’t need to fill this in again\./)).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Pick a time' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /^Pick a/ })).toHaveCount(0)
   await expect(page.getByText(/don’t serve/)).toHaveCount(0)
   await shot(page, 'visitor-outside')
 
@@ -83,7 +87,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
   // refused), pick the next one, as a visitor would.
   const booked = page.getByRole('heading', { name: 'You’re booked' })
   for (let i = 0; i < 6 && !(await booked.isVisible()); i++) {
-    await page.locator('.slot').first().click()
+    await page.locator('.bk-slot').first().click()
     await page.getByRole('button', { name: /^Book / }).click()
     await expect(booked.or(page.getByText('That time was just taken. Please pick another.'))).toBeVisible()
   }
@@ -94,10 +98,7 @@ test('outside the service area: kept, owner approves, the same visitor books wit
 test('in the service area: books straight away (no coverage step)', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_AREA_CUSTOMER}`)
   await page.getByLabel('What do you need?').fill('Weekly pool cleaning')
-  await page.getByLabel('Name').fill('Robin InArea')
-  await page.getByLabel('Phone').fill('(555) 010-0178')
-  await page.getByLabel('Email').fill('robin@example.net')
-  await page.getByLabel('ZIP').fill('29403')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
+  await page.getByLabel(/Your ZIP code/).fill('29403')
+  await page.getByRole('button', { name: 'See open times' }).click()
   await expect(page.getByRole('heading', { name: 'Pick a time' })).toBeVisible()
 })

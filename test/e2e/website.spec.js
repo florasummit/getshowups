@@ -121,7 +121,8 @@ test('owner edits, previews and publishes the website; visitors book through it 
   await noOverflow()
   await page.getByRole('link', { name: mobile ? 'Book a visit' : 'Book a time' }).first().click()
   await expect(page).toHaveURL(new RegExp(`/book/${id}\\?utm_source=google&utm_campaign=camp12345678$`))
-  await expect(page.getByLabel('What do you need?')).toBeVisible()
+  // The booking page opens on the business's own services (its list has one).
+  await expect(page.getByRole('heading', { level: 1, name: /^(What can we help with\?|Weekly pool care|Pick a time|Pick a visit time)$/ })).toBeVisible()
 })
 
 test('changes stay private until published again; an earlier version can be restored', async ({ page, context }) => {

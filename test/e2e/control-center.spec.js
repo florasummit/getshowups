@@ -31,7 +31,7 @@ test('demo: injected availability failure → detected incident on the test acco
   // 1. The automated customer journey works: the booking page offers times.
   expect((await lookup()).slots.length).toBeGreaterThan(0)
   await page.goto(`/book/${C}`)
-  await expect(page.getByRole('heading', { name: 'Book an appointment' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: /^(What can we help with\?|Pick a time|Pick a visit time)$/ })).toBeVisible()
   await expect(page.getByText('Control Demo Pools')).toBeVisible()
 
   // 2–5. Deterministic, reversible failure: Google rejects the stored grant. The page shows no times; the cron opens ONE

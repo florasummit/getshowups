@@ -54,5 +54,9 @@ test('booking page: times that fail to load offer a retry; each step moves focus
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('We can’t load times right now')
   ok()
   await page.getByRole('button', { name: 'Try again' }).click()
-  await expect(page.getByLabel('What do you need?')).toBeVisible()
+  // A business without services or a service area: open times come first.
+  await expect(page.getByRole('heading', { level: 1, name: 'Pick a time' })).toBeVisible()
+  await page.locator('.bk-slot').last().click()
+  await page.getByRole('button', { name: /^Continue with / }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Your details' })).toBeFocused()
 })
