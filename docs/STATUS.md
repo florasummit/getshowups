@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+
+## Homepage funnel through our own booking page; sales answers (2026-11-25, founder-approved)
+
+While enrollment is closed and GetShowUps' own sales booking runs (enrollment.salesChat: bookable + receptionist on),
+"Request early access" goes to /book/getshowups (src/lib/enrollment.js salesBookingHref): inbound utm/gclid codes are kept,
+otherwise utm_source=homepage&utm_campaign=cta_<button>. The early-access section offers "See open times" instead of the
+Google Calendar embed (embed kept as the fallback when salesChat is false). Every request is now a lead in the product:
+qualified, booked with Google's invitation, flagged for follow-up when unbooked, reported by source (#164).
+server/sales.js SALES_NOTES = founder-approved answers (pool-first, not-a-fit rule, what is not live; 2,893/3,000);
+the live record changes when an admin presses "Apply approved answers". test/sales-funnel.test.js covers the chain.
 ## Shared knowledge, industries, ads outcomes, kept conversations (2026-11-25)
 
 docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser (V1 decision; the privacy policy says we don't store

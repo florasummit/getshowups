@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx'
 import { ghl } from '../config/ghl.js'
 import { enrollmentClosed } from '../content/site.js'
-import { SALES_BUSINESS, useSalesChat, useStartAction } from '../lib/enrollment.js'
+import { SALES_BUSINESS, salesBookingHref, useSalesChat, useStartAction } from '../lib/enrollment.js'
 import { track } from '../lib/analytics.js'
 
 /**
@@ -56,6 +56,24 @@ function SchedulerSlot() {
   )
 }
 
+// GetShowUps' own booking page (the product every customer gets): the visitor leaves details, picks one of the founder's
+// real open times, and the call is booked on the calendar, with Google's invitation. The request is a lead in GetShowUps,
+// attributed to this button (salesBookingHref), so it can be followed up and counted.
+function SalesBooking() {
+  return (
+    <div className="scheduler-placeholder sales-booking" data-sales-booking>
+      <span className="placeholder-icon">
+        <Icon name="calendar" size={28} />
+      </span>
+      <p className="placeholder-title">Book a 20-minute call</p>
+      <p>Pick a time that suits you. It goes straight onto our calendar and Google sends you the invitation.</p>
+      <a className="btn btn-primary" href={salesBookingHref('section')} onClick={() => track('early_access_open', { how: 'booking_page' })}>
+        See open times
+      </a>
+    </div>
+  )
+}
+
 export default function BookDemo() {
   const start = useStartAction()
   // GetShowUps selling itself: the same receptionist every customer gets, with the sales playbook, on the GetShowUps
@@ -80,16 +98,14 @@ export default function BookDemo() {
             <>
               <h3 className="demo-next-title">What happens next</h3>
               <ol className="demo-next">
-                {enrollmentClosed.next.map((a) => (
+                {(salesChat ? enrollmentClosed.nextOwnBooking : enrollmentClosed.next).map((a) => (
                   <li key={a}>{a}</li>
                 ))}
               </ol>
             </>
           )}
         </div>
-        <div className="demo-panel">
-          <SchedulerSlot />
-        </div>
+        <div className="demo-panel">{salesChat ? <SalesBooking /> : <SchedulerSlot />}</div>
       </div>
     </section>
   )

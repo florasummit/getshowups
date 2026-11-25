@@ -16,7 +16,7 @@ const NAMES = new Set([
   'conversation_industry', // { industry }
   'conversation_finished', // { industry }
   'early_access_cta', // { location: 'header' | 'hero' | 'demo' | 'pricing' | 'footer' | 'mobile_nav' | 'sales_chat' }
-  'early_access_open', // { how: 'embed_visible' | 'new_tab' }
+  'early_access_open', // { how: 'embed_visible' | 'new_tab' | 'booking_page' }
   'enterprise_cta', // { location: 'pricing' }
   'enterprise_inquiry', // { outcome: 'sent' | 'error' | 'rate_limited' | 'unavailable' }
 ])
