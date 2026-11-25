@@ -48,9 +48,12 @@ export async function recordAttribution(env, customerId, leadId, rawUtm, now = D
   // Meta website clicks are 'meta_ad_click'; Meta instant-form leads ('meta_lead_form') come from the webhook.
   // The click id itself is kept (encrypted, 90 days) only for a GetShowUps Google campaign and only when conversion
   // reporting is on (ADS_CONVERSIONS_ENABLED); otherwise just whether one was present.
+  // A link that isn't one of this business's own campaigns (an ad run directly in Google/Meta/ChatGPT Ads, a newsletter,
+  // a partner) keeps its utm_source/utm_campaign codes (validated, never personal), so results can still be read by source.
+  const linkSource = source === 'booking_page' && utm.source ? { utmSource: utm.source, ...(utm.campaign ? { utmCampaign: utm.campaign } : {}) } : {}
   const gclidEnc = source === 'google_ads' ? await sealClickId(env, rawUtm?.gclid) : null
   await env.ONBOARDING_DB.prepare('INSERT OR IGNORE INTO lead_attribution (lead_id, customer, source, campaign_id, details, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-    .bind(leadId, customerId, source, campaignId, JSON.stringify({ medium: utm.medium, gclid: utm.gclid, ...(gclidEnc ? { gclidEnc } : {}) }), now)
+    .bind(leadId, customerId, source, campaignId, JSON.stringify({ medium: utm.medium, gclid: utm.gclid, ...(gclidEnc ? { gclidEnc } : {}), ...linkSource }), now)
     .run()
   return { source, campaignId }
 }

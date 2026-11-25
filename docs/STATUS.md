@@ -9,6 +9,14 @@ platform 'openai' (the one reviewed exception to additive-only; test/migration-0
 Off: OPENAI_ADS_ENABLED. No OpenAI sandbox → OPENAI_ADS_VERIFY_BUSINESSES (paused creation only). Not verified against a
 real ChatGPT Ads account. Next: founder creates the account + key; approvals: 0039 (backup + rehearsal), the two switches.
 
+
+
+## GetShowUps sales attribution, closed loop (2026-11-24, draft PR)
+
+server/sales-attribution.js: prospects of the `getshowups` sales business by source → business created (owner sign-in =
+prospect email, after the inquiry, never a test business) → paying (live-mode only); CAC from GetShowUps' own ad spend.
+Admin → Growth shows it (salesBusinesses, salesPaying, cac). Booking-page links that aren't a business's own campaign keep
+utm_source/utm_campaign codes in lead_attribution.details. No migration, no UI change.
 ## Known test issue: voice ceiling test fails 00:00 to 00:05 UTC (2026-11-25)
 
 test/voice-core.test.js "gates: a real (non-test) business is refused": it starts a Lab session at Date.now() minus 5 minutes and
