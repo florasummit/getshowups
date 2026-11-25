@@ -72,7 +72,7 @@ async function settle(env, customerId, type, actor, body, now) {
 export async function cancelPlan(env, customerId, actor, now = Date.now()) {
   const s = await runningSub(env, customerId)
   if (!s.ok) return s
-  if (!RUNNING.includes(s.body.status)) return { ok: true, ended: true, endsAt: null, recorded: true }
+  if (!RUNNING.includes(s.body.status)) return { ...(await settle(env, customerId, 'billing.cancel_requested', actor, s.body, now)), ended: true, endsAt: null }
   let body = s.body
   if (!ending(body)) {
     const r = await stripePost(env, `/subscriptions/${encodeURIComponent(s.id)}`, { cancel_at_period_end: true })
@@ -104,7 +104,10 @@ export async function scheduleCancel(env, customerId, now = Date.now()) {
   if (!sub?.stripeSubscriptionId || sub.status === 'canceled') return { ok: true, none: true }
   const s = await runningSub(env, customerId, { access: false })
   if (!s.ok) return s.error === 'resource_missing' ? { ok: true, none: true } : s
-  return RUNNING.includes(s.body.status) && !ending(s.body) ? cancelPlanRaw(env, customerId, s, now) : { ok: true }
+  if (RUNNING.includes(s.body.status) && !ending(s.body)) return cancelPlanRaw(env, customerId, s, now)
+  // Already ending at Stripe: make sure our record says so too.
+  if (!sub.cancelAtPeriodEnd) await resyncFromStripe(env, customerId, now).catch(() => null)
+  return { ok: true }
 }
 async function cancelPlanRaw(env, customerId, s, now) {
   const r = await stripePost(env, `/subscriptions/${encodeURIComponent(s.id)}`, { cancel_at_period_end: true })

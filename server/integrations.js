@@ -31,7 +31,7 @@ export async function listServices(env, customer) {
   const adState = (p) => (conns === UNKNOWN ? 'unknown' : !conns[p] ? 'off' : conns[p].status === 'connected' ? 'connected' : 'attention')
   const adName = (p) => (conns === UNKNOWN ? null : conns[p]?.account_name || null)
   const items = [
-    { id: 'calendar', name: 'Google Calendar', state: cal === UNKNOWN ? 'unknown' : cal ? 'connected' : 'off', does: 'Shows your open times and adds bookings.', stops: 'New bookings stop: your booking page and receptionist can’t offer times, and your GetShowUps website goes offline until you connect again. Events already in your calendar stay there.', external: 'If no other GetShowUps connection uses the same Google account, we also ask Google to remove our access.', here: true, page: 'settings' },
+    { id: 'calendar', name: 'Google Calendar', state: cal === UNKNOWN ? 'unknown' : cal ? 'connected' : 'off', does: 'Shows your open times and adds bookings.', stops: 'New bookings stop: your booking page and receptionist can’t offer times, and your GetShowUps website goes offline until you connect again. Events already in your calendar stay there, but appointments can’t be cancelled from GetShowUps (by you or your customers) until you connect again.', external: 'Our stored access is deleted. We also ask Google to remove the permission when no other connection could be using it; you can always remove it at myaccount.google.com/permissions.', here: true, page: 'settings' },
     { id: 'google', name: 'Google Ads', state: adState('google'), detail: adName('google'), does: 'Creates, changes and reports on the ads you approve.', stops: 'We stop managing and reporting the account. You choose whether running campaigns are paused first. Campaigns stay in your Google Ads account.', external: 'Our stored access is deleted. Google’s own permission stays until you remove it at myaccount.google.com/permissions.', page: 'ads', offered: ads },
     { id: 'lsa', name: 'Local Services Ads', state: adState('google') === 'off' ? 'off' : lsa?.n > 0 ? 'connected' : 'off', detail: lsa?.n > 0 ? `${lsa.n} leads read` : null, does: 'Reads Google’s lead records (never contact details).', stops: 'It uses the Google Ads connection: disconnecting Google Ads stops it. Your Local Services account is unchanged.', page: 'ads', offered: ads },
     { id: 'meta', name: 'Meta ads', state: adState('meta'), detail: adName('meta'), does: 'Runs Facebook and Instagram lead ads and receives their leads.', stops: 'Leads stop arriving and we stop managing the account. Campaigns stay in your Meta account.', external: 'Our stored access is deleted. Remove the app in Facebook → Settings → Business integrations to end Meta’s permission.', here: adState('meta') !== 'off', page: 'ads', offered: ads },
@@ -59,10 +59,14 @@ export async function disconnectService(env, session, service, { pauseRunning = 
       rec = JSON.parse(raw)
     } catch {}
     await env.GOOGLE_TOKENS.delete(`google:${id}`)
+    for (const k of (await env.GOOGLE_TOKENS.list({ prefix: `google-archive:${id}:` })).keys) await env.GOOGLE_TOKENS.delete(k.name)
     let revoked = false
     if (rec?.refreshToken) {
       const token = await decrypt(env, rec.refreshToken).catch(() => null)
-      if (token) revoked = (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID).catch(() => false)) === true
+      // Google keeps ONE grant per account and client: if any ads or profile connection uses our client, revoking could
+      // end it while its campaigns run (those records don't name the account), so then it is only forgotten here.
+      const shared = await Promise.all(['ads:google:', 'ads:gbp:'].map((prefix) => env.GOOGLE_TOKENS.list({ prefix, limit: 1 }))).then((l) => l.some((x) => x.keys.length > 0))
+      if (token && !shared) revoked = (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID).catch(() => false)) === true
     }
     await note({ revokeAsked: revoked })
     return { ok: true, revokeAsked: revoked, left: 'Events already in your Google Calendar stay there.' }

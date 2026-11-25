@@ -8,6 +8,7 @@ import { json } from '../../../server/google-oauth.js'
 import { SESSION_COOKIE, cookie, isOwner, needsFresh, requireSession } from '../../../server/auth.js'
 import { cancelDeletion, closureRequest, deletionEnabled, deletionStatus, protectedBusiness, recoveryDays, requestDeletion, setClosureRequest } from '../../../server/deletion.js'
 import { closingImpact } from '../../../server/closing-impact.js'
+import { getSubscription } from '../../../server/stripe.js'
 import { deletePerson, personState } from '../../../server/people.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 
@@ -20,7 +21,7 @@ export async function onRequestGet({ request, env }) {
   const c = session.customer
   const person = await personState(env, session)
   if (!c) return json(200, { enabled: deletionEnabled(env), person, email: session.email, business: null })
-  const [owner, del, request_, impact, protectedBiz] = await Promise.all([isOwner(db, session), deletionStatus(db, c.id), closureRequest(db, c.id).catch(() => null), closingImpact(env, c), protectedBusiness(env, c.id)])
+  const [owner, del, request_, impact, protectedBiz, sub] = await Promise.all([isOwner(db, session), deletionStatus(db, c.id), closureRequest(db, c.id).catch(() => null), closingImpact(env, c), protectedBusiness(env, c.id), getSubscription(db, c.id)])
   return json(200, {
     enabled: deletionEnabled(env),
     person,
@@ -33,7 +34,7 @@ export async function onRequestGet({ request, env }) {
       impact,
       request: request_,
       scheduledFor: del?.status === 'in_progress' && del.step === 'lockout' ? (del.report.scheduledFor ?? null) : null,
-      chargesStopped: del?.report?.billingEnds === true,
+      chargesStopped: Boolean(del) && (!sub?.stripeSubscriptionId || sub.status === 'canceled' || sub.cancelAtPeriodEnd),
       adsPending: del?.report?.adsPending === true,
     },
   })

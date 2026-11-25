@@ -7,6 +7,7 @@ import { sha256Hex } from './google-oauth.js'
 import { EMAIL_RE, ownerEmail } from './auth.js'
 import { issueInvite, revokeInvite } from './accounts.js'
 import { recipientAllowed } from './email.js'
+import { hit } from './ratelimit.js'
 import { testStatus } from './testbusiness.js'
 
 export const MAX_MEMBERS = 10
@@ -17,7 +18,7 @@ export async function listPeople(env, session, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const id = session.customer.id
   const [members, invites, sessions] = await Promise.all([
-    db.prepare('SELECT email, created_at FROM customer_users WHERE customer = ?1 ORDER BY created_at, email').bind(id).all(),
+    db.prepare('SELECT email, created_at FROM customer_users WHERE customer = ?1 ORDER BY created_at, rowid').bind(id).all(),
     db.prepare('SELECT id, email, created_at, expires_at FROM account_invites WHERE customer = ?1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2 ORDER BY created_at DESC LIMIT 20').bind(id, now).all(),
     db.prepare('SELECT token_hash, created_at, expires_at FROM sessions WHERE email = ?1 AND expires_at > ?2 ORDER BY created_at DESC LIMIT 50').bind(session.email, now).all(),
   ])
@@ -39,6 +40,7 @@ export async function invitePerson(env, session, email, now = Date.now()) {
   const n = await db.prepare('SELECT (SELECT count(*) FROM customer_users WHERE customer = ?1) + (SELECT count(*) FROM account_invites WHERE customer = ?1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2) AS n').bind(id, now).first()
   if (n.n >= MAX_MEMBERS) return { ok: false, status: 409, error: 'too_many' }
   if (await db.prepare('SELECT 1 AS x FROM customer_users WHERE email = ?1 AND customer = ?2').bind(e, id).first()) return { ok: false, status: 409, error: 'already_member' }
+  if ((await hit(env, 'accountInvite', id)).limited) return { ok: false, status: 429, error: 'rate_limited' }
   const r = await issueInvite(env, { email: e, customer: id, businessName: session.customer.name, actor: `owner:${await emailRef(session.email)}` }, now)
   const emailed = recipientAllowed(env, e, { testOnly: (await testStatus(env, id)).test })
   await note(env, 'account.member_invited', id, session.email, {}, now)
@@ -48,6 +50,8 @@ export async function invitePerson(env, session, email, now = Date.now()) {
 export async function cancelInvite(env, session, inviteId, now = Date.now()) {
   const own = await env.ONBOARDING_DB.prepare('SELECT 1 AS x FROM account_invites WHERE id = ?1 AND customer = ?2').bind(String(inviteId || ''), session.customer.id).first()
   if (!own || !(await revokeInvite(env.ONBOARDING_DB, inviteId, now))) return { ok: false, status: 404, error: 'not_found' }
+  // Its email, if it hadn't left yet, isn't sent any more.
+  await env.ONBOARDING_DB.prepare("DELETE FROM email_outbox WHERE id = ?1 AND status = 'pending'").bind(`invite:${inviteId}`).run()
   return { ok: true }
 }
 
@@ -100,11 +104,8 @@ export async function deletePerson(env, session, now = Date.now()) {
   }
   const ref = await emailRef(email)
   const { results } = await db.prepare("SELECT id, actor, details FROM admin_audit WHERE instr(lower(actor), ?1) > 0 OR instr(lower(details), ?1) > 0").bind(email).all()
-  const swap = (s) => {
-    let out = String(s)
-    for (let i = out.toLowerCase().indexOf(email); i >= 0; i = out.toLowerCase().indexOf(email)) out = out.slice(0, i) + ref + out.slice(i + email.length)
-    return out
-  }
+  // Whole addresses only: never part of someone else's.
+  const swap = (v) => String(v).replace(/[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => (m.toLowerCase() === email ? ref : m))
   const opt = (q) => db.prepare(q).bind(email).run().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
   await opt('DELETE FROM owner_notice_off WHERE email = ?1')
   await db.batch([

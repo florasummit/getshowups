@@ -6,7 +6,7 @@ import { api } from '../lib/api.js'
 const date = (ms) => new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 const money = (c, cur = 'usd') => (c == null ? null : new Intl.NumberFormat('en-US', { style: 'currency', currency: cur.toUpperCase() }).format(c / 100))
 const INVOICE = { paid: 'Paid', open: 'Due', void: 'Cancelled', uncollectible: 'Not collected' }
-const ERR = { owner_only: 'Only the business owner can change the plan.', subscription_ended: 'This plan has already ended.', no_subscription: 'There’s no plan to change.', test_business: 'Test businesses don’t use live billing.', not_confirmed: 'Stripe didn’t confirm this, so we can’t say it’s done. Check again in a minute.', rate_limited: 'Too many tries. Wait a few minutes.' }
+const ERR = { owner_only: 'Only the business owner can change the plan.', subscription_ended: 'This plan has already ended.', no_subscription: 'There’s no plan to change.', closing: 'This business is being closed. Undo that first under Close the business.', test_business: 'Test businesses don’t use live billing.', not_confirmed: 'Stripe didn’t confirm this, so we can’t say it’s done. Check again in a minute.', rate_limited: 'Too many tries. Wait a few minutes.' }
 
 export default function PlanDetails({ sub, owner, reload, portal }) {
   const [d, setD] = useState(undefined)
@@ -22,10 +22,10 @@ export default function PlanDetails({ sub, owner, reload, portal }) {
     const { status, data } = await api('/api/dashboard/billing', { method: 'POST', body: { action, confirm: true } })
     setAsk(null)
     if (status !== 200) {
-      setState({ error: ERR[data.error] || 'That didn’t work. Nothing was changed.' })
+      setState({ error: ERR[data.error] || 'We couldn’t confirm whether this finished. Reload the page to see where your plan stands.' })
       return load()
     }
-    setState({ done: action === 'cancel' ? (data.ended ? 'Your plan has already ended.' : `Cancelled. Stripe confirmed it: your plan ends ${data.endsAt ? date(data.endsAt) : 'at the end of this period'} and you won’t be charged again.`) : 'Your plan continues. Stripe confirmed it.' })
+    setState({ done: action === 'cancel' ? (data.ended ? 'Your plan has already ended.' : `Cancelled. Stripe confirmed it: your plan ends ${data.endsAt ? date(data.endsAt) : 'at the end of this period'} and it won’t renew.${sub.status === 'past_due' ? ' Stripe may still collect the unpaid invoice.' : ''}`) : 'Your plan continues. Stripe confirmed it.' })
     load()
     reload?.()
   }
@@ -75,11 +75,11 @@ export default function PlanDetails({ sub, owner, reload, portal }) {
             <strong>Cancel your plan?</strong>
           </p>
           <ul className="fine">
-            <li>You keep everything until {sub.currentPeriodEnd ? date(sub.currentPeriodEnd) : 'the end of the period you paid for'}. No further charges. The rest of the period isn’t refunded automatically.</li>
+            <li>You keep everything until {sub.currentPeriodEnd ? date(sub.currentPeriodEnd) : 'the end of the period you paid for'}. It doesn’t renew. The rest of the period isn’t refunded automatically.</li>
             <li>After that: your website stays online 14 more days; ads we run are paused; booking stops when the website does.</li>
             <li>Your data is kept, and for 90 days you can reactivate and find everything as it was.</li>
             <li>Connected Google, ad and domain accounts stay yours. Upcoming appointments stay in your calendar.</li>
-            {sub.status === 'past_due' && <li>An unpaid invoice stays due.</li>}
+            {sub.status === 'past_due' && <li>Your unpaid invoice stays due, and Stripe may still charge your card for it.</li>}
           </ul>
           <div className="row-actions">
             <button type="button" className="btn btn-sm btn-quiet" onClick={() => setAsk(null)}>

@@ -12,6 +12,7 @@ import { billingDetails, cancelPlan, keepPlan } from '../../../server/billing-de
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { billingSubscription, createCheckout, createPortal, getSubscription, listPlans, stripeConfigured } from '../../../server/stripe.js'
 import { getSignup } from '../../../server/onboarding.js'
+import { deletionStatus } from '../../../server/deletion.js'
 import { recoveryFor } from '../../../server/lifecycle.js'
 import { accountOf } from '../../../server/business-accounts.js'
 
@@ -55,10 +56,15 @@ export async function onRequestPost({ request, env }) {
     if (!(await isOwner(env.ONBOARDING_DB, session))) return json(403, { error: 'owner_only' })
     const rl = await hit(env, 'accountWrite', session.customer.id)
     if (rl.limited) return tooManyJson(rl.retryAfter)
+    if (body.action === 'keep' && (await deletionStatus(env.ONBOARDING_DB, session.customer.id))) return json(409, { error: 'closing' })
     const r = await (body.action === 'cancel' ? cancelPlan : keepPlan)(env, session.customer.id, { type: 'owner', id: session.email })
     if (r.ok) return json(200, r)
     if (r.unavailable) console.error('billing action failed:', body.action, r.error)
     return json(r.unavailable ? 502 : 409, { error: r.unavailable ? 'not_confirmed' : r.error })
+  }
+  if (['checkout', 'portal'].includes(body.action)) {
+    if (!(await isOwner(env.ONBOARDING_DB, session))) return json(403, { error: 'owner_only' })
+    if (body.action === 'checkout' && (await deletionStatus(env.ONBOARDING_DB, session.customer.id))) return json(409, { error: 'closing' })
   }
   if (body.action === 'checkout' && !(await isBilled(env.ONBOARDING_DB, session.customer.id, await getSubscription(env.ONBOARDING_DB, session.customer.id)))) {
     return json(409, { error: 'not_billed' })

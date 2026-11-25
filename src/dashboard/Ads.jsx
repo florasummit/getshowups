@@ -1899,8 +1899,8 @@ export default function Ads() {
       {d.hold && (
         <p className="form-error" role="alert" data-ads-hold={d.hold.reason}>
           Your ads are paused because {d.hold.text}.{' '}
-          {d.hold.reason === 'suspended'
-            ? 'Contact GetShowUps to restore the account.'
+          {['suspended', 'restricted'].includes(d.hold.reason)
+            ? 'Contact GetShowUps to restore it.'
             : d.hold.reason === 'account_deleted'
               ? ''
               : 'Update your payment in Settings → Billing.'}{' '}

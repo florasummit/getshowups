@@ -6,7 +6,7 @@ import { api, whenFull } from '../lib/api.js'
 const STEP = { lockout: 'turning services off', ads: 'pausing ads', billing: 'ending billing', integrations: 'disconnecting', data: 'erasing data', verify: 'verifying', done: 'done' }
 const STATE = { completed: ['ok', 'Completed'], failed: ['bad', 'Needs a look'], scheduled: ['', 'Scheduled'], running: ['', 'Running'] }
 const ERR = { not_available_yet: 'Not available until migration 0041 is applied.', not_scheduled: 'Its recovery window is over.', not_requested: 'Already handled.', reason_required: 'Write a reason (at least 5 characters).', being_deleted: 'This business is being closed or deleted.' }
-const adminError = (code) => ERR[code] || 'That didn’t work. Nothing was changed.'
+const adminError = (code) => ERR[code] || 'We couldn’t confirm whether this finished. Reload to see where it stands.'
 
 // One consequential action: opens, asks why, confirms.
 export function ReasonAction({ label, confirm, text, danger = false, onRun }) {

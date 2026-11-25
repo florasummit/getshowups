@@ -622,7 +622,7 @@ async function runTool(ctx, name, input) {
     ctx.bookedNow = r.appointment.id
     ctx.after.push(() => syncStage(env, customer.id, leadId, 'booked', null, now))
     ctx.after.push(() => syncNote(env, customer.id, leadId, `booked:${conv.id}`, `Booked by the GetShowUps receptionist (${ctx.channel}) for ${slotLabel(start, customer.timezone)}. Need: ${lead.need}`, now))
-    return { ok: true, booked: true, time: slotLabel(start, customer.timezone), confirmation: lead.email ? `A confirmation email goes to ${lead.email}.` : 'It is on the calendar; no confirmation email (no email given).' }
+    return { ok: true, booked: true, time: slotLabel(start, customer.timezone), confirmation: lead.email ? `Google sends a calendar invitation to ${lead.email}. No other email is promised.` : 'It is on the calendar. No email goes out (none was given), and one added now would not get an invitation: do not offer one.' }
   }
   if (name === 'request_callback') return upsertRequest(ctx, 'callback', input.reason, input.urgent)
   if (name === 'leave_message') return upsertRequest(ctx, 'message', input.message, input.urgent)

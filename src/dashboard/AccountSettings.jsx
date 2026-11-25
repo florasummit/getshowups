@@ -25,7 +25,8 @@ const ERR = {
   ads_on_hold_pause_first: 'Your running ads must be paused first.',
   pause_failed: 'An ad couldn’t be paused, so nothing was disconnected.',
 }
-const errText = (c) => ERR[c] || 'That didn’t work. Nothing was changed. Please try again.'
+// Refused for a known reason: nothing changed. Anything else (lost connection, server error) may have finished partly.
+const errText = (c) => ERR[c] || (['network_error', 'storage_error', 'failed', 'not_confirmed', 'export_failed'].includes(c) ? 'We couldn’t confirm whether this finished. Reload the page to see where it stands.' : 'That was refused. Please check and try again.')
 
 // A refused action: the reason, or the way to sign in again (asked for consequential changes only).
 export function ActionError({ code }) {
@@ -396,23 +397,28 @@ const count = (n, one, many = `${one}s`) => (n === null ? `${many}: couldn’t b
 function Impact({ i, deletes, recoveryDays }) {
   const ads = i.ads === null ? 'Running ads couldn’t be checked' : i.ads.length ? `${i.ads.map((a) => `${a.n} running on ${PLATFORM[a.platform] || a.platform}`).join(', ')}: paused and checked first. They stay in your own ad account, paused.` : 'No ads started here are running. Ads you run yourself in Google, Meta or OpenAI are not touched and keep running.'
   return (
-    <ul className="fine" data-impact>
-      <li>
-        Offline: {i.site === null ? 'website (couldn’t be checked)' : i.site ? 'your website' : 'no published website'}, your booking page and receptionist{i.domain ? `, ${i.domain} (the domain stays yours)` : ''}.
-      </li>
-      <li>{count(i.upcoming, 'upcoming appointment')}: not cancelled for you. They stay in your Google Calendar; tell your customers yourself.</li>
-      <li>{count(i.messages, 'scheduled message')} won’t be sent.</li>
-      <li>{ads}</li>
-      <li>
-        {i.subscription === null ? 'Your plan couldn’t be checked.' : i.subscription ? (deletes && !recoveryDays ? 'Your plan ends right away, with no further charges. The current period isn’t refunded automatically.' : 'Your plan is set to end, so it doesn’t renew.') : 'There’s no plan to end.'}
-      </li>
-      <li>Disconnected here: {i.services === null ? 'couldn’t be checked' : i.services.length ? i.services.join(', ') : 'nothing connected'}. Those accounts stay yours.</li>
-      <li>
-        {deletes ? 'Erased' : 'Kept until a person handles your request'}: {count(i.customers, 'customer record')}, {count(i.conversations, 'receptionist conversation')}, {count(i.images, 'photo')}, your website, settings and what you taught the AI.
-      </li>
-      <li>{count(i.members, 'person', 'people')} lose access. Other businesses are not affected.</li>
-      <li>Kept: billing records and a log without your customers’ details. Copies in backups go away as the backups expire.</li>
-    </ul>
+    <>
+      {!deletes && (
+        <p className="notice-info" data-request-only>
+          Sending this request changes nothing yet: your website, bookings, ads and plan continue, and charges with them, until a person closes the business with you. To stop renewing now, cancel under Plan and billing. What closing would mean:
+        </p>
+      )}
+      <ul className="fine" data-impact>
+        <li>
+          Goes offline: {i.site === null ? 'website (couldn’t be checked)' : i.site ? 'your website' : 'no published website'}, your booking page and receptionist{i.domain ? `, ${i.domain} (the domain stays yours)` : ''}.
+        </li>
+        <li>{count(i.upcoming, 'upcoming appointment')}: not cancelled for you. They stay in your Google Calendar; tell your customers yourself.</li>
+        <li>{count(i.messages, 'scheduled message')} won’t be sent.</li>
+        <li>{ads}</li>
+        <li>{i.subscription === null ? 'Your plan couldn’t be checked.' : !i.subscription ? 'There’s no plan to end.' : !deletes ? 'Your plan would end.' : !recoveryDays ? 'Your plan ends right away, with no further charges. The current period isn’t refunded automatically.' : 'Your plan is set to end, so it doesn’t renew. An unpaid invoice may still be collected.'}</li>
+        <li>Disconnected here: {i.services === null ? 'couldn’t be checked' : i.services.length ? i.services.join(', ') : 'nothing connected'}. Those accounts stay yours.</li>
+        <li>
+          Erased: {count(i.customers, 'customer record')}, {count(i.conversations, 'receptionist conversation')}, {count(i.images, 'photo')}, your website, settings and what you taught the AI.
+        </li>
+        <li>{count(i.members, 'person', 'people')} lose access. Other businesses are not affected.</li>
+        <li>Kept: billing records and a log without your customers’ details. Copies in backups go away as the backups expire.</li>
+      </ul>
+    </>
   )
 }
 
@@ -462,7 +468,7 @@ export function CloseBusiness() {
             Keep my business
           </button>
         )}
-        <p className="fine">Keeping it puts your website and booking page back. Ads stay paused and your plan still ends until you choose otherwise.</p>
+        <p className="fine">Keeping it puts your website and booking page back, if they were on before and your plan hasn’t ended. Ads stay paused and your plan still ends until you choose otherwise. Reminders that were due meanwhile aren’t sent.</p>
         <ActionError code={state.code} />
       </div>
     )

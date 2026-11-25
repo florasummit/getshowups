@@ -15,6 +15,7 @@ import { adapter, logAction, verifyAndRecord, UNREACHABLE } from './campaigns.js
 
 export const HOLD_REASONS = {
   suspended: 'GetShowUps paused this business',
+  restricted: 'GetShowUps switched ads off for this business',
   payment_failed: 'a subscription payment failed',
   subscription_ended: 'the GetShowUps subscription ended',
   account_deleted: 'the account is being deleted',
@@ -43,7 +44,7 @@ export async function adsHold(env, customerId) {
     .catch((err) => (err?.message?.includes('no such table') ? null : Promise.reject(err)))
   if (deleting) return { reason: 'account_deleted' }
   if (biz.status === 'suspended') return { reason: 'suspended' }
-  if (await restricted(env, customerId, 'ads', { onError: 'throw' })) return { reason: 'suspended' }
+  if (await restricted(env, customerId, 'ads', { onError: 'throw' })) return { reason: 'restricted' }
   if (!stripeConfigured(env)) return null
   if (await isComplimentary(env, customerId)) return null // complimentary entitlement: no billing hold, ever
   const [sub, signup] = await Promise.all([

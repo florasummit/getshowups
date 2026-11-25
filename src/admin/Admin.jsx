@@ -630,7 +630,7 @@ const STAGES = {
   deleting: 'Being deleted',
   deleted: 'Deleted',
 }
-const HOLDS = { suspended: 'suspended by GetShowUps', payment_failed: 'payment failed', subscription_ended: 'subscription ended', account_deleted: 'account deleted' }
+const HOLDS = { restricted: 'ads switched off for this business', suspended: 'suspended by GetShowUps', payment_failed: 'payment failed', subscription_ended: 'subscription ended', account_deleted: 'account deleted' }
 function Lifecycle({ l }) {
   return (
     <section className="card" aria-labelledby="lifecycle-title">

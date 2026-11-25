@@ -24,6 +24,8 @@ export async function onRequestPost({ request, env }) {
     .bind(customer, status, Date.now())
     .first()
   if (!row) return json(404, { error: 'not_found' })
+  // Suspended while its owner is closing it: undoing the closing must not lift the suspension.
+  if (status === 'suspended') await env.ONBOARDING_DB.prepare("UPDATE account_deletions SET report = json_set(report, '$.wasStatus', 'suspended') WHERE customer = ?1 AND status = 'in_progress'").bind(customer).run().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
   let ads = null
   if (status === 'suspended') {
     ads = await enforceAdsHold(env, customer, { actor: `admin:${admin.email}` }).catch((err) => {

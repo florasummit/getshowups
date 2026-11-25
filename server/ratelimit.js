@@ -32,6 +32,7 @@ export const RULES = {
   adsKey: { limit: 10, windowSec: 3600 }, //         POST /api/ads/openai/key save (per business; each validates with OpenAI)
   adsGeo: { limit: 60, windowSec: 600 }, //          GET /api/ads/openai/locations (per business; each asks OpenAI)
   accountWrite: { limit: 40, windowSec: 600 }, //    account, people, availability, integrations writes (per business)
+  accountInvite: { limit: 10, windowSec: 86400 }, // invitations an owner creates (per business and day)
   accountExport: { limit: 6, windowSec: 3600 }, //    GET /api/dashboard/export (per business)
   billingRead: { limit: 60, windowSec: 600 }, //      GET billing details (per business; each reads Stripe)
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)

@@ -10,7 +10,8 @@ import { blobBytes } from './assets.js'
 import { domainFor } from './domains.js'
 import { visibleTranscript } from './receptionist/engine.js'
 
-export const MAX_ROWS = 20000
+export const MAX_ROWS = 10000
+const MAX_HEAVY = 1500 // conversations and website versions (large rows)
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const at = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : '')
 const money = (c) => (c == null ? '' : (c / 100).toFixed(2))
@@ -28,11 +29,11 @@ export async function businessExport(env, customer, now = Date.now()) {
   const id = customer.id
   const notes = []
   const files = []
-  const rowsOf = async (name, sql) => {
+  const rowsOf = async (name, sql, max = MAX_ROWS) => {
     try {
-      const { results } = await db.prepare(`${sql} LIMIT ${MAX_ROWS + 1}`).bind(id).all()
-      if (results.length > MAX_ROWS) notes.push(`${name}: only the first ${MAX_ROWS} rows fit. Contact hello@getshowups.com for the rest.`)
-      return results.slice(0, MAX_ROWS)
+      const { results } = await db.prepare(`${sql} LIMIT ${max + 1}`).bind(id).all()
+      if (results.length > max) notes.push(`${name}: only the first ${max} rows fit. Contact hello@getshowups.com for the rest.`)
+      return results.slice(0, max)
     } catch (err) {
       // A part that doesn't exist yet is empty; a part that can't be read fails the export instead of looking empty.
       if (String(err?.message).includes('no such table')) return []
@@ -58,7 +59,7 @@ export async function businessExport(env, customer, now = Date.now()) {
   addCsv('callbacks.csv', ['id', 'kind', 'name', 'phone', 'email', 'note', 'urgent', 'status', 'created_at', 'resolved_at'], req.map((r) => [r.id, r.kind, r.name, r.phone, r.email, r.note, r.urgent ? 'yes' : '', r.status, at(r.created_at), at(r.resolved_at)]))
   const msgs = await rowsOf('messages.csv', "SELECT * FROM thread_messages WHERE customer = ?1 ORDER BY created_at")
   addCsv('messages.csv', ['customer_id', 'direction', 'channel', 'author', 'body', 'status', 'created_at'], msgs.map((m) => [m.lead_id, m.direction, m.channel, m.author, m.body, m.status, at(m.created_at)]))
-  const conv = await rowsOf('receptionist_conversations.json', "SELECT id, channel, status, outcome, lead_id, summary, state, transcript, created_at FROM receptionist_conversations WHERE customer = ?1 ORDER BY created_at")
+  const conv = await rowsOf('receptionist_conversations.json', "SELECT id, channel, status, outcome, lead_id, summary, state, transcript, created_at FROM receptionist_conversations WHERE customer = ?1 ORDER BY created_at DESC", MAX_HEAVY)
   addJson('receptionist_conversations.json', conv.map((c) => ({ id: c.id, channel: c.channel, status: c.status, outcome: c.outcome, customerId: c.lead_id, summary: c.summary, startedAt: at(c.created_at), lines: spoken(c) })))
   const ads = await rowsOf('ad_results.csv', 'SELECT m.*, k.platform FROM ad_metrics_daily m JOIN ad_campaigns k ON k.id = m.campaign_id WHERE k.customer = ?1 ORDER BY m.date')
   addCsv('ad_results.csv', ['date', 'platform', 'campaign', 'spend', 'clicks', 'impressions'], ads.map((m) => [m.date, m.platform, m.campaign_id, money(m.spend_cents), m.clicks, m.impressions]))
@@ -72,7 +73,7 @@ export async function businessExport(env, customer, now = Date.now()) {
     one('SELECT draft, live_version FROM ai_rules WHERE customer = ?1'),
     rowsOf('ai_knowledge.json', 'SELECT version, config, note, created_at FROM ai_rule_versions WHERE customer = ?1 ORDER BY version'),
     loadWebsite(db, customer),
-    rowsOf('website.json', 'SELECT version, content, created_at FROM website_versions WHERE customer = ?1 ORDER BY version'),
+    rowsOf('website.json', 'SELECT version, content, created_at FROM website_versions WHERE customer = ?1 ORDER BY version DESC', 100),
     domainFor(env, id),
   ])
   addJson('business.json', { id, name: customer.name, timezone: customer.timezone, appointmentMode: customer.appointmentMode, serviceZips: customer.serviceZips, hours: { days: customer.workdays, from: customer.dayStart, to: customer.dayEnd, minutes: customer.slotMinutes }, bookingNoticeMinutes: rules.minNoticeMinutes, closedDates: rules.closures, profile, policies, receptionist: rec && { on: Boolean(rec.enabled), mode: rec.mode, greeting: rec.greeting, knowledge: rec.knowledge }, domain: domain ? { hostname: domain.hostname, status: domain.status } : null })

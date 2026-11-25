@@ -235,6 +235,102 @@ test('a suspended business that is closed and undone stays suspended', async () 
   assert.equal(one("SELECT status FROM customers WHERE id = 'alpha-co'").status, 'suspended')
 })
 
+test('undo always wins over a run that was already under way, and an undone deletion never erases', async () => {
+  env.ACCOUNT_RECOVERY_DAYS = '14'
+  stripe.down = true
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  stripe.down = false
+  // The owner undoes while the cron is waiting for Stripe.
+  const f = globalThis.fetch
+  let undone
+  globalThis.fetch = async (...a) => {
+    undone ??= await cancelDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+    return f(...a)
+  }
+  await processDeletions(env, { now: Date.now() + 400000 })
+  assert.equal(undone.ok, true)
+  assert.equal(one("SELECT status FROM customers WHERE id = 'alpha-co'").status, 'active')
+  globalThis.fetch = f
+  // A run that read the job just before the undo finds nothing to claim.
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  const db = env.ONBOARDING_DB
+  const prepare = db.prepare
+  let once = true
+  db.prepare = (sqlText) => {
+    if (once && sqlText.includes("json_set(report, '$.claimed'")) {
+      once = false
+      q("DELETE FROM account_deletions WHERE customer = 'alpha-co'")
+    }
+    return prepare(sqlText)
+  }
+  assert.equal((await advanceDeletion(env, 'alpha-co', Date.now() + 15 * DAY)).status, 'not_found')
+  db.prepare = prepare
+  assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 1)
+  // Once claimed, an undo is refused.
+  q("INSERT INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at, report) VALUES ('alpha-co', 1, 'x', 'in_progress', 'lockout', ?, '{\"claimed\":1}')", Date.now() + DAY)
+  assert.equal((await cancelDeletion(env, 'alpha-co', { type: 'owner', id: 'x' })).error, 'not_scheduled')
+})
+
+test('closing window: an admin suspension survives the undo; the plan can’t be kept; one resumed in Stripe is ended again; reminders come back', async () => {
+  env.ACCOUNT_RECOVERY_DAYS = '14'
+  q("INSERT INTO messages (id, customer, lead_id, kind, channel, send_at, status, created_at, updated_at) VALUES ('m1', 'alpha-co', 'lead-alpha-co', 'lead_followup_1', 'email', ?, 'scheduled', 1, 1)", Date.now() + DAY)
+  const ann = await signIn('ann@alpha.example')
+  await acct(ann, { action: 'delete', confirm: true, name: 'Alpha Co' })
+  assert.equal(one("SELECT error FROM messages WHERE id = 'm1'").error, 'account_closing')
+  assert.equal((await plan(ann, { action: 'keep', confirm: true })).data.error, 'closing')
+  stripe.sub.cancel_at_period_end = false
+  q("UPDATE subscriptions SET cancel_at_period_end = 0 WHERE customer = 'alpha-co'")
+  assert.equal((await call(account, 'GET', '/api/dashboard/account', { cookie: ann })).data.business.chargesStopped, false, 'never claimed from an old answer')
+  await processDeletions(env, { now: Date.now() + 400000 })
+  assert.equal(stripe.sub.cancel_at_period_end, true)
+  const admin = await signIn(ADMIN)
+  assert.equal((await call(pStatus, 'POST', '/api/platform/status', { cookie: admin, body: { customer: 'alpha-co', status: 'suspended', reason: 'abuse report', confirm: true } })).status, 200)
+  assert.equal((await acct(ann, { action: 'undo_delete', confirm: true })).status, 200)
+  assert.equal(one("SELECT status FROM customers WHERE id = 'alpha-co'").status, 'suspended')
+  assert.equal(one("SELECT status FROM messages WHERE id = 'm1'").status, 'scheduled')
+})
+
+test('the restore marker is written before a deletion can be called completed', async () => {
+  const put = env.GOOGLE_TOKENS.put
+  env.GOOGLE_TOKENS.put = async (k, v) => {
+    if (k.startsWith('deleted:')) throw new Error('kv down')
+    return put(k, v)
+  }
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  assert.equal(one("SELECT status FROM account_deletions WHERE customer = 'alpha-co'").status, 'in_progress')
+  env.GOOGLE_TOKENS.put = put
+  await processDeletions(env, { now: Date.now() + DAY })
+  assert.equal(one("SELECT status FROM account_deletions WHERE customer = 'alpha-co'").status, 'completed')
+  assert.ok(kv.has('deleted:alpha-co'))
+})
+
+test('disconnecting Calendar never revokes a grant an ads or profile connection may share', async () => {
+  const { encrypt } = await import('../server/google-oauth.js')
+  const ann = await signIn('ann@alpha.example')
+  const revoked = []
+  const f = globalThis.fetch
+  globalThis.fetch = async (u, i) => (String(u).includes('/revoke') ? (revoked.push(1), new Response('{}')) : f(u, i))
+  const connect = async () => kv.set('google:alpha-co', JSON.stringify({ customer: 'alpha-co', refreshToken: await encrypt(env, 'rt'), googleSub: 'g1', clientId: 'cid' }))
+  await connect()
+  kv.set('ads:google:alpha-co', 'sealed')
+  let r = await call(integrations, 'POST', '/api/dashboard/integrations', { cookie: ann, body: { action: 'disconnect', id: 'calendar', confirm: true } })
+  assert.deepEqual([r.data.revokeAsked, revoked.length, kv.has('ads:google:alpha-co')], [false, 0, true])
+  kv.delete('ads:google:alpha-co')
+  await connect()
+  r = await call(integrations, 'POST', '/api/dashboard/integrations', { cookie: ann, body: { action: 'disconnect', id: 'calendar', confirm: true } })
+  assert.deepEqual([r.data.revokeAsked, revoked.length], [true, 1])
+  globalThis.fetch = f
+})
+
+test('only the owner opens billing; deleting one person never alters another address', async () => {
+  q("INSERT INTO customer_users (email, customer, created_at) VALUES ('mo@alpha.example', 'alpha-co', 2000)")
+  const mo = await signIn('mo@alpha.example')
+  assert.equal((await plan(mo, { action: 'portal' })).status, 403)
+  q("INSERT INTO admin_audit (at, actor, action, customer, details) VALUES (1, 'x', 'invite', 'beta-co', '{\"email\":\"momo@alpha.example\"}')")
+  assert.equal((await acct(mo, { action: 'delete_me', confirm: true, email: 'mo@alpha.example' })).status, 200)
+  assert.equal(one('SELECT details FROM admin_audit').details, '{"email":"momo@alpha.example"}')
+})
+
 test('recovery window with Stripe down: reported as not stopped yet, and the cron keeps trying', async () => {
   env.ACCOUNT_RECOVERY_DAYS = '7'
   stripe.down = true
@@ -277,12 +373,13 @@ test('a restored backup can’t resurrect a deleted business: offline within the
   delete env.ACCOUNT_DELETION_ENABLED // even while switched off it is taken offline
   assert.equal((await processDeletions(env, { now: hour })).replayed, 1)
   assert.equal(one("SELECT status FROM customers WHERE id = 'alpha-co'").status, 'suspended')
-  assert.equal(one("SELECT count(*) n FROM customer_users WHERE customer = 'alpha-co'").n, 0)
+  assert.equal((await processDeletions(env, { now: hour + 3600000 })).replayed ?? 0, 0, 'found once, not every hour')
   env.ACCOUNT_DELETION_ENABLED = 'true'
-  await processDeletions(env, { now: hour + 60000 })
+  await processDeletions(env, { now: hour + 3600000 + 400000 })
+  assert.equal(one("SELECT count(*) n FROM customer_users WHERE customer = 'alpha-co'").n, 0)
   assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 0)
   q("DELETE FROM account_deletions WHERE customer = 'alpha-co'")
-  assert.equal((await processDeletions(env, { now: hour + 3600000 })).replayed ?? 0, 0, 'a tombstone is left alone')
+  assert.equal((await processDeletions(env, { now: hour + 7200000 })).replayed ?? 0, 0, 'a tombstone is left alone')
   assert.notEqual(await uniqueCustomerId(env, 'Alpha Co'), 'alpha-co')
 })
 
@@ -446,8 +543,8 @@ test('restrictions: admin only, reason required, only ever take away, ads are he
   assert.equal((await ctl(admin, { action: 'restrict', customer: 'beta-co', feature: 'ads', confirm: true, reason: 'x' })).data.error, 'reason_required')
   assert.equal((await ctl(admin, { action: 'restrict', customer: 'beta-co', feature: 'billing', confirm: true, reason: 'not a feature' })).data.error, 'invalid_feature')
   assert.equal((await ctl(admin, { action: 'restrict', customer: 'beta-co', feature: 'ads', confirm: true, reason: 'policy review' })).status, 200)
-  assert.equal(await adsAccess(env, c), false)
-  assert.equal((await adsHold(env, 'beta-co')).reason, 'suspended')
+  assert.equal(await adsAccess(env, c), true, 'the owner can still pause and disconnect')
+  assert.equal((await adsHold(env, 'beta-co')).reason, 'restricted')
   assert.equal(await adsAccess(env, customerFromRow(one("SELECT * FROM customers WHERE id = 'alpha-co'"))), true)
   await ctl(admin, { action: 'unrestrict', customer: 'beta-co', feature: 'ads', confirm: true, reason: 'review done' })
   assert.equal(await adsAccess(env, c), true)
