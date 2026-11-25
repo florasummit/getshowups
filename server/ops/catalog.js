@@ -514,6 +514,14 @@ registerCapability({
   dependsOn: ['account.deletion', 'billing.lifecycle'],
   state: (env) => (retentionScheduleEnabled(env) ? { mode: 'live' } : { mode: 'disabled', note: 'Day 90 only records the expiry', approval: 'Approved, disclosed retention schedule + RETENTION_SCHEDULE_ENABLED' }),
 })
+registerCapability({
+  id: 'account.controls',
+  tier: 'operate',
+  name: 'Account settings (people, plan, data export, connections, closing)',
+  journey: 'account',
+  dependsOn: ['platform.database', 'platform.audit'],
+  state: (env) => ({ mode: 'live', note: deletionEnabled(env) ? 'Owners can delete their business' : 'Closing is a request a person handles until deletion is on' }),
+})
 // ---------- AI receptionist (server/receptionist/) ----------
 registerCapability({
   id: 'receptionist.chat',

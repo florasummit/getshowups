@@ -25,7 +25,9 @@ and a dashboard with an assistant that reads its records. Growth is $499 a month
 | Google Ads, Local Services reading | Test account only; nothing can spend | ADS_LIVE_LAUNCH |
 | Calls from Google ads | Built, off | GOOGLE_CALLS_ENABLED, migration 0040 |
 | Meta ads; ChatGPT ads | Built against stand-ins, off; never seen with a real account | docs/META_ADS.md, docs/OPENAI_ADS.md |
-| Account deletion | Built, off | ACCOUNT_DELETION_ENABLED |
+| Account settings: people, sessions, plan and invoices, cancel and keep, export, connections, notices, closing | Live (plan parts with Stripe test mode) | unit + browser tests; docs/legal/POLICY_MAP.md |
+| Services editor, closed dates, minimum notice, setup check | Live (dates, notice and notice choices need migration 0041) | unit + browser tests |
+| Account deletion | Built, off; owners can ask to close | ACCOUNT_DELETION_ENABLED, ACCOUNT_RECOVERY_DAYS |
 | Phone line, call routing, recordings | Not built | by decision |
 
 ## How it fits together

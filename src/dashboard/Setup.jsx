@@ -13,6 +13,7 @@ import Readiness from './Readiness.jsx'
 import WebsiteEditor, { WebsitePreview } from './WebsiteEditor.jsx'
 import { useWebsite } from './website-data.js'
 import DomainSettings from './DomainSettings.jsx'
+import { YourAccount } from './AccountSettings.jsx'
 import { PublishBox } from './WebsiteTab.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
@@ -62,6 +63,12 @@ export default function Setup({ me, reload }) {
             back={index > 1 && steps[index - 1].id !== 'payment' ? () => setEditing(steps[index - 1].id) : null}
           />
         </section>
+        {!me.customer && (
+          <details className="panel panel--narrow" data-own-account>
+            <summary>Your account</summary>
+            <YourAccount />
+          </details>
+        )}
         {progress.selfServe && <p className="fine setup-foot">Your progress saves automatically. You can leave and come back any time.</p>}
       </main>
     </div>

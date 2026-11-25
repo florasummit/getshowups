@@ -9,6 +9,7 @@
 //        { action: 'generate' }                    AI copy + three designs from the business details, stored (draft untouched)
 //        { action: 'revise', instruction }         AI revision of the draft ("make it more modern"), stored (draft untouched)
 //        { action: 'apply', generationId, option } make a stored design the private draft (owner photos kept)
+import { restricted } from '../../../../server/restrictions.js'
 import { recordEvent } from '../../../../server/auditlog.js'
 import { json } from '../../../../server/google-oauth.js'
 import { requireSession, siteOrigin } from '../../../../server/auth.js'
@@ -127,6 +128,7 @@ export async function onRequestPost({ request, env }) {
       return json(200, { generation: r.generation, aiUsage: await aiUsage(env, customer, session.email) })
     }
     if (action === 'generate' || action === 'revise') {
+      if (await restricted(env, customer.id, 'website_studio')) return json(403, { error: 'ai_unavailable' })
       const kind = action === 'generate' ? 'generation' : 'revision'
       const rl = await hit(env, 'websiteAi', customer.id)
       if (rl.limited) return tooManyJson(rl.retryAfter)

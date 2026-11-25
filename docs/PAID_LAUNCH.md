@@ -220,3 +220,8 @@ Cloudflare docs (2026-10/11): Alerts → Platform Notifications → Create a Not
 
 Residual gap: nothing PUSHES an alert if the scheduler silently stops. /admin → Business Review marks the scheduler stale
 when the daily audit checkpoint is older than 2 days; check it daily during launch week.
+
+## Added 2026-11-25: permissions the live restricted key needs
+Settings → Plan and billing reads and changes Stripe directly: Customers (write), Subscriptions (write), Checkout Sessions (write),
+Billing portal (write), Invoices (read; preview), Payment methods (read), Prices (read). A missing read permission shows
+"couldn't be read", a missing write permission refuses the action; nothing is claimed. Test a cancel and a keep in live mode at step B4.

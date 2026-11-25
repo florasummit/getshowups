@@ -21,6 +21,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { randomToken } from '../google-oauth.js'
 import { linkToken, verifyLinkToken } from '../links.js'
+import { restricted } from '../restrictions.js'
 import { createLead, bookAppointment, dispatchBooked, openSlots, recordAvailability, validateLead } from '../booking.js'
 import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
@@ -90,7 +91,7 @@ export async function getSettings(db, customerId) {
 
 // Is the receptionist offered for this (already bookable) business right now?
 export async function receptionistOn(env, customer) {
-  if (!modelConfigured(env) || !(await receptionistReady(env.ONBOARDING_DB))) return false
+  if (!modelConfigured(env) || !(await receptionistReady(env.ONBOARDING_DB)) || (await restricted(env, customer.id, 'receptionist'))) return false
   return (await getSettings(env.ONBOARDING_DB, customer.id).catch(() => ({ enabled: false }))).enabled
 }
 
@@ -621,7 +622,7 @@ async function runTool(ctx, name, input) {
     ctx.bookedNow = r.appointment.id
     ctx.after.push(() => syncStage(env, customer.id, leadId, 'booked', null, now))
     ctx.after.push(() => syncNote(env, customer.id, leadId, `booked:${conv.id}`, `Booked by the GetShowUps receptionist (${ctx.channel}) for ${slotLabel(start, customer.timezone)}. Need: ${lead.need}`, now))
-    return { ok: true, booked: true, time: slotLabel(start, customer.timezone), confirmation: lead.email ? `A confirmation email goes to ${lead.email}.` : 'It is on the calendar; no confirmation email (no email given).' }
+    return { ok: true, booked: true, time: slotLabel(start, customer.timezone), confirmation: lead.email ? `Google sends a calendar invitation to ${lead.email}. No other email is promised.` : 'It is on the calendar. No email goes out (none was given), and one added now would not get an invitation: do not offer one.' }
   }
   if (name === 'request_callback') return upsertRequest(ctx, 'callback', input.reason, input.urgent)
   if (name === 'leave_message') return upsertRequest(ctx, 'message', input.message, input.urgent)

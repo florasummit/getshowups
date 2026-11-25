@@ -67,6 +67,11 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      Privacy policy: src/legal/Privacy.jsx, also plain HTML at build (vite.config.js). Every security
                      claim there has evidence in docs/GOOGLE_PRIVACY_RESUBMISSION.md; change both together
                      Help topics: src/content/help.js + dashboard/Help.jsx (opening never makes a request)
+  api/dashboard/{people,account,export,integrations,availability,setup-check}  Settings (server/people.js, deletion.js, business-export.js,
+                     integrations.js, booking-rules.js, setup-check.js): owner = longest-standing member; consequential actions need a
+                     sign-in ≤ 15 min old (auth.js needsFresh); billing cancel/keep only after Stripe confirms (billing-details.js)
+  api/platform/controls  Admin: closing requests + deletions, sign a business out, per-business restrictions (server/restrictions.js,
+                     only ever take away), undo a closing; every write needs a reason
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)

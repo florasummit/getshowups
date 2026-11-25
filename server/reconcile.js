@@ -38,7 +38,7 @@ export function scopeOf(customer, known, tests) {
 
 async function deletedSet(db) {
   try {
-    return new Set((await db.prepare('SELECT customer FROM account_deletions').all()).results.map((r) => r.customer))
+    return new Set((await db.prepare("SELECT customer FROM account_deletions WHERE NOT (status = 'in_progress' AND step = 'lockout' AND coalesce(json_extract(report, '$.scheduledFor'), 0) > 0)").all()).results.map((r) => r.customer))
   } catch {
     return new Set()
   }

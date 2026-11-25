@@ -92,6 +92,24 @@ Data is stored with Cloudflare. Access tokens and AI keys are encrypted; access 
 business's signed-in users and authorized GetShowUps staff for support; staff actions are recorded in a tamper-evident
 audit log.
 
+## Added 2026-11-25 (facts of the product; wording for review)
+
+- **Assistant history:** the owner's conversation with the dashboard assistant is kept in that owner's browser only (not on
+  our servers) until they sign out, delete the business or account, or clear it. [FACT: the live policy says we don't store
+  it, which is true of our servers, but its browser-storage section doesn't list this. Must be added.]
+- **Demo booking:** the homepage now uses our own booking page, not Google's scheduler. [Live policy to correct.]
+- **People and sessions:** owners invite others by email; we keep who belongs to a business, pending invitations and sign-in
+  sessions (7 days). Each person chooses which notices they get.
+- **Export:** the owner can download the business's data; the download is recorded, not its contents.
+- **Closing:** while online deletion is off, a request is recorded and handled by a person. When on: see DATA_RETENTION.
+  A marker holding only the business id and a date is kept outside the database so a restored backup can't bring a deleted
+  business back.
+- **Disconnecting:** for Google Calendar we delete our access and, if no other connection uses the same Google account, ask
+  Google to revoke it. For Google Ads, Business Profile, Meta and ChatGPT ads we delete our access only; the provider's own
+  permission is removed by the owner there.
+- **Call reports (off):** "If a business turns on call reports, we read from Google Ads the time, length and answered or
+  missed status of calls from its ads, not the caller's number or recordings." [Needed before GOOGLE_CALLS_ENABLED.]
+
 ## Children, changes
 
 Unchanged from the live page.

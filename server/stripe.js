@@ -18,7 +18,7 @@ const testKey = (k) => /^(sk|rk)_test_/.test(String(k || ''))
 // A live (non-test) secret key is in use. Test businesses (server/testbusiness.js) never reach live
 // Stripe: checkout and the billing portal are refused for them, so no live charge can be created.
 export const stripeLiveKey = (env) => Boolean(env.STRIPE_SECRET_KEY) && !testKey(env.STRIPE_SECRET_KEY)
-const liveBlocked = async (env, customerId) => stripeLiveKey(env) && (await testStatus(env, customerId)).test
+export const liveBlocked = async (env, customerId) => stripeLiveKey(env) && (await testStatus(env, customerId)).test
 // A sandbox (test-key) subscription unlocks the real product, so until live billing is on, sandbox checkout is only
 // for authorized testers: a platform admin, an email listed in MESSAGE_TEST_RECIPIENTS, or a business a platform admin
 // marked as a test business (a readable mark; an unreadable table never authorizes). Everyone else is told online
@@ -63,7 +63,7 @@ function form(params, prefix = '', out = new URLSearchParams()) {
   return out
 }
 
-async function stripePost(env, path, params, { idempotencyKey, method = 'POST' } = {}) {
+export async function stripePost(env, path, params, { idempotencyKey, method = 'POST' } = {}) {
   try {
     const res = await fetch(`${apiBase(env)}${path}${method === 'GET' ? `?${form(params)}` : ''}`, {
       method,
@@ -166,7 +166,8 @@ export async function createCheckout(env, { customer, email, planId, origin }) {
     metadata: { customer: customer.id, plan: plan.id },
     success_url: `${origin}/dashboard?billing=success`,
     cancel_url: `${origin}/dashboard?billing=canceled`,
-  })
+    // Two tabs (or a double click) within a minute get the same Checkout, never two that could both be paid.
+  }, { idempotencyKey: `gsu-checkout-${customer.id}-${plan.id}-${stripeCustomer}-${Math.floor(Date.now() / 60000)}` })
   return r.ok ? { ok: true, url: r.body.url } : r
 }
 

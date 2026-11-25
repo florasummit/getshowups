@@ -5,7 +5,7 @@ import { progress } from '../../../server/customers.js'
 import { signupPlan } from '../../../server/onboarding.js'
 import { billingMisconfigured, listPlans, sandboxCheckoutAllowed, stripeConfigured } from '../../../server/stripe.js'
 import { adsAccess } from '../../../server/ads/access.js'
-import { deletionEnabled } from '../../../server/deletion.js'
+import { deletionEnabled, deletionStatus } from '../../../server/deletion.js'
 import { testStatus } from '../../../server/testbusiness.js'
 import { studioAccess } from '../../../server/intelligence/access.js'
 
@@ -23,6 +23,7 @@ export async function onRequestGet({ request, env }) {
     checkoutOpen: stripeConfigured(env) ? await sandboxCheckoutAllowed(env, customer?.id || null, email) : billingMisconfigured(env) ? false : null,
     email,
     customer,
+    closing: customer?.status === 'suspended' ? await deletionStatus(env.ONBOARDING_DB, customer.id).then((x) => x?.report?.scheduledFor ?? null, () => null) : null,
     // Admin-marked test business: browser acceptance (scripts/acceptance) refuses to run anywhere else. Unreadable = not confirmed.
     testBusiness: customer ? await testStatus(env, customer.id).then((t) => t.test === true && !t.unreadable) : false,
     progress: await progress(env, customer),

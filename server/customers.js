@@ -56,7 +56,8 @@ async function idTaken(env, id) {
   const db = env.ONBOARDING_DB
   if (await db.prepare('SELECT 1 FROM customers WHERE id = ?1').bind(id).first()) return true
   if (await db.prepare('SELECT 1 FROM onboarding_invites WHERE customer = ?1 LIMIT 1').bind(id).first()) return true
-  return Boolean(await env.GOOGLE_TOKENS.get(`google:${id}`))
+  // Deleted ids are never reused, even if the database was restored to before the deletion.
+  return Boolean((await env.GOOGLE_TOKENS.get(`google:${id}`)) || (await env.GOOGLE_TOKENS.get(`deleted:${id}`)))
 }
 
 export async function uniqueCustomerId(env, name) {
