@@ -329,14 +329,16 @@ export default function ChatPage({ id }) {
   if (info.missing) {
     return (
       <div className="pub chat chat--notice">
-        <p className="chat-empty">This page isn’t available.</p>
+        <h1 className="chat-empty">This page isn’t available.</h1>
       </div>
     )
   }
   if (!info.enabled) {
     return (
       <div className="pub chat chat--notice" style={accentVars(info.brand?.accent, { product: info.brand?.product })}>
-        <BrandMark name={info.name} brand={info.brand} />
+        <h1 className="chat-h1">
+          <BrandMark name={info.name} brand={info.brand} />
+        </h1>
         <p className="chat-empty">
           Chat isn’t available right now. <a href={`/book/${id}`}>Book online</a>
           {info.phone && (
@@ -364,7 +366,7 @@ export default function ChatPage({ id }) {
       <header className="chat-head">
         <div className="chat-col chat-head-row">
           <div className="chat-id">
-            {info.brand?.product ? <BrandMark name={info.name} brand={info.brand} href="/" /> : <BrandMark name={info.name} brand={info.brand} href={info.website || undefined} />}
+            <h1 className="chat-h1">{info.brand?.product ? <BrandMark name={info.name} brand={info.brand} href="/" /> : <BrandMark name={info.name} brand={info.brand} href={info.website || undefined} />}</h1>
             <p className="chat-sub">
               <span className="chat-status" aria-hidden="true" />
               {info.brand?.product ? 'Ask about GetShowUps, or book a demo' : 'Assistant · answers questions and books appointments'}

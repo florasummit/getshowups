@@ -153,7 +153,8 @@ test.describe('read-only pages @mobile', () => {
 
   test('booking page layout and unknown pages', async ({ page }) => {
     await page.goto(`/book/${fixtures.E2E_CUSTOMER}`)
-    await expect(page.getByRole('heading', { name: 'Book an appointment' })).toBeVisible()
+    // No services and no service area: open times first.
+    await expect(page.getByRole('heading', { level: 1, name: 'Pick a time' })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
     await page.goto('/book/does-not-exist')
     await expect(page.getByRole('heading', { name: 'This booking page isn’t available' })).toBeVisible()

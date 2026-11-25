@@ -47,6 +47,7 @@ export default function BookingPage({ id }) {
   const [lead, setLead] = useState(resume)
   const [booked, setBooked] = useState(null)
   const [state, setState] = useState({})
+  const [skipFirst, setSkipFirst] = useState(false) // nothing to choose or ask first: the page opened on times
   const [area, setArea] = useState(null) // 'in' | 'review': a ZIP the owner must approve first (no times shown)
   const visit = useRef(visitId())
   const sent = useRef(new Set())
@@ -71,6 +72,7 @@ export default function BookingPage({ id }) {
       if (one) setChoice((c) => ({ ...c, serviceId: one.id }))
       // Nothing to choose or ask before times: go straight to them (availability first).
       const nothingFirst = !data.areaCheck && (data.services.length === 0 || (one && !one.question && one.flow === 'book'))
+      setSkipFirst(Boolean(nothingFirst))
       setStep(nothingFirst ? 'time' : 'service')
     })
 
@@ -98,7 +100,7 @@ export default function BookingPage({ id }) {
     }
   }, [step])
 
-  if (page.loading || !step) return <div className="pub" aria-busy="true" />
+  if (page.loading) return <div className="pub" aria-busy="true" />
   if (page.missing || page.error) {
     return (
       <PublicShell name="" brand={null} footer={false}>
@@ -115,6 +117,7 @@ export default function BookingPage({ id }) {
     )
   }
 
+  if (!step) return <div className="pub" aria-busy="true" />
   const biz = page.data
   const tz = biz.timezone
   const visitMode = biz.appointmentMode === 'at_customer'
@@ -124,7 +127,7 @@ export default function BookingPage({ id }) {
   const request = service?.flow === 'request'
   const minutes = service?.minutes || times?.minutes || biz.slotMinutes
   const one = services.length === 1 && !biz.allowOther
-  const hadServiceStep = !(step === 'time' && !lead && !choice.serviceId && services.length === 0 && !biz.areaCheck) && !(one && !service?.question && !biz.areaCheck && !request)
+  const hadServiceStep = !skipFirst && !resume
   const flowSteps = [...(hadServiceStep && !resume ? ['service'] : []), ...(request || area === 'review' ? [] : ['time']), ...(resume ? [] : ['details'])]
   const stepNo = flowSteps.indexOf(step) + 1
   const product = biz.brand?.product

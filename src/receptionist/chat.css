@@ -48,6 +48,11 @@
   gap: 2px;
   min-width: 0;
 }
+.chat-h1 {
+  margin: 0;
+  font: inherit;
+  min-width: 0;
+}
 .chat-sub {
   display: flex;
   align-items: center;
