@@ -62,6 +62,7 @@ const CREDITED = /\b(ads?|advertising|campaigns?) (have |has )?(generated|earned
 // → null | what is wrong, in words the model can act on
 // quoted: what customers wrote. Their numbers (a pool's size, a time to call) may be repeated, but never as money or results.
 const MONEY = /[$%]|\b(percent|revenue|paid|payments?|earn\w*|income|profit\w*|spent|spend|cost\w*|dollars?|bookings?|inquir\w+|leads?|clicks?)\b/i
+const MONEY_Q = /\b(make|made|earn\w*|revenue|paid|profit\w*|money|spend|spent|sales?|income|worth)\b/i
 export function problemWith(text, { facts, looked, refs, waiting = null, quoted = '' }) {
   if (!text || text.length < 2) return 'The answer was empty.'
   if (text.length > BOUNDS.answer) return 'The answer was too long. Under 160 words.'
@@ -188,7 +189,9 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
     const facts = `${factsOnly(screen)} ${factsOnly(known)} ${factsOnly(before)} ${factsOnly(results)} ${factsOnly(pending)} ${req.question} ${whenText(now, c.tz)} ${new Intl.DateTimeFormat('en-US', { timeZone: c.tz, dateStyle: 'full' }).format(now)}`
     const read = results.some((r) => !r?.ok) || known.length > 0 || before.length > 0
     const wrong = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : problemWith(text, { facts, quoted: wordsOf([screen, known, before, results]).join(' '), looked: read || /\[[ALR]\d{1,3}\]/.test(text), refs: c.shown, waiting: waiting === 'could not be read' ? null : [waiting.call_backs_waiting, waiting.receptionist_messages_waiting, waiting.conversations_needing_the_owner].filter(Number.isInteger) })
-    const why = wrong || claimProblem(text, c.claims, { now, tz: c.tz })
+    // Asked about money of a name this business doesn't have: its own figures must not stand in for the other's.
+    const stranger = !wrong && results.some((r) => r?.matches === 0) && !results.some((r) => r?.matches > 0) && MONEY_Q.test(req.question) && /\$|\d|\b(recorded|payments?|bookings?|revenue|spend)\b/i.test(text) ? 'The name asked about is not in this business. Say in one sentence that you only have this business, without figures and without saying what this business has recorded.' : null
+    const why = wrong || stranger || claimProblem(text, c.claims, { now, tz: c.tz })
     if (!why) {
       const used = new Set([...text.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))
       return { ok: true, answer: fillNames(text), raw: text, looked: results.some((r) => !r?.ok), ...base(), records: onePer([...c.shown.values()].filter((r) => used.has(r.ref))).slice(0, 8) }
