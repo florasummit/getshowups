@@ -62,7 +62,7 @@ test('owner permanently deletes the account: typed confirmation; site, booking a
   expect(o.customers.find((c) => c.id === id).deleted).toBe(true)
   expect(o.metrics.customers.total).toBe(o.customers.filter((c) => !c.testBusiness && !c.deleted).length)
   const detail = await (await a.request.get(`/api/platform/customer?id=${id}`)).json()
-  expect(detail.deletion.report.billing).toEqual({ canceled: 1, customerDeleted: true })
+  expect(detail.deletion.report.billing).toEqual({ canceled: 1, notFound: 0, customerDeleted: true })
   expect(detail.deletion.report.verify.clean).toBe(true)
   expect(detail.totals.leads).toBe(0)
   const log = await (await a.request.get(`/api/platform/audit?customer=${id}`)).json()
