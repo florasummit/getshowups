@@ -29,6 +29,8 @@ export const RULES = {
   adsPlan: { limit: 6, windowSec: 3600 }, //        POST /api/dashboard/ads/plan (per business; each call may use AI)
   adsCreative: { limit: 12, windowSec: 3600 }, //    POST /api/dashboard/ads/creative generate (per business)
   adsWrite: { limit: 60, windowSec: 600 }, //        other ads writes (per business)
+  adsKey: { limit: 10, windowSec: 3600 }, //         POST /api/ads/openai/key save (per business; each validates with OpenAI)
+  adsGeo: { limit: 60, windowSec: 600 }, //          GET /api/ads/openai/locations (per business; each asks OpenAI)
   cron: { limit: 30, windowSec: 600 }, //            POST /api/cron/run (per IP; the scheduler calls every 5 min)
   voiceCatalog: { limit: 60, windowSec: 600 }, //    GET /api/dashboard/receptionist/voices (per business; cached catalog, refresh hits the provider)
   domain: { limit: 30, windowSec: 600 }, //          POST /api/dashboard/domain (per business; each check does DNS lookups)

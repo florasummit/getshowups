@@ -356,6 +356,7 @@ const META_PAGE_TOKEN = 'PAGEmock-not-a-secret'
 const META_ACCOUNTS = [{ id: 'act_111', name: 'MOCK Meta sandbox ad account', currency: 'USD', account_status: 1 }]
 const META_PAGES = [{ id: '222', name: 'MOCK Pools Page' }]
 const metaState = { seq: 500, objects: {}, leads: {}, testLeads: {} }
+const openaiState = { seq: 0, objects: {}, idem: {} }
 async function deliverMetaLead(leadgenId, pageId, formId) {
   const body = JSON.stringify({ object: 'page', entry: [{ id: pageId, time: Date.now(), changes: [{ field: 'leadgen', value: { leadgen_id: leadgenId, page_id: pageId, form_id: formId, created_time: Math.floor(Date.now() / 1000) } }] }] })
   const sig = `sha256=${createHmac('sha256', META_SECRET).update(body).digest('hex')}`
@@ -429,6 +430,35 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/__health') return send(res, 200, { ok: true })
   if (url.pathname === '/__events') return send(res, 200, events)
+  // OpenAI Ads API stand-in (OPENAI_ADS_API_MOCK_ORIGIN): one ad account for the fixture key; campaign → ad group → ad
+  // keep the status they were created with (paused); Idempotency-Key returns the existing object; read-back by id.
+  if (url.pathname.startsWith('/openai-ads/v1/')) {
+    const path = url.pathname.slice('/openai-ads/v1'.length)
+    if (req.headers.authorization !== 'Bearer e2e-openai-ads-key-not-a-secret-0123456789') return send(res, 401, { error: { message: 'invalid key' } })
+    if (req.method === 'GET' && path === '/ad_account') return send(res, 200, { id: 'acct_e2e', name: 'E2E ChatGPT Ads', status: 'active', timezone: 'America/New_York', currency_code: 'USD', url: 'https://e2e.example', preview_url: null, review: {} })
+    if (req.method === 'GET' && path === '/geo_lookup/search')
+      return send(res, 200, { query: url.searchParams.get('q'), count: 2, results: [{ id: '3000519', name: 'Charleston', canonical_name: 'Charleston, SC', type: 'market', country_code: 'US', parent_id: null, parent_country: 'US' }, { id: '2000045', name: 'South Carolina', canonical_name: 'South Carolina', type: 'region', country_code: 'US', parent_id: null, parent_country: 'US' }] })
+    const body = raw ? JSON.parse(raw) : {}
+    const create = /^\/(campaigns|ad_groups|ads)$/.exec(path)
+    if (req.method === 'POST' && create) {
+      const idem = req.headers['idempotency-key']
+      if (idem && openaiState.idem[idem]) return send(res, 200, openaiState.objects[openaiState.idem[idem]])
+      const id = `${{ campaigns: 'cmpn', ad_groups: 'adgrp', ads: 'ad' }[create[1]]}_e2e${++openaiState.seq}`
+      openaiState.objects[id] = { id, ...body, ...(create[1] === 'ads' ? { review_status: 'in_review' } : {}) }
+      if (idem) openaiState.idem[idem] = id
+      events.push({ type: 'openai.create', kind: create[1], id, status: body.status })
+      return send(res, 200, openaiState.objects[id])
+    }
+    const one = /^\/(campaigns|ad_groups|ads)\/([a-z]+_e2e\d+)(?:\/(pause|activate))?$/.exec(path)
+    if (one && openaiState.objects[one[2]]) {
+      const o = openaiState.objects[one[2]]
+      if (one[3]) o.status = one[3] === 'pause' ? 'paused' : 'active'
+      else if (req.method === 'POST') Object.assign(o, body)
+      return send(res, 200, o)
+    }
+    if (req.method === 'GET' && /\/insights$/.test(path)) return send(res, 200, { object: 'list', data: [], count: 0, first_id: null, last_id: null, has_more: false })
+    return send(res, 404, { error: {} })
+  }
   if (/^\/v\d{1,3}\.0\//.test(url.pathname)) {
     const params = req.method === 'POST' ? Object.fromEntries(new URLSearchParams(raw)) : Object.fromEntries(url.searchParams)
     for (const [k, v] of Object.entries(params)) {

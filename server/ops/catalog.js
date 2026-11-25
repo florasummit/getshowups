@@ -17,6 +17,7 @@ import { adsEnabled } from '../ads/access.js'
 import { studioEnabled as teachAiEnabled } from '../intelligence/access.js'
 import { liveLaunchEnabled } from '../ads/campaigns.js'
 import { metaConfigured } from '../ads/meta.js'
+import { openaiAdsEnabled, verifyBusinesses } from '../ads/openai.js'
 import { conversionsEnabled } from '../ads/conversions.js'
 import { deletionEnabled, deletionStatus } from '../deletion.js'
 import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
@@ -317,6 +318,24 @@ registerCapability({
         : { mode: 'sandbox', note: 'Connect, draft, preview, review and dry run; creating a paused campaign needs ADS_LIVE_LAUNCH', approval: 'ADS_LIVE_LAUNCH=true (creating paused campaigns) and, separately, each owner’s Start' }
       : { mode: 'disabled', note: 'Meta app not configured: owners see “not available yet”; drafts and previews still work', approval: 'META_APP_ID + META_APP_SECRET (+ META_WEBHOOK_VERIFY_TOKEN) from a Meta app with Business verification and App Review', needs: 'configuration' },
   verify: seen('Meta campaign read back', 7, "SELECT max(at) AS at FROM ad_actions WHERE kind = 'verify' AND status = 'applied' AND campaign_id IN (SELECT id FROM ad_campaigns WHERE platform = 'meta')"),
+})
+registerCapability({
+  id: 'ads.openai',
+  tier: 'advertising',
+  action: { label: 'Ads tab (business dashboard)', href: '/dashboard/ads' },
+  name: 'ChatGPT ads (OpenAI Ads API)',
+  journey: 'advertising',
+  external: 'OpenAI Ads',
+  dependsOn: ['platform.tokens', 'ads.safety_stop'],
+  description: "Chat-card ads in ChatGPT: the owner's own Ads API key (validated, encrypted), market/region targeting, draft, review, dry run; created PAUSED; read back and compared; paused/resumed; daily insights.",
+  blockers: ['A ChatGPT Ads account (ads.openai.com) and its Ads API key — external, founder', 'Migration 0039 applied (table rebuild, approval)', 'No OpenAI sandbox: the first paused campaign is created in a real account (OPENAI_ADS_VERIFY_BUSINESSES)'],
+  state: (env) =>
+    !openaiAdsEnabled(env)
+      ? { mode: 'disabled', note: 'OPENAI_ADS_ENABLED is off: no ChatGPT Ads routes, drafts or connections', approval: 'OPENAI_ADS_ENABLED=true (after migration 0039)', needs: 'configuration' }
+      : liveLaunchEnabled(env)
+        ? { mode: 'live', note: 'Connected owners can create paused campaigns and start them (approved budget, subscription)' }
+        : { mode: 'sandbox', note: `Connect, draft, review and dry run; paused creation only for ${verifyBusinesses(env).join(', ') || 'no business'} (OPENAI_ADS_VERIFY_BUSINESSES); starting needs ADS_LIVE_LAUNCH`, approval: 'ADS_LIVE_LAUNCH=true and, separately, each owner’s Start' },
+  verify: seen('ChatGPT Ads campaign read back', 7, "SELECT max(at) AS at FROM ad_actions WHERE kind = 'verify' AND status = 'applied' AND campaign_id IN (SELECT id FROM ad_campaigns WHERE platform = 'openai')"),
 })
 registerCapability({
   id: 'ads.safety_stop',

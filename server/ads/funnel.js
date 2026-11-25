@@ -8,7 +8,7 @@ import { isTestLead } from '../testdata.js'
 import { CURRENT_REVENUE_SQL, revenueReady } from '../revenue.js'
 
 const DAY = 86_400_000
-export const AD_SOURCES = ['google_ads', 'meta_ad_click', 'meta_lead_form']
+export const AD_SOURCES = ['google_ads', 'meta_ad_click', 'meta_lead_form', 'openai_ad_click']
 export const STALE_HOURS = 36
 const inList = (xs) => xs.map((x) => `'${x}'`).join(',')
 

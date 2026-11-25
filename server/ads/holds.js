@@ -19,7 +19,8 @@ export const HOLD_REASONS = {
   account_deleted: 'the account is being deleted',
 }
 
-const PAUSED = { google: 'PAUSED', meta: 'PAUSED' }
+const PAUSED = { google: 'PAUSED', meta: 'PAUSED', openai: 'paused' }
+const WHERE = { google: 'Google Ads', meta: 'Meta', openai: 'ChatGPT Ads' }
 
 async function lastEventAt(db, customerId, types) {
   const row = await db
@@ -85,7 +86,7 @@ export async function enforceAdsHold(env, customerId, { actor = 'system:hold', h
       failed++
       const lost = UNREACHABLE.includes(r.error)
       if (lost) unreachable++
-      const where = row.platform === 'google' ? 'Google Ads' : 'Meta'
+      const where = WHERE[row.platform] || row.platform
       await logAction(
         db,
         {
