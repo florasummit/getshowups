@@ -10,6 +10,8 @@ export const RULES = {
   bookView: { limit: 60, windowSec: 600 }, //        GET /api/book/:id (per IP; each view calls Google)
   bookLead: { limit: 10, windowSec: 600 }, //        POST lead (per IP)
   bookLeadPerBusiness: { limit: 100, windowSec: 3600 }, // POST lead (per business, caps spam floods)
+  bookEvent: { limit: 120, windowSec: 600 }, //       POST /api/book/:id/event (per IP; booking-page funnel stages, codes only)
+  bookArea: { limit: 60, windowSec: 600 }, //        GET /api/book/:id/area (per IP; a ZIP lookup in our own records, no Google call: its own allowance, so it never uses up page views)
   siteForm: { limit: 5, windowSec: 600 }, //         POST website contact/quote form (per IP)
   siteFormPerBusiness: { limit: 60, windowSec: 3600 }, // POST website form (per business, caps spam floods)
   enterpriseToken: { limit: 60, windowSec: 600 }, //  GET /api/enterprise/inquiry (per IP; the form token)

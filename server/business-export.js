@@ -5,6 +5,7 @@ import { zip } from './zip.js'
 import { getProfile } from './onboarding.js'
 import { getPolicies } from './policies.js'
 import { bookingRules } from './booking-rules.js'
+import { bookingOptions } from './services.js'
 import { loadWebsite } from './website.js'
 import { blobBytes } from './assets.js'
 import { domainFor } from './domains.js'
@@ -45,7 +46,9 @@ export async function businessExport(env, customer, now = Date.now()) {
 
   const leads = await rowsOf('customers.csv', `SELECT l.*, a.street, a.unit, a.city, a.state, a.zip AS azip, t.source AS source, (SELECT is_test FROM test_marks m WHERE m.lead_id = l.id) AS test
       FROM leads l LEFT JOIN lead_addresses a ON a.lead_id = l.id LEFT JOIN lead_attribution t ON t.lead_id = l.id WHERE l.customer = ?1 ORDER BY l.created_at`)
-  addCsv('customers.csv', ['id', 'asked_at', 'name', 'email', 'phone', 'need', 'zip', 'status', 'street', 'unit', 'city', 'state', 'address_zip', 'source', 'test_record'], leads.map((l) => [l.id, at(l.created_at), l.name, l.email, l.phone, l.need, l.zip, l.status, l.street, l.unit, l.city, l.state, l.azip, l.source || '', l.test ? 'yes' : '']))
+  // The service each request was for (migration 0042), read on its own so a missing table never empties customers.csv.
+  const chosen = new Map((await rowsOf('customers.csv', 'SELECT lead_id, service_name, flow, minutes FROM lead_services WHERE customer = ?1')).map((s) => [s.lead_id, s]))
+  addCsv('customers.csv', ['id', 'asked_at', 'name', 'email', 'phone', 'need', 'zip', 'status', 'street', 'unit', 'city', 'state', 'address_zip', 'source', 'test_record', 'service', 'booking_flow', 'service_minutes'], leads.map((l) => { const s = chosen.get(l.id); return [l.id, at(l.created_at), l.name, l.email, l.phone, l.need, l.zip, l.status, l.street, l.unit, l.city, l.state, l.azip, l.source || '', l.test ? 'yes' : '', s?.service_name ?? '', s?.flow ?? '', s?.minutes ?? ''] }))
   const appts = await rowsOf('appointments.csv', `SELECT a.*, l.name, o.work, o.value_cents,
         (SELECT amount_cents FROM revenue_entries r WHERE r.appointment_id = a.id AND r.kind = 'invoiced' ORDER BY r.id DESC LIMIT 1) AS invoiced,
         (SELECT amount_cents FROM revenue_entries r WHERE r.appointment_id = a.id AND r.kind = 'paid' ORDER BY r.id DESC LIMIT 1) AS paid
@@ -65,7 +68,7 @@ export async function businessExport(env, customer, now = Date.now()) {
   addCsv('ad_results.csv', ['date', 'platform', 'campaign', 'spend', 'clicks', 'impressions'], ads.map((m) => [m.date, m.platform, m.campaign_id, money(m.spend_cents), m.clicks, m.impressions]))
 
   const one = (sql) => db.prepare(sql).bind(id).first().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
-  const [profile, policies, rules, rec, ai, versions, site, siteVersions, domain] = await Promise.all([
+  const [profile, policies, rules, rec, ai, versions, site, siteVersions, domain, options] = await Promise.all([
     getProfile(db, id),
     getPolicies(db, id),
     bookingRules(db, id),
@@ -75,8 +78,9 @@ export async function businessExport(env, customer, now = Date.now()) {
     loadWebsite(db, customer),
     rowsOf('website.json', 'SELECT version, content, created_at FROM website_versions WHERE customer = ?1 ORDER BY version DESC', 100),
     domainFor(env, id),
+    bookingOptions(db, id),
   ])
-  addJson('business.json', { id, name: customer.name, timezone: customer.timezone, appointmentMode: customer.appointmentMode, serviceZips: customer.serviceZips, hours: { days: customer.workdays, from: customer.dayStart, to: customer.dayEnd, minutes: customer.slotMinutes }, bookingNoticeMinutes: rules.minNoticeMinutes, closedDates: rules.closures, profile, policies, receptionist: rec && { on: Boolean(rec.enabled), mode: rec.mode, greeting: rec.greeting, knowledge: rec.knowledge }, domain: domain ? { hostname: domain.hostname, status: domain.status } : null })
+  addJson('business.json', { id, name: customer.name, timezone: customer.timezone, appointmentMode: customer.appointmentMode, serviceZips: customer.serviceZips, hours: { days: customer.workdays, from: customer.dayStart, to: customer.dayEnd, minutes: customer.slotMinutes }, bookingNoticeMinutes: rules.minNoticeMinutes, closedDates: rules.closures, bookingPage: { offerOtherNotSure: options.allowOther }, profile, policies, receptionist: rec && { on: Boolean(rec.enabled), mode: rec.mode, greeting: rec.greeting, knowledge: rec.knowledge }, domain: domain ? { hostname: domain.hostname, status: domain.status } : null })
   addJson('ai_knowledge.json', { draft: ai ? JSON.parse(ai.draft) : null, publishedVersion: ai?.live_version ?? null, versions: versions.map((v) => ({ version: v.version, note: v.note, at: at(v.created_at), config: JSON.parse(v.config) })) })
   addJson('website.json', { draft: site.draft, liveVersion: site.liveVersion, versions: siteVersions.map((v) => ({ version: v.version, at: at(v.created_at), content: JSON.parse(v.content) })) })
 

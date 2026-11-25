@@ -49,13 +49,13 @@ export const ERASED_TABLES = [
   'ai_rule_versions', 'ai_rules',
   'receptionist_requests', 'receptionist_events', 'receptionist_calls', 'receptionist_conversations', 'receptionist_settings', 'receptionist_voice_inherit', 'receptionist_voice_settings',
   'thread_messages', 'lead_threads', 'followup_settings', 'sms_provider_objects', 'sms_registration_extra', 'sms_accounts', 'sms_registrations', 'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'revenue_entries', 'coverage_requests', 'appointment_outcomes', 'appointment_changes',
-  'lead_addresses', 'lead_attribution', 'test_marks', 'meta_lead_events', 'ghl_links', 'lsa_leads', 'google_calls', 'google_call_setup', 'appointments', 'leads',
+  'lead_services', 'lead_addresses', 'lead_attribution', 'test_marks', 'meta_lead_events', 'ghl_links', 'lsa_leads', 'google_calls', 'google_call_setup', 'appointments', 'leads',
   'ad_change_requests', 'ad_imported_metrics_daily', 'ad_imported_campaigns', 'ad_import_state', 'ad_templates', 'gbp_connections',
   'ad_metrics_daily', 'ad_creatives', 'ad_actions', 'ad_campaigns', 'ad_budget_approvals', 'ad_profiles', 'ad_connections',
   'website_versions', 'website_generations', 'website_ai_usage', 'website_assets', 'website_domains', 'websites', 'landing_pages',
   'business_profiles', 'service_settings', 'customer_settings', 'onboarding_marks', 'self_signups', 'account_invites',
   'onboarding_invites', 'customer_users', 'email_outbox', 'conversation_control', 'business_policies', 'email_suppressions', 'website_imports', 'ai_credentials', 'ai_key_usage', 'website_design_turns',
-  'booking_rules', 'business_closures', 'owner_notice_off', 'business_restrictions',
+  'booking_rules', 'business_closures', 'owner_notice_off', 'business_restrictions', 'booking_options',
   'acceptance_sessions', 'acceptance_grants', 'website_asset_hidden', 'ops_incidents', 'qa_runs', 'business_accounts',
 ]
 // Kept (no personal data, or needed for tax/accounting, disputes, security): see docs/DATA_RETENTION.md.

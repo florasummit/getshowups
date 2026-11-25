@@ -4,6 +4,7 @@
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle, returnFromMeta, useSession } from './helpers.js'
+import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 
 // No retries: these tests are one stateful sequence on a database seeded once per run. A retry re-runs
 // the file from the top against the already-changed records (e.g. "Draft my plan" has become "Draft
@@ -467,15 +468,10 @@ test('booking page passes ad attribution with the lead', async ({ page }) => {
     if (r.url().endsWith('/lead') && r.method() === 'POST') sent = r.postDataJSON()
   })
   await page.goto(`/book/${fixtures.E2E_CUSTOMER}?utm_source=google&utm_medium=paid&utm_campaign=abc123def456`)
-  await page.getByLabel('What do you need?').fill('Pool opening')
-  await page.getByLabel('Name').fill('Ad Clicker')
-  await page.getByLabel('Phone').fill('(555) 010-0166')
-  await page.getByLabel('Email').fill('adclick@example.net')
-  const zip = page.getByLabel('ZIP', { exact: true })
-  if (await zip.count()) await zip.fill('29403')
-  await page.getByRole('button', { name: /Choose a time/ }).click()
-  await expect(page.getByRole('heading', { name: /Pick a/ })).toBeVisible()
-  expect(sent.attribution).toEqual({ utm_source: 'google', utm_medium: 'paid', utm_campaign: 'abc123def456' })
+  await chooseService(page, { need: 'Pool opening', zip: '29403' })
+  await chooseTime(page, { day: 'last', slot: 'last' })
+  await fillDetails(page, { need: 'Pool opening', name: 'Ad Clicker', phone: '(555) 010-0166', email: 'adclick@example.net' })
+  await expect.poll(() => sent?.attribution).toEqual({ utm_source: 'google', utm_medium: 'paid', utm_campaign: 'abc123def456' })
 })
 
 test('Google Ads: disconnect is confirmed and honest; a sign-in without an Ads account gets setup guidance; reconnect restores (mock API)', async ({ page, context }) => {

@@ -3,6 +3,7 @@
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
+import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 
@@ -25,28 +26,20 @@ test('settings: the owner writes what customers should know', async ({ page, con
 
 test('visit booking: service address is required and lands on the calendar event', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_HOME_CUSTOMER}`)
-  await expect(page.getByRole('heading', { name: 'Book a visit' })).toBeVisible()
-  await expect(page.getByLabel('ZIP', { exact: true })).toBeVisible()
-  await page.getByLabel('What do you need?').fill('Green pool cleanup')
-  await page.getByLabel('Name').fill('Robin Homeowner')
-  await page.getByLabel('Phone').fill('(555) 010-0177')
-  await page.getByLabel('Email').fill('robin@example.net')
-  await page.getByLabel('Street address').fill('21 Tide Ln')
-  await page.getByLabel('City').fill('Charleston')
-  await page.getByLabel('State').fill('zz')
-  await page.getByLabel('ZIP', { exact: true }).fill('29403')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
-  await expect(page.getByRole('alert')).toHaveText('Please enter the two-letter state, like SC.')
-  await page.getByLabel('State').fill('sc')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
+  await chooseService(page, { need: 'Green pool cleanup', zip: '29403' })
   await expect(page.getByRole('heading', { name: 'Pick a visit time' })).toBeVisible()
   const notes = page.getByRole('region', { name: 'Good to know' })
   await expect(notes).toContainText('Before your appointment: Please unlock the side gate and keep pets inside.')
   await expect(notes).toContainText('Cancellations: Please cancel at least 24 hours ahead.')
   // The mock calendar is shared by all businesses and other specs book the first slot in parallel,
   // so take the last offered slot to avoid a cross-spec race (production calendars are separate).
-  await page.locator('.slot').last().click()
-  await page.getByRole('button', { name: /^Book / }).click()
+  await chooseTime(page, { slot: 'last' })
+  // The ZIP from the first step is already in the address.
+  await expect(page.getByLabel('ZIP', { exact: true })).toHaveValue('29403')
+  await fillDetails(page, { name: 'Robin Homeowner', phone: '(555) 010-0177', email: 'robin@example.net', address: { street: '21 Tide Ln', city: 'Charleston', state: 'zz' } })
+  await expect(page.getByRole('alert')).toHaveText('Please enter the two-letter state, like SC.')
+  await page.getByLabel('State').fill('sc')
+  await page.getByRole('button', { name: /^Confirm/ }).click()
   await expect(page.getByRole('heading', { name: 'Visit booked' })).toBeVisible()
   await expect(page.getByText('E2E Home Service will visit 21 Tide Ln.')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Good to know' })).toContainText('keep pets inside')
@@ -100,7 +93,9 @@ test('settings: mode choice shown and saved; hours label reflects visits', async
 
 test('at_business regression: booking page has no address step @mobile', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_CUSTOMER}`)
-  await expect(page.getByRole('heading', { name: 'Book an appointment' })).toBeVisible()
+  await chooseService(page)
+  await chooseTime(page, { day: 'last', slot: 'last' })
+  await expect(page.getByLabel('Name')).toBeVisible()
   await expect(page.getByLabel('Street address')).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
@@ -118,6 +113,8 @@ test('visit outcome buttons stay inside the card on mobile @mobile', async ({ pa
 
 test('visit booking page fits on mobile @mobile', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_HOME_CUSTOMER}`)
+  await chooseService(page, { zip: '29403' })
+  await chooseTime(page, { day: 'last', slot: 'last' })
   await expect(page.getByLabel('Street address')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })

@@ -28,7 +28,10 @@ src/                 React marketing site (Vite → dist/). Browser code only.
   dashboard/         Sign-in → self-serve onboarding (Setup.jsx: business → plan → details → services → calendar →
                      hours → website → address → publish → launch; older businesses: business → calendar → hours) →
                      Home.jsx tabs: Overview · Appointments · Website (WebsiteTab, WebsiteEditor, DomainSettings) · Settings
-  booking/           Public booking page /book/:id (details → time → booked)
+  booking/           Public booking page /book/:id: service (+ZIP area check) → time (for the service's length) → details →
+                     booked; request services skip the time; no times → details are still taken. ?preview=1 never books
+  public/            ONE design system for public customer pages (booking + chat): PublicShell (the business's own published
+                     logo/accent, or the canonical GetShowUps logo on our pages), public.css (.pub tokens), color.js (AA-safe accent)
   admin/             Platform console /admin (metrics, attention, customers, detail, invites, plans, email); Control
                      Center /admin/control: Control.jsx (shell + Overview), control/ (Incidents, Accounts, Integrations,
                      ui, lib: URL state), Qa.jsx (Testing), control.css. Labels/states come from server/ops/states.js
@@ -39,7 +42,9 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/google/oauth/  Customer Google Calendar connection: start (GET/POST), callback (GET)
   api/auth/          Dashboard sign-in: google/start, google/callback (openid+email), logout (POST)
   api/dashboard/     Session routes: me, calendar, overview (GET); business, hours, connect-link, outcome (POST)
-  api/book/[customer]/  Public: index (GET slots), lead (POST), appointment (POST books on Google Calendar)
+  api/book/[customer]/  Public: index (GET services, brand, slots[?service=]), area (GET ZIP check before times), lead (POST,
+                     serviceId + answer), appointment (POST books on Google Calendar), event (POST funnel stage, codes only)
+  api/dashboard/booking  Owner: "Other / Not sure" option + last-30-days booking funnel (services save via /profile)
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
                      invite-action, status, plans, test-business, alerts (founder alert status + TEST email). Every write is same-origin and audited.
   api/stripe/webhook Stripe events (signature verified, idempotent)
@@ -99,6 +104,12 @@ server/              Shared backend modules imported by functions/ (bundled by P
   calendar.js        Google access: connect, freeBusy, createEvent/deleteEvent, checkConnection, slot math
   customers.js       Business validation/creation (ids never collide with stored connections), progress
   booking.js         Leads, qualification, double-booking-safe booking, outcomes, results
+  services.js        THE service catalog (business_profiles.services JSON): stable ids, slots (1-4 x slot length), hidden,
+                     booking book|request|off, one question. Old {name, price} rows stay valid. Booking page = bookingServices;
+                     receptionist/assistant = offeredServices (hidden dropped). The lead keeps a lead_services snapshot (0042);
+                     book() takes the length from it (never the browser), checks overlap, and isOfferedSlot uses the span
+  booking-funnel.js  Booking-page stages per visit (events 'booking_stage', codes only) and the owner's 30-day funnel
+  public-brand.js    A business's published logo + accent for its booking/chat pages (never a draft)
   public.js          Guard for the public booking API (only fully set-up businesses)
   ratelimit.js       D1 fixed-window rate limits (hashed IP / business keys, fails open)
   platform.js        Platform-admin authorization (PLATFORM_ADMIN_EMAILS) + audit()

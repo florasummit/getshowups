@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { LoadError } from './ui.jsx'
 import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
+import { suggestionsFor } from '../content/service-suggestions.js'
 
 // A settings save refused because the saved values changed elsewhere (another tab or device) since this page loaded.
 const CHANGED_ELSEWHERE = 'These settings were changed somewhere else (another tab or device) since this page opened, so this change wasn’t saved. Reload the page to see the latest, then make your change again.'
@@ -308,20 +309,35 @@ export function PoliciesForm() {
   )
 }
 
-// Services and prices: one list for the receptionist, the assistant, ads and new websites. The published website keeps its
-// own copy (a visitor never sees it change without a publish); the setup check says when the two disagree.
+// Services and prices: ONE list (server/services.js) for the booking page, the receptionist, the assistant, ads and new
+// websites. The published website keeps its own copy (a visitor never sees it change without a publish); the setup check
+// says when the two disagree. Per service: what it is, its price as the owner writes it, how long it takes, how customers
+// get it (book a time / request / not on the booking page), one optional question, and a temporary hide switch.
+const FLOWS = [
+  ['book', 'Customers pick a time'],
+  ['request', 'Customers send a request (quote or call back)'],
+  ['off', 'Not on the booking page (the receptionist can still answer about it)'],
+]
+const blankService = () => ({ name: '', price: '', description: '', slots: 1, hidden: false, booking: 'book', question: null })
+const withDefaults = (s) => ({ ...blankService(), ...s, question: s?.question?.label ? s.question : null })
+const lengthLabel = (m) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${Math.floor(m / 60)} h ${m % 60} min`)
+
 export function ServicesForm() {
   const [p, setP] = useState(undefined)
   const [rows, setRows] = useState(null)
+  const [open, setOpen] = useState(null)
   const [state, setState] = useState({})
+  const [booking, setBooking] = useState(null)
   const base = useRef(null)
   const load = () =>
     api('/api/dashboard/profile').then(({ status, data }) => {
       if (status === 200 && data.profile) base.current = data.profile
       setP(status === 200 ? data.profile || {} : null)
     })
+  const loadBooking = () => api('/api/dashboard/booking').then(({ status, data }) => setBooking(status === 200 ? data : false))
   useEffect(() => {
     load()
+    loadBooking()
     const on = (e) => {
       base.current = e.detail
       setP(e.detail)
@@ -331,12 +347,21 @@ export function ServicesForm() {
   }, [])
   if (p === null) return <LoadError what="your services" onRetry={load} />
   if (p === undefined) return <div aria-busy="true" />
-  const list = rows ?? (p.services?.length ? p.services : [{ name: '', price: '' }])
-  const set = (i, k) => (e) => setRows(list.map((r, j) => (j === i ? { ...r, [k]: e.target.value } : r)))
+  const slot = booking?.slotMinutes || 60
+  const list = rows ?? (p.services?.length ? p.services.map(withDefaults) : [blankService()])
+  const update = (i, patch) => setRows(list.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const set = (i, k) => (e) => update(i, { [k]: e.target.value })
+  const move = (i, d) => {
+    const l = [...list]
+    ;[l[i], l[i + d]] = [l[i + d], l[i]]
+    setRows(l)
+    if (open === i) setOpen(i + d)
+  }
+  const ideas = suggestionsFor(p.industry, list.map((r) => r.name))
   const fromWebsite = async () => {
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/website')
-    const found = (status === 200 ? data.draft?.services || [] : []).filter((x) => x?.name).slice(0, 8).map((x) => ({ name: String(x.name).slice(0, 60), price: String(x.price || '').slice(0, 40) }))
+    const found = (status === 200 ? data.draft?.services || [] : []).filter((x) => x?.name).slice(0, 16).map((x) => ({ ...blankService(), name: String(x.name).slice(0, 60), price: String(x.price || '').slice(0, 40), description: String(x.description || '').slice(0, 160) }))
     if (found.length) setRows(found)
     setState(found.length ? { note: 'Copied from your website. Check them, then save.' } : { error: 'Your website lists no services.' })
   }
@@ -344,44 +369,124 @@ export function ServicesForm() {
     e.preventDefault()
     const industry = p.industry || new FormData(e.currentTarget).get('industry')
     setState({ busy: true })
-    const services = list.filter((r) => r.name.trim()).map(({ name, price }) => ({ name, price: price || '' }))
+    const services = list
+      .filter((r) => r.name.trim())
+      .map((r) => ({ ...(r.id ? { id: r.id } : {}), name: r.name, price: r.price || '', description: r.description || '', slots: r.slots || 1, hidden: r.hidden === true, booking: r.booking || 'book', question: r.question?.label?.trim() ? { label: r.question.label, required: r.question.required === true } : null }))
     const { status, data } = await api('/api/dashboard/profile', { method: 'POST', body: { phone: p.phone, industry, description: p.description, cities: p.cities || [], services, ...(base.current ? { base: base.current } : {}) } })
     if (status === 200) {
       base.current = data.profile
       setP(data.profile)
       setRows(null)
+      setOpen(null)
       setState({ saved: true })
       window.dispatchEvent(new CustomEvent('gsu:profile', { detail: data.profile }))
       saved()
-    } else setState({ error: status === 409 ? CHANGED_ELSEWHERE : data.fields?.includes('services:unapproved_claim') ? 'Please remove promises like guarantees, discounts or ratings from names and prices.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the services and try again.' })
+    } else setState({ error: status === 409 ? CHANGED_ELSEWHERE : data.fields?.includes('services:unapproved_claim') ? 'Please remove promises like guarantees, discounts or ratings from names, prices and descriptions.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the services and try again: names up to 60 characters, prices up to 40, descriptions up to 160.' })
+  }
+  const toggleOther = async (allowOther) => {
+    setBooking((b) => ({ ...b, options: { ...b.options, allowOther } }))
+    const { status } = await api('/api/dashboard/booking', { method: 'POST', body: { allowOther } })
+    if (status !== 200) loadBooking()
+    else saved()
   }
   return (
-    <form className="form" onSubmit={submit}>
-      <p className="fine">What the receptionist, the assistant and your ads say you do. Write what a price covers: “$300 per month”, “From $150 per visit”, “$95 per hour”.</p>
+    <form className="form svc-form" onSubmit={submit}>
+      <p className="fine">What customers can book, and what the receptionist and the assistant say you do. Write what a price covers: “$300 per month”, “From $150 per visit”, “$95 per hour”.</p>
       {!p.industry && (
         <label className="field">
           <span>What do you do?</span>
           <input name="industry" maxLength={60} required placeholder="Pool service" />
         </label>
       )}
-      {list.map((r, i) => (
-        <div key={i} className="service-row">
-          <label className="field">
-            <span className={i ? 'sr-only' : undefined}>Service</span>
-            <input value={r.name} onChange={set(i, 'name')} maxLength={60} aria-label={`Service ${i + 1}`} />
-          </label>
-          <label className="field field--price">
-            <span className={i ? 'sr-only' : undefined}>Price</span>
-            <input value={r.price || ''} onChange={set(i, 'price')} maxLength={40} placeholder="$150 per visit" aria-label={`Price for service ${i + 1}`} />
-          </label>
-          <button type="button" className="link-btn service-remove" aria-label={`Remove service ${i + 1}`} onClick={() => setRows(list.filter((_, j) => j !== i))} disabled={list.length === 1}>
-            Remove
-          </button>
-        </div>
-      ))}
+      <ol className="svc-list">
+        {list.map((r, i) => {
+          const minutes = (r.slots || 1) * slot
+          return (
+            <li key={r.id || `new-${i}`} className={`svc${r.hidden ? ' is-hidden' : ''}`}>
+              <div className="svc-main">
+                <label className="field">
+                  <span className="sr-only">Service {i + 1}</span>
+                  <input value={r.name} onChange={set(i, 'name')} maxLength={60} placeholder="Service name" aria-label={`Service ${i + 1}`} />
+                </label>
+                <label className="field field--price">
+                  <span className="sr-only">Price for service {i + 1}</span>
+                  <input value={r.price || ''} onChange={set(i, 'price')} maxLength={40} placeholder="$150 per visit" aria-label={`Price for service ${i + 1}`} />
+                </label>
+                <div className="svc-tools">
+                  <button type="button" className="icon-btn" aria-label={`Move ${r.name || `service ${i + 1}`} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+                    ↑
+                  </button>
+                  <button type="button" className="icon-btn" aria-label={`Move ${r.name || `service ${i + 1}`} down`} disabled={i === list.length - 1} onClick={() => move(i, 1)}>
+                    ↓
+                  </button>
+                  <button type="button" className="link-btn" aria-expanded={open === i} aria-controls={`svc-more-${i}`} onClick={() => setOpen(open === i ? null : i)}>
+                    {open === i ? 'Done' : 'Options'}
+                  </button>
+                  <button type="button" className="link-btn service-remove" aria-label={`Remove service ${i + 1}`} onClick={() => setRows(list.filter((_, j) => j !== i))} disabled={list.length === 1}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <p className="svc-meta">
+                {r.booking === 'off' ? 'Not on the booking page' : r.booking === 'request' ? 'Request' : lengthLabel(minutes)}
+                {r.question?.label ? ' · asks one question' : ''}
+                {r.hidden ? ' · Hidden' : ''}
+              </p>
+              {open === i && (
+                <div className="svc-more" id={`svc-more-${i}`}>
+                  <label className="field">
+                    <span>Description (optional)</span>
+                    <textarea rows={2} maxLength={160} value={r.description || ''} onChange={set(i, 'description')} placeholder="What’s included, in one line" />
+                  </label>
+                  <fieldset className="field">
+                    <legend>How customers get it</legend>
+                    {FLOWS.map(([v, label]) => (
+                      <label key={v} className="check">
+                        <input type="radio" name={`flow-${i}`} checked={(r.booking || 'book') === v} onChange={() => update(i, { booking: v })} />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  {(r.booking || 'book') === 'book' && (
+                    <label className="field">
+                      <span>How long it takes</span>
+                      <select value={r.slots || 1} onChange={(e) => update(i, { slots: Number(e.target.value) })}>
+                        {[1, 2, 3, 4].map((n) => (
+                          <option key={n} value={n}>
+                            {lengthLabel(n * slot)}
+                          </option>
+                        ))}
+                      </select>
+                      <small className="fine">Times are offered on your {lengthLabel(slot)} booking grid (Booking hours).</small>
+                    </label>
+                  )}
+                  {r.booking !== 'off' && (
+                    <div className="svc-question">
+                      <label className="field">
+                        <span>Ask customers who choose it (optional)</span>
+                        <input maxLength={80} value={r.question?.label || ''} onChange={(e) => update(i, { question: { label: e.target.value, required: r.question?.required === true } })} placeholder="Which equipment, and what’s it doing?" />
+                      </label>
+                      {r.question?.label && (
+                        <label className="check">
+                          <input type="checkbox" checked={r.question?.required === true} onChange={(e) => update(i, { question: { ...r.question, required: e.target.checked } })} />
+                          <span>Required</span>
+                        </label>
+                      )}
+                    </div>
+                  )}
+                  <label className="check">
+                    <input type="checkbox" checked={r.hidden === true} onChange={(e) => update(i, { hidden: e.target.checked })} />
+                    <span>Hide for now (not offered on the booking page or by the receptionist; past requests keep it)</span>
+                  </label>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
       <div className="row-actions">
-        {list.length < 8 && (
-          <button type="button" className="btn btn-sm btn-quiet" onClick={() => setRows([...list, { name: '', price: '' }])}>
+        {list.length < 16 && (
+          <button type="button" className="btn btn-sm btn-quiet" onClick={() => setRows([...list, blankService()])}>
             Add a service
           </button>
         )}
@@ -389,6 +494,16 @@ export function ServicesForm() {
           Copy from my website
         </button>
       </div>
+      {ideas?.names.length > 0 && list.length < 16 && (
+        <div className="svc-ideas">
+          <span className="fine">Common for {ideas.label}, if you offer them:</span>
+          {ideas.names.map((n) => (
+            <button key={n} type="button" className="chip" onClick={() => setRows([...list.filter((r) => r.name.trim()), { ...blankService(), name: n }])}>
+              + {n}
+            </button>
+          ))}
+        </div>
+      )}
       {state.error && (
         <p className="form-error" role="alert">
           {state.error}
@@ -396,13 +511,43 @@ export function ServicesForm() {
       )}
       {(state.saved || state.note) && (
         <p className="fine" role="status">
-          {state.saved ? 'Saved. The receptionist uses it now. Your website changes when you edit and publish it.' : state.note}
+          {state.saved ? 'Saved. Your booking page and the receptionist use it now. Your website changes when you edit and publish it.' : state.note}
         </p>
       )}
       <button className="btn btn-quiet btn-block" disabled={state.busy}>
         Save services
       </button>
+      {booking && (
+        <div className="svc-booking">
+          {booking.options?.ready && (
+            <label className="check">
+              <input type="checkbox" checked={booking.options.allowOther !== false} onChange={(e) => toggleOther(e.target.checked)} />
+              <span>Offer “Other / Not sure” on the booking page (customers describe what they need)</span>
+            </label>
+          )}
+          <p className="fine">
+            <a href={`${booking.bookingUrl}?preview=1`} target="_blank" rel="noopener">
+              Preview your booking page
+            </a>{' '}
+            · nothing is booked from a preview.
+          </p>
+          <FunnelLine funnel={booking.funnel} />
+        </div>
+      )}
     </form>
+  )
+}
+
+// Last 30 days of the booking page (server/booking-funnel.js): counts only, no rate when there were no visits.
+function FunnelLine({ funnel }) {
+  if (!funnel) return null
+  const v = funnel.stages.view
+  if (!v) return <p className="fine">No booking page visits in the last 30 days.</p>
+  const done = funnel.stages.booked + funnel.stages.requested
+  return (
+    <p className="fine svc-funnel">
+      Last 30 days: {v} visit{v === 1 ? '' : 's'} · {funnel.stages.time} chose a time · {done} booked or requested ({funnel.conversion}%)
+    </p>
   )
 }
 

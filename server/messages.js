@@ -82,7 +82,8 @@ async function prefs(env, customer) {
 // first nudge after 15 minutes; then a second nudge a day later. All skipped automatically once they book.
 export async function scheduleLeadMessages(env, customer, lead, now = Date.now()) {
   // An enterprise inquiry (server/enterprise.js), or a caller the owner added after speaking with them, is answered by a person: no automatic "pick a time" messages.
-  if (lead.source === 'enterprise_inquiry' || lead.source === 'google_call') return 0
+  // A quote/consultation request from the booking page (a service set to 'request') asked for a reply, not a time.
+  if (lead.source === 'enterprise_inquiry' || lead.source === 'google_call' || lead.request) return 0
   if (!customer.automations || !lead.qualified) return 0
   const p = await prefs(env, customer.id)
   // Before migration 0024 (no preferences, no conversations) every lead keeps the previous schedule.

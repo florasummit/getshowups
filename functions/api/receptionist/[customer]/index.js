@@ -15,6 +15,8 @@ import { hostingStatus, isHosted, liveContent } from '../../../../server/website
 import { connectedHost } from '../../../../server/domains.js'
 import { siteOrigin } from '../../../../server/auth.js'
 import { providerSpendAllowed } from '../../../../server/business-accounts.js'
+import { bookingServices } from '../../../../server/services.js'
+import { publicBrand } from '../../../../server/public-brand.js'
 
 export async function onRequestGet({ request, env, params }) {
   const rl = await hitByIp(env, 'bookView', request)
@@ -51,6 +53,10 @@ export async function onRequestGet({ request, env, params }) {
     voiceStatus: await customerVoiceStatus(env, customer.id),
     callbacks: await receptionistRequestsReady(env.ONBOARDING_DB),
     website,
+    // Quick replies come from the business's own offered services (names only; hidden ones left out), and the page
+    // wears the business's published brand (GetShowUps' own chat: product).
+    services: bookingServices(profile?.services, customer.slotMinutes).map((x) => ({ name: x.name, flow: x.flow })),
+    brand: await publicBrand(env, customer),
     ...(test ? { test: test.ok ? { provider: test.provider, name: test.name } : { error: test.error } } : {}),
   })
 }

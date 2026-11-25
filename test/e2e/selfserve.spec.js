@@ -5,6 +5,7 @@
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle } from './helpers.js'
+import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 test.describe.configure({ mode: 'serial', timeout: 120_000 })
@@ -191,14 +192,9 @@ test('new customer: get started → pay → onboard → publish → book → man
   await noOverflow()
   await page.getByRole('link', { name: 'Book a time' }).first().click()
   const lead = `lead-${mobile ? 'm' : 'd'}@example.net`
-  await page.getByLabel('What do you need?').fill('Weekly cleaning')
-  await page.getByLabel('Name').fill('Casey Customer')
-  await page.getByLabel('Phone').fill('(555) 010-0177')
-  await page.getByLabel('Email').fill(lead)
-  await page.getByLabel('ZIP', { exact: true }).fill('29403')
-  await page.getByRole('button', { name: 'Choose a time' }).click()
-  await page.locator('.slot').last().click() // any offered time; the first date may have only a few left late in the day
-  await page.getByRole('button', { name: /^Book / }).click()
+  await chooseService(page, { need: 'Weekly cleaning', zip: '29403' })
+  await chooseTime(page, { slot: 'last' }) // any offered time; the first date may have only a few left late in the day
+  await fillDetails(page, { need: 'Weekly cleaning', name: 'Casey Customer', phone: '(555) 010-0177', email: lead, address: { street: '9 Marsh Ln', city: 'Charleston', state: 'SC' } })
   await expect(page.getByRole('heading', { name: /booked/i })).toBeVisible()
   const events = await (await page.request.get(`${mock}/__events`)).json()
   expect(events.some((e) => e.attendees?.[0]?.email === lead)).toBe(true)

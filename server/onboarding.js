@@ -1,6 +1,7 @@
 // Self-serve onboarding: who must pay before setup, the ordered steps (derived from saved data so any
 // device resumes at the right place), the business profile collected during onboarding, and the
 // launch-readiness checklist shown at the end of onboarding and on the dashboard.
+import { validateServices } from './services.js'
 import { unapprovedClaims } from './ads/spec.js'
 import { isComplimentary } from './business-accounts.js'
 import { billingMisconfigured, billingSubscription, listPlans, stripeConfigured, stripeLiveEnabled } from './stripe.js'
@@ -46,7 +47,7 @@ export function normalizePhone(raw) {
 }
 
 // Returns [errors[], profile]. Text that customers see goes through the same claims filter as ads.
-export function validateProfile(body, { requireServices = false } = {}) {
+export function validateProfile(body, { requireServices = false, previous = [] } = {}) {
   const b = body && typeof body === 'object' ? body : {}
   const errors = []
   const phone = b.phone ? normalizePhone(b.phone) : ''
@@ -55,16 +56,15 @@ export function validateProfile(body, { requireServices = false } = {}) {
   if (!industry) errors.push('industry')
   const description = clean(b.description)
   if (description.length > 400) errors.push('description')
-  const services = (Array.isArray(b.services) ? b.services : [])
-    .map((s) => ({ name: clean(s?.name), price: clean(s?.price) }))
-    .filter((s) => s.name)
-  if (services.length > 8 || services.some((s) => s.name.length > 60 || s.price.length > 40)) errors.push('services')
+  // Services: the one catalog (server/services.js): ids, description, length, hidden, booking flow, one question.
+  const [serviceErrors, services] = validateServices(b.services, previous)
+  errors.push(...serviceErrors)
   if (requireServices && !services.length) errors.push('services')
   const cities = (Array.isArray(b.cities) ? b.cities : String(b.cities || '').split(','))
     .map(clean)
     .filter(Boolean)
   if (cities.length > 6 || cities.some((c) => c.length > 40)) errors.push('cities')
-  for (const [field, texts] of [['description', [description]], ['services', services.flatMap((s) => [s.name, s.price])]]) {
+  for (const [field, texts] of [['description', [description]]]) {
     if (texts.some((t) => t && unapprovedClaims(t).length)) errors.push(`${field}:unapproved_claim`)
   }
   return [[...new Set(errors)], { phone: phone || '', industry, description, services, cities }]

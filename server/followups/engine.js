@@ -9,6 +9,7 @@
 // taken over (for automatic messages), it isn't quiet hours (automatic, not a direct answer), and the business and
 // lead are under their limits. Each message is claimed atomically, sent at most once (an unknown outcome is never
 // retried), and recorded with the provider's id.
+import { offeredServices } from '../services.js'
 import { customerFromRow } from '../auth.js'
 import { getCustomer } from '../customers.js'
 import { getProfile } from '../onboarding.js'
@@ -99,7 +100,8 @@ export async function businessFacts(env, customer, { profile: given, role = 'fol
   return {
     name: customer.name,
     phone: profile?.phone || '',
-    services: (profile?.services || []).filter((s) => s && s.name).map((s) => ({ name: String(s.name), price: s.price ? String(s.price) : '' })),
+    // Hidden (temporarily off) services are not offered anywhere: server/services.js.
+    services: offeredServices(profile?.services).map((s) => ({ name: s.name, price: s.price })),
     area: (profile?.cities || []).join(', '),
     hours,
     visit: customer.appointmentMode === 'at_customer',

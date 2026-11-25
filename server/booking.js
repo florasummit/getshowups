@@ -1,6 +1,7 @@
 // Appointment engine: lead capture → qualification → booking on Google Calendar → outcomes → results.
 // Double booking is prevented by (1) a partial UNIQUE index on (customer, start_at) that reserves the
 // slot atomically, (2) a fresh freeBusy check after reserving, and (3) rollback if Google fails.
+import { leadMinutes } from './services.js'
 import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
 import { EMAIL_RE } from './auth.js'
 import { computeSlots, connect, createEvent, freeBusy, isOfferedSlot, removeEvent } from './calendar.js'
@@ -130,13 +131,14 @@ export async function createLead(env, customer, lead, now = Date.now(), opts = {
   await track(env, 'lead_created', { id: `lead:${id}`, customer: customer.id, props: { qualified, ...(coverage ? { coverage } : {}) }, at: now })
   const source = lead.source || 'booking_page'
   await ingestLead(env, customer.id, id, source, now)
-  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent, source }, now)
+  await scheduleLeadMessages(env, customer, { id, qualified, smsConsent, source, request: lead.request === true }, now)
   return { id, token, qualified, coverage: coverage ? 'pending' : null }
 }
 
 // Open slots for the public booking page: booking hours minus Google busy time minus our own
 // reserved appointments (covers the moment between reserving and Google showing the event).
-export async function openSlots(env, customer, now = Date.now()) {
+// span: slots per appointment for the chosen service (server/services.js); 1 = the business's slot length.
+export async function openSlots(env, customer, now = Date.now(), { span = 1 } = {}) {
   const rules = await withBookingRules(env.ONBOARDING_DB, customer)
   const conn = await connect(env, customer.id)
   if (!conn.ok) return { ok: false, status: conn.status }
@@ -149,7 +151,7 @@ export async function openSlots(env, customer, now = Date.now()) {
     .bind(customer.id, now, now - STALE_PENDING_MS)
     .all()
   const busy = [...fb.busy, ...results.map((r) => ({ start: r.start_at, end: r.end_at }))]
-  return { ok: true, slots: computeSlots({ busy, rules, now, days: BOOKING_DAYS }).slots }
+  return { ok: true, slots: computeSlots({ busy, rules, now, days: BOOKING_DAYS, span }).slots }
 }
 
 // Availability for the public booking page (and the receptionist): a lookup that failed because of the calendar
@@ -279,9 +281,12 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
   if (!tokenOk) return fail(404, 'lead_not_found')
   if (lead.status === 'unqualified') return fail(409, 'not_qualified')
   if (lead.status === 'booked') return fail(409, 'already_booked')
-  if (!isOfferedSlot({ rules: await withBookingRules(db, customer), now, days: BOOKING_DAYS, start })) return fail(409, 'slot_unavailable')
+  // The service the request was for sets the length (lead_services, migration 0042); otherwise one slot, as before.
+  const minutes = await leadMinutes(db, lead.id)
+  const span = minutes ? Math.min(4, Math.max(1, Math.round(minutes / customer.slotMinutes))) : 1
+  if (!isOfferedSlot({ rules: await withBookingRules(db, customer), now, days: BOOKING_DAYS, start, span })) return fail(409, 'slot_unavailable')
 
-  const end = start + customer.slotMinutes * 60 * 1000
+  const end = start + span * customer.slotMinutes * 60 * 1000
   const conn = await connect(env, customer.id)
   if (!conn.ok) return fail(503, 'calendar_unavailable')
 
@@ -306,6 +311,16 @@ async function book(env, customer, { leadId, leadToken, start }, now) {
     throw err
   }
   const release = () => db.prepare('DELETE FROM appointments WHERE id = ?1').bind(id).run()
+  // 1b. Services can take several slots, so two bookings can overlap without sharing a start time: any other active
+  //     booking overlapping this one (a reservation in progress included) means the time is taken.
+  const overlap = await db
+    .prepare("SELECT 1 FROM appointments WHERE customer = ?1 AND id <> ?2 AND status <> 'cancelled' AND start_at < ?4 AND end_at > ?3 AND NOT (status = 'pending' AND created_at < ?5) LIMIT 1")
+    .bind(customer.id, id, start, end, now - STALE_PENDING_MS)
+    .first()
+  if (overlap) {
+    await release()
+    return fail(409, 'slot_unavailable')
+  }
 
   // 2. Confirm the time is still free on the real calendar.
   const fb = await freeBusy(env, conn.accessToken, start, end)

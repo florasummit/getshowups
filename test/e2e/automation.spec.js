@@ -4,6 +4,7 @@ import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 import { linkToken } from '../../server/links.js'
+import { chooseService, chooseTime } from './booking-flow.js'
 
 const env = { TOKEN_ENCRYPTION_KEY: fixtures.E2E_TOKEN_ENCRYPTION_KEY }
 const APPT = '0123456789abcdef0123456789abcdef'
@@ -26,7 +27,9 @@ test('settings: reminders are honest about delivery (activating, never a false "
 
 test('booking page does not offer text messages when no SMS provider is configured', async ({ page }) => {
   await page.goto(`/book/${fixtures.E2E_AUTO_CUSTOMER}`)
-  await expect(page.getByRole('heading', { name: 'Book an appointment' })).toBeVisible()
+  await chooseService(page)
+  await chooseTime(page, { day: 'last', slot: 'last' })
+  await expect(page.getByLabel('Name')).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
 })
 
@@ -61,8 +64,8 @@ test("can't make it: the customer cancels from their email link (nothing changes
   // The follow-up test books this business's first slot in parallel. Book on the LAST offered day: "last slot of the first
   // day" was the same slot from 20:00 to 21:00 New York time (only one left today), and the double-booking guard then
   // correctly refused one of the two tests.
-  await page.locator('.day-chip').last().click()
-  await page.locator('.slot').last().click()
+  await page.locator('.bk-day').last().click()
+  await page.locator('.bk-slot').last().click()
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
 })
@@ -71,7 +74,7 @@ test('pick-a-time link from a follow-up books for the existing lead without re-e
   const k = await linkToken(env, 'lead', 'seed-lead-resume')
   await page.goto(`/book/${fixtures.E2E_AUTO_CUSTOMER}?lead=seed-lead-resume&k=${k}`)
   await expect(page.getByRole('heading', { name: 'Pick a time' })).toBeVisible()
-  await page.locator('.slot').first().click()
+  await page.locator('.bk-slot').first().click()
   await page.getByRole('button', { name: /^Book / }).click()
   await expect(page.getByRole('heading', { name: 'You’re booked' })).toBeVisible()
   await expect(page.getByText('on its way to your email')).toBeVisible()

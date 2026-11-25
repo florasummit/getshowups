@@ -9,6 +9,7 @@
 // connects the Google Calendar the consultations land on from the dashboard (OAuth needs their browser); until then the
 // sales chat answers questions and records callback requests but cannot offer times. Idempotent: an existing record is
 // reported, never changed.
+import { readServices, saveBookingOptions } from './services.js'
 import { createCustomer, getCustomer, updateHours } from './customers.js'
 import { getProfile, saveProfile } from './onboarding.js'
 import { setTestBusiness } from './testbusiness.js'
@@ -24,9 +25,11 @@ export const SALES_PROFILE = {
   phone: '',
   industry: 'Software',
   description: 'AI receptionist and booking for pool, HVAC and roofing businesses: every inquiry answered, qualified and booked on your Google Calendar while you are on a job.',
+  // The booking page offers only the demo (the plans are for the receptionist's answers, not bookable: booking 'off').
   services: [
-    { name: 'Growth plan', price: '$499/month' },
-    { name: 'Enterprise plan', price: 'Starting at $10,000/month' },
+    { id: 'sv_gsudemo', name: 'Product demo', price: '', description: 'A 20-minute call with the founder to see whether GetShowUps fits how your business takes inquiries.', slots: 1, hidden: false, booking: 'book', question: { label: 'What does your business do?', required: true } },
+    { id: 'sv_gsugrowth', name: 'Growth plan', price: '$499/month', description: '', slots: 1, hidden: false, booking: 'off', question: null },
+    { id: 'sv_gsuenterprise', name: 'Enterprise plan', price: 'Starting at $10,000/month', description: '', slots: 1, hidden: false, booking: 'off', question: null },
   ],
   cities: [],
 }
@@ -66,6 +69,7 @@ export async function createSalesBusiness(env, admin, kind, now = Date.now()) {
   }
   await updateHours(db, id, SALES_HOURS, now)
   await saveProfile(db, id, SALES_PROFILE, now)
+  await salesBookingOptions(db, id, now)
   await db
     .prepare("INSERT INTO receptionist_settings (customer, enabled, mode, greeting, knowledge, transfer_phone, updated_at) VALUES (?1, 1, 'ai_first', ?2, ?3, NULL, ?4) ON CONFLICT(customer) DO NOTHING")
     .bind(id, SALES_GREETING, SALES_NOTES, now)
@@ -84,7 +88,8 @@ async function salesAnswers(env, id) {
     getSettings(db, id),
     db.prepare('SELECT (SELECT updated_at FROM business_profiles WHERE customer = ?1) AS p, (SELECT updated_at FROM receptionist_settings WHERE customer = ?1) AS s').bind(id).first(),
   ])
-  const list = (l) => (l || []).map((s) => `${s.name}: ${s.price || ''}`).join('\n')
+  // Everything the booking page and receptionist read, in a form the console can show as a difference.
+  const list = (l) => readServices(l).map((s) => `${s.name}: ${s.price}${s.booking === 'book' ? '' : ` [${s.booking === 'off' ? 'not on the booking page' : 'request'}]`}${s.description ? ` (${s.description})` : ''}${s.question ? ` asks: ${s.question.label}` : ''}`).join('\n')
   const stored = { services: list(profile?.services), description: profile?.description || '', notes: settings.knowledge }
   const latest = { services: list(SALES_PROFILE.services), description: SALES_PROFILE.description, notes: SALES_NOTES }
   return { current: JSON.stringify(stored) === JSON.stringify(latest), stored, latest, version: `${stamp?.p ?? 0}:${stamp?.s ?? 0}` }
@@ -106,7 +111,15 @@ export async function refreshSalesAnswers(env, kind, version, now = Date.now()) 
   ])
   // An edit in between changed neither row (each update requires the other's version too).
   if (!results.every((r) => (r?.meta?.changes ?? 0) > 0)) return { ok: false, httpStatus: 409, error: 'conflict' }
+  await salesBookingOptions(db, spec.id, now)
   return { ok: true, changed: true, id: spec.id }
+}
+
+// The sales booking page offers the demo only (no "Other / Not sure"). Before migration 0042 there is nothing to set.
+async function salesBookingOptions(db, id, now) {
+  await saveBookingOptions(db, id, { allowOther: false }, now).catch((err) => {
+    if (!String(err?.message).includes('no such table')) throw err
+  })
 }
 
 // What the console shows per record: exists, receptionist on, calendar connected (the one step only the founder can do).

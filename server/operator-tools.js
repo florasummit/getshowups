@@ -4,6 +4,7 @@
 // conversation was given, and every reference is looked up again inside the business.
 // Data minimisation: the model sees references, times, statuses, ZIPs and what was asked for (contact details removed),
 // never names, phones, emails or addresses. The page shows the real names next to the references.
+import { offeredServices } from './services.js'
 import { ACCEPTANCE, stillAllowed } from './acceptance-env.js'
 import { callReport, callsOn } from './ads/calls.js'
 import { channels } from './ads/economics.js'
@@ -421,7 +422,7 @@ export const TOOLS = [
       appointments_are: f.visit ? "at the customer's address" : 'at the business',
       service_area_zips: z.length ? z.slice(0, 40) : 'no limit, anyone can book',
       outside_zips_asked_from_last_90_days: outside.slice(0, 6).map((x) => ({ zip: x.zip || 'unknown', inquiries: x.n })),
-      services: (profile?.services || []).map((s) => ({ name: s.name, price: s.price || 'no price listed' })),
+      services: offeredServices(profile?.services).map((s) => ({ name: s.name, price: s.price || 'no price listed' })),
       towns: profile?.cities || [],
       online_booking: c.customer.status && c.customer.status !== 'active' ? 'closed: the account is not active' : cal === null || cal === false ? 'CLOSED to new bookings: needs Google Calendar connected (Settings); nobody can book online, and website chat cannot run, until then' : c.customer.hoursConfirmed === false ? 'CLOSED to new bookings: booking hours not confirmed (Settings)' : cal === undefined ? 'unknown' : 'open if hosting is active: customers can book on the booking page at any hour, with or without a website or the receptionist',
       ai_receptionist: rec === undefined ? 'unknown' : rec?.enabled === 1 ? 'on' : 'off (optional website chat, turned on in Receptionist; not phone calls)',

@@ -6,6 +6,7 @@ import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { returnFromGoogle, useSession } from './helpers.js'
 import { SITE, SETUP_ORDER, asVisitor, bookAsCustomer, customerActions, detect, headers, injectFault, mockEvents, runJourney, useGoogle } from './journey.js'
+import { chooseService, fillDetails } from './booking-flow.js'
 
 test.describe.configure({ mode: 'serial', timeout: 240_000 })
 
@@ -132,13 +133,11 @@ test('new customer: state-driven from sign-in to a bookable business; interrupti
   const visitor = await browser.newContext({ extraHTTPHeaders: { 'CF-Connecting-IP': mobile ? '198.51.100.212' : '198.51.100.211' } })
   const vp = await visitor.newPage()
   await vp.goto(`/book/${business}`)
-  await vp.getByLabel('What do you need?').fill('Weekly cleaning')
-  await vp.getByLabel('Name').fill('Outage Olive')
-  await vp.getByLabel('Phone').fill('(555) 010-0178')
-  await vp.getByLabel('Email').fill('olive@example.net')
-  await vp.getByLabel('ZIP', { exact: true }).fill('29403')
-  await vp.getByRole('button', { name: 'Choose a time' }).click()
+  await chooseService(vp, { need: 'Weekly cleaning', zip: '29403' })
   await expect(vp.getByRole('heading', { name: 'Online booking isn’t available right now' })).toBeVisible()
+  await vp.getByRole('button', { name: 'Leave your details' }).click()
+  await fillDetails(vp, { need: 'Weekly cleaning', name: 'Outage Olive', phone: '(555) 010-0178', email: 'olive@example.net', address: { street: '4 Dock St', city: 'Charleston', state: 'SC' } })
+  await expect(vp.getByRole('heading', { name: 'Request sent' })).toBeVisible()
   await visitor.close()
   expect((await (await page.request.get('/api/dashboard/overview')).json()).followUp.some((l) => l.name === 'Outage Olive')).toBe(true)
   await page.goto('/dashboard')

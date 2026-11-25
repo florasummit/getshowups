@@ -115,7 +115,9 @@ test('admin: an unconfigured provider cannot start a session server-side either 
   expect((await (await page.request.get('/api/platform/voice-lab/status')).json()).sessions).toEqual([])
 })
 
-test('one click creates the Voice Lab test business; the Lab offers it; the sales record stays uncreated here and the public sales chat stays closed @mobile', async ({ page, context }) => {
+test('one click creates the Voice Lab test business; the Lab offers it; the sales record stays uncreated here and the public sales chat stays closed @mobile', async ({ page, context }, testInfo) => {
+  // Its own visitor address: the public-page allowance is per address, and every spec otherwise shares 127.0.0.1.
+  await context.setExtraHTTPHeaders({ 'CF-Connecting-IP': testInfo.project.name === 'mobile' ? '198.51.100.232' : '198.51.100.231' })
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   page.on('dialog', (d) => d.accept())
   await page.goto('/admin')
