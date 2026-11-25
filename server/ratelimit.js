@@ -53,6 +53,11 @@ export const RULES = {
   aiAskBurst: { limit: 5, windowSec: 60 }, //       POST /api/dashboard/assist (per business)
   aiAttempt: { limit: 60, windowSec: 86400 }, //    POST /api/dashboard/assist attempts that may reach a model (per business and day; abuse ceiling: the 20 answers a day are counted from successful ones)
   aiAskAll: { limit: 25, windowSec: 86400 }, //     the same, all businesses together: the included model shares one small daily allowance (docs/ASSISTANT_PROGRESS.md)
+  acceptancePair: { limit: 5, windowSec: 600 }, //   POST /api/acceptance/pair (per IP)
+  acceptancePairAll: { limit: 20, windowSec: 600 }, // the same, everyone together
+  acceptanceSession: { limit: 90, windowSec: 600 }, // POST /api/acceptance/session (per IP; the runner polls while it waits)
+  acceptanceAdmin: { limit: 10, windowSec: 600 }, //  POST /api/platform/acceptance (per admin: code guesses)
+  acceptanceRefused: { limit: 20, windowSec: 3600 }, // audit rows for refused test-session writes (per business)
   aiWriteBurst: { limit: 10, windowSec: 60 }, //    POST /api/dashboard/write (per business)
   aiWrite: { limit: 40, windowSec: 86400 }, //      POST /api/dashboard/write (per business and day; cost cap)
   aiRulesTeachModel: { limit: 60, windowSec: 86400 }, // teach requests that reach the model (per business and day; cost cap)

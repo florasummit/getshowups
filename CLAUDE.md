@@ -238,6 +238,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   redirect); errors return to where sign-in started. An admin account without a business lands on /admin from any
   entry point, and /dashboard offers it the console instead of starting onboarding. Landing grants nothing: /admin
   authorizes every request.
+- Test sessions (server/acceptance.js, docs/INTELLIGENCE.md §8): acceptance runner only, one admin-marked test business, own
+  cookie, exact route list, stripped environment + write-guarded database; ACCEPTANCE_SESSIONS_ENABLED=true needs approval.
+  Never add a route that calls out, queues or changes accounts to server/acceptance-routes.js.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`.
 - Permanent audit log (server/auditlog.js, migration 0015 `audit_log`): append-only (SQLite triggers refuse UPDATE/DELETE),

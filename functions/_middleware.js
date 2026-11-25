@@ -5,6 +5,8 @@
 import { missingConfig } from '../server/google-oauth.js'
 import { siteOrigin } from '../server/auth.js'
 import { customerForHost } from '../server/domains.js'
+import { carriesTestSession, dispatch } from '../server/acceptance.js'
+import { ROUTES } from '../server/acceptance-routes.js'
 import { serveSite } from '../server/site-serve.js'
 import { liveContent } from '../server/website.js'
 import { testStatus } from '../server/testbusiness.js'
@@ -59,6 +61,8 @@ export async function withAppHeaders(res, url) {
 export async function onRequest(context) {
   const { request, env, next } = context
   const url = new URL(request.url)
+  // A test session (server/acceptance.js) reaches its short list and nothing else, on our own address only.
+  if (url.pathname.startsWith('/api/') && carriesTestSession(request) && !/^\/api\/acceptance\/(pair|session)$/.test(url.pathname)) return withAppHeaders(missingConfig(env).length || !isOwnHost(url.hostname, env) ? new Response(null, { status: 403 }) : await dispatch(request, env, ROUTES), url)
   // Preview deployments have no bindings: nothing to route.
   if (missingConfig(env).length || isOwnHost(url.hostname, env)) return withAppHeaders(await next(), url)
   // Certificate validation and platform paths are left to the hosting platform.

@@ -199,12 +199,15 @@ export const KNOWN = [
 ]
 // Deployed site: wording only; the facts come from what the dashboard itself shows (run.mjs compares).
 export const DEPLOYED = [
-  { view: 'overview', q: 'what is needs your attention telling me', card: true },
-  { q: 'which one would you deal with first and why', any: true },
-  { q: 'what about the second one', any: true },
-  { view: 'appointments', q: 'anything coming up', any: true },
-  { view: 'settings', q: 'is anyone waiting on me right now', card: true },
-  { view: 'receptionist', q: 'what does this page say needs doing', any: true },
-  { view: 'ads', q: 'hows advertising going', any: true },
-  { view: 'overview', q: 'is something missing from my setup', any: true },
+  { view: 'overview', q: 'what is needs your attention telling me', card: true, must: [/Vera Synthetic/] },
+  { q: 'isnt the first one just an old visit', must: [/Vera Synthetic/, /call/i] },
+  { q: 'what exactly do they need', must: [/15 ?x ?30/i] },
+  { view: 'settings', q: 'who else is waiting on me and for what', must: [/Owen Synthetic/], card: true },
+  { view: 'receptionist', q: 'did walt ask for a call', must: [/no|not|message/i] },
+  { view: 'overview', q: 'what would you do first and why', must: [/Vera Synthetic/] },
+  { q: 'draft a reply to owen', proposal: 'follow_up' },
+  { q: 'scrap that', pending: 0 },
+  { q: 'i rang vera, all sorted', proposal: 'call_back_done', approve: true },
+  { q: 'so is anyone waiting for a call now', must: [/no|nobody|none/i], never: [/Vera Synthetic (is|asked).*still waiting/i] },
+  { q: 'how much did poolthru make', never: [/\$/], must: [/only|can.t|don.t/i] },
 ]

@@ -1094,6 +1094,92 @@ function AuditLog() {
   )
 }
 
+// Acceptance test sessions (server/acceptance.js): approve a pairing code for a test business, or revoke. Never shows a secret.
+function AcceptanceTesting() {
+  const [d, setD] = useState(null)
+  const [f, setF] = useState({ code: '', customer: '', typed: '', sure: false })
+  const [msg, setMsg] = useState('')
+  const load = useCallback(() => api('/api/platform/acceptance').then(({ status, data }) => setD(status === 200 ? data : { failed: true })), [])
+  useEffect(() => {
+    load()
+  }, [load])
+  if (!d) return null
+  const approve = async (e) => {
+    e.preventDefault()
+    setMsg('')
+    const { status, data } = await api('/api/platform/acceptance', { method: 'POST', body: { action: 'approve', code: f.code, customer: f.customer, confirmCustomer: f.typed, confirm: f.sure } })
+    setMsg(status === 200 ? 'Approved for 90 days. Any earlier grant for this business has ended.' : status === 429 ? 'Too many tries. Wait ten minutes.' : { switched_off: 'Test sessions are switched off.', not_test_business: 'That is not a test business.', code_not_valid: 'That code isn’t valid. It may have run out or been used.' }[data.error] || 'Check the code and the business.')
+    if (status === 200) setF({ code: '', customer: '', typed: '', sure: false })
+    load()
+  }
+  const revoke = async (id) => {
+    if (!window.confirm('End this grant and its sessions now?')) return
+    const { status } = await api('/api/platform/acceptance', { method: 'POST', body: { action: 'revoke', id, confirm: true } })
+    setMsg(status === 200 ? 'Revoked.' : 'That didn’t work. Try again.')
+    load()
+  }
+  return (
+    <section className="card" aria-labelledby="acceptance-title" data-acceptance>
+      <h2 className="card-title" id="acceptance-title">
+        Acceptance testing
+      </h2>
+      <p className="fine">{d.failed || d.unavailable ? 'Not available.' : d.enabled ? 'Lets our test runner use one test business’s dashboard. Never a real business, never this console.' : 'Switched off.'}</p>
+      {d.enabled && (
+        <form className="stack" onSubmit={approve} aria-label="Approve a test runner">
+          <label className="field">
+            <span>Pairing code</span>
+            <input value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} autoComplete="off" required />
+          </label>
+          <label className="field">
+            <span>Test business</span>
+            <select value={f.customer} onChange={(e) => setF({ ...f, customer: e.target.value })} required>
+              <option value="">Choose</option>
+              {d.businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Type its id to confirm</span>
+            <input value={f.typed} onChange={(e) => setF({ ...f, typed: e.target.value })} autoComplete="off" required />
+          </label>
+          <label>
+            <input type="checkbox" checked={f.sure} onChange={(e) => setF({ ...f, sure: e.target.checked })} /> I started this pairing and want to allow it for 90 days
+          </label>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={!f.sure || !f.customer || f.typed !== f.customer}>
+            Approve
+          </button>
+        </form>
+      )}
+      <p role="status">{msg}</p>
+      {d.grants.length > 0 && (
+        <ul className="rows">
+          {d.grants.slice(0, 5).map((g) => {
+            const open = g.active
+            return (
+              <li key={g.id} className="row">
+                <div className="row-main">
+                  <p className="row-title">
+                    {g.customer} <span className={`tag ${open ? 'tag--ok' : ''}`}>{open ? 'active' : g.revoked_at ? 'revoked' : 'expired'}</span>
+                  </p>
+                  <p className="row-sub">{g.last_used_at ? `Last used ${date(g.last_used_at)}` : 'Not used yet'} · until {date(g.expires_at)}</p>
+                </div>
+                {open && (
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={() => revoke(g.id)}>
+                    Revoke
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function CustomerRows({ list, onOpen }) {
   return (
     <ul className="rows">
@@ -1368,6 +1454,7 @@ function Overview({ me }) {
       {me.billingConfigured && <Reconciliation />}
 
       <MessagingOps />
+      <AcceptanceTesting />
       <AuditLog />
 
       <section className="card">

@@ -1,21 +1,20 @@
 // Browser acceptance for the dashboard assistant: opens the dashboard, types questions, reads what is rendered, compares it
 // with the records and the page, tries supported actions, and writes a Markdown report with screenshots.
 //   node scripts/acceptance/run.mjs --local <dist dir> [--set fresh|known|arch] [--only <biz>] [--cap 0.50]   synthetic businesses, real model
-//   node scripts/acceptance/run.mjs --deployed [--approve]                           https://getshowups.com, saved sign-in
-// Deployed runs: login.mjs once (a person signs in; nothing is bypassed). They refuse to start unless the signed-in business
-// is on ALLOWED and admin-marked as a test business, and every request that could change anything is blocked in the browser
+//   node scripts/acceptance/run.mjs --deployed [--approve] [--mobile]                https://getshowups.com, test session
+// Deployed runs: pair.mjs once (an admin approves a code). They refuse to start unless the business is on ALLOWED and
+// admin-marked as a test business, and every request that could change anything is blocked in the browser
 // except asking (and approving a prepared change with --approve). Exit 0 = every check passed.
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium, devices } from '@playwright/test'
+import { explain, verdict } from './accounts.mjs'
+import { openSession } from './grant.mjs'
 import { ARCH, DEPLOYED, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
 import { BUSINESSES, token } from './worlds.mjs'
 
 const arg = (k, d = null) => (process.argv.includes(k) ? (process.argv[process.argv.indexOf(k) + 1] ?? true) : d)
 const has = (k) => process.argv.includes(k)
-export const ALLOWED = ['gsu-journey-test']
-export const PROFILE = join(homedir(), '.getshowups-acceptance')
 const OUT = resolve(arg('--out', 'test-results/acceptance'))
 mkdirSync(OUT, { recursive: true })
 const lines = []
@@ -151,15 +150,22 @@ async function local(dist) {
 
 async function deployed() {
   const origin = 'https://getshowups.com'
-  const ctx = await chromium.launchPersistentContext(PROFILE, { channel: 'chrome', headless: !has('--show'), viewport: { width: 1440, height: 950 } })
-  const page = ctx.pages()[0] || (await ctx.newPage())
+  const browser = await chromium.launch({ headless: !has('--show') })
+  const ctx = await browser.newContext(has('--mobile') ? { ...devices['Pixel 7'] } : { viewport: { width: 1440, height: 950 } })
+  const opened = await openSession(ctx)
+  if (!opened.customer) throw new Error(opened.pending ? 'Waiting for an admin to approve the pairing code.' : `No test session (${opened.refused}). Pair first: node scripts/acceptance/pair.mjs`)
+  const page = await ctx.newPage()
   const blocked = []
   await page.goto(`${origin}/dashboard`)
   const me = async () => (await page.request.get(`${origin}/api/dashboard/me`)).json().catch(() => ({}))
   let who = await me()
-  if (!who.customer) throw new Error('Not signed in: run node scripts/acceptance/login.mjs (a person signs in once).')
-  if (!ALLOWED.includes(who.customer.id) || who.testBusiness !== true) throw new Error('Refusing: the signed-in business is not an allowed, admin-marked test business.')
+  const v = verdict(who)
+  if (v !== 'ok') throw new Error(explain(who, v))
   who = null
+  // Synthetic records back to their starting state (server/acceptance-fixture.js).
+  const reset = await page.request.post(`${origin}/api/acceptance/fixture`, { headers: { Origin: origin } })
+  if (!reset.ok()) throw new Error(`The synthetic records could not be prepared (${reset.status()}).`)
+  await page.reload()
   await guard(page, blocked, has('--approve'))
   const build = await (await page.request.get(`${origin}/build.json`)).json().catch(() => ({}))
   log(`# Deployed acceptance\n\nBuild ${build.commit || 'unknown'}`)
@@ -171,9 +177,9 @@ async function deployed() {
     if (card) log(`_The card shows: ${card.items.map((i) => i.text).join(' · ') || 'all caught up'}_`)
     await page.waitForTimeout(13000) // the minute limit is real here
   }
-  await page.screenshot({ path: join(OUT, 'deployed.png') })
+  await page.screenshot({ path: join(OUT, `deployed${has('--mobile') ? '-mobile' : ''}.png`) })
   if (blocked.length) log(`_Blocked in the browser: ${[...new Set(blocked)].join(', ')}_`)
-  await ctx.close()
+  await browser.close()
 }
 
 try {

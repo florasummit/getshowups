@@ -60,6 +60,7 @@ removed a day after they expire (server/sessions-purge.js). Still switched off: 
 | `admin_audit` | Staff actions; emails → refs, free text erased at deletion | Security, accountability | Permanent |
 | `account_deletions` | When, who (ref or staff email), per-step results | Proof of deletion; replay list after a backup restore | Permanent |
 | `test_businesses` | Test flag | Keeps test data out of metrics | With the tombstone |
+| `acceptance_pairings` | Pairing codes (hashes) | Test sessions | Minutes: expired rows removed at the next pairing |
 | `receptionist_voice_defaults` | Platform-wide default voice provider history (versions; ids of businesses a version pinned) | Platform configuration, not business data | Permanent (business ids only, no personal data) |
 | `stripe_events`, `rate_limits`, `sessions` | Event ids, hashed keys, sign-in sessions (not tied to the business) | Idempotency, abuse prevention | Their own expiry |
 

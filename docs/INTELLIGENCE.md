@@ -57,7 +57,24 @@ Feedback is codes only (`functions/api/dashboard/assist-feedback.js`), never cha
 
 ## 7. Evaluation and release
 `scripts/acceptance/run.mjs`: real dashboard, handlers and model on synthetic businesses (sets: main, fresh, known), or the
-deployed site signed in as an admin-marked test business. Every real defect becomes a scenario with its strict expectation; a
+deployed site through a test session (§8). Every real defect becomes a scenario with its strict expectation; a
 failing one moves to `known` with a severity and leaves only after passing repeatedly. Read the transcripts: checks miss things.
 Blocks a release: material factual error, wrong consequential action, security or tenant failure, broken core function, claimed
 but unverified success. Wording imperfections are listed, not chased. Green CI is not acceptance.
+
+## 8. Test sessions (authentication for acceptance only)
+Normal sign-in is unchanged: Google, `server/auth.js`. A test session is a separate thing that can only ever be one admin-marked
+test business. Off unless `ACCEPTANCE_SESSIONS_ENABLED` is exactly `true`; every error refuses.
+| Rule | Where (enforced) |
+| --- | --- |
+| Pairing: the runner sends a hash of its secret, gets a 10-minute code; a platform admin approves it for a business typed to confirm; spent in one transaction; rate-limited | `server/acceptance.js`, `functions/api/platform/acceptance.js` |
+| Grant 90 days, one per business, renewed only by pairing again; session 1 hour, one at a time; revoking ends both on the next request | `server/acceptance.js` |
+| Test mark, active business, grant, session and switch read together on every request, and again when an action or tool runs | `server/acceptance.js` (live), `server/acceptance-env.js` (stillAllowed) |
+| Own cookie; never combined with a normal session; unknown to admin and normal session code | `server/acceptance.js`, `functions/_middleware.js` |
+| Exact method + path list; everything else under /api/ refused | `server/acceptance-routes.js` |
+| No Google, Ads, Stripe, email, text, CRM or voice credentials; calendar tokens unreadable; queues, other tables and other businesses not writable | `server/acceptance-env.js` |
+| Synthetic records: fixed ids, no deliverable addresses, no calendar event, no queued message, outside the owner-notice window | `server/acceptance-fixture.js` |
+| Out of platform metrics, revenue, MRR and founder alerts (test businesses) | `server/metrics.js`, `server/growth.js`, `server/alerts.js` |
+| Only hashes stored; the secret lives in the runner's Keychain | `migrations/0038_acceptance_sessions.sql`, `scripts/acceptance/grant.mjs` |
+| Approve, refuse, session, refused write and revoke are in the permanent audit log | `server/acceptance.js` |
+Tests: `test/acceptance.test.js`. Renew: `node scripts/acceptance/pair.mjs`, then Admin, Acceptance testing.
