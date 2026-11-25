@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
+import { BusinessControls, Closures, ReasonAction } from './Controls.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
 import { Pill } from '../dashboard/ui.jsx'
@@ -365,7 +366,6 @@ function AccountType({ id, onChanged }) {
 function CustomerDetail({ id, onBack, onChanged }) {
   const [d, setD] = useState(null)
   const [health, setHealth] = useState(null)
-  const [confirming, setConfirming] = useState(false)
   const [statusResult, setStatusResult] = useState(null)
   const [linkResult, setLinkResult] = useState(null)
   const load = useCallback(() => api(`/api/platform/customer?id=${id}`).then(({ status, data }) => setD(status === 200 ? data : { error: true })), [id])
@@ -385,12 +385,13 @@ function CustomerDetail({ id, onBack, onChanged }) {
     load()
     onChanged()
   }
-  const setStatus = async (status) => {
-    const { data } = await api('/api/platform/status', { method: 'POST', body: { customer: id, status } })
+  const setStatus = async (next, reason) => {
+    const { status, data } = await api('/api/platform/status', { method: 'POST', body: { customer: id, status: next, reason, confirm: true } })
+    if (status !== 200) return data.error || 'failed'
     setStatusResult(data?.ads ?? null)
-    setConfirming(false)
     load()
     onChanged()
+    return null
   }
   const inviteAction = async (inviteId, action) => {
     const { data } = await api('/api/platform/invite-action', { method: 'POST', body: { id: inviteId, action } })
@@ -490,23 +491,7 @@ function CustomerDetail({ id, onBack, onChanged }) {
       <section className="card">
         <h2 className="card-title">Account</h2>
         {d.status === 'active' ? (
-          confirming ? (
-            <div className="stack">
-              <p className="fine">Pauses the booking page and, right away, every running ad campaign (checked on Google). Reactivating never restarts ads; the owner does that.</p>
-              <div className="row-actions">
-                <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirming(false)}>
-                  Cancel
-                </button>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => setStatus('suspended')}>
-                  Confirm: pause booking page and ads
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="btn btn-sm btn-quiet" onClick={() => setConfirming(true)}>
-              Suspend account
-            </button>
-          )
+          <ReasonAction label="Suspend account" confirm="Confirm: pause booking page and ads" danger text="Pauses the booking page and, right away, every running ad campaign (checked on Google). Reactivating never restarts ads; the owner does that." onRun={(reason) => setStatus('suspended', reason)} />
         ) : (
           <>
             {statusResult && (
@@ -516,12 +501,12 @@ function CustomerDetail({ id, onBack, onChanged }) {
                 {statusResult.failed ? `; ${statusResult.failed > 0 ? statusResult.failed : 'some'} couldn’t be paused yet, retrying every few minutes` : ''}.
               </p>
             )}
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => setStatus('active')}>
-              Reactivate account
-            </button>
+            <ReasonAction label="Reactivate account" confirm="Confirm: reactivate" onRun={(reason) => setStatus('active', reason)} />
           </>
         )}
       </section>
+
+      <BusinessControls id={d.id} />
 
       {d.lifecycle && <Lifecycle l={d.lifecycle} />}
 
@@ -1390,6 +1375,7 @@ function Overview({ me }) {
         </section>
       )}
       <Metrics m={data.metrics} />
+      <Closures onOpen={setSelected} />
 
       {attention.length > 0 && (
         <section className="card">

@@ -21,6 +21,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { randomToken } from '../google-oauth.js'
 import { linkToken, verifyLinkToken } from '../links.js'
+import { restricted } from '../restrictions.js'
 import { createLead, bookAppointment, dispatchBooked, openSlots, recordAvailability, validateLead } from '../booking.js'
 import { providerMock } from '../ai-credentials.js'
 import { toE164 } from '../sms.js'
@@ -90,7 +91,7 @@ export async function getSettings(db, customerId) {
 
 // Is the receptionist offered for this (already bookable) business right now?
 export async function receptionistOn(env, customer) {
-  if (!modelConfigured(env) || !(await receptionistReady(env.ONBOARDING_DB))) return false
+  if (!modelConfigured(env) || !(await receptionistReady(env.ONBOARDING_DB)) || (await restricted(env, customer.id, 'receptionist'))) return false
   return (await getSettings(env.ONBOARDING_DB, customer.id).catch(() => ({ enabled: false }))).enabled
 }
 

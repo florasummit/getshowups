@@ -170,7 +170,7 @@ test('owner deletion: confirmed by typing the business name; everything erased, 
   assert.equal((await del({ action: 'delete', confirm: true, name: 'Alpha Co' }, { origin: 'https://evil.example' })).status, 403)
   assert.equal(db.sql.prepare('SELECT count(*) n FROM account_deletions').get().n, 0, 'nothing started by refused requests')
   const r = await del({ action: 'delete', confirm: true, name: '  alpha   co ' })
-  assert.deepEqual([r.status, r.json()], [202, { deleting: true, status: 'completed' }])
+  assert.deepEqual([r.status, r.json()], [202, { deleting: true, status: 'completed', scheduledFor: null }])
 
   // Erased: every business/personal record of alpha.
   for (const t of ERASED_TABLES) assert.equal(count(t, 'alpha-co'), 0, t)

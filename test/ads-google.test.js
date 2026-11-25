@@ -1368,7 +1368,7 @@ test('ads hold: platform admin suspension pauses running campaigns immediately (
   const statusRoute = await import('../functions/api/platform/status.js')
   env.PLATFORM_ADMIN_EMAILS = 'founder@getshowups.example'
   const cookie = await session('founder@getshowups.example')
-  const res = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'suspended', reason: 'policy review' } })
+  const res = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'suspended', reason: 'policy review', confirm: true } })
   assert.equal(res.status, 200)
   assert.deepEqual(res.json().ads, { paused: 1, verified: 1, failed: 0 })
   assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'])
@@ -1376,7 +1376,7 @@ test('ads hold: platform admin suspension pauses running campaigns immediately (
   assert.equal(audit.action, 'customer.suspend')
   assert.deepEqual(JSON.parse(audit.details), { reason: 'policy review', adsPaused: 1, adsVerified: 1, adsFailed: 0 })
   assert.equal(db.sql.prepare("SELECT actor FROM ad_actions WHERE kind = 'pause'").get().actor, 'admin:founder@getshowups.example')
-  const back = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'active' } })
+  const back = await call(statusRoute, 'POST', '/api/platform/status', { cookie, body: { customer: 'pools', status: 'active', reason: 'resolved now', confirm: true } })
   assert.equal(back.status, 200)
   assert.deepEqual([rowStatus(), g.status], ['paused', 'PAUSED'], 'reactivation never restarts ads')
 })

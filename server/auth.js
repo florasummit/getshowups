@@ -58,7 +58,7 @@ export async function getSession(request, env, now = Date.now()) {
   const token = readCookie(request, SESSION_COOKIE)
   if (!token || !TOKEN_RE.test(token)) return null
   const row = await env.ONBOARDING_DB.prepare(
-    `SELECT s.token_hash, s.email, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
+    `SELECT s.token_hash, s.email, s.created_at AS signed_in_at, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
        FROM sessions s
        LEFT JOIN customer_users u ON u.email = s.email
        LEFT JOIN customers c ON c.id = u.customer
@@ -69,7 +69,7 @@ export async function getSession(request, env, now = Date.now()) {
     .bind(await sha256Hex(token), now)
     .first()
   if (!row) return null
-  return { tokenHash: row.token_hash, email: row.email, customer: customerFromRow(row) }
+  return { tokenHash: row.token_hash, email: row.email, signedInAt: row.signed_in_at, customer: customerFromRow(row) }
 }
 
 export async function deleteSession(db, tokenHash) {
@@ -93,3 +93,16 @@ export async function requireSession(request, env, { needCustomer = true, write 
   if (needCustomer && !session.customer) return { response: json(409, { error: 'setup_required' }) }
   return { session }
 }
+
+// Consequential account actions (closing, deleting, removing people, exporting): the person must have signed in with
+// Google within the last 15 minutes. A stolen or forgotten open session is not enough. Test sessions never qualify.
+export const FRESH_MS = 15 * 60 * 1000
+export const isFresh = (session, now = Date.now()) => Number.isFinite(session?.signedInAt) && now - session.signedInAt <= FRESH_MS && session.signedInAt <= now + 60000
+export const needsFresh = (session, now) => (isFresh(session, now) ? null : json(403, { error: 'reauth_required' }))
+
+// Who may close the business, remove people, invite, export and change the subscription: the business's owner = its
+// longest-standing member (derived; there are no roles to keep). If the owner leaves, the next one takes over.
+export async function ownerEmail(db, customerId) {
+  return (await db.prepare('SELECT email FROM customer_users WHERE customer = ?1 ORDER BY created_at, email LIMIT 1').bind(customerId).first())?.email ?? null
+}
+export const isOwner = async (db, session) => Boolean(session?.customer) && (await ownerEmail(db, session.customer.id)) === session.email

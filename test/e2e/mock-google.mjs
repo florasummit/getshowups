@@ -31,7 +31,7 @@ const subObject = (s) => ({
   status: s.status,
   metadata: s.metadata,
   currency: 'usd',
-  cancel_at_period_end: false,
+  cancel_at_period_end: s.cancel_at_period_end === true,
   cancel_at: s.cancel_at ?? null,
   items: { data: [{ quantity: 1, current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400, price: { id: s.price, unit_amount: 49900, recurring: { interval: 'month', interval_count: 1 } } }] },
 })
@@ -50,6 +50,15 @@ async function stripeMock(req, res, url, raw) {
     return send(res, 200, { id: c.id, object: 'customer', livemode: false })
   }
   const one = p.match(/^\/v1\/subscriptions\/([^/]+)$/)
+  if (one && req.method === 'POST') {
+    const sub = stripe.subs.get(one[1])
+    if (!sub) return send(res, 404, { error: { code: 'resource_missing' } })
+    if (form.has('cancel_at_period_end')) sub.cancel_at_period_end = form.get('cancel_at_period_end') === 'true'
+    if (form.get('cancel_at') === '') sub.cancel_at = null
+    await sendEvent('customer.subscription.updated', subObject(sub))
+    return send(res, 200, subObject(sub))
+  }
+  if (p === '/v1/invoices/create_preview' && req.method === 'POST') return send(res, 200, { amount_due: 49900, currency: 'usd', next_payment_attempt: Math.floor(Date.now() / 1000) + 30 * 86400 })
   if (one && (req.method === 'GET' || req.method === 'DELETE')) {
     const sub = stripe.subs.get(one[1])
     if (!sub) return send(res, 404, { error: { code: 'resource_missing', message: 'No such subscription' } })
@@ -60,6 +69,7 @@ async function stripeMock(req, res, url, raw) {
     return send(res, 200, subObject(sub))
   }
   const cus = p.match(/^\/v1\/customers\/([^/]+)$/)
+  if (cus && req.method === 'GET') return send(res, 200, { id: cus[1], object: 'customer', livemode: false, invoice_settings: { default_payment_method: { type: 'card', card: { brand: 'visa', last4: '4242', exp_month: 4, exp_year: 2031 } } } })
   if (cus && req.method === 'DELETE') {
     if (!stripe.customers.delete(cus[1])) return send(res, 404, { error: { code: 'resource_missing', message: 'No such customer' } })
     return send(res, 200, { id: cus[1], object: 'customer', deleted: true })
@@ -69,7 +79,7 @@ async function stripeMock(req, res, url, raw) {
     return send(res, 200, { data: [...stripe.subs.values()].filter((s) => !cus || s.customer === cus).map(subObject), has_more: false })
   }
   if (p === '/v1/invoices' && req.method === 'GET') {
-    return send(res, 200, { data: stripe.invoices.filter((i) => i.created >= Number(url.searchParams.get('created[gte]') || 0)), has_more: false })
+    return send(res, 200, { data: stripe.invoices.filter((i) => i.created >= Number(url.searchParams.get('created[gte]') || 0) && (!url.searchParams.get('customer') || i.customer === url.searchParams.get('customer'))), has_more: false })
   }
   if (p === '/v1/checkout/sessions' && req.method === 'GET') {
     const open = [...stripe.sessions.values()].filter((s) => s.customer === url.searchParams.get('customer') && s.status === 'open')

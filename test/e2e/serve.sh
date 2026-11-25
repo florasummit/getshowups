@@ -135,8 +135,15 @@ d1 "
   INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_STARTER_CUSTOMER', 1, 'admin@e2e.example', $NOW), ('$E2E_STARTER_M_CUSTOMER', 1, 'admin@e2e.example', $NOW);
   INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_DELETE_CUSTOMER', 'E2E Delete Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+    ('e2e-acct', 'E2E Account Pools', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW),
+    ('e2e-acct-m', 'E2E Account Mobile', 'America/New_York', '', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
+  INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES
+    ('e2e-acct', '', 'Pool service', '', '[]', '[]', $NOW), ('e2e-acct-m', '', 'Pool service', '', '[]', '[]', $NOW);
+  INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-acct.example', 'e2e-acct', $NOW), ('owner@e2e-acct-m.example', 'e2e-acct-m', $NOW);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_ACCT_OLD_SESSION_TOKEN")', 'owner@e2e-acct.example', $((NOW - 3600000)), $FAR);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-delete.example', '$E2E_DELETE_CUSTOMER', $NOW);
-  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DELETE_SESSION_TOKEN")', 'owner@e2e-delete.example', $NOW, $FAR);
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DELETE_SESSION_TOKEN")', 'owner@e2e-delete.example', $((NOW - 3600000)), $FAR);
   INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, currency, current_period_end, last_event_at, updated_at) VALUES
     ('$E2E_DELETE_CUSTOMER', 'cus_E2EDEL', 'sub_E2EDEL', 'founding', 'active', 49900, 'usd', $FAR, 0, $NOW);
   INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES
@@ -263,7 +270,7 @@ d1 "$VOICE_SQL
   INSERT INTO receptionist_conversations (id, customer, channel, state, transcript, created_at, updated_at) VALUES ('conv-$VS-test', '$VS', 'voice', '{\"voice\":{\"provider\":\"retell\",\"startedAt\":$((NOW - 120000)),\"endedAt\":$((NOW - 60000)),\"test\":true,\"metrics\":{\"micLive\":1,\"audioReceived\":1}},\"tools\":[{\"name\":\"find_available_times\",\"ok\":true},{\"name\":\"book_appointment\",\"ok\":true,\"simulated\":true}],\"booked\":{\"simulated\":true}}', '[]', $((NOW - 120000)), $((NOW - 60000)));
   INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES ('call_seed_$VS', '$VS', 'conv-$VS-test', 'retell', $((NOW - 120000)), $((NOW - 60000)));"
 
-for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_AREA_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_OPENAI_CUSTOMER" "$E2E_ADVERTISER_CUSTOMER" "$E2E_ADVERTISER_M_CUSTOMER" "$E2E_STARTER_CUSTOMER" "$E2E_STARTER_M_CUSTOMER" "$E2E_DELETE_CUSTOMER" "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
+for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_AREA_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_OPENAI_CUSTOMER" "$E2E_ADVERTISER_CUSTOMER" "$E2E_ADVERTISER_M_CUSTOMER" "$E2E_STARTER_CUSTOMER" "$E2E_STARTER_M_CUSTOMER" "$E2E_DELETE_CUSTOMER" e2e-acct e2e-acct-m "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
   npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done

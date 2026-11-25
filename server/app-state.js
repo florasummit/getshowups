@@ -170,7 +170,7 @@ const ABOUT = {
   teach: ['rules for how the receptionist answers', ['write, test and publish a rule'], []],
   website: ['the business website', ['edit, preview, publish', 'connect a domain'], []],
   ads: ['advertising', ['connect an ad account', 'prepare a campaign', 'approve a budget'], []],
-  settings: ['business details and setup', ['services and prices', 'phone', 'service area', 'booking hours', 'Google Calendar', 'policies'], []],
+  settings: ['business details and setup', ['services and prices', 'phone', 'service area', 'booking hours', 'closed dates and minimum notice', 'Google Calendar', 'policies', 'people who can sign in', 'plan, invoices and cancelling', 'connected services', 'download the business’s data', 'close the business'], []],
 }
 export const pageState = async (c, page) => ({ this_page_is_about: ABOUT[page][0], owner_can_do_here: ABOUT[page][1], ...(ABOUT[page][2].length ? { not_possible_here: ABOUT[page][2] } : {}), ...(await PAGES[page](c)) })
 export const selectedLead = async (c, id) => {

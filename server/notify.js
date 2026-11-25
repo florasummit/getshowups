@@ -7,6 +7,7 @@
 //     so nothing waits in the outbox to be sent late.
 //   - The lead's details are the owner's own data; the outbox body is cleared once sent (server/email.js).
 import { enqueue, recipientAllowed } from './email.js'
+import { noticesOff } from './notice-prefs.js'
 import { sha256Hex } from './google-oauth.js'
 import { longWhen, shortNeed } from './messages.js'
 import { sandboxed, statusIn, testStatuses } from './testbusiness.js'
@@ -156,11 +157,13 @@ export async function queueOwnerNotices(env, now = Date.now(), { bookingId = nul
     .bind(...customers)
     .all()
   const tests = await testStatuses(env)
+  const off = await noticesOff(db, customers)
   const origin = siteOrigin(env)
   for (const [kind, r] of items) {
     const testOnly = sandboxed(statusIn(tests, r.customer), r.created_at)
     let sendable = 0
     for (const m of members.filter((x) => x.customer === r.customer)) {
+      if (off.has(`${r.customer}|${m.email}|${kind}`)) continue
       if (!recipientAllowed(env, m.email, { testOnly })) {
         out.held++
         continue

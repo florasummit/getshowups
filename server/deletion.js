@@ -18,11 +18,30 @@ import { forgetConnection } from './ads/connections.js'
 import { endBillingNow, getSubscription, stripeConfigured, subscriptionEnded } from './stripe.js'
 import { deleteGhlConfig } from './ghl.js'
 import { disconnectDomain } from './domains.js'
+import { accountOf } from './business-accounts.js'
+import { SALES_BUSINESS } from './public.js'
+import { scheduleCancel } from './billing-details.js'
 
 export const deletionEnabled = (env) => env.ACCOUNT_DELETION_ENABLED === 'true'
 // Standard event fields for one deletion: every step of it shares one correlation id.
 const ev = (customer, outcome) => ({ customer, capability: 'account.deletion', resource: { type: 'customer', id: customer }, outcome, correlationId: `deletion:${customer}` })
 export const STEPS = ['lockout', 'ads', 'billing', 'integrations', 'data', 'verify']
+// Optional recovery window before anything is erased (0 = none, the owner decision of 2026-11-14; 14 is proposed, not
+// approved). During it the business is offline, its ads are paused and its plan is set to end; the owner can undo.
+export const recoveryDays = (env) => {
+  const n = Number(env.ACCOUNT_RECOVERY_DAYS)
+  return Number.isInteger(n) && n > 0 && n <= 90 ? n : 0
+}
+// Businesses nobody may delete from the product: ours (internal_live) and the sales record. Reclassify first, on purpose.
+// An unreadable classification is treated as protected.
+export async function protectedBusiness(env, id) {
+  if (id === SALES_BUSINESS) return true
+  try {
+    return (await accountOf(env, id)).classification === 'internal_live'
+  } catch {
+    return true
+  }
+}
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 
 // Erased per business, children before parents (foreign keys).
@@ -36,6 +55,7 @@ export const ERASED_TABLES = [
   'website_versions', 'website_generations', 'website_ai_usage', 'website_assets', 'website_domains', 'websites', 'landing_pages',
   'business_profiles', 'service_settings', 'customer_settings', 'onboarding_marks', 'self_signups', 'account_invites',
   'onboarding_invites', 'customer_users', 'email_outbox', 'conversation_control', 'business_policies', 'email_suppressions', 'website_imports', 'ai_credentials', 'ai_key_usage', 'website_design_turns',
+  'booking_rules', 'business_closures', 'owner_notice_off', 'business_restrictions',
   'acceptance_sessions', 'acceptance_grants', 'website_asset_hidden', 'ops_incidents', 'qa_runs', 'business_accounts',
 ]
 // Kept (no personal data, or needed for tax/accounting, disputes, security): see docs/DATA_RETENTION.md.
@@ -63,12 +83,16 @@ export async function deletionStatus(db, customerId) {
 export async function requestDeletion(env, customerId, actor, now = Date.now()) {
   if (!deletionEnabled(env)) return { ok: false, error: 'not_enabled' }
   const db = env.ONBOARDING_DB
-  const exists = await db.prepare('SELECT id FROM customers WHERE id = ?1').bind(customerId).first()
+  const exists = await db.prepare('SELECT id, status FROM customers WHERE id = ?1').bind(customerId).first()
   if (!exists) return { ok: false, error: 'not_found' }
+  if (await protectedBusiness(env, customerId)) return { ok: false, error: 'protected_business' }
+  const days = actor.type === 'system' ? 0 : recoveryDays(env)
+  const scheduledFor = days ? now + days * 86400000 : null
+  const report = scheduledFor ? { scheduledFor, wasStatus: exists.status } : {}
   const by = actor.type === 'owner' ? `owner:${await emailRef(actor.id)}` : actor.type === 'admin' ? String(actor.id).toLowerCase() : String(actor.id || 'system')
   const created = await db
-    .prepare("INSERT OR IGNORE INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at) VALUES (?1, ?2, ?3, 'in_progress', 'lockout', ?2)")
-    .bind(customerId, now, by)
+    .prepare("INSERT OR IGNORE INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at, report) VALUES (?1, ?2, ?3, 'in_progress', 'lockout', ?4, ?5)")
+    .bind(customerId, now, by, scheduledFor ?? now, JSON.stringify(report))
     .run()
   if ((created?.meta?.changes ?? 0) > 0) {
     const actorType = ['admin', 'owner'].includes(actor.type) ? actor.type : 'system'
@@ -76,6 +100,30 @@ export async function requestDeletion(env, customerId, actor, now = Date.now()) 
   }
   const r = await advanceDeletion(env, customerId, now)
   return { ok: true, ...r }
+}
+
+// The recovery window: offline, ads paused, plan set to end (asked again every cron run until Stripe confirms it), so
+// nothing is charged or published while the owner can still change their mind. Nothing is erased.
+async function holdForRecovery(env, id, report, now) {
+  const db = env.ONBOARDING_DB
+  await db.prepare("UPDATE customers SET status = 'suspended', updated_at = ?2 WHERE id = ?1 AND status <> 'suspended'").bind(id, now).run()
+  await db.prepare("UPDATE messages SET status = 'skipped', error = 'account_closing', updated_at = ?2 WHERE customer = ?1 AND status = 'scheduled'").bind(id, now).run()
+  const a = await enforceAdsHold(env, id, { actor: 'system:deletion', hold: { reason: 'account_deleted' }, now, correlationId: `deletion:${id}` }).catch(() => ({ failed: -1, paused: 0 }))
+  const b = report.billingEnds ? { ok: true } : await scheduleCancel(env, id, now).catch(() => ({ ok: false, error: 'internal_error' }))
+  const next = { ...report, adsPaused: (report.adsPaused || 0) + (a.paused || 0), adsPending: a.failed !== 0, billingEnds: b.ok === true, ...(b.ok ? { billingError: undefined } : { billingError: b.error }) }
+  await db.prepare("UPDATE account_deletions SET report = ?2 WHERE customer = ?1 AND status = 'in_progress' AND step = 'lockout' AND next_attempt_at > ?3").bind(id, JSON.stringify(next), now).run()
+  return next
+}
+
+// Undo within the window. The plan stays set to end: charging again takes the owner's own "Keep my plan". Ads stay paused.
+export async function cancelDeletion(env, id, actor, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  const gone = await db.prepare("DELETE FROM account_deletions WHERE customer = ?1 AND status = 'in_progress' AND step = 'lockout' AND attempts = 0 AND next_attempt_at > ?2 RETURNING report").bind(id, now).first()
+  if (!gone) return { ok: false, error: 'not_scheduled' }
+  const report = JSON.parse(gone.report || '{}')
+  if (report.wasStatus === 'active') await db.prepare("UPDATE customers SET status = 'active', updated_at = ?2 WHERE id = ?1 AND status = 'suspended'").bind(id, now).run()
+  await recordEvent(db, { type: 'account.deletion_withdrawn', actorType: actor.type, actor: actor.type === 'owner' ? `owner:${actor.id}` : actor.id, ...ev(id, 'success'), at: now })
+  return { ok: true }
 }
 
 // ---------- steps ----------
@@ -143,7 +191,7 @@ async function integrations(env, id) {
       if (token && (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID))) out.googleRevoked = true
     }
   }
-  for (const platform of ['google', 'meta', 'gbp']) {
+  for (const platform of ['google', 'meta', 'gbp', 'openai']) {
     if (await kv.get(`ads:${platform}:${id}`)) out.ads.push(platform)
     await forgetConnection(env, platform, id)
   }
@@ -223,7 +271,7 @@ async function verify(env, id) {
   const name = await db.prepare('SELECT name FROM customers WHERE id = ?1').bind(id).first()
   if (name && name.name !== 'Deleted business') left.customers = 1
   const kv = env.GOOGLE_TOKENS
-  for (const key of [`google:${id}`, `ads:google:${id}`, `ads:meta:${id}`, `ads:gbp:${id}`, `ghl:${id}`]) if (await kv.get(key)) left[key.split(':')[0] + (key.startsWith('ads') ? `:${key.split(':')[1]}` : '')] = 1
+  for (const key of [`google:${id}`, `ads:google:${id}`, `ads:meta:${id}`, `ads:gbp:${id}`, `ads:openai:${id}`, `ghl:${id}`]) if (await kv.get(key)) left[key.split(':')[0] + (key.startsWith('ads') ? `:${key.split(':')[1]}` : '')] = 1
   if ((await kv.list({ prefix: `google-archive:${id}:` })).keys.length) left['google-archive'] = 1
   const sub = await getSubscription(db, id)
   if (sub?.stripeSubscriptionId && stripeConfigured(env)) {
@@ -262,6 +310,7 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
   if (!job) return { status: 'not_found' }
   if (job.status === 'completed') return { status: 'completed', step: 'done' }
   const report = JSON.parse(job.report || '{}')
+  if (job.step === 'lockout' && report.scheduledFor > now) return { status: 'scheduled', scheduledFor: report.scheduledFor, report: await holdForRecovery(env, customerId, report, now) }
   let i = STEPS.indexOf(job.step)
   while (i >= 0 && i < STEPS.length) {
     const name = STEPS[i]
@@ -289,6 +338,8 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
       .run()
     await recordEvent(db, { type: `account.deletion_${name}`, actor: 'system:deletion', ...ev(customerId, 'success'), details: summary(name, report[name]), at: now })
   }
+  // Outside the database on purpose: a database restored to before the deletion can't bring the business back (below).
+  await env.GOOGLE_TOKENS.put(`deleted:${customerId}`, JSON.stringify({ at: now }))
   await recordEvent(db, { type: 'account.deletion_completed', actor: 'system:deletion', ...ev(customerId, 'success'), details: { retained: RETAINED.length }, at: now })
   return { status: 'completed', step: 'done' }
 }
@@ -302,9 +353,17 @@ function summary(name, r) {
 // Cron: advance due deletions (bounded).
 // limit 2: a full deletion measured 118 D1 queries (scripts/scale-bench.mjs); the cron run shares ~1,000 per request.
 export async function processDeletions(env, { now = Date.now(), limit = 2 } = {}) {
-  if (!deletionEnabled(env)) return { enabled: false }
+  // Once an hour (a KV list): also while deletion is off, so a restore never puts a deleted business back online.
+  const replayed = now % 3600000 < 300000 ? await replayRestored(env, now).catch(() => -1) : 0
+  if (!deletionEnabled(env)) return { enabled: false, ...(replayed ? { replayed } : {}) }
   let rows
   try {
+    // Recovery windows still open: whatever couldn't be stopped yet (a charge, an ad) is tried again.
+    const waiting = (await env.ONBOARDING_DB.prepare("SELECT customer, report FROM account_deletions WHERE status = 'in_progress' AND step = 'lockout' AND next_attempt_at > ?1 ORDER BY next_attempt_at LIMIT 10").bind(now).all()).results
+    for (const w of waiting) {
+      const r = JSON.parse(w.report || '{}')
+      if (r.scheduledFor > now && (!r.billingEnds || r.adsPending)) await holdForRecovery(env, w.customer, r, now)
+    }
     rows = (await env.ONBOARDING_DB.prepare("SELECT customer FROM account_deletions WHERE status = 'in_progress' AND next_attempt_at <= ?1 ORDER BY next_attempt_at LIMIT ?2").bind(now, limit).all()).results
   } catch (err) {
     if (err?.message?.includes('no such table')) return { enabled: true, advanced: 0 }
@@ -317,5 +376,63 @@ export async function processDeletions(env, { now = Date.now(), limit = 2 } = {}
     if (r.status === 'completed') completed++
     else if (r.error) failed++
   }
-  return { enabled: true, advanced: rows.length, completed, failed }
+  return { enabled: true, advanced: rows.length, completed, failed, ...(replayed ? { replayed } : {}) }
+}
+
+// A deleted business that is back as a normal record (the database was restored to an earlier point): offline at once,
+// members out, and, when deletion is on, the whole workflow runs again. Returns how many were found.
+export async function replayRestored(env, now = Date.now()) {
+  const db = env.ONBOARDING_DB
+  let cursor
+  let found = 0
+  for (let page = 0; page < 20; page++) {
+    const l = await env.GOOGLE_TOKENS.list({ prefix: 'deleted:', cursor })
+    const ids = l.keys.map((k) => k.name.slice('deleted:'.length))
+    for (let i = 0; i < ids.length; i += 50) {
+      const part = ids.slice(i, i + 50)
+      const { results } = await db.prepare(`SELECT c.id FROM customers c LEFT JOIN account_deletions d ON d.customer = c.id WHERE c.id IN (${part.map((_, j) => `?${j + 1}`).join(',')}) AND (c.name <> 'Deleted business' OR c.status <> 'suspended') AND (d.customer IS NULL OR d.status = 'completed' OR d.step = 'lockout')`).bind(...part).all()
+      for (const { id } of results) {
+        await lockout(env, id, now)
+        await db
+          .prepare("INSERT INTO account_deletions (customer, requested_at, requested_by, status, step, next_attempt_at, report) VALUES (?1, ?2, 'system:restore', 'in_progress', 'lockout', ?2, '{}') ON CONFLICT(customer) DO UPDATE SET status = 'in_progress', step = 'lockout', attempts = 0, completed_at = NULL, next_attempt_at = ?2, report = '{}'")
+          .bind(id, now)
+          .run()
+        await recordEvent(db, { type: 'account.deletion_replayed', actor: 'system:deletion', ...ev(id, 'failure'), details: { reason: 'database_restored' }, at: now })
+        found++
+      }
+    }
+    if (l.list_complete || !l.cursor) break
+    cursor = l.cursor
+  }
+  return found
+}
+
+// ---------- closing requests while deletion is switched off ----------
+// The owner asks; a person at GetShowUps handles it (privacy policy: "we handle the request by hand"). Kept in the
+// permanent log (codes only); open = asked and neither withdrawn nor resolved since.
+const REQ = ['account.closure_requested', 'account.closure_withdrawn', 'account.closure_resolved']
+export async function closureRequest(db, id) {
+  const r = await db.prepare(`SELECT action, at FROM audit_log WHERE customer = ?1 AND action IN ('${REQ.join("','")}') ORDER BY seq DESC LIMIT 1`).bind(id).first()
+  return r?.action === REQ[0] ? { at: r.at } : null
+}
+export async function setClosureRequest(env, id, kind, actor, details = {}, now = Date.now()) {
+  const open = await closureRequest(env.ONBOARDING_DB, id)
+  if ((kind === 'requested') === Boolean(open)) return { ok: false, error: open ? 'already_requested' : 'not_requested' }
+  await recordEvent(env.ONBOARDING_DB, { type: `account.closure_${kind}`, actorType: actor.type, actor: actor.type === 'owner' ? `owner:${actor.id}` : actor.id, customer: id, capability: 'account.deletion', resource: { type: 'customer', id }, outcome: 'info', correlationId: `closure:${id}`, details, at: now })
+  return { ok: true }
+}
+// Every closing request and deletion, for the platform console.
+export async function closures(db) {
+  const { results } = await db
+    .prepare(`SELECT a.customer, a.at, c.name FROM audit_log a JOIN (SELECT customer, max(seq) AS seq FROM audit_log WHERE action IN ('${REQ.join("','")}') GROUP BY customer) m ON m.seq = a.seq LEFT JOIN customers c ON c.id = a.customer WHERE a.action = '${REQ[0]}' ORDER BY a.at LIMIT 100`)
+    .all()
+  const del = await db.prepare('SELECT d.customer, c.name, d.status, d.step, d.attempts, d.last_error, d.requested_at, d.next_attempt_at, d.completed_at, d.report FROM account_deletions d LEFT JOIN customers c ON c.id = d.customer ORDER BY d.requested_at DESC LIMIT 100').all()
+  return {
+    requests: results.filter((r) => !del.results.some((d) => d.customer === r.customer)).map((r) => ({ customer: r.customer, name: r.name, at: r.at })),
+    deletions: del.results.map((d) => {
+      const rep = JSON.parse(d.report || '{}')
+      const scheduled = d.status === 'in_progress' && d.step === 'lockout' && rep.scheduledFor && d.attempts === 0 ? rep.scheduledFor : null
+      return { customer: d.customer, name: d.name, state: d.status === 'completed' ? 'completed' : d.last_error ? 'failed' : scheduled ? 'scheduled' : 'running', step: d.step, attempts: d.attempts, error: d.last_error, requestedAt: d.requested_at, completedAt: d.completed_at, scheduledFor: scheduled, nextAttemptAt: d.status === 'completed' ? null : d.next_attempt_at, billingError: rep.billingError ?? null, adsPending: rep.adsPending === true }
+    }),
+  }
 }

@@ -8,6 +8,7 @@
 //     for live use (the receptionist ignores every published rule set). Unchanged.
 import { CUSTOMER_RE } from '../invites.js'
 import { businessEligible } from '../eligibility.js'
+import { restricted } from '../restrictions.js'
 import { getProfile } from '../onboarding.js'
 import { withinHours } from '../receptionist/routing.js'
 import { rulesReady } from './store.js'
@@ -26,7 +27,7 @@ export const rulesLiveFor = (env, id) => env?.AI_RULES_ENABLED !== 'false' && li
 
 // Studio is offered to every eligible business once migration 0033 is applied (hidden, never broken, before that).
 export async function studioAccess(env, customer) {
-  if (!studioEnabled(env) || !(await businessEligible(env, customer))) return false
+  if (!studioEnabled(env) || !(await businessEligible(env, customer)) || (await restricted(env, customer.id, 'teach_ai'))) return false
   return rulesReady(env.ONBOARDING_DB)
 }
 

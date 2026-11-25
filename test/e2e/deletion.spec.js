@@ -3,7 +3,7 @@
 // the founder sees the deletion record. MOCK DATA throughout; nothing external is touched.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
-import { useSession } from './helpers.js'
+import { returnFromGoogle, useSession } from './helpers.js'
 
 test.describe.configure({ mode: 'serial', retries: 0 })
 
@@ -12,19 +12,30 @@ test('owner permanently deletes the account: typed confirmation; site, booking a
   expect((await page.request.get(`/api/book/${id}`)).status()).toBe(200)
   await useSession(context, fixtures.E2E_DELETE_SESSION_TOKEN)
   await page.goto('/dashboard/settings')
-  const card = page.locator('.card', { has: page.getByRole('heading', { name: 'Delete account' }) })
+  const card = page.locator('#close')
   await expect(card).toContainText('There is no undo')
-  await expect(card).toContainText('cancel your plan in Billing instead')
-  await card.getByRole('button', { name: 'Delete account…' }).click()
-  const confirm = card.getByRole('button', { name: 'Permanently delete account' })
+  await expect(card).toContainText('cancel your plan under Plan and billing instead')
+  await card.getByRole('button', { name: 'Delete business…' }).click()
+  await expect(card.locator('[data-impact]')).toContainText('Your plan ends right away')
+  await expect(card.locator('[data-impact]')).toContainText('1 customer record')
+  const confirm = card.getByRole('button', { name: 'Permanently delete business' })
   await card.getByLabel(/Type the business name/).fill('E2E Delete')
   await expect(confirm).toBeDisabled()
+  await card.getByLabel(/Type the business name/).fill('e2e delete pools')
+  // The seeded session is an hour old: asked to sign in again, nothing deleted; after it, it goes through.
+  await confirm.click()
+  await expect(card.locator('[data-reauth]')).toBeVisible()
+  expect((await page.request.get(`/api/book/${id}`)).status()).toBe(200)
+  await returnFromGoogle(page, '**/api/auth/google/start**', 'GET', '/api/auth/google/callback', 'login:owner@e2e-delete.example')
+  await card.getByRole('link', { name: 'Sign in again with Google' }).click()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+  await card.getByRole('button', { name: 'Delete business…' }).click()
   await card.getByLabel(/Type the business name/).fill('e2e delete pools')
   await expect(confirm).toBeEnabled()
   // The assistant's conversations in this browser go with the account.
   await page.evaluate(() => localStorage.setItem('gsu:assistant:v1:e2e-delete:o', '[]'))
   await confirm.click()
-  await expect(page.locator('[data-account-deleted]')).toContainText('Your account is being deleted')
+  await expect(page.locator('[data-account-deleted]')).toContainText('Your business has been deleted')
 
   expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('gsu:assistant')))).toEqual([])
   // At once: no access to the business, booking page and public API gone.

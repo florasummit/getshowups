@@ -372,6 +372,7 @@ test('ads hold: a platform admin suspension pauses the running campaign on Googl
   await a.goto('/admin')
   await a.locator('.row--link', { hasText: 'E2E Ads Pools' }).first().click()
   await a.getByRole('button', { name: 'Suspend account' }).click()
+  await a.getByLabel(/^Reason/).fill('browser test')
   await expect(a.getByText('every running ad campaign (checked on Google)')).toBeVisible()
   await a.getByRole('button', { name: 'Confirm: pause booking page and ads' }).click()
   await expect(a.locator('[data-ads-paused]')).toHaveText('Ads: 1 campaign paused (1 confirmed on Google).')
@@ -389,6 +390,8 @@ test('ads hold: a platform admin suspension pauses the running campaign on Googl
   await expect(c.locator('.chip')).toHaveText('Paused')
 
   await a.getByRole('button', { name: 'Reactivate account' }).click()
+  await a.getByLabel(/^Reason/).fill('browser test over')
+  await a.getByRole('button', { name: 'Confirm: reactivate' }).click()
   await expect(a.getByRole('button', { name: 'Suspend account' })).toBeVisible()
   await admin.close()
   await page.reload()

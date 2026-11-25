@@ -6,6 +6,7 @@ import { json } from '../../../server/google-oauth.js'
 import { audit, requirePlatformAdmin } from '../../../server/platform.js'
 import { CUSTOMER_RE } from '../../../server/invites.js'
 import { track } from '../../../server/events.js'
+import { deletionStatus } from '../../../server/deletion.js'
 import { enforceAdsHold } from '../../../server/ads/holds.js'
 
 export async function onRequestPost({ request, env }) {
@@ -15,11 +16,14 @@ export async function onRequestPost({ request, env }) {
   const customer = String(body?.customer || '').toLowerCase()
   const status = body?.status
   if (!CUSTOMER_RE.test(customer) || !['active', 'suspended'].includes(status)) return json(400, { error: 'invalid_request' })
+  const reason = String(body?.reason || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+  if (body?.confirm !== true || reason.length < 5) return json(400, { error: 'reason_required' })
+  // A business being closed or deleted is never put back online from here (the owner, or "Undo closing", does that).
+  if (status === 'active' && (await deletionStatus(env.ONBOARDING_DB, customer))) return json(409, { error: 'being_deleted' })
   const row = await env.ONBOARDING_DB.prepare('UPDATE customers SET status = ?2, updated_at = ?3 WHERE id = ?1 RETURNING id')
     .bind(customer, status, Date.now())
     .first()
   if (!row) return json(404, { error: 'not_found' })
-  const reason = String(body?.reason || '').slice(0, 200)
   let ads = null
   if (status === 'suspended') {
     ads = await enforceAdsHold(env, customer, { actor: `admin:${admin.email}` }).catch((err) => {
