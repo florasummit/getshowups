@@ -36,8 +36,29 @@ export function useSalesChat() {
   return useEnrollment()?.salesChat === true
 }
 
-// The marketing site's start action: Get started (open or unknown) or Request early access (closed).
+// Our own booking page for a call with the founder: GetShowUps' consultation calendar, through the same booking
+// product every customer gets (lead captured, qualified, booked on the calendar, attributed). Campaign codes the
+// visitor arrived with are passed on unchanged; without any, the link says which homepage button was used
+// (utm_source=homepage, utm_campaign=cta_<location>), so Admin → Growth can read prospects by source. Codes only.
+const CODE = /^[A-Za-z0-9_.-]{1,64}$/
+export function salesBookingHref(location = 'cta', search = typeof window === 'undefined' ? '' : window.location.search) {
+  const inbound = new URLSearchParams(search)
+  const out = new URLSearchParams()
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign']) if (CODE.test(inbound.get(k) || '')) out.set(k, inbound.get(k))
+  if (/^[A-Za-z0-9_-]{10,200}$/.test(inbound.get('gclid') || '')) out.set('gclid', inbound.get('gclid'))
+  if (!out.has('utm_source')) {
+    out.set('utm_source', 'homepage')
+    out.set('utm_medium', 'site')
+    out.set('utm_campaign', `cta_${String(location).replace(/[^a-z0-9_]/gi, '').slice(0, 40) || 'cta'}`)
+  }
+  return `/book/${SALES_BUSINESS}?${out}`
+}
+
+// The marketing site's start action: Get started (open or unknown) or Request early access (closed). While closed and
+// GetShowUps' own sales booking is running (enrollment.salesChat: bookable + receptionist on), early access goes
+// straight to that booking page; otherwise to the section on this page (unchanged behaviour).
 export function useStartAction() {
-  const open = useEnrollmentOpen()
-  return open === false ? { ...enrollmentClosed, closed: true } : { ...getStarted, closed: false }
+  const e = useEnrollment()
+  if (e?.open !== false) return { ...getStarted, closed: false, salesBooking: false }
+  return { ...enrollmentClosed, closed: true, salesBooking: e.salesChat === true }
 }

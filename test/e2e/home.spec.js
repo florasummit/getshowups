@@ -237,3 +237,19 @@ test('early access: when the GetShowUps business runs its own receptionist (enro
   await expect(link).toHaveAttribute('href', '/chat/getshowups')
   await expect(page.locator('#book-demo').getByRole('heading', { name: 'Request early access' })).toBeVisible()
 })
+
+test('early access goes through our own booking page when it runs: every button carries its location, campaign codes from the ad are kept, the section offers open times @mobile', async ({ page }) => {
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: false, salesChat: true } }))
+  await page.goto('/', { waitUntil: 'networkidle' })
+  const hero = page.locator('.hero').getByRole('link', { name: /Request early access/ })
+  await expect(hero).toHaveAttribute('href', '/book/getshowups?utm_source=homepage&utm_medium=site&utm_campaign=cta_hero')
+  await expect(page.locator('#pricing [data-start-location="pricing"]')).toHaveAttribute('href', /utm_campaign=cta_pricing$/)
+  await openModeB(page)
+  const section = page.locator('#book-demo [data-sales-booking]')
+  await expect(section.getByRole('link', { name: 'See open times' })).toHaveAttribute('href', '/book/getshowups?utm_source=homepage&utm_medium=site&utm_campaign=cta_section')
+  await expect(page.locator('#book-demo iframe')).toHaveCount(0)
+  await expect(page.locator('#book-demo').getByText('Pick a time on our booking page. It goes straight onto our calendar.')).toBeVisible()
+  // A visitor from an ad keeps the ad's codes all the way to the booking page.
+  await page.goto('/?utm_source=openai&utm_medium=paid&utm_campaign=gsu-gpt-a', { waitUntil: 'networkidle' })
+  await expect(page.locator('.hero').getByRole('link', { name: /Request early access/ })).toHaveAttribute('href', '/book/getshowups?utm_source=openai&utm_medium=paid&utm_campaign=gsu-gpt-a')
+})

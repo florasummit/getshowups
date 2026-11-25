@@ -21,6 +21,8 @@ export const enrollmentClosed = {
   label: 'Request early access',
   note: 'Online enrollment isn’t open yet. Book a short call and we’ll set you up as soon as it opens.',
   next: ['Pick a time. The calendar here books it directly.', 'We look at your services, service area and website together.', 'When enrollment opens, you’re set up first. Nothing is charged until you sign up.'],
+  // When GetShowUps' own booking page runs (enrollment.salesChat): the same steps, booked through it.
+  nextOwnBooking: ['Pick a time on our booking page. It goes straight onto our calendar.', 'We look at your services, service area and website together.', 'When enrollment opens, you’re set up first. Nothing is charged until you sign up.'],
 }
 
 export const hero = {

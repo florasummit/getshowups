@@ -32,21 +32,22 @@ export const SALES_PROFILE = {
 }
 export const SALES_HOURS = { slotMinutes: 20, dayStart: '09:00', dayEnd: '17:00', workdays: [1, 2, 3, 4, 5] }
 export const SALES_GREETING = 'Hi, this is the GetShowUps assistant. What kind of business do you run, and how do new inquiries reach you today?'
-// Owner-approved answers (≤ 3000 characters, server/receptionist/knowledge.js LIMITS.knowledge). Only facts that are
-// true in production; the engine's guards still apply (listed price only, no promises).
-export const SALES_NOTES = `What you get for $499/month: a professional website built and hosted for you (your GetShowUps address or your own domain); an AI receptionist on your website chat that answers in seconds using only your services, prices, towns, hours and approved notes; online booking straight into your Google Calendar with a real open time; service-area screening for every lead; Teach Your AI (in pilot: they write and test rules; we switch them on for live conversations); Google Calendar invitations for every booking; show-up and visit tracking; direct help from the founding team.
-Not available yet (say so plainly): text messaging, email reminders, ad management, and voice on the phone. Voice on the website is in a pilot.
-Pricing: the Growth plan is $499 a month, billed monthly, no setup fee, no free trial, cancel any time from the billing page. Advertising spend, if they run ads, is separate and paid directly to Google or Meta. Applicable taxes are separate where required. No discounts.
+// Owner-approved answers (≤ 3000 characters, server/receptionist/knowledge.js LIMITS.knowledge). Founder-approved
+// 2026-11-25: pool-first, who is not a fit, qualifying questions, what is not live. Only facts that are true in production; the engine's guards still apply (listed price only, no promises).
+export const SALES_NOTES = `Who it is for: owner-run pool service and repair companies first, also HVAC and roofing: businesses that book visits and miss website inquiries while on jobs. Probably not a fit (say so kindly): inquiries only by phone, fewer than about 10 a month, nothing to book, or they want texting or a phone line now.
+What you get for $499/month: a website built and hosted for you; an AI receptionist on your website chat that answers in seconds using only your services, prices, towns, hours and approved notes; online booking of a real open time on your Google Calendar (Google emails the invitation); ZIP-code screening before any time is offered; every inquiry, booking, visit and payment you record in one dashboard; set-up with the founder on a short call.
+Not available yet (say so plainly): answering the phone, text messages, automatic email reminders and follow-ups, and running ads from GetShowUps. Voice on the website is a pilot.
+Pricing: $499 a month, billed monthly, no setup fee, no free trial, cancel any time from the billing page. Ad spend, if they run ads, is separate and paid to Google or Meta. Taxes separate where required. No discounts.
+Ask one at a time: what work they do; how inquiries reach them (website, phone, texts, referrals); about how many a month; what happens to one that arrives while they are on a job; which calendar they use.
+Skimmer, Jobber or a CRM: it works alongside them; it handles the website conversation and booking, not routes or invoicing.
+Voicemail or texts: voicemail doesn't ask the questions or book a time; the receptionist answers, checks the area and books a real slot.
+Will it say something wrong: it uses only their records and never invents a price or promise; an unlisted price is confirmed by the team. They test it before customers see it.
+Wants a person: it never pretends to be them and can't transfer calls; a request for a person becomes a callback request on their dashboard.
+Price: monthly, cancel any time; the dashboard shows what came in and what got booked, so they judge it on their own numbers. Never promise leads, bookings or revenue.
+Proof: the founder runs a Charleston pool company that uses GetShowUps without paying; offer a live demo on the call. No customer results to share yet; say so if asked.
+No website: included. Cancel: site stays online to the end of the paid period plus 14 days, content downloadable, domain stays theirs.
 Enterprise: for agencies, franchises, entrepreneurship programs, universities and multi-location organizations; priced by agreement, never online checkout. Each business runs as its own workspace today; one login across businesses, shared reporting and one invoice are not live. Offer to take their details or book a consultation, or point them to Contact sales under Pricing.
-Setup: the founder sets the business up with them on a short call; online enrollment opens later. Nothing is charged until they choose to sign up.
-Already have voicemail or texts: voicemail does not ask the questions or book the time; the receptionist answers in seconds, checks the area, asks what they would ask, and books a real open slot. Every inquiry still shows on their dashboard.
-Will it say something wrong: it uses only their records and never invents a price or a promise; if a price is not listed it says the team will confirm. They can test it before customers see it.
-Customers want a person: it never pretends to be them and cannot transfer calls; if someone asks for a person it records a callback request they see immediately.
-Price objection: billed monthly with no setup fee and cancel any time; the dashboard shows exactly what came in and what got booked, so they can judge it on their own numbers. Never promise lead counts, bookings or revenue.
-No website: a hosted website with booking and chat is included.
-Cancel: the website stays online to the end of the paid period plus 14 days, content can be downloaded, the domain is always theirs.
-Who it is for: pool service, HVAC and roofing businesses that book appointments and miss inquiries while on jobs. If a business has nothing to book or no inquiries to answer, say it is probably not a fit.
-Consultation: a free 20-minute call with the founder to look at their services, service area and current website; booked on this calendar.`
+Next step: a 20-minute call with the founder on this calendar to look at their services, area and website.`
 
 // → { ok, created, kind, id, status } | { ok: false, httpStatus, error }
 export async function createSalesBusiness(env, admin, kind, now = Date.now()) {
