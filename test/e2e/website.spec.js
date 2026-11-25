@@ -37,6 +37,8 @@ test.describe.configure({ mode: 'serial', timeout: 90_000 })
 
 test('owner edits, previews and publishes the website; visitors book through it @mobile', async ({ page, context }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile'
+  // Its own visitor address: the public-page allowance is per address, and every spec otherwise shares 127.0.0.1.
+  await context.setExtraHTTPHeaders({ 'CF-Connecting-IP': mobile ? '198.51.100.234' : '198.51.100.233' })
   const id = mobile ? fixtures.E2E_HOME_CUSTOMER : fixtures.E2E_CUSTOMER
   await useSession(context, mobile ? fixtures.E2E_HOME_SESSION_TOKEN : fixtures.E2E_SESSION_TOKEN)
   const noOverflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
