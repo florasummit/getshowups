@@ -747,7 +747,8 @@ test('Journey A: an established advertiser connects and the campaigns already in
   // Results keep Google's numbers for the account's own campaigns apart from GetShowUps campaigns.
   const res = await (await page.request.get('/api/dashboard/results?days=30&scope=ads')).json()
   expect(res.imported).toMatchObject({ campaigns: 2 })
-  expect(res.funnel.attribution.importedLeads).toBe(0)
+  // The two callers the owner added count for their own Google campaign, never for a GetShowUps one.
+  expect(res.funnel.attribution).toMatchObject({ importedLeads: 2, adLeads: 0 })
   // Period: 7 days → 7 × $21.
   await imported.getByRole('button', { name: '7 days' }).click()
   await expect(search.locator('summary')).toContainText('$147')
