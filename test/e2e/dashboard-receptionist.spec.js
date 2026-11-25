@@ -94,8 +94,10 @@ test('owner (voice released for this business): browser voice is Active with wha
   expect(text).not.toMatch(/Retell|ElevenLabs|OpenAI/)
 })
 
-test('owner chooses how the chat opens on the website: the panel switch saves on its own, says what it does, and turns back off', async ({ page, context }) => {
-  await useSession(context, fixtures.E2E_VOICE_M_SESSION_TOKEN)
+test('website chat panel: the owner turns it on; the published site opens the same chat in a panel (nothing loads before, no script, new-tab links); off again = the plain link @mobile', async ({ page, context, browser }, info) => {
+  const mobile = info.project.name === 'mobile'
+  const id = mobile ? fixtures.E2E_VOICE_M_CUSTOMER : fixtures.E2E_VOICE_CUSTOMER
+  await useSession(context, mobile ? fixtures.E2E_VOICE_M_SESSION_TOKEN : fixtures.E2E_VOICE_SESSION_TOKEN)
   await page.goto('/dashboard/receptionist')
   const panel = page.getByRole('switch', { name: /Open the chat in a panel on my website/ })
   await expect(panel).not.toBeChecked()
@@ -105,10 +107,37 @@ test('owner chooses how the chat opens on the website: the panel switch saves on
   await expect(page.getByText('Saved. Your website now opens the chat in a panel.')).toBeVisible()
   await expect(panel).toBeChecked()
   expect((await (await page.request.get('/api/dashboard/receptionist')).json()).websitePanel).toEqual({ on: true })
-  await page.reload()
-  await expect(panel).toBeChecked()
+  await expect(page.getByRole('list', { name: 'Channels' }).getByRole('listitem').filter({ hasText: 'Website chat' })).toContainText('in a panel on your website')
+
+  // A visitor (no session, own address) on the published site.
+  const visitor = await browser.newContext({ viewport: page.viewportSize(), extraHTTPHeaders: { 'CF-Connecting-IP': mobile ? '198.51.100.236' : '198.51.100.235' } })
+  const site = await visitor.newPage()
+  const chatRequests = []
+  site.on('request', (r) => /\/chat\/|\/api\/receptionist\//.test(r.url()) && chatRequests.push(r.url()))
+  const res = await site.goto(`/p/${id}`)
+  expect(res.headers()['content-security-policy']).toMatch(/frame-src http:\/\/[^ ;]+$/)
+  expect(await site.locator('script:not([type="application/ld+json"])').count()).toBe(0)
+  const box = site.locator('details[data-gsu-chat-panel]')
+  await expect(box.locator('summary')).toContainText('Chat or talk with us')
+  expect(chatRequests).toEqual([]) // nothing of the chat loads until the visitor opens it
+  await box.locator('summary').click()
+  const frame = site.frameLocator('details[data-gsu-chat-panel] iframe')
+  await expect(frame.getByText('Hi! Thanks for calling Voice Pools.')).toBeVisible()
+  await expect(frame.getByLabel('Your message')).toBeVisible()
+  await expect(frame.getByRole('link', { name: 'Book online' })).toHaveAttribute('target', '_blank')
+  await expect(box.locator('summary')).toContainText('Close chat')
+  expect(await site.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  await expect(site.getByRole('link', { name: 'Open the chat in a new tab' })).toHaveAttribute('href', new RegExp(`/chat/${id}$`))
+  await box.locator('summary').click()
+  await expect(box).not.toHaveAttribute('open', '')
+
+  // Off again: the plain link, no panel, no frame permission.
   await panel.click()
   await expect(page.getByText('Saved. Your website shows the chat link.')).toBeVisible()
   await expect(panel).not.toBeChecked()
-  expect((await (await page.request.get('/api/dashboard/receptionist')).json()).websitePanel).toEqual({ on: false })
+  const off = await site.goto(`/p/${id}`)
+  expect(off.headers()['content-security-policy']).not.toContain('frame-src')
+  await expect(site.locator('a[data-gsu-chat]')).toContainText('Chat or talk with us')
+  await expect(site.locator('details[data-gsu-chat-panel]')).toHaveCount(0)
+  await visitor.close()
 })

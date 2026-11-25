@@ -9,11 +9,14 @@ _Update at the end of every task. Newest first._
   no script on the business site, nothing loads until a visitor opens it, the page's policy allows that one frame only
   (frame-src our origin), "Open the chat in a new tab" stays. server/chat-panel.js; migration 0043 (website_chat_settings).
 - **Why during the V1 freeze:** a founder requirement (2026-11-25: prepare the panel with owner on/off for review).
+- **Complete:** owner switch (saved on its own, audited, shown in the Website chat tile, in the data export, erased with
+  the account); inside the panel Book online and Privacy open in a new tab; a chat that can't load says so in the panel.
 - **Verified:** unit tests (off = identical page, on = panel + policy, another business untouched, before 0043 = link and
-  the setting hidden, audited); a real browser with the real policy on a rendered site fixture, desktop and phone
-  (0 chat requests before opening, opens, converses against a stand-in, closes, no sideways scroll); owner switch browser test in CI.
-- **Not verified:** on a customer's own domain (the frame is then cross-site: browsers partition its storage, so a
-  conversation may not resume after leaving the page); the microphone inside the frame on real phones.
+  the setting hidden, audited); browser tests on desktop and phone against the real server (owner turns it on, the
+  published site opens the chat in the panel, nothing loads before, no script, off again = the link); a cross-site check
+  (site and chat on different sites, as on a customer's own domain): the conversation resumes after a page change.
+- **Not verified:** Safari's handling of framed storage (the chat then starts fresh after a page change, never an
+  error) and the microphone inside the frame on real phones ("Open the chat in a new tab" is the fallback for both).
 - **Needs approval:** the design, migration 0043 (after 0042; 0040 stays unapplied), merge. The privacy policy wording is untouched.
 
 ## Account lifecycle, platform controls, booking settings (2026-11-25, PR #169)

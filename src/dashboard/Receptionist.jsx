@@ -61,7 +61,7 @@ const channelName = (c) => (c === 'voice' ? 'Browser voice' : 'Chat')
 // (functions/api/dashboard/receptionist/index.js: chat = model configured; voiceStatus = the business's ACTIVE voice
 // provider resolved server-side: 'available' | 'testing' (Retell not released for this business, RECEPTIONIST_VOICE_
 // BUSINESSES) | 'not_configured'; staffEmail = the MESSAGES_LIVE gate; no phone line exists). Never a hardcoded state.
-function channelTiles(cap, on, chatUrl, admin) {
+function channelTiles(cap, on, chatUrl, admin, panel) {
   const voice = !on
     ? ['neutral', 'Off', 'Turn the receptionist on below; voice follows the same switch as chat.']
     : cap.voiceStatus === 'available'
@@ -70,16 +70,16 @@ function channelTiles(cap, on, chatUrl, admin) {
         ? ['neutral', 'Not turned on yet', `GetShowUps turns browser voice on business by business; this business is not on the list yet. Chat works meanwhile.${admin ? ' Admin: add it to the Retell release list (RECEPTIONIST_VOICE_BUSINESSES) or switch its provider in the Admin Console.' : ''}`]
         : ['neutral', 'Not available', 'The voice provider is not configured on the platform; chat works meanwhile.']
   return [
-    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
+    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', panel ? `Customers chat in a panel on your website, or at ${chatUrl}.` : `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
     ['Browser voice', voice],
     ['Phone calls', ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']],
     ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team is emailed about callback requests and messages.'] : ['warn', 'Test mode', 'Emails go only to GetShowUps test recipients until messaging launch; requests still show on this page.']],
   ]
 }
-function Channels({ cap, on, chatUrl, admin }) {
+function Channels({ cap, on, chatUrl, admin, panel }) {
   return (
     <ul className="ui-tiles" aria-label="Channels">
-      {channelTiles(cap, on, chatUrl, admin).map(([label, [tone, text, hint]]) => (
+      {channelTiles(cap, on, chatUrl, admin, panel).map(([label, [tone, text, hint]]) => (
         <li key={label} className="ui-tile" data-channel={label}>
           <span className="ui-tile-label">{label}</span>
           <Pill tone={tone}>{text}</Pill>
@@ -332,7 +332,7 @@ export default function Receptionist() {
       >
         {on ? 'Answers questions, books real appointments on your calendar, and takes callback requests when someone wants a person.' : 'Turn it on below to answer customers on your website.'}
       </PageHeader>
-      <Channels cap={cap} on={on} chatUrl={data.chatUrl} admin={Boolean(data.admin)} />
+      <Channels cap={cap} on={on} chatUrl={data.chatUrl} admin={Boolean(data.admin)} panel={Boolean(data.websitePanel?.on)} />
 
       <Section title={attention.length ? `Needs attention (${attention.length})` : 'Needs attention'} label="Needs attention" className={attention.length ? 'ui-section--attention' : ''}>
         {attention.length ? (
