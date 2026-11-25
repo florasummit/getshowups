@@ -34,7 +34,7 @@ export async function onRequestGet({ request, env }) {
       impact,
       request: request_,
       scheduledFor: del?.status === 'in_progress' && del.step === 'lockout' && !del.report.claimed ? (del.report.scheduledFor ?? null) : null,
-      chargesStopped: Boolean(del) && (!sub?.stripeSubscriptionId || sub.status === 'canceled' || sub.cancelAtPeriodEnd),
+      chargesStopped: Boolean(del) && (!sub?.stripeSubscriptionId || sub.status === 'canceled' || (sub.cancelAtPeriodEnd && del.report?.billingEnds === true)),
       adsPending: del?.report?.adsPending === true,
     },
   })

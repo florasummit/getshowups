@@ -2,13 +2,18 @@
 // receipts, cancel at the end of the paid period, and keep the plan. Read from Stripe when the owner opens it; nothing of
 // it is stored. Nothing is called done until Stripe's own answer says so, and the stored subscription is then refreshed
 // from Stripe (server/reconcile.js), never guessed. Cancelling only ever reduces what will be charged.
-import { billingSubscription, fetchStripeSubscription, getSubscription, liveBlocked, stripeConfigured, stripeLiveEnabled, stripePost } from './stripe.js'
+import { billingSubscription, fetchStripeSubscription, getSubscription, liveBlocked, stripeConfigured, stripeLiveEnabled, stripeModeMismatch, stripePost } from './stripe.js'
 import { resyncFromStripe } from './reconcile.js'
 import { recordEvent } from './auditlog.js'
 
 const RUNNING = ['active', 'trialing', 'past_due', 'unpaid', 'paused', 'incomplete']
 const httpsUrl = (u) => (typeof u === 'string' && /^https:\/\/([a-z0-9-]+\.)*stripe\.com\//.test(u) ? u : null)
 const ending = (s) => Boolean(s.cancel_at_period_end || s.cancel_at)
+const paidUntil = (s) => {
+  const ends = (s.items?.data || []).map((i) => i.current_period_end).filter(Number.isFinite)
+  return s.current_period_end ?? (ends.length ? Math.max(...ends) : null)
+}
+const endsThisPeriod = (s) => Boolean(s.cancel_at_period_end || (s.cancel_at && paidUntil(s) && s.cancel_at <= paidUntil(s) + 60))
 const periodEnd = (s) => {
   const ends = (s.items?.data || []).map((i) => i.current_period_end).filter(Number.isFinite)
   const t = s.cancel_at ?? s.current_period_end ?? (ends.length ? Math.max(...ends) : null)
@@ -102,9 +107,11 @@ export async function keepPlan(env, customerId, actor, now = Date.now()) {
 export async function scheduleCancel(env, customerId, now = Date.now()) {
   const sub = await getSubscription(env.ONBOARDING_DB, customerId)
   if (!sub?.stripeSubscriptionId || sub.status === 'canceled') return { ok: true, none: true }
+  if (stripeModeMismatch(env, sub)) return { ok: false, error: 'stripe_mode_mismatch' }
   const s = await runningSub(env, customerId, { access: false })
-  if (!s.ok) return s.error === 'resource_missing' ? { ok: true, none: true } : s
-  if (RUNNING.includes(s.body.status) && !ending(s.body)) return cancelPlanRaw(env, customerId, s, now)
+  if (!s.ok) return s.error === 'resource_missing' && sub.livemode !== true ? { ok: true, none: true } : s
+  // For a closing, only an end no later than the paid period counts: a far-off end date would still renew first.
+  if (RUNNING.includes(s.body.status) && !endsThisPeriod(s.body)) return cancelPlanRaw(env, customerId, s, now)
   // Already ending at Stripe: make sure our record says so too.
   if (!sub.cancelAtPeriodEnd) await resyncFromStripe(env, customerId, now).catch(() => null)
   return { ok: true }
@@ -112,6 +119,6 @@ export async function scheduleCancel(env, customerId, now = Date.now()) {
 async function cancelPlanRaw(env, customerId, s, now) {
   const r = await stripePost(env, `/subscriptions/${encodeURIComponent(s.id)}`, { cancel_at_period_end: true })
   if (!r.ok) return { ok: false, error: r.error }
-  if (!ending(r.body)) return { ok: false, error: 'not_confirmed' }
+  if (!endsThisPeriod(r.body)) return { ok: false, error: 'not_confirmed' }
   return settle(env, customerId, 'billing.cancel_requested', { type: 'system', id: 'system:deletion' }, r.body, now)
 }
