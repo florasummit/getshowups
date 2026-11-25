@@ -9,6 +9,7 @@ import { isTestBusinessSql } from './testbusiness.js'
 import { stripeLiveEnabled } from './stripe.js'
 import { baselineFrom, DEFAULTS, monthlyFunnel, normalizeAssumptions, FIELDS } from './growth-model.js'
 import { SALES_PROFILE } from './sales.js'
+import { salesAttribution } from './sales-attribution.js'
 
 const DAY = 86_400_000
 const REAL = (col) => `NOT ${isTestBusinessSql(col)}`
@@ -41,6 +42,11 @@ export async function growthMeasure(env, now = Date.now()) {
     .catch(() => ({ cents: 0, days: 0, businesses: 0 }))) || {}
   const spendMeasured = Number(spend.days || 0) > 0
   const s = g.sales
+  // Prospect → business → paying, by source (90 days: a sale takes longer than the 30-day window above).
+  const attr = await salesAttribution(env, { now, days: 90, internal }).catch(() => null)
+  const att = attr && !attr.unavailable ? attr : null
+  const sourceLabel = (r) => `${r.source.replace(/^link:/, '')}${r.campaign ? ` (${r.campaign})` : ''}`
+  const bySourceNote = att?.bySource.length ? `By source, prospects → businesses${att.live ? ' → paying' : ''}: ${att.bySource.slice(0, 5).map((r) => `${sourceLabel(r)} ${r.prospects} → ${r.businessesCreated}${att.live ? ` → ${r.paying}` : ''}`).join(' · ')}` : null
   const b = g.billing
   // Test mode: the count of active Stripe test subscriptions (0 when there are none), never revenue.
   const testSubs = live ? null : b?.mode === 'test' ? b.testSubscriptions || 0 : 0
@@ -57,7 +63,9 @@ export async function growthMeasure(env, now = Date.now()) {
     item('demoBookingRate', 'Consultation booking rate (sales)', s ? s.demoBookingRate : null, s?.demoBookingRate == null ? 'unavailable' : 'live', { unit: 'percent', n: s?.qualifiedLeads ?? null }),
     item('demoAttendanceRate', 'Consultation attendance rate (sales)', s ? s.demoAttendanceRate : null, s?.demoAttendanceRate == null ? 'unavailable' : 'live', { unit: 'percent', n: s ? s.consultationsAttended + s.consultationsMissed : null }),
     item('spend', 'Acquisition spend (ads, all customers)', spendMeasured ? Number(spend.cents) : null, spendMeasured ? 'live' : 'unavailable', { unit: 'cents', n: Number(spend.days || 0), note: spendMeasured ? `${spend.businesses} business(es), ${spend.days} campaign-days synced from the platforms.` : 'No ad spend synced in the period (no live campaigns).' }),
-    item('cac', 'Customer acquisition cost', null, 'unavailable', { unit: 'cents', note: 'Needs measured spend and paying customers won in the same period.' }),
+    item('salesBusinesses', 'Prospects who created a business (90 days)', att ? att.businessesCreated : null, att ? 'live' : 'unavailable', { n: att?.prospects ?? null, note: att ? bySourceNote || `Of ${att.prospects} prospects; matched by the owner’s sign-in, counts only.` : 'The GetShowUps sales business does not exist yet, or billing tables are missing.' }),
+    item('salesPaying', 'Prospects now paying (90 days)', att?.paying ?? null, att?.live ? 'live' : att ? 'test' : 'unavailable', { n: att?.businessesCreated ?? null, note: att?.live ? 'Active live-mode subscriptions of businesses created by prospects.' : 'Stripe is in test mode: no prospect counts as paying.' }),
+    item('cac', 'Customer acquisition cost (GetShowUps’ own ads, 90 days)', att?.cacCents ?? null, att?.cacCents == null ? 'unavailable' : 'live', { unit: 'cents', n: att?.paying ?? null, note: att?.cacCents != null ? `${att.spendCents} cents of GetShowUps ad spend ÷ ${att.paying} paying customer(s) from prospects.` : 'Needs GetShowUps’ own measured ad spend and at least one paying customer from a prospect (live billing).' }),
     item('retention', 'Retention (customers active 30 days after setup)', g.retention30, g.retention30 == null ? 'unavailable' : 'live', { unit: 'percent' }),
   ]
   // What the simulator can be prefilled with (null where not measured). Closed deals: paying customers are counted
@@ -73,7 +81,7 @@ export async function growthMeasure(env, now = Date.now()) {
     mrrCents: live ? (b?.mrrCents ?? null) : null,
     priceMonthlyCents: listedPriceCents(),
   }
-  return { generatedAt: now, range, billingMode: live ? 'live' : 'test', items, measured, customers: g.customers }
+  return { generatedAt: now, range, billingMode: live ? 'live' : 'test', items, measured, customers: g.customers, salesAttribution: att }
 }
 
 // ---------- Decide: the most consequential MEASURABLE bottleneck, with a concrete experiment ----------

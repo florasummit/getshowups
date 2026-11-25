@@ -4,8 +4,12 @@ _Update at the end of every task. Newest first._
 
 ## Shared knowledge, industries, ads outcomes, kept conversations (2026-11-25)
 
-docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser: the privacy policy says we don't store them;
-server-side history is an owner decision (policy text first). voice-core midnight test fixed (fixed time of day).
+## GetShowUps sales attribution, closed loop (2026-11-24, draft PR)
+
+server/sales-attribution.js: prospects of the `getshowups` sales business by source → business created (owner sign-in =
+prospect email, after the inquiry, never a test business) → paying (live-mode only); CAC from GetShowUps' own ad spend.
+Admin → Growth shows it (salesBusinesses, salesPaying, cac). Booking-page links that aren't a business's own campaign keep
+utm_source/utm_campaign codes in lead_attribution.details. No migration, no UI change.
 
 ## Test sessions for acceptance (2026-11-25)
 
