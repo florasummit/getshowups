@@ -403,7 +403,7 @@ svg {
   height: var(--header-h);
 }
 
-/* The logo (src/components/Logo.jsx) is the protected brand asset: only its surroundings are themed here. */
+/* The logo (src/components/Logo.jsx = brand/icon/getshowups-icon.svg + the live wordmark) is the protected brand asset: only its surroundings are themed here. */
 .logo {
   display: inline-flex;
   align-items: center;

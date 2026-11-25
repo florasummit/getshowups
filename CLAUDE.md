@@ -212,6 +212,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 ## Conventions
 
 - Plain JavaScript (ESM), React 19, no TypeScript, no CSS framework. Styles in `src/index.css` with tokens on `:root`.
+  BRAND ASSETS (canonical, reuse, never recreate): brand/ (brand/README.md = files, colours, typography, usage).
+  Icon = Calendar + Growth (2026-11-25): brand/icon/getshowups-icon.svg; full logo = brand/logo/getshowups-logo-on-{light,dark}.svg
+  (wordmark outlined, identical to the live text); PNG 16-1024 + 2400w logos in brand/png/, social image in brand/social/,
+  previous logo + rejected concepts in brand/archive/. In the product use <Logo /> (src/components/Logo.jsx, the only
+  in-app logo; test/brand.test.js keeps it = the brand icon). Web copies in public/ (favicon.svg/.ico, apple-touch-icon,
+  icon-192/512, maskable, og-image, site.webmanifest) are generated: node scripts/build-brand.mjs. Ads, videos, decks
+  and marketing take files from brand/. A brand change needs the founder's approval (steps in brand/README.md).
   Flagship visual system (2026-11-21): the orange logo is the only brand mark (never recolour or redraw Logo.jsx);
   one gradient "beam" token (`--beam`, logo orange → sky → lavender) used for the hero canvas and thin accent edges
   only; three soft tints (`--sky-*`, `--mint-*`, `--lav-*`) on the cool canvas `--cloud`; three shadow tiers
