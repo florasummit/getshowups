@@ -613,6 +613,7 @@ export default function Demo({ embedded = false }) {
         <div className="dm-foot-actions">
           {(stage === "summary" || stage === "declined") && (
             <GetStarted
+              location="demo"
               className="btn btn-primary"
               onClick={() => track("early_access_cta", { location: "demo" })}
             />

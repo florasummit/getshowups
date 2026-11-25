@@ -22,7 +22,7 @@ export default function Hero() {
           <p className="hero-sub">{hero.sub}</p>
           <div className="hero-aside">
             <div className="hero-actions">
-              <GetStarted className="btn btn-ink btn-lg" onClick={() => track(start.closed ? 'early_access_cta' : 'hero_cta', start.closed ? { location: 'hero' } : { cta: 'get_started' })}>
+              <GetStarted location="hero" className="btn btn-ink btn-lg" onClick={() => track(start.closed ? 'early_access_cta' : 'hero_cta', start.closed ? { location: 'hero' } : { cta: 'get_started' })}>
                 {' '}
                 <Icon name="arrow" size={18} />
               </GetStarted>

@@ -40,7 +40,7 @@ export default function Pricing() {
                   {start.note}
                 </p>
               )}
-              <GetStarted className="btn btn-primary btn-lg btn-block" onClick={() => track('early_access_cta', { location: 'pricing' })} />
+              <GetStarted location="pricing" className="btn btn-primary btn-lg btn-block" onClick={() => track('early_access_cta', { location: 'pricing' })} />
               {!start.closed && (
                 <a href="#book-demo" className="price-alt">
                   Questions first? Book a call

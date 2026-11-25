@@ -61,7 +61,7 @@ export default function Header() {
         <a href="/dashboard" className="header-login">
           Sign in
         </a>
-        <GetStarted className="btn btn-ink btn-sm header-cta" onClick={() => track('early_access_cta', { location: 'header' })} />
+        <GetStarted location="header" className="btn btn-ink btn-sm header-cta" onClick={() => track('early_access_cta', { location: 'header' })} />
         <button
           type="button"
           className="menu-toggle"
@@ -87,6 +87,7 @@ export default function Header() {
           Sign in
         </a>
         <GetStarted
+          location="mobile_nav"
           className="btn btn-primary btn-block"
           onClick={() => {
             track('early_access_cta', { location: 'mobile_nav' })
