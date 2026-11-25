@@ -213,11 +213,13 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 
 - Plain JavaScript (ESM), React 19, no TypeScript, no CSS framework. Styles in `src/index.css` with tokens on `:root`.
   BRAND ASSETS (canonical, reuse, never recreate): brand/ (brand/README.md = files, colours, typography, usage).
-  Icon = Calendar + Growth (2026-11-25): brand/icon/getshowups-icon.svg; full logo = brand/logo/getshowups-logo-on-{light,dark}.svg
+  Icon = Calendar + Growth A (2026-11-25; geometry from brand/source/icon.py): brand/icon/getshowups-icon.svg; full logo = brand/logo/getshowups-logo-on-{light,dark}.svg
   (wordmark outlined, identical to the live text); PNG 16-1024 + 2400w logos in brand/png/, social image in brand/social/,
   previous logo + rejected concepts in brand/archive/. In the product use <Logo /> (src/components/Logo.jsx, the only
-  in-app logo; test/brand.test.js keeps it = the brand icon). Web copies in public/ (favicon.svg/.ico, apple-touch-icon,
-  icon-192/512, maskable, og-image, site.webmanifest) are generated: node scripts/build-brand.mjs. Ads, videos, decks
+  in-app logo; test/brand.test.js keeps it = the brand icon). Homepage navigation = wordmark alone (<Logo mark={false} />);
+  icon stays in the footer, dashboard, admin, favicons and app icons (brand/README.md "Which version where"). Web copies in public/ (favicon.svg/.ico, apple-touch-icon,
+  icon-192/512, maskable, og-image, site.webmanifest) are generated: node scripts/build-brand.mjs, which also stamps
+  ?v=<icon hash> on every icon link (index.html, manifest, server/brand.js FAVICON_HREF); never link an icon unversioned. Ads, videos, decks
   and marketing take files from brand/. A brand change needs the founder's approval (steps in brand/README.md).
   Flagship visual system (2026-11-21): the orange logo is the only brand mark (never recolour or redraw Logo.jsx);
   one gradient "beam" token (`--beam`, logo orange → sky → lavender) used for the hero canvas and thin accent edges

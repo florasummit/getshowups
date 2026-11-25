@@ -3,13 +3,23 @@
 **Use these files. Never redraw, recolour, re-space or recreate the icon or the wordmark.** The sources are the SVG files in `icon/` and `logo/`; everything else is generated from them.
 
 ## The logo
-- **Icon:** Calendar + Growth (2026-11-25).
-  - An orange calendar outline. Its top-right corner opens for a white check that continues into an upward arrow ("booked, and growing").
-  - Drawn on the near-black rounded square: 32 × 32 grid, corner radius 8.
-  - Strokes: calendar 2.2, check and arrow 2.4, round caps and joins.
+- **Icon:** Calendar + Growth, concept A "Refined" (approved 2026-11-25).
+  - A compact orange calendar outline (17 × 16, radius 3). Its top-right corner opens for a white check, which sweeps up through that corner at 45° and ends in a solid, pointed arrowhead beyond the outline ("booked, and growing").
+  - The whole composition, arrow included, is centred on the near-black rounded square: 32 × 32 grid, corner radius 8.
+  - Strokes: calendar 2.2, check 2.4, round caps and joins. The arrowhead is a filled triangle.
+  - The geometry comes from `source/icon.py`; never edit the SVG paths by hand.
   - Flat colours only: no gradients, shadows or transparency effects.
 - **Wordmark:** "GetShow" in ink plus "Ups" in orange, Inter weight 750, letter-spacing −0.02em. It is unchanged since 2026-11-21.
 - **Lockup:** icon 28 px, a 10 px gap, wordmark at 18.4 px, text centred on the icon (as in `src/components/Logo.jsx`). Scale the lockup as one unit.
+
+## Which version where
+| Version | Use it for |
+| --- | --- |
+| **Wordmark alone** | The public homepage navigation (`<Logo mark={false} />`), and large marketing surfaces where the name has room: ad end cards, video titles, deck covers, letterheads |
+| **Full logo** (icon + wordmark) | Product chrome: dashboard, onboarding/setup, sign-in, admin; the site footer; the social sharing image; anywhere the name and the mark should be learned together |
+| **Icon alone** | Compact spaces: favicons, browser tabs, app icons, home-screen icons, avatars, small badges, and wherever the name is already shown nearby |
+
+The wordmark alone keeps the exact typography, colours and proportions. It is the same artwork without the icon. Never put the icon on the left of a wordmark that already sits next to it.
 
 ## Files
 | Need | File |
@@ -21,17 +31,19 @@
 | Mark without background, for light backgrounds (ink check) | `icon/getshowups-mark-transparent-on-light.svg` |
 | Full logo for light backgrounds (wordmark as outlines) | `logo/getshowups-logo-on-light.svg` |
 | Full logo for dark backgrounds | `logo/getshowups-logo-on-dark.svg` |
+| Wordmark alone (outlined) | `logo/getshowups-wordmark-on-{light,dark}.svg` |
 | Icon PNG, 16–1024 px | `png/icon/getshowups-icon-<size>.png` (16, 32, 48, 64, 128, 180, 192, 256, 512, 1024) |
 | Square / maskable app icons | `png/icon/getshowups-icon-square-{180,512,1024}.png`, `png/icon/getshowups-icon-maskable-512.png` |
 | Transparent mark PNG | `png/icon/getshowups-mark-transparent-on-{dark,light}-1024.png` |
 | Favicon | `png/icon/favicon.ico` (16/32/48) |
 | Full logo, high resolution (2400 px wide) | `png/logo/getshowups-logo-on-{light,dark}-{transparent,background}-2400w.png` |
+| Wordmark alone, high resolution | `png/logo/getshowups-wordmark-on-{light,dark}-{transparent,background}-2400w.png` |
 | Social sharing image (1200×630) | `social/getshowups-og-1200x630.png` (dark), `social/getshowups-og-light-1200x630.png` |
 | Previous logo, rejected concepts | `archive/` (do not use) |
 
 **Web copies:** `public/favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `og-image.png` and `site.webmanifest` are what getshowups.com serves.
 
-**In the product:** use `<Logo />` (`src/components/Logo.jsx`). It is the only in-app logo, used in the header, footer, dashboard, onboarding, admin and sign-in.
+**In the product:** use `<Logo />` (`src/components/Logo.jsx`), the only in-app logo: the full logo in the footer, dashboard, onboarding, admin and sign-in, and `<Logo mark={false} />` (wordmark alone) in the homepage navigation.
 
 ## Colours
 | Token | Hex | Use |
@@ -57,7 +69,7 @@
 - Customer businesses keep their own logos and website icons. This brand never replaces them.
 
 ## Changing the brand (rare; needs the founder's approval)
-1. Edit `icon/getshowups-icon.svg`, then mirror the paths in `src/components/Logo.jsx` and `test/e2e/flagship.spec.js` (`test/brand.test.js` fails until they match).
+1. Change the geometry in `source/icon.py` and run `python3 brand/source/icon.py` (writes every `icon/*.svg`). Then mirror the paths in `src/components/Logo.jsx` and `test/e2e/flagship.spec.js` (`test/brand.test.js` fails until they match).
 2. Rebuild the outlined logos: `uv run --with fonttools --with brotli --with uharfbuzz python brand/source/outline-wordmark.py`.
-3. Rebuild the rasters and web copies: `node scripts/build-brand.mjs`.
+3. Rebuild the rasters and web copies: `node scripts/build-brand.mjs`. This also stamps a new icon version (`?v=`) on every icon link (`index.html`, the manifest, `server/brand.js`), so browsers fetch the new favicon instead of keeping the cached one.
 4. Move the old files to `archive/`.
