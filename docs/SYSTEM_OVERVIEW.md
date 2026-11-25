@@ -83,7 +83,7 @@ Stripe, Resend. Twilio, Meta and OpenAI Ads are built but unused.
 | Google verification pending | warning screen, 100 users | founder submission |
 | No restore into Cloudflare D1 has been exercised | local restore only | a drill on synthetic data |
 | Workers Free limits | daily AI allowance for website copy; 7-day database history | Workers Paid (approval) |
-| AI wording varies | about 1 answer in 40 is held back or needs rewording in tests; amounts and statuses are checked by code | owner reports on `/admin/control` |
+| AI wording varies | in the last 423 test answers, 34 drafts were corrected before showing and 2 were held back; amounts and statuses are checked by code, wording isn't | owner reports on `/admin/control` |
 | No platform-wide daily AI cost ceiling for the receptionist | per-business ceilings | add before 100 businesses |
 | Ads, texts, live payments never run with real accounts | off | staged activation, one at a time |
 | Rate limits and some counters fail open on a storage error | accepted | alerts |
