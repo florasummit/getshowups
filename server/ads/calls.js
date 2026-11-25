@@ -6,7 +6,7 @@ import { sha256Hex } from '../google-oauth.js'
 import { createLead, validateLead } from '../booking.js'
 import { zonedToUtc } from '../calendar.js'
 import { resumeUrl } from '../links.js'
-import { isTestLead } from '../testdata.js'
+import { internalEmails, isTestLead } from '../testdata.js'
 import { readCalls } from './google.js'
 
 const DAY = 86_400_000
@@ -175,7 +175,7 @@ export async function addCaller(env, customer, kind, id, body, now = Date.now())
   const leadId = `gcall_${(await sha256Hex(`${customer.id}:${kind}:${row.id}:${phone}`)).slice(0, 22)}`
   // Already added by the same call and number (a retry after a failure in between): finished, never a second one.
   if (row.lead_id && row.lead_id !== leadId) return { ok: false, error: 'already_linked' }
-  const known = await db.prepare(`SELECT id, name FROM leads l WHERE NOT ${isTestLead('l', "'[]'")} AND customer = ?1 AND substr(${DIGITS}, -10) = ?2 AND id <> ?3 ORDER BY created_at LIMIT 1`).bind(customer.id, phone, leadId).first()
+  const known = await db.prepare(`SELECT id, name FROM leads l WHERE NOT ${isTestLead('l', '?4')} AND customer = ?1 AND substr(${DIGITS}, -10) = ?2 AND id <> ?3 ORDER BY created_at LIMIT 1`).bind(customer.id, phone, leadId, internalEmails(env)).first()
   if (known) return { ok: false, error: 'already_customer', lead: { id: known.id, name: known.name } }
   const read = () => db.prepare('SELECT id, status FROM leads WHERE id = ?1 AND customer = ?2').bind(leadId, customer.id).first()
   if (!(await read()))

@@ -129,7 +129,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const system = systemPrompt(c, req, known.filter((k) => !onScreen.includes(`"ref":"${k.ref}"`)), pending, before, screen, discussed, lastOrder)
   const messages = []
   for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
-  messages.push({ role: 'user', text: meant ? `${req.question}\n(From the application: unless the owner names someone here, “he” or “she” is ${meant.sure ? '' : 'probably '}[${meant.ref}]. Answer about them.)` : req.question })
+  messages.push({ role: 'user', text: meant ? `${req.question}\n(From the application: unless the owner names someone here, “he” or “she” is ${meant.sure ? `[${meant.ref}]. Answer about them` : `[${meant.ref}], not [${meant.not}] (whom they called otherwise). Answer about [${meant.ref}] and where they are; if that can’t be right, ask who they mean`}.)` : req.question })
   const results = []
   const tools = []
   let cost = 0

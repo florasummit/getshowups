@@ -33,5 +33,5 @@ export function whoIsMeant(question, turns) {
   // Someone never called anything, discussed more recently, could be meant as well: then it isn't known.
   if (same >= 0) return all.slice(0, same).some((x) => x.cue === null) ? null : { ref: all[same].ref, sure: true }
   const left = all.filter((x) => x.cue === null)
-  return all.length === 2 && left.length === 1 ? { ref: left[0].ref, sure: false } : null
+  return all.length === 2 && left.length === 1 ? { ref: left[0].ref, sure: false, not: all.find((x) => x !== left[0]).ref } : null
 }
