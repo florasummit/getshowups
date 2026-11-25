@@ -653,6 +653,13 @@ createServer(async (req, res) => {
       '/contact-us': ['text/html', html('Contact us — Northwind Air', '<h1>Contact us</h1><p>Call or send a message.</p>')],
       '/privacy-policy': ['text/html', html('Privacy Policy — Northwind Air', hvacPolicy)],
     }
+    // A client-rendered single-page app (like a Vite/React build): every address, /sitemap.xml included, answers with
+    // the same empty shell; only robots.txt is real.
+    if (host === 'www.spaapp.example') {
+      const shell = '<!doctype html><html><head><title>Spa App Pools</title><meta name="description" content="Pool care in Charleston, booked online."><script type="module" src="/assets/index.js"></script></head><body><noscript>This page requires JavaScript.</noscript><div id="root"></div></body></html>'
+      res.writeHead(200, { 'Content-Type': path === '/robots.txt' ? 'text/plain' : 'text/html; charset=utf-8' })
+      return res.end(path === '/robots.txt' ? 'User-agent: *\nAllow: /' : shell)
+    }
     const p = host === 'www.harborpools.example' ? pages[path] : host === 'www.northwindair.example' ? hvac[path] : null
     if (!p) return send(res, 404, { error: 'not found' })
     res.writeHead(200, { 'Content-Type': p[0] })

@@ -630,6 +630,22 @@ periods clears (or drops) the old answer. Ad data that starts inside the period 
 - Tests: test/receptionist.test.js "location policy" (pricing first, refusal remembered across turns and in the
   provider path, place as context, out of area, booking readiness, phrase rules).
 
+## Website import: client-rendered sites explained (2026-11-22) — fix/import-client-rendered (no migration; PR for approval)
+
+- Finding (getshowups.com as the test case): the marketing site is a client-rendered Vite/React app; its HTML has a
+  title + meta description and an empty `#root`. The importer reads raw HTML only (never runs JavaScript), so it found
+  1 page, the description as the introduction, and "/ has no text we could read". `/sitemap.xml` answers 200 with the
+  app's HTML (single-page-app fallback), so no other pages were discoverable.
+- Change: `extractPage` marks a conservative `appShell` (no heading/text/link/image/phone/email, no visible body text,
+  an external script, and an empty mount point `#root/#app/#__next/#__nuxt/#svelte`/`<app-root>` or only `<noscript>`);
+  `crawlSite` returns `clientRendered: true` when the HOME page is one; `reviewFlags` gives one `client_rendered` flag
+  (explained in the dashboard) instead of `empty_page`. Sitemaps are used only when they are real XML (xml content type
+  or an `<?xml`/`<urlset`/`<sitemapindex` start; HTML is never a sitemap).
+- Unchanged: requests made (home, robots.txt, sitemaps, pages), robots.txt rules, URL/SSRF rules, limits, timeouts,
+  storage and isolation; server-rendered sites produce the same result (no new keys). No browser execution.
+- Limitation: a client-rendered site still imports only its title/description/structured data; the owner adds the rest.
+  getshowups.com itself is unchanged (pre-rendering it is a separate product decision).
+
 ## Website Studio legal pages + complete domain setup (2026-11-22) — feat/legal-pages-domain-setup (no migration; PR for approval)
 
 - **PoolThru findings (read-only):** the "broken Privacy Policy link" is not on our site. Authoritative DNS (Google

@@ -177,7 +177,8 @@ server/              Shared backend modules imported by functions/ (bundled by P
   stock-photos.js    Licensed photo library manifest (CC0, StockSnap via Openverse; creator + source recorded)
   site-import.js     Website import: public pages of the owner's existing site (robots.txt honoured, same site only, public
                      hosts only via normalizeWebsiteUrl, ≤12 pages, size/time caps, manual redirects re-checked), tolerant
-                     HTML extraction (no scripts), suggestContent (only text found on the site). website-import.js: stored
+                     HTML extraction (no scripts; JavaScript is never run: an empty app shell is reported as
+                     clientRendered with one explanatory flag; a sitemap counts only if it is real XML), suggestContent (only text found on the site). website-import.js: stored
                      imports (0021) and applyImport → PRIVATE draft (fields through validateContent; photos only from that
                      import, via saveAsset). Imported text is untrusted data, never instructions
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving

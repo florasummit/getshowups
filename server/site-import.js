@@ -203,6 +203,8 @@ export function extractPage(html, pageUrl) {
     images.push({ url, alt: (attr(t, 'alt') || '').slice(0, 150), width: dims ? Number(dims[1]) : Number(attr(t, 'width')) || null, height: dims ? Number(dims[2]) : Number(attr(t, 'height')) || null })
     if (images.length >= MAX_IMAGES) break
   }
+  const found = headings.length || blocks.length || links.length || images.length || contacts.phones.size || contacts.emails.size
+  const appShell = isAppShell(src, body, found)
   const prices = []
   for (const b of blocks) for (const p of b.text.match(PRICE_RE) || []) prices.push({ price: p.replace(/\s+/g, ' '), context: b.text.slice(0, 200) })
   const business = jsonLd.find((x) => /LocalBusiness|Organization|Service|Store|HomeAndConstructionBusiness/i.test(String(x?.['@type'] || '')))
@@ -220,6 +222,7 @@ export function extractPage(html, pageUrl) {
     prices: prices.slice(0, 20),
     phones: [...contacts.phones].slice(0, 3),
     emails: [...contacts.emails].slice(0, 3),
+    ...(appShell ? { appShell: true } : {}),
     business: business
       ? {
           name: typeof business.name === 'string' ? business.name.slice(0, 120) : null,
@@ -231,6 +234,25 @@ export function extractPage(html, pageUrl) {
         }
       : null,
   }
+}
+
+// A page drawn in the browser by JavaScript (an "app shell", e.g. a Vite/React single-page app): the HTML itself has
+// nothing readable, it loads an external script, and its body is only an empty mount point or a <noscript> message.
+// Conservative: any heading, text, link, image, phone or email, or any visible body text, means it is not one. The
+// script is never run; this only lets us tell the owner why nothing could be read.
+const MOUNT_RE = /<(div|main)\b[^>]*\bid\s*=\s*["']?(root|app|__next|__nuxt|svelte)["']?[^>]*>\s*<\/\1>|<app-root\b[^>]*>\s*<\/app-root>/i
+function isAppShell(src, body, found) {
+  if (found || !/<script\b[^>]*\bsrc\s*=/i.test(src)) return false
+  const inner = (body.match(/<body\b[^>]*>([\s\S]*)<\/body>/i) || [])[1]
+  if (inner === undefined || text(inner)) return false
+  return MOUNT_RE.test(inner) || /<noscript\b/i.test(src)
+}
+
+// A real XML sitemap, not an HTML page answering at that address (single-page apps return their shell for every path).
+export function isXmlSitemap(type, bytes) {
+  const head = new TextDecoder().decode(bytes.slice(0, 512)).trimStart()
+  if (/^<(!doctype\s+html|html)\b/i.test(head)) return false
+  return /xml/.test(type || '') || /^<(\?xml|urlset|sitemapindex)\b/i.test(head)
 }
 
 const locs = (xml) => [...String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => decode(m[1]))
@@ -263,7 +285,7 @@ export async function crawlSite(input) {
   const candidates = new Set()
   for (const sm of [...robots.sitemaps, `${origin}/sitemap.xml`].slice(0, 3)) {
     const r = await fetchPublic(sm, { siteHost: host, maxBytes: 1_000_000, accept: 'application/xml,text/xml' })
-    if (r.ok) for (const loc of locs(new TextDecoder().decode(r.bytes))) candidates.add(loc)
+    if (r.ok && isXmlSitemap(r.type, r.bytes)) for (const loc of locs(new TextDecoder().decode(r.bytes))) candidates.add(loc)
     if (candidates.size) break
   }
   const homePage = extractPage(new TextDecoder().decode(home.bytes), home.url)
@@ -303,7 +325,8 @@ export async function crawlSite(input) {
       else pages.push(page)
     }
   }
-  return { ok: true, source: origin, platform: detectPlatform(home), pages, skipped }
+  // clientRendered: the home page is an app shell, so only its title/description (and structured data) were readable.
+  return { ok: true, source: origin, platform: detectPlatform(home), pages, skipped, ...(homePage.appShell ? { clientRendered: true } : {}) }
 }
 
 function detectPlatform(home) {
@@ -484,8 +507,10 @@ export async function fetchImage(url) {
 // Things the owner should look at before using the content (shown with the import; nothing is changed automatically).
 export function reviewFlags(result) {
   const flags = []
+  // One clear explanation instead of an "empty page" line per app-shell page.
+  if (result.clientRendered) flags.push({ kind: 'client_rendered' })
   for (const p of result.pages) {
-    if (!p.headings.length && !p.text.length) flags.push({ kind: 'empty_page', path: p.path })
+    if (!p.headings.length && !p.text.length && !p.appShell) flags.push({ kind: 'empty_page', path: p.path })
     if (/^(new page|page \d+|untitled|contact \d+)\b/i.test(p.title.split(/\s+[—|-]\s+/)[0])) flags.push({ kind: 'placeholder_title', path: p.path, title: p.title.slice(0, 80) })
   }
   // The same service with different prices on different pages.

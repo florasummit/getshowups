@@ -106,6 +106,8 @@ test('crawl: sitemap pages on the same site only; robots honoured; off-site/unsa
   const r = await crawlSite('oldsite.example')
   assert.equal(r.ok, true)
   assert.equal(r.source, 'https://www.oldsite.example', 'followed the www redirect')
+  assert.equal('clientRendered' in r, false, 'a server-rendered site is never reported as client-rendered')
+  assert.ok(r.pages.every((p) => !('appShell' in p)))
   assert.deepEqual(r.pages.map((p) => p.path).sort(), ['/', '/about', '/services'])
   const reasons = Object.fromEntries(r.skipped.map((s) => [new URL(s.url).pathname, s.reason]))
   assert.deepEqual(reasons, { '/private/admin': 'robots', '/home': 'duplicate', '/moved': 'unsafe_url', '/huge': 'too_large' })
