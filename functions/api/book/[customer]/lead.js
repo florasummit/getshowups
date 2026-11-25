@@ -1,6 +1,9 @@
 // POST /api/book/:customer/lead — capture a lead from the booking page and qualify it (service area).
-//   Body: { name, email, phone, need, zip?, zipConfirmed?, website? }  (website is a honeypot and must be empty)
-// Returns { leadId, leadToken, qualified, coverage }. The token lets only this browser book for this lead.
+//   Body: { name, email, phone, need?, serviceId?, answer?, zip?, zipConfirmed?, website? }  (website is a honeypot)
+//   serviceId: one of the page's services (server/services.js); '' = Other / Not sure (then `need` is the open text).
+//   The stored need is "Service: answer", so every existing view, message and calendar event reads as before.
+// Returns { leadId, leadToken, qualified, coverage, flow }. The token lets only this browser book for this lead.
+// flow 'request': a quote / consultation request (no time is booked; no "pick a time" follow-ups).
 // 400 invalid_zip (not a ZIP) / unknown_zip (not a known ZIP area; resend with zipConfirmed: true to keep it as typed).
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
@@ -8,6 +11,8 @@ import { createLead, validateLead } from '../../../../server/booking.js'
 import { hit, hitByIp, tooManyJson } from '../../../../server/ratelimit.js'
 import { recordAttribution } from '../../../../server/ads/attribution.js'
 import { syncLead } from '../../../../server/ghl.js'
+import { getProfile } from '../../../../server/onboarding.js'
+import { bookingOptions, bookingServices, needText, recordLeadService, resolveChoice } from '../../../../server/services.js'
 
 export async function onRequestPost({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
@@ -17,11 +22,21 @@ export async function onRequestPost({ request, env, params, waitUntil }) {
   }
   const body = await request.json().catch(() => null)
   if (body?.website) return json(400, { error: 'invalid_request' })
-  const [error, lead] = validateLead(body, customer.appointmentMode)
+  const db = env.ONBOARDING_DB
+  const [profile, options] = await Promise.all([getProfile(db, customer.id).catch(() => null), bookingOptions(db, customer.id).catch(() => ({ allowOther: true }))])
+  const services = bookingServices(profile?.services, customer.slotMinutes)
+  // A service removed or hidden since the page loaded → service_unavailable (the page reloads the list).
+  const [choiceError, choice] = resolveChoice(body, services, options.allowOther)
+  if (choiceError) return json(400, { error: choiceError })
+  const [error, lead] = validateLead({ ...body, need: needText(choice, body?.need) }, customer.appointmentMode)
   if (error) return json(400, { error })
+  const flow = choice.service?.flow === 'request' ? 'request' : 'book'
+  if (flow === 'request') lead.request = true
   if (customer.serviceZips.length && !lead.zip) return json(400, { error: 'invalid_zip' })
   try {
     const { id, token, qualified, coverage } = await createLead(env, customer, lead)
+    // Which service it was for, as the customer saw it (history and reports survive renames and removals).
+    await recordLeadService(db, { leadId: id, customer: customer.id, choice, minutes: choice.service?.minutes ?? null }).catch((e) => console.error('lead service failed:', e?.name))
     // Best effort: attribution and the GoHighLevel copy never block or fail the lead.
     const sideEffects = (async () => {
       await recordAttribution(env, customer.id, id, body.attribution).catch((e) => console.error('attribution failed:', e?.name))
@@ -31,7 +46,7 @@ export async function onRequestPost({ request, env, params, waitUntil }) {
     else await sideEffects
     // Not in a listed ZIP: the lead is kept with its attribution and waits for the owner's coverage decision
     // (coverage 'pending'); the browser shows "we'll confirm availability", never times.
-    return json(201, { leadId: id, leadToken: token, qualified, coverage })
+    return json(201, { leadId: id, leadToken: token, qualified, coverage, flow })
   } catch (err) {
     console.error('lead save failed:', customer.id, err?.message)
     return json(503, { error: 'storage_error' })

@@ -18,7 +18,7 @@ const rate = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 1000 : null)
 // The listed plan price (the one the sales assistant quotes: server/sales.js), for modeling only. Never invented and
 // never written anywhere: Stripe prices are Price ids the simulator cannot touch.
 export function listedPriceCents() {
-  const m = /\$(\d[\d,]*)(?:\.(\d{2}))?/.exec(SALES_PROFILE.services?.[0]?.price || '')
+  const m = /\$(\d[\d,]*)(?:\.(\d{2}))?/.exec(SALES_PROFILE.services?.find((s) => s.name === 'Growth plan')?.price || '')
   return m ? Number(m[1].replace(/,/g, '')) * 100 + Number(m[2] || 0) : null
 }
 

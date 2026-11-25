@@ -17,6 +17,7 @@ import { YourAccount } from './AccountSettings.jsx'
 import { PublishBox } from './WebsiteTab.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
+import { SUGGESTED } from '../content/service-suggestions.js'
 
 const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
 const PLAN_KEY = 'gsu_plan'
@@ -375,15 +376,6 @@ function DetailsStep({ customer, onDone }) {
 }
 
 // ---------- 4. Services ----------
-const SUGGESTED = {
-  'pool service': ['Weekly pool cleaning', 'Pool opening', 'Pool closing', 'Green pool cleanup', 'Equipment repair'],
-  'lawn care': ['Lawn mowing', 'Fertilization', 'Aeration', 'Leaf cleanup'],
-  'house cleaning': ['Standard cleaning', 'Deep cleaning', 'Move-out cleaning'],
-  'pest control': ['General pest treatment', 'Termite inspection', 'Mosquito treatment'],
-  hvac: ['AC repair', 'Furnace repair', 'System tune-up', 'New system estimate'],
-  plumbing: ['Leak repair', 'Drain cleaning', 'Water heater service'],
-  'pressure washing': ['House washing', 'Driveway cleaning', 'Deck cleaning'],
-}
 function ServicesStep({ onDone, back }) {
   const profile = useProfile()
   const [edited, setRows] = useState(null)

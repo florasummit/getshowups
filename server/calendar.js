@@ -208,12 +208,15 @@ const hm = (s) => s.split(':').map(Number)
 
 // Open slots within booking hours that do not overlap any busy interval and start after `now`.
 // rules: { timezone, slotMinutes, dayStart 'HH:MM', dayEnd 'HH:MM', workdays [0-6], closedDates? ['YYYY-MM-DD'], minNoticeMinutes? }
+// span (1-4): a service that takes `span` slots (server/services.js): starts stay on the same grid, the whole length
+// must fit the day and be free. span 1 = exactly the slots offered before services had lengths.
 // Returns { slots: [{ start, end }] (epoch ms), rangeStart, rangeEnd }.
-export function computeSlots({ busy, rules, now, days }) {
+export function computeSlots({ busy, rules, now, days, span = 1 }) {
   const today = partsIn(now, rules.timezone)
   const [sh, sm] = hm(rules.dayStart)
   const [eh, em] = hm(rules.dayEnd)
   const slotMs = rules.slotMinutes * 60 * 1000
+  const lenMs = slotMs * (Number.isInteger(span) && span >= 1 && span <= 4 ? span : 1)
   const closed = new Set(rules.closedDates || [])
   const earliest = now + (rules.minNoticeMinutes || 0) * 60 * 1000
   const slots = []
@@ -223,8 +226,8 @@ export function computeSlots({ busy, rules, now, days }) {
     if (closed.has(date.toISOString().slice(0, 10))) continue
     const [y, m, d] = [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()]
     const dayEnd = zonedToUtc(y, m, d, eh, em, rules.timezone)
-    for (let start = zonedToUtc(y, m, d, sh, sm, rules.timezone); start + slotMs <= dayEnd; start += slotMs) {
-      const end = start + slotMs
+    for (let start = zonedToUtc(y, m, d, sh, sm, rules.timezone); start + lenMs <= dayEnd; start += slotMs) {
+      const end = start + lenMs
       if (start < earliest) continue
       if (busy.some((b) => b.start < end && b.end > start)) continue
       slots.push({ start, end })
@@ -240,6 +243,6 @@ export function computeSlots({ busy, rules, now, days }) {
 
 // True when `start` is exactly one of the bookable slot starts (ignoring busy time), so a client
 // can only request times that the booking hours actually offer.
-export function isOfferedSlot({ rules, now, days, start }) {
-  return computeSlots({ busy: [], rules, now, days }).slots.some((s) => s.start === start)
+export function isOfferedSlot({ rules, now, days, start, span = 1 }) {
+  return computeSlots({ busy: [], rules, now, days, span }).slots.some((s) => s.start === start)
 }

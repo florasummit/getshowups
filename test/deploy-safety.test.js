@@ -162,7 +162,7 @@ test('business details: a page holding older details gets 409 and nothing is rep
   const a = await call('POST', { ...edit, services: [], description: 'From the older tab', base: loaded }, profileApi)
   assert.equal(a.status, 409)
   assert.equal(a.json.error, 'conflict')
-  assert.deepEqual((await call('GET', null, profileApi)).json.profile.services, [{ name: 'Weekly Pool Care', price: '$180' }])
+  assert.deepEqual((await call('GET', null, profileApi)).json.profile.services.map(({ name, price, hidden, booking }) => ({ name, price, hidden, booking })), [{ name: 'Weekly Pool Care', price: '$180', hidden: false, booking: 'book' }])
   // Saving again from what B now shows works; a page without `base` (older release, onboarding) still saves.
   assert.equal((await call('POST', { ...edit, description: 'Next', base: b.json.profile }, profileApi)).status, 200)
   assert.equal((await call('POST', { ...edit, description: 'No base' }, profileApi)).status, 200)
