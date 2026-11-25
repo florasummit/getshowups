@@ -5,14 +5,23 @@
 const KEY = 'gsu:assistant:v1:'
 const MAX = { conversations: 10, entries: 30, age: 30 * 86_400_000 }
 let owner = null
-export const setMemoryOwner = (id) => {
-  owner = id || null
-}
 const store = () => {
   try {
     return window.localStorage
   } catch {
     return null
+  }
+}
+// Who is signed in, as business:account. Another account's conversations on this browser (someone who didn't sign out) are
+// deleted, not just hidden.
+export const setMemoryOwner = (id) => {
+  if (owner === (id || null)) return
+  owner = id || null
+  try {
+    const s = store()
+    for (const k of Object.keys(s || {})) if (k.startsWith('gsu:assistant:') && k !== KEY + owner) s.removeItem(k)
+  } catch {
+    // Storage blocked: nothing is kept.
   }
 }
 const fresh = (c, now) => c && typeof c.id === 'string' && Array.isArray(c.talk) && now - c.at < MAX.age

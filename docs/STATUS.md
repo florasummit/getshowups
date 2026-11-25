@@ -4,6 +4,9 @@ _Update at the end of every task. Newest first._
 
 ## Shared knowledge, industries, ads outcomes, kept conversations (2026-11-25)
 
+docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser (V1 decision; the privacy policy says we don't store
+them): per business and account, cleared on sign-out, account switch, account deletion and after 30 days. voice-core midnight test fixed.
+
 ## GetShowUps sales attribution, closed loop (2026-11-24, draft PR)
 
 server/sales-attribution.js: prospects of the `getshowups` sales business by source → business created (owner sign-in =

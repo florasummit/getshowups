@@ -76,6 +76,7 @@ function DeleteAccount({ name }) {
     e.preventDefault()
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/account', { method: 'POST', body: { action: 'delete', confirm: true, name: typed } })
+    if (status === 202) clearMemory()
     setState(status === 202 ? { done: true } : { error: data.error === 'name_mismatch' ? 'The name doesn’t match.' : 'Couldn’t delete the account. Please try again.' })
   }
   if (state.done)

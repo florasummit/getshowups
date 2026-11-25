@@ -209,9 +209,18 @@ test('the browser memory holds references, not names; sign-out and age clear it;
   m.keep('c1', [{ id: 'e1', q: 'who is waiting', answer: 'Rosa Vance is waiting.', raw: '[R1] is waiting.', ctx: {}, records: [{ contact: ['555'] }], proposals: [{ name: 'Rosa Vance' }] }, { id: 'e2', q: 'x', answer: 'Rosa Vance (from a list)' }], { R: ['r'] }, [])
   assert.doesNotMatch([...data.values()].join(), /Rosa|555|proposals/)
   assert.equal(m.withNames('Call Rosa [R1] about [L2].', { R1: 'Rosa Vance' }), 'Call Rosa Vance about a customer.')
-  m.setMemoryOwner('beta:o')
-  assert.deepEqual(m.conversations(), [])
+  // Another business, or another account of the same business, never sees it, and it is gone from the browser.
+  for (const other of ['beta:o', 'alpha:p', null]) {
+    m.setMemoryOwner('alpha:o')
+    m.keep('c1', [{ id: 'e1', q: 'who is waiting', raw: '[R1] is waiting.', answer: 'x' }], {}, [])
+    assert.equal(m.conversations().length, 1)
+    data.set('unrelated', 'kept')
+    m.setMemoryOwner(other)
+    assert.deepEqual([m.conversations(), [...data.keys()]], [[], ['unrelated']], String(other))
+  }
+  data.delete('unrelated')
   m.setMemoryOwner('alpha:o')
+  m.keep('c1', [{ id: 'e1', q: 'who is waiting', raw: '[R1] is waiting.', answer: 'x' }], {}, [])
   assert.equal(m.conversations().length, 1)
   assert.equal(m.conversations(Date.now() + 31 * DAY).length, 0)
   m.forget('c1')
