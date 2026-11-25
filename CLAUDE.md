@@ -719,6 +719,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   QA_INGEST_TOKEN (unset: /api/qa/runs answers 503) + the CI qa-report job, MESSAGES_LIVE, SMS_LIVE,
   STRIPE_LIVE_ENABLED, ADS_LIVE_LAUNCH; enrollment closed ({"open":false}). Voice:
   RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical.
+- Current baseline (2026-11-25): PR #173, main e0540fd, deployment a8505dca, rollback bc3450d9; migrations through 0042
+  applied EXCEPT 0040 (Google calls: applied nowhere, own approval; apply migrations one file at a time, never "all
+  pending"). Production has 100 tables: D1 refuses a result with more than 100 columns, so the one-select count
+  comparison must be split into two queries. Details: docs/STATUS.md.
 - Releases: apply a PR's migration before merging it, never out of order; merge pinned to the reviewed head
   (--match-head-commit); after each deploy diff the live customer HTML against a pre-release capture.
 - Each system exists once: audit = server/auditlog.js (audit_log); ads safety stop = server/ads/holds.js; deletion =
