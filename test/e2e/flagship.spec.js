@@ -6,7 +6,7 @@
 import { test, expect } from './test.js'
 import { SCENARIOS } from '../../src/content/conversation.js'
 
-const LOGO_SVG = '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"></rect><path d="M18 10H9a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-6" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M10 7.5v4M15 7.5v4" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"></path><path d="M10 18l3.5 3.5L26 9M22 9h4v4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>' // = brand/icon/getshowups-icon.svg (Calendar + Growth, 2026-11-25)
+const LOGO_SVG = '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" class="logo-bg"></rect><path d="M19.3 9.5H9a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h11a3 3 0 0 0 3-3V13.2" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M10 7v4M15 7v4" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"></path><path d="M9.5 16L13 19.5L23.21 9.29" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path><path d="M27.1 5.4L21.09 6.74L25.76 11.41Z" fill="#fff"></path></svg>' // = brand/icon/getshowups-icon.svg (Calendar + Growth A, 2026-11-25)
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
