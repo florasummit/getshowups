@@ -59,6 +59,7 @@ const ERRORS = {
   invalid_key_format: 'That doesn’t look like a ChatGPT Ads API key. Copy it again from Ads Manager → Settings.',
   invalid_key: 'ChatGPT Ads didn’t accept that key. Create a new one in Ads Manager → Settings and paste it here.',
   platform_unavailable: 'ChatGPT ads aren’t switched on for GetShowUps yet.',
+  invalid_spec: 'Fix the marked fields first, then try again.',
   not_paused: 'ChatGPT Ads reported this campaign as running, so GetShowUps paused it straight away and stopped. Check it in Ads Manager.',
 }
 const PLATFORM_NAME = { google: 'Google', meta: 'Meta', openai: 'ChatGPT Ads' }

@@ -103,8 +103,8 @@ d1 "
     ('$E2E_OPENAI_CUSTOMER', 'E2E ChatGPT Pools', 'America/New_York', '29403', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW);
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@e2e-openai.example', '$E2E_OPENAI_CUSTOMER', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_OPENAI_SESSION_TOKEN")', 'owner@e2e-openai.example', $NOW, $FAR);
-  INSERT INTO ad_profiles (customer, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
-    ('$E2E_OPENAI_CUSTOMER', 'Pool service', '[\"Pool repair\",\"Green pool cleanup\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
+  INSERT INTO ad_profiles (customer, website, industry, services, service_area, customer_value_cents, monthly_budget_cents, updated_at) VALUES
+    ('$E2E_OPENAI_CUSTOMER', 'https://e2e-chatgpt-pools.example', 'Pool service', '[\"Pool repair\",\"Green pool cleanup\"]', '{\"zips\":[\"29403\"]}', 30000, 30000, $NOW);
   INSERT INTO subscriptions (customer, stripe_customer_id, stripe_subscription_id, plan_id, status, mrr_cents, currency, current_period_end, updated_at) VALUES
     ('$E2E_OPENAI_CUSTOMER', 'cus_E2EOPENAI', 'sub_E2EOPENAI', 'founding', 'active', 49900, 'usd', $FAR, $NOW);
   INSERT INTO ad_budget_approvals (id, customer, monthly_cents, approved_by, approved_at) VALUES ('e2e-openai-budget', '$E2E_OPENAI_CUSTOMER', 60000, 'owner@e2e-openai.example', $NOW);

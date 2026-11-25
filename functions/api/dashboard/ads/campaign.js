@@ -37,7 +37,11 @@ export async function onRequestPost({ request, env }) {
         // A ChatGPT Ads starter draft from the business's own records (one open draft per platform, like "Draft my plan").
         const profile = await getProfile(env.ONBOARDING_DB, customer.id)
         if (!profile) return json(409, { error: 'profile_required' })
-        const spec = { ...openaiStarter({ name: customer.name, services: profile.services, zips: profile.serviceArea?.zips || [] }), finalUrl: `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${customer.id}` }
+        // Lands on the business's own booking page (leads are captured, screened and attributed there); a local or
+        // non-https deployment falls back to the website in the ad profile (ads need an https landing page).
+        const booking = `${new URL(env.GOOGLE_REDIRECT_URI).origin}/book/${customer.id}`
+        const finalUrl = booking.startsWith('https://') ? booking : /^https:\/\//.test(profile.website || '') ? profile.website : booking
+        const spec = { ...openaiStarter({ name: customer.name, services: profile.services, zips: profile.serviceArea?.zips || [] }), finalUrl }
         r = await saveDraft(env, customer, { spec, onlyIfNone: true })
         break
       }
