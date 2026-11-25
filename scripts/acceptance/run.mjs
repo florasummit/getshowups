@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 import { chromium, devices } from '@playwright/test'
 import { explain, verdict } from './accounts.mjs'
 import { openSession } from './grant.mjs'
-import { ARCH, DEPLOYED, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
+import { ARCH, DEPLOYED, DEPLOYED_AGAIN, FRESH, KNOWN, SCENARIOS } from './scenarios.mjs'
 import { BUSINESSES, token } from './worlds.mjs'
 
 const arg = (k, d = null) => (process.argv.includes(k) ? (process.argv[process.argv.indexOf(k) + 1] ?? true) : d)
@@ -169,7 +169,7 @@ async function deployed() {
   await guard(page, blocked, has('--approve'))
   const build = await (await page.request.get(`${origin}/build.json`)).json().catch(() => ({}))
   log(`# Deployed acceptance\n\nBuild ${build.commit || 'unknown'}`)
-  for (const t of DEPLOYED) {
+  for (const t of arg('--set') === 'again' ? DEPLOYED_AGAIN : DEPLOYED) {
     if (t.view || !(await panel(page).count())) await open(page, t.view || 'overview', origin)
     const card = t.card ? (await (await page.request.get(`${origin}/api/dashboard/overview`)).json()).attention : null
     const call = card?.items.find((i) => i.id === 'callbacks')

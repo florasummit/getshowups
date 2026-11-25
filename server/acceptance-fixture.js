@@ -12,7 +12,7 @@ export async function resetFixture({ env, grant }, now = Date.now()) {
   const c = grant.customer
   const at = (days) => Math.floor((now + days * D) / D) * D + 15 * H + 7 * 60_000 // a minute nobody can book
   const lead = (id, name, need, ago, status, zip = '29401') =>
-    db.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'x', ?9, ?9) ON CONFLICT(id) DO UPDATE SET status = ?8, need = ?6, created_at = ?9 WHERE leads.customer = ?2").bind(`acc-${id}`, c, name, `acc-${id}@acceptance.invalid`, '+15555550100', need, zip, status, now - ago)
+    db.prepare("INSERT INTO leads (id, customer, name, email, phone, need, zip, status, token_hash, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'x', ?9, ?9) ON CONFLICT(id) DO UPDATE SET status = ?8, phone = ?5, need = ?6, created_at = ?9 WHERE leads.customer = ?2").bind(`acc-${id}`, c, name, `acc-${id}@acceptance.invalid`, `+1555555${id.split('').reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 9000, 7) + 1000}`, need, zip, status, now - ago)
   const thread = (id, sent, needs = null) =>
     db.prepare("INSERT INTO lead_threads (lead_id, customer, source, stage, needs_owner, last_outbound_at, created_at, updated_at) VALUES (?1, ?2, 'other', 'new', ?3, ?4, ?5, ?5) ON CONFLICT(lead_id) DO UPDATE SET needs_owner = ?3, last_outbound_at = ?4 WHERE lead_threads.customer = ?2").bind(`acc-${id}`, c, needs, sent, now - D)
   const appt = (id, start, status) =>
