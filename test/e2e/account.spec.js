@@ -5,6 +5,8 @@ import { returnFromGoogle, useSession } from './helpers.js'
 import { fixtures } from '../../playwright.config.js'
 
 test('settings: every section works, fits a phone, and consequential actions ask for a recent sign-in @mobile', async ({ page, context }, info) => {
+  // Its own visitor address: sign-ins are limited per address and the other specs share one.
+  await page.setExtraHTTPHeaders({ 'CF-Connecting-IP': info.project.name === 'mobile' ? '198.51.100.222' : '198.51.100.221' })
   const errs = []
   page.on('pageerror', (e) => errs.push(e.message))
   const c = info.project.name === 'mobile' ? ['owner@e2e-acct-m.example', 'E2E Account Mobile'] : ['owner@e2e-acct.example', 'E2E Account Pools']

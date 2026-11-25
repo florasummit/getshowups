@@ -15,7 +15,7 @@ test('settings: details and notes that fail to load show a retry, not an empty f
   const a = await failOnce(page, '/api/dashboard/profile')
   const b = await failOnce(page, '/api/dashboard/policies')
   await page.goto('/dashboard/settings')
-  await expect(page.locator('[data-load-error]')).toHaveCount(2)
+  await expect(page.locator('[data-load-error]')).toHaveCount(3)
   await expect(page.locator('textarea[name="description"], textarea[name="beforeVisit"]')).toHaveCount(0)
   a()
   b()

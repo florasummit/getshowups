@@ -257,6 +257,7 @@ export function SignInSecurity() {
 export function Notices() {
   const [d, load] = useLoad('/api/dashboard/people')
   const [code, setCode] = useState(null)
+  const [now, setNow] = useState({}) // what was just chosen, until the server's answer is read back
   if (d === undefined) return <div aria-busy="true" />
   if (d === null) return <LoadError what="your notifications" onRetry={load} />
   if (!d.notices) return <p className="fine">You get every notice. Choosing which ones isn’t available yet.</p>
@@ -267,11 +268,14 @@ export function Notices() {
         <label key={n.kind} className="check">
           <input
             type="checkbox"
-            checked={n.on}
+            checked={now[n.kind] ?? n.on}
             onChange={async (e) => {
-              const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on: e.target.checked })
+              const on = e.target.checked
+              setNow((x) => ({ ...x, [n.kind]: on }))
+              const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on })
               setCode(r.ok ? null : r.code)
-              load()
+              await load()
+              setNow((x) => ({ ...x, [n.kind]: undefined }))
             }}
           />
           <span>{n.label}</span>

@@ -9,6 +9,7 @@ test.describe.configure({ mode: 'serial', retries: 0 })
 
 test('owner permanently deletes the account: typed confirmation; site, booking and access end at once; admin sees the record', async ({ page, context, browser }) => {
   const id = fixtures.E2E_DELETE_CUSTOMER
+  await page.setExtraHTTPHeaders({ 'CF-Connecting-IP': '198.51.100.223' }) // sign-ins are limited per address
   expect((await page.request.get(`/api/book/${id}`)).status()).toBe(200)
   await useSession(context, fixtures.E2E_DELETE_SESSION_TOKEN)
   await page.goto('/dashboard/settings')
