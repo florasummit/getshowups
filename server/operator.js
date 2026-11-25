@@ -5,6 +5,7 @@
 // can't reach another business, and can't save anything. Business records and earlier turns are data, never instructions.
 // The answer is checked (numbers must come from lookups, nothing claimed as done, no money credited to ads); a failed
 // check is sent back at most twice with the reason, then the looked-up records are shown without prose.
+import { whoIsMeant } from './who-is-meant.js'
 import { HELP } from '../src/content/help.js'
 import { claimProblem } from './claims.js'
 import { fit } from './fit.js'
@@ -37,10 +38,10 @@ ON SCREEN (${PAGE[view]} page)
 ${fit(screen.page, 5000)}${screen.selected ? `\nSELECTED ${JSON.stringify(screen.selected)}` : ''}` : ''}${lastOrder.length ? `
 
 IN YOUR LAST ANSWER, IN ORDER
-${lastOrder.map((r, i) => `${i + 1}: [${r}]`).join(', ')} (the first is its main subject; "after that" means the next one after the subject the owner asked about)` : ''}${discussed.length ? `
+${lastOrder.map((r, i) => `${i + 1}: [${r}]`).join(', ')} (the first is its main subject; "and after?" continues from the LAST one here: begin "After [that person], …")` : ''}${discussed.length ? `
 
-PEOPLE DISCUSSED (latest first, with what the owner said then)
-${discussed.map((d) => `[${d.ref}] "${d.words.slice(0, 80)}"`).join(', ')}` : ''}${known.length ? `
+PEOPLE DISCUSSED (latest first)
+${discussed.map((d) => `[${d.ref}]`).join(', ')}` : ''}${known.length ? `
 
 RECORDS ALREADY DISCUSSED (current)
 ${fit(known, 6000)}` : ''}${before.length ? `
@@ -116,9 +117,12 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const known = await knownRecords(c, (req.history || []).map((h) => h.a).join(' '))
   c.pending = req.pending || []
   const pending = c.pending.map((p) => ({ type: p.type, ...(p.ref ? { ref: p.ref } : {}), change: p.change }))
-  // Latest first, with the owner's own words from that turn: they say who "she", "the other one" or "that guy" was.
-  const discussed = []
-  for (const h of [...(req.history || [])].reverse()) for (const m of [...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].reverse()) if (discussed.length < 12 && !discussed.some((d) => d.ref === m[1])) discussed.push({ ref: m[1], words: h.q })
+  const discussed = [] // latest first
+  for (const h of [...(req.history || [])].reverse()) {
+    const refs = [...new Set([...h.a.matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
+    for (const ref of refs.reverse()) if (discussed.length < 12 && !discussed.some((d) => d.ref === ref)) discussed.push({ ref, words: h.q, alone: refs.length === 1 })
+  }
+  const meant = whoIsMeant(req.question, discussed)
   const lastOrder = [...new Set([...((req.history || []).at(-1)?.a || '').matchAll(/\[([ALR]\d{1,3})\]/g)].map((m) => m[1]))]
   const unread = (e) => (console.error('assistant screen failed:', e?.name), 'could not be read')
   const [waiting, shownPage, selected] = await Promise.all([waitingNow(c).catch(unread), PAGE_IDS.includes(req.view) ? pageState(c, req.view).catch(unread) : null, req.selected ? selectedLead(c, req.selected).catch(() => null) : null])
@@ -127,7 +131,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
   const system = systemPrompt(c, req, known.filter((k) => !onScreen.includes(`"ref":"${k.ref}"`)), pending, before, screen, discussed, lastOrder)
   const messages = []
   for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
-  messages.push({ role: 'user', text: req.question })
+  messages.push({ role: 'user', text: meant ? `${req.question}\n(From the application: unless the owner names someone here, “he” or “she” is [${meant}]. Answer about them.)` : req.question })
   const results = []
   const tools = []
   let cost = 0
