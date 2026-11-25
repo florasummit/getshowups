@@ -19,7 +19,7 @@ test('settings: details and notes that fail to load show a retry, not an empty f
   await expect(page.locator('textarea[name="description"], textarea[name="beforeVisit"]')).toHaveCount(0)
   a()
   b()
-  for (const n of [2, 1]) {
+  for (const n of [3, 2, 1]) {
     await expect(page.locator('[data-load-error]')).toHaveCount(n)
     await page.locator('[data-load-error]').first().getByRole('button', { name: 'Retry' }).click()
   }

@@ -264,7 +264,7 @@ export function Notices() {
     <div className="stack">
       <p className="fine">Emails to {d.you.email} about this business. Others here choose their own. Billing and security emails can’t be turned off.</p>
       {d.notices.map((n) => (
-        <label key={n.kind} className="choice-option">
+        <label key={n.kind} className="check">
           <input
             type="checkbox"
             checked={n.on}
