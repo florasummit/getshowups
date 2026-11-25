@@ -48,7 +48,7 @@ export default function Header() {
   return (
     <header className={`site-header ${scrolled || open ? 'is-solid' : ''} ${dark && !open ? 'is-dark' : ''}`}>
       <div className="container header-inner">
-        <Logo />
+        <Logo mark={false} />
         <nav aria-label="Primary" className="desktop-nav">
           <ul>
             {navLinks.map((l) => (
