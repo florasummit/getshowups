@@ -55,6 +55,7 @@ test('0039 keeps every row, column, index and foreign key, and accepts openai', 
   assert.deepEqual(sql.prepare('PRAGMA foreign_key_list(ad_metrics_daily)').all().map((f) => [f.table, f.from, f.to]).sort(), [['ad_campaigns', 'campaign_id', 'id'], ['customers', 'customer', 'id']])
   assert.ok(sql.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'ad_campaigns_customer'").get())
   assert.equal(sql.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE '%_0039'").get().n, 0, 'no leftover tables')
+  assert.deepEqual(sql.prepare('SELECT platform FROM ad_platforms ORDER BY platform').all().map((r) => r.platform), ['google', 'meta', 'openai'])
   insertOpenAi(sql)
   assert.throws(() => sql.prepare("INSERT INTO ad_campaigns (id, customer, platform, status, spec, daily_budget_cents, created_at, updated_at) VALUES ('x', 'poolthru-llc', 'tiktok', 'draft', '{}', 1, 1, 1)").run(), /CHECK/)
   assert.throws(() => sql.prepare("INSERT INTO ad_metrics_daily (campaign_id, customer, date, fetched_at) VALUES ('nope', 'poolthru-llc', '2026-11-22', 1)").run(), /FOREIGN KEY/, 'the foreign key is still enforced')
@@ -87,6 +88,12 @@ test('rollback refuses while openai rows exist, and otherwise restores the googl
   assert.deepEqual(sql.prepare('PRAGMA foreign_key_check').all(), [])
   assert.throws(() => insertOpenAi(sql), /CHECK/)
   assert.equal(sql.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE '%_down' OR name LIKE 'rollback_%'").get().n, 0)
+  assert.equal(sql.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'ad_platforms'").get().n, 0, 'the marker goes with it')
+})
+
+test('build.json lists only the marker table for 0039, so Business Review sees it applied once it is', () => {
+  const listed = [...UP.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1])
+  assert.deepEqual(listed, ['ad_platforms'])
 })
 
 test('0039 is the only rebuild: its statements touch only the three ad tables', () => {

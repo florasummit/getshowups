@@ -14,8 +14,16 @@
 --   4. Verify:   the same counts; PRAGMA foreign_key_check (no rows); SELECT sql FROM sqlite_master WHERE name = 'ad_campaigns'
 -- Rollback: scripts/rollback/0039_ads_platform_openai.down.sql (refuses while any 'openai' row exists).
 
+-- The working tables (*_0039) are created with a plain CREATE TABLE on purpose: they are renamed away, so they must not
+-- be listed as this migration's tables (scripts/build-info.mjs reads "CREATE TABLE IF NOT EXISTS"). The marker below is
+-- what Business Review checks to know 0039 is applied: the platforms ad_connections and ad_campaigns accept.
+CREATE TABLE IF NOT EXISTS ad_platforms (
+  platform TEXT PRIMARY KEY CHECK (platform IN ('google', 'meta', 'openai'))
+);
+INSERT OR IGNORE INTO ad_platforms (platform) VALUES ('google'), ('meta'), ('openai');
+
 -- 1. ad_connections (no table references it).
-CREATE TABLE IF NOT EXISTS ad_connections_0039 (
+CREATE TABLE ad_connections_0039 (
   customer     TEXT NOT NULL REFERENCES customers(id),
   platform     TEXT NOT NULL CHECK (platform IN ('google', 'meta', 'openai')),
   account_id   TEXT,
@@ -33,7 +41,7 @@ DROP TABLE ad_connections;
 ALTER TABLE ad_connections_0039 RENAME TO ad_connections;
 
 -- 2. ad_campaigns and its one dependant, ad_metrics_daily.
-CREATE TABLE IF NOT EXISTS ad_campaigns_0039 (
+CREATE TABLE ad_campaigns_0039 (
   id                  TEXT PRIMARY KEY,
   customer            TEXT NOT NULL REFERENCES customers(id),
   platform            TEXT NOT NULL CHECK (platform IN ('google', 'meta', 'openai')),
@@ -52,7 +60,7 @@ CREATE TABLE IF NOT EXISTS ad_campaigns_0039 (
 INSERT OR IGNORE INTO ad_campaigns_0039 (id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, approved_by, approved_at, launched_at, last_error, created_at, updated_at)
   SELECT id, customer, platform, status, spec, daily_budget_cents, platform_campaign_id, platform_ids, approved_by, approved_at, launched_at, last_error, created_at, updated_at FROM ad_campaigns;
 
-CREATE TABLE IF NOT EXISTS ad_metrics_daily_0039 (
+CREATE TABLE ad_metrics_daily_0039 (
   campaign_id TEXT NOT NULL REFERENCES ad_campaigns_0039(id),
   customer    TEXT NOT NULL REFERENCES customers(id),
   date        TEXT NOT NULL,

@@ -57,4 +57,5 @@ DROP TABLE ad_campaigns;
 ALTER TABLE ad_campaigns_down RENAME TO ad_campaigns;
 ALTER TABLE ad_metrics_daily_down RENAME TO ad_metrics_daily;
 CREATE INDEX IF NOT EXISTS ad_campaigns_customer ON ad_campaigns (customer, status);
+DROP TABLE IF EXISTS ad_platforms; -- the 0039 marker: Business Review then shows 0039 as not applied
 DROP TABLE rollback_0039_guard;

@@ -61,7 +61,7 @@ results definition (`server/ads/funnel.js`).
 
 ## Migration 0039 release (table rebuild; approval)
 SQLite can't widen a CHECK in place, so 0039 rebuilds `ad_connections`, `ad_campaigns` and `ad_metrics_daily`. It is the
-one reviewed exception to "additive only". `test/migration-0039.test.js` covers:
+one reviewed exception to "additive only". It also adds a marker table, `ad_platforms` (google, meta, openai). That is the table Business Review checks (`build.json`) to show 0039 as applied, because the working `*_0039` tables are renamed away. `test/migration-0039.test.js` covers:
 - every row, column, index and foreign key is kept;
 - `openai` is accepted and unknown platforms are refused;
 - it is safe to run twice;
