@@ -116,20 +116,27 @@ async function holdForRecovery(env, id, report, now) {
   const a = await enforceAdsHold(env, id, { actor: 'system:deletion', hold: { reason: 'account_deleted' }, now, correlationId: `deletion:${id}` }).catch(() => ({ failed: -1, paused: 0 }))
   if (!(await stillClosing(db, id, now))) return report
   const b = await scheduleCancel(env, id, now).catch(() => ({ ok: false, error: 'internal_error' }))
-  const next = { ...report, adsPaused: (report.adsPaused || 0) + (a.paused || 0), adsPending: a.failed !== 0, billingEnds: b.ok === true, ...(b.ok ? { billingError: undefined } : { billingError: b.error }) }
-  await db.prepare(`UPDATE account_deletions SET report = ?2 WHERE customer = ?1 AND ${OPEN} AND next_attempt_at > ?3`).bind(id, JSON.stringify(next), now).run()
+  // Only its own keys: a suspension recorded meanwhile (wasStatus) is never overwritten.
+  const next = { ...report, adsPaused: (report.adsPaused || 0) + (a.paused || 0), adsPending: a.failed !== 0, billingEnds: b.ok === true, billingError: b.ok ? null : String(b.error || 'failed') }
+  await db
+    .prepare(`UPDATE account_deletions SET report = json_set(report, '$.adsPaused', ?3, '$.adsPending', json(?4), '$.billingEnds', json(?5), '$.billingError', ?6) WHERE customer = ?1 AND ${OPEN} AND next_attempt_at > ?2`)
+    .bind(id, now, next.adsPaused, String(next.adsPending), String(next.billingEnds), next.billingError)
+    .run()
   return next
 }
 
 // Undo within the window. The plan stays set to end: charging again takes the owner's own "Keep my plan". Ads stay paused.
 export async function cancelDeletion(env, id, actor, now = Date.now()) {
   const db = env.ONBOARDING_DB
-  const gone = await db.prepare(`DELETE FROM account_deletions WHERE customer = ?1 AND ${OPEN} AND attempts = 0 AND next_attempt_at > ?2 RETURNING report`).bind(id, now).first()
-  if (!gone) return { ok: false, error: 'not_scheduled' }
-  const report = JSON.parse(gone.report || '{}')
-  if (report.wasStatus === 'active') await db.prepare("UPDATE customers SET status = 'active', updated_at = ?2 WHERE id = ?1 AND status = 'suspended'").bind(id, now).run()
-  // Reminders stopped by the closing that are still due later are put back.
-  await db.prepare("UPDATE messages SET status = 'scheduled', error = NULL, updated_at = ?2 WHERE customer = ?1 AND status = 'skipped' AND error = 'account_closing' AND send_at > ?2").bind(id, now).run()
+  // One transaction, every part under the same condition, the record last: never half undone.
+  const cond = `EXISTS (SELECT 1 FROM account_deletions WHERE customer = ?1 AND ${OPEN} AND attempts = 0 AND next_attempt_at > ?2`
+  const done = await db.batch([
+    db.prepare(`UPDATE customers SET status = 'active', updated_at = ?2 WHERE id = ?1 AND status = 'suspended' AND ${cond} AND json_extract(report, '$.wasStatus') = 'active')`).bind(id, now),
+    // Reminders stopped by the closing that are still due later are put back.
+    db.prepare(`UPDATE messages SET status = 'scheduled', error = NULL, updated_at = ?2 WHERE customer = ?1 AND status = 'skipped' AND error = 'account_closing' AND send_at > ?2 AND ${cond})`).bind(id, now),
+    db.prepare(`DELETE FROM account_deletions WHERE customer = ?1 AND ${OPEN} AND attempts = 0 AND next_attempt_at > ?2`).bind(id, now),
+  ])
+  if (!done.at(-1)?.meta?.changes) return { ok: false, error: 'not_scheduled' }
   await recordEvent(db, { type: 'account.deletion_withdrawn', actorType: actor.type, actor: actor.type === 'owner' ? `owner:${actor.id}` : actor.id, ...ev(id, 'success'), at: now })
   return { ok: true }
 }
@@ -179,6 +186,10 @@ async function integrations(env, id) {
   const tw = await closeSubaccount(env, id).catch(() => ({ ok: false, error: 'storage_error' }))
   if (!tw.ok) throw step(`twilio_${tw.error}`)
   out.twilio = tw.skipped ? null : 'closed'
+  for (const platform of ['google', 'meta', 'gbp', 'openai']) {
+    if (await kv.get(`ads:${platform}:${id}`)) out.ads.push(platform)
+    await forgetConnection(env, platform, id)
+  }
   // Google Calendar (and archived records from older OAuth clients): delete ours first, then revoke the grant
   // unless another stored connection still uses it (one grant per Google account + client).
   const keys = [`google:${id}`]
@@ -198,10 +209,6 @@ async function integrations(env, id) {
       const token = await decrypt(env, rec.refreshToken).catch(() => null)
       if (token && (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID))) out.googleRevoked = true
     }
-  }
-  for (const platform of ['google', 'meta', 'gbp', 'openai']) {
-    if (await kv.get(`ads:${platform}:${id}`)) out.ads.push(platform)
-    await forgetConnection(env, platform, id)
   }
   if (await kv.get(`ghl:${id}`)) out.ghl = true
   await deleteGhlConfig(env, id).catch(() => kv.delete(`ghl:${id}`))
@@ -324,7 +331,7 @@ export async function advanceDeletion(env, customerId, now = Date.now()) {
   if (job.step === 'lockout' && report.scheduledFor > now) return { status: 'scheduled', scheduledFor: report.scheduledFor, report: await holdForRecovery(env, customerId, report, now) }
   // Claimed before anything is changed: an undo can no longer succeed after this, and a job that was undone stops here.
   report.claimed = now
-  const claimed = await db.prepare("UPDATE account_deletions SET report = json_set(report, '$.claimed', ?2) WHERE customer = ?1 AND status = 'in_progress' RETURNING customer").bind(customerId, now).first()
+  const claimed = await db.prepare("UPDATE account_deletions SET report = json_set(report, '$.claimed', ?2) WHERE customer = ?1 AND status = 'in_progress' AND step = ?3 AND requested_at = ?4 AND next_attempt_at = ?5 RETURNING customer").bind(customerId, now, job.step, job.requested_at, job.next_attempt_at).first()
   if (!claimed) return { status: 'not_found' }
   let i = STEPS.indexOf(job.step)
   while (i >= 0 && i < STEPS.length) {
@@ -453,7 +460,7 @@ export async function closures(db) {
     requests: results.filter((r) => !del.results.some((d) => d.customer === r.customer)).map((r) => ({ customer: r.customer, name: r.name, at: r.at })),
     deletions: del.results.map((d) => {
       const rep = JSON.parse(d.report || '{}')
-      const scheduled = d.status === 'in_progress' && d.step === 'lockout' && rep.scheduledFor && d.attempts === 0 ? rep.scheduledFor : null
+      const scheduled = d.status === 'in_progress' && d.step === 'lockout' && rep.scheduledFor && !rep.claimed && d.attempts === 0 ? rep.scheduledFor : null
       return { customer: d.customer, name: d.name, state: d.status === 'completed' ? 'completed' : d.last_error ? 'failed' : scheduled ? 'scheduled' : 'running', step: d.step, attempts: d.attempts, error: d.last_error, requestedAt: d.requested_at, completedAt: d.completed_at, scheduledFor: scheduled, nextAttemptAt: d.status === 'completed' ? null : d.next_attempt_at, billingError: rep.billingError ?? null, adsPending: rep.adsPending === true }
     }),
   }

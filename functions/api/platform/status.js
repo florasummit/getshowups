@@ -20,12 +20,12 @@ export async function onRequestPost({ request, env }) {
   if (body?.confirm !== true || reason.length < 5) return json(400, { error: 'reason_required' })
   // A business being closed or deleted is never put back online from here (the owner, or "Undo closing", does that).
   if (status === 'active' && (await deletionStatus(env.ONBOARDING_DB, customer))) return json(409, { error: 'being_deleted' })
+  // Suspended while its owner is closing it: undoing the closing must not lift the suspension.
+  if (status === 'suspended') await env.ONBOARDING_DB.prepare("UPDATE account_deletions SET report = json_set(report, '$.wasStatus', 'suspended') WHERE customer = ?1 AND status = 'in_progress'").bind(customer).run().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
   const row = await env.ONBOARDING_DB.prepare('UPDATE customers SET status = ?2, updated_at = ?3 WHERE id = ?1 RETURNING id')
     .bind(customer, status, Date.now())
     .first()
   if (!row) return json(404, { error: 'not_found' })
-  // Suspended while its owner is closing it: undoing the closing must not lift the suspension.
-  if (status === 'suspended') await env.ONBOARDING_DB.prepare("UPDATE account_deletions SET report = json_set(report, '$.wasStatus', 'suspended') WHERE customer = ?1 AND status = 'in_progress'").bind(customer).run().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
   let ads = null
   if (status === 'suspended') {
     ads = await enforceAdsHold(env, customer, { actor: `admin:${admin.email}` }).catch((err) => {

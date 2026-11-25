@@ -290,6 +290,26 @@ test('closing window: an admin suspension survives the undo; the plan can’t be
   assert.equal(one("SELECT status FROM messages WHERE id = 'm1'").status, 'scheduled')
 })
 
+test('a suspension recorded while a closing is being held survives; a claim only takes the job it read', async () => {
+  env.ACCOUNT_RECOVERY_DAYS = '14'
+  const f = globalThis.fetch
+  globalThis.fetch = async (...a) => {
+    q("UPDATE account_deletions SET report = json_set(report, '$.wasStatus', 'suspended') WHERE customer = 'alpha-co'")
+    return f(...a)
+  }
+  await requestDeletion(env, 'alpha-co', { type: 'owner', id: 'ann@alpha.example' })
+  globalThis.fetch = f
+  assert.equal(JSON.parse(one("SELECT report FROM account_deletions").report).wasStatus, 'suspended')
+  const prepare = env.ONBOARDING_DB.prepare
+  env.ONBOARDING_DB.prepare = (x) => {
+    if (x.includes("json_set(report, '$.claimed'")) q("UPDATE account_deletions SET requested_at = requested_at + 1, next_attempt_at = next_attempt_at + 1 WHERE customer = 'alpha-co'")
+    return prepare(x)
+  }
+  assert.equal((await advanceDeletion(env, 'alpha-co', Date.now() + 15 * DAY)).status, 'not_found')
+  env.ONBOARDING_DB.prepare = prepare
+  assert.equal(one("SELECT count(*) n FROM leads WHERE customer = 'alpha-co'").n, 1)
+})
+
 test('the restore marker is written before a deletion can be called completed', async () => {
   const put = env.GOOGLE_TOKENS.put
   env.GOOGLE_TOKENS.put = async (k, v) => {
@@ -327,8 +347,10 @@ test('only the owner opens billing; deleting one person never alters another add
   const mo = await signIn('mo@alpha.example')
   assert.equal((await plan(mo, { action: 'portal' })).status, 403)
   q("INSERT INTO admin_audit (at, actor, action, customer, details) VALUES (1, 'x', 'invite', 'beta-co', '{\"email\":\"momo@alpha.example\"}')")
+  q("INSERT INTO admin_audit (at, actor, action, customer, details) VALUES (2, 'x', 'invite', 'alpha-co', ?)", `{"note":"asked by 'Mo@alpha.example'."}`)
   assert.equal((await acct(mo, { action: 'delete_me', confirm: true, email: 'mo@alpha.example' })).status, 200)
-  assert.equal(one('SELECT details FROM admin_audit').details, '{"email":"momo@alpha.example"}')
+  assert.equal(one('SELECT details FROM admin_audit WHERE at = 1').details, '{"email":"momo@alpha.example"}')
+  assert.ok(!/mo@alpha/i.test(one('SELECT details FROM admin_audit WHERE at = 2').details))
 })
 
 test('recovery window with Stripe down: reported as not stopped yet, and the cron keeps trying', async () => {

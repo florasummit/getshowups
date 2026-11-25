@@ -154,6 +154,12 @@ export async function grantInUse(env, sub, clientId = env.GOOGLE_CLIENT_ID) {
 // Revokes a token only if no stored connection still depends on the same Google grant.
 export async function revokeUnlessInUse(token, sub, env, clientId) {
   if (await grantInUse(env, sub, clientId)) return false
+  // Google keeps ONE grant per account and client. Ads and Business Profile connections use the same client and don't record
+  // the account, so while any exists the grant may be theirs: revoking could leave campaigns running out of reach.
+  for (const prefix of ['ads:google:', 'ads:gbp:']) {
+    const l = await env.GOOGLE_TOKENS.list({ prefix, limit: 1 })
+    if (l.keys.length || l.list_complete === false) return false
+  }
   await revokeToken(token, env)
   return true
 }

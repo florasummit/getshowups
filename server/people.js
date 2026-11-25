@@ -105,7 +105,8 @@ export async function deletePerson(env, session, now = Date.now()) {
   const ref = await emailRef(email)
   const { results } = await db.prepare("SELECT id, actor, details FROM admin_audit WHERE instr(lower(actor), ?1) > 0 OR instr(lower(details), ?1) > 0").bind(email).all()
   // Whole addresses only: never part of someone else's.
-  const swap = (v) => String(v).replace(/[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => (m.toLowerCase() === email ? ref : m))
+  const esc = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const swap = (v) => String(v).replace(new RegExp(`(?<![A-Za-z0-9._%+-])${esc}(?![A-Za-z0-9-]|\\.[A-Za-z0-9])`, 'gi'), ref)
   const opt = (q) => db.prepare(q).bind(email).run().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
   await opt('DELETE FROM owner_notice_off WHERE email = ?1')
   await db.batch([

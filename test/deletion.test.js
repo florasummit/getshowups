@@ -162,6 +162,7 @@ test('gate: without ACCOUNT_DELETION_ENABLED nothing can be requested or run (ro
 })
 
 test('owner deletion: confirmed by typing the business name; everything erased, billing ended, Google revoked; beta untouched', async () => {
+  kv.m.delete('ads:google:beta-co') // an ads connection anywhere could share the grant (tested separately)
   const c = await cookie(OWNER)
   assert.equal((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json().features.accountDeletion, true)
   const del = (body, opts = {}) => call(account, 'POST', '/api/dashboard/account', { cookie: c, body, ...opts })
@@ -211,6 +212,7 @@ test('owner deletion: confirmed by typing the business name; everything erased, 
 })
 
 test('shared Google grant: the token is deleted but NOT revoked while another business still uses the same grant', async () => {
+  kv.m.delete('ads:google:beta-co')
   await kv.put('google:beta-co', JSON.stringify({ customer: 'beta-co', refreshToken: await encrypt(env, RT), googleSub: 'sub-A', clientId: 'cid', scope: 'x' }))
   db.sql.prepare("DELETE FROM self_signups WHERE customer = 'alpha-co'").run()
   await requestDeletion(env, 'alpha-co', { type: 'owner', id: OWNER })

@@ -63,10 +63,7 @@ export async function disconnectService(env, session, service, { pauseRunning = 
     let revoked = false
     if (rec?.refreshToken) {
       const token = await decrypt(env, rec.refreshToken).catch(() => null)
-      // Google keeps ONE grant per account and client: if any ads or profile connection uses our client, revoking could
-      // end it while its campaigns run (those records don't name the account), so then it is only forgotten here.
-      const shared = await Promise.all(['ads:google:', 'ads:gbp:'].map((prefix) => env.GOOGLE_TOKENS.list({ prefix, limit: 1 }))).then((l) => l.some((x) => x.keys.length > 0))
-      if (token && !shared) revoked = (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID).catch(() => false)) === true
+      if (token) revoked = (await revokeUnlessInUse(token, rec.googleSub, env, rec.clientId ?? env.GOOGLE_CLIENT_ID).catch(() => false)) === true
     }
     await note({ revokeAsked: revoked })
     return { ok: true, revokeAsked: revoked, left: 'Events already in your Google Calendar stay there.' }
