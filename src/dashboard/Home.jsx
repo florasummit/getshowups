@@ -9,6 +9,7 @@ import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
 import { AssistantButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
+import { clearMemory, setMemoryOwner } from './assistant-memory.js'
 import { setAssistantView } from './assistant-store.js'
 import Insight from './Insight.jsx'
 import Scorecard from './Scorecard.jsx'
@@ -24,6 +25,7 @@ const TeachAI = lazyPage(() => import('./TeachAI.jsx'))
 
 export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = null }) {
   const signOut = async () => {
+    clearMemory() // first: also when the page is closed before the server answers
     await api('/api/auth/logout', { method: 'POST' })
     location.replace(to)
   }
@@ -74,6 +76,7 @@ function DeleteAccount({ name }) {
     e.preventDefault()
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/account', { method: 'POST', body: { action: 'delete', confirm: true, name: typed } })
+    if (status === 202) clearMemory()
     setState(status === 202 ? { done: true } : { error: data.error === 'name_mismatch' ? 'The name doesn’t match.' : 'Couldn’t delete the account. Please try again.' })
   }
   if (state.done)
@@ -604,6 +607,7 @@ export default function Home({ me, reload }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   useEffect(() => setAssistantView(view), [view])
+  setMemoryOwner(`${me.customer.id}:${me.email}`)
   useEffect(() => {
     const on = () => {
       reload()

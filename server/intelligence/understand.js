@@ -6,6 +6,7 @@
 // and safety words, equipment words, days, intents (price, reschedule, a person, installation, commercial, complaint,
 // complex job) and corrections. Anything else stays unknown and is asked for (or recorded by the model with the
 // note_answer tool, checked against the customer's own words). It never decides eligibility: decide.js does.
+import { INDUSTRIES } from './industries.js'
 import { spokenToDigits } from '../receptionist/digits.js'
 
 const lc = (s) => String(s || '').toLowerCase()
@@ -25,12 +26,15 @@ const NEEDS = {
   pool: /\b(green(?: pool| water)?|cloudy|algae|pump|filter|heater|leak(?:ing)?|(?:weekly|regular|routine) (?:cleaning|service|care)|clean(?:ing)?|opening|closing|chemicals?|salt (?:cell|system)|pool light)\b/i,
   hvac: /\b(no heat|not heating|not cooling|no (?:ac|a\/c|air|cooling)|(?:ac|a\/c|air conditioner|air)(?: is| isn't| is not| won't| not)? (?:not )?(?:cooling|working|turning on|blowing)[a-z ]{0,20}|blowing (?:warm|hot|cold) air|furnace|heat pump|thermostat|(?:strange |loud |weird )?nois(?:e|y)|leak(?:ing)?|tune[- ]?up|maintenance|install(?:ation)?|replace(?:ment)?|new (?:system|unit))\b/i,
   electrical: /\b(outlets?|breakers?|panel|wiring|(?:lights?|lighting) (?:flicker\w*|out|not working)|flicker\w*|sparks?|ev charger|generator|ceiling fan|light switch|switch|install(?:ation)?|rewir\w*)\b/i,
+  plumbing: INDUSTRIES.plumbing.needs,
+  appointment: INDUSTRIES.appointment.needs,
   general: /\b(?:need|want|looking for|help with|interested in)\s+(?:a |an |some |the )?([a-z][a-z -]{2,40})/i,
 }
 const EQUIPMENT = {
   pool: /\b(pump|filter|heater|salt cell|chlorinator|automation|pool light|robot(?:ic)? cleaner|cleaner)\b/i,
   hvac: /\b(furnace|heat pump|central air|ac unit|a\/c unit|air conditioner|mini[- ]split|boiler|thermostat|duct(?:s|work)?|(?:carrier|trane|lennox|rheem|goodman|york|daikin|bryant)(?: unit| system)?)\b/i,
   electrical: /\b(panel|breaker box|fuse box|outlets?|switch(?:es)?|fixtures?|ev charger|generator|ceiling fan)\b/i,
+  plumbing: INDUSTRIES.plumbing.equipment,
 }
 const SAFETY = [
   ['call_911', /\b(smell(?:s|ing)? (?:of |like )?gas|gas (?:smell|leak)|carbon monoxide|co (?:alarm|detector)|(?:house|room|kitchen|panel|outlet) (?:is )?on fire|there'?s a fire|fire in|smoke (?:coming|from))\b/i],

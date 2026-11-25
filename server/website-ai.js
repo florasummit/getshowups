@@ -6,6 +6,7 @@
 // business's records, and every generated sentence passes the claims filter plus a number check
 // (no invented years, ratings, prices or counts). Anything that fails falls back to the template text.
 // Provider: Cloudflare Workers AI (binding `AI`). Without it, the deterministic template is used.
+import { taughtFor } from './intelligence/knowledge.js'
 import { markCredential, storedCredential } from './ai-credentials.js'
 import { studioAccess } from './website-studio.js'
 import { runWithOwnKey } from './ai-providers.js'
@@ -109,7 +110,8 @@ const copyArea = (profile, base) => {
 export const industryOf = (customer, profile, base) =>
   industryKey({ industry: profile?.industry, services: profile?.services?.length ? profile.services : base?.services || [], description: profile?.description, name: customer.name })
 
-export function websiteFacts(customer, profile, base) {
+// taught: what the owner published as tellable to customers (intelligence/knowledge.js); left out when there is none.
+export function websiteFacts(customer, profile, base, taught = null) {
   const dir = directionFor(industryOf(customer, profile, base))
   return {
     businessName: customer.name,
@@ -123,6 +125,7 @@ export function websiteFacts(customer, profile, base) {
     appointments: customer.appointmentMode === 'at_customer' ? 'The business visits the customer at their home or site.' : 'Customers come to the business.',
     bookingOnline: 'Customers can book a time online.',
     phoneListed: Boolean(profile?.phone),
+    ...(taught?.facts.length ? { ownerKnowledge: taught.facts.map((t) => `${t.topic}: ${t.text}`) } : {}),
   }
 }
 
@@ -284,7 +287,7 @@ export async function generateWebsite(env, customer, { now = Date.now(), draftPh
   const { db, base, profile, claims, industry, allowedStock } = ctx
   const assetIds = withoutLogo(ctx.assetIds, logo) // the logo is never placed as a photo
   // An imported or edited draft is the owner's own text: the model may use it (numbers in it are allowed).
-  const facts = { ...websiteFacts(customer, profile, base), ...(draftText ? { currentText: String(draftText).slice(0, 6000) } : {}) }
+  const facts = { ...websiteFacts(customer, profile, base, await taughtFor(env, customer, 'website')), ...(draftText ? { currentText: String(draftText).slice(0, 6000) } : {}) }
   const photos = draftPhotos.filter((id) => assetIds.has(id))
   const images = imageChoices(assetIds, industry, photos)
   const presets = presetDesigns(industry, photos)
@@ -345,7 +348,7 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   const preset = draft.design || presetDesigns(industry, photos)[0]
   const allowZip = /\bzip|postal/i.test(ask)
   // Facts for the number check: the business details plus the owner's own current text.
-  const facts = { ...websiteFacts(customer, profile, draft), currentText: [draft.headline, draft.intro, draft.about, ...draft.services.map((s) => s.description)].join(' ') }
+  const facts = { ...websiteFacts(customer, profile, draft, await taughtFor(env, customer, 'website')), currentText: [draft.headline, draft.intro, draft.about, ...draft.services.map((s) => s.description)].join(' ') }
   const current = { headline: draft.headline, intro: draft.intro, about: draft.about, services: draft.services.map((s) => ({ name: s.name, description: s.description })), seoTitle: draft.seoTitle, seoDescription: draft.seoDescription, design: preset }
   const t0 = Date.now()
   let r

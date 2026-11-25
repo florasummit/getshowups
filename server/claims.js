@@ -16,6 +16,8 @@ export function claimProblem(text, facts, { now, tz }) {
     if (person && /\b(not|isn['’]?t|never) (a )?(real|genuine|serious)\b|\b(fake|spam|a hoax)\b|\bI['’]d (leave|ignore|skip) (it|them)\b/i.test(x)) return `About [${person}]: do not decide that a customer or request isn't real or should be ignored. Say what they asked for and that part of the text looks odd.`
     const sent = refs.find((r) => facts.get(r).sentAt)
     if (sent && /\b(nothing|no (message|reply|follow-up)s?)( \w+){0,3} (been sent|gone out|went out|sent)\b|\bnot been (messaged|contacted)\b/i.test(x) && !/\b(since|after|else|from you|by you|other than|except|draft\w*|prepared|note)\b/i.test(x)) return `About [${sent}]: a message is recorded as sent. Say what the record shows.`
+    const auto = refs.find((r) => facts.get(r).sentAt && !['auto', 'ai', 'system'].includes(facts.get(r).sender))
+    if (auto && /\bautomatic(ally)?\b/i.test(x) && /\b(messages?|sent|went|got|received)\b/i.test(x) && !/\b(not|whether|or an automatic)\b/i.test(x)) return `About [${auto}]: ${facts.get(auto).sender === 'owner' ? 'the owner sent the last message' : 'who sent the last message is not recorded'}, so it was not shown to be automatic. Say what the record shows.`
     const note = refs.find((r) => facts.get(r).kind === 'message' && !facts.get(r).lead)
     const other = note && refs.find((r) => facts.get(r).kind === 'appointment')
     if (other && /\b(affects?|matters? (for|to)|before|applies|about|for)\b/i.test(x)) return `About [${note}]: the note names no visit or person, so do not connect it with [${other}], not even as a guess.`
@@ -28,7 +30,6 @@ export function claimProblem(text, facts, { now, tz }) {
     if (f.kind === 'message' && !neg && /\b(asked for|wants|waiting for|expects|requested) (a |your )?(phone )?call/i.test(x)) return bad('they left a message; they did not ask for a call back.')
     if (f.kind === 'callback' && !neg && /\b(waiting for|expects|wants) (a |your )?(written )?reply\b/i.test(x)) return bad('they asked for a phone call, not a written reply.')
     if (f.kind === 'appointment' && f.confirmed === false && !neg && /\b(customer|they|has|have|is)( \w+)? confirmed\b/i.test(x) && !/\b(once|until|whether|if|ask)\b/i.test(x)) return bad('the customer has not confirmed.')
-    if (f.sender && f.sender !== 'auto' && !neg && /\bautomatic(ally)?\b/i.test(x) && /\b(message|sent|went)\b/i.test(x)) return bad(`the last message was sent by ${f.sender === 'owner' ? 'the owner' : 'someone not recorded'}, not automatically.`)
     if (f.at && /\byesterday\b/i.test(x) && !/\b(since|until)\b/i.test(x) && dayOf(f.at, tz) !== dayOf(now, tz) - 1) return bad('its date is not yesterday.')
     if (f.at && /\blast week\b/i.test(x) && mondayOf(dayOf(f.at, tz)) !== mondayOf(dayOf(now, tz)) - 7) return bad('its date is not in last week.')
     if (f.waiting && !neg && /\b(longest|oldest)\b/i.test(x) && !/\bsecond|next\b/i.test(x)) {

@@ -2,6 +2,11 @@
 
 _Update at the end of every task. Newest first._
 
+## Shared knowledge, industries, ads outcomes, kept conversations (2026-11-25)
+
+docs/INTELLIGENCE.md §9. No migration. Conversations stay in the owner's browser (V1 decision; the privacy policy says we don't store
+them): per business and account, cleared on sign-out, account switch, account deletion and after 30 days. voice-core midnight test fixed.
+
 ## ChatGPT Ads, third ad platform (2026-11-24, draft PR, not released)
 
 server/ads/openai.js + docs/OPENAI_ADS.md. Migration 0039 rebuilds ad_connections/ad_campaigns/ad_metrics_daily to allow
@@ -19,11 +24,6 @@ server/sales-attribution.js: prospects of the `getshowups` sales business by sou
 prospect email, after the inquiry, never a test business) → paying (live-mode only); CAC from GetShowUps' own ad spend.
 Admin → Growth shows it (salesBusinesses, salesPaying, cac). Booking-page links that aren't a business's own campaign keep
 utm_source/utm_campaign codes in lead_attribution.details. No migration, no UI change.
-## Known test issue: voice ceiling test fails 00:00 to 00:05 UTC (2026-11-25)
-
-test/voice-core.test.js "gates: a real (non-test) business is refused": it starts a Lab session at Date.now() minus 5 minutes and
-expects the DAILY ceiling, so in the first five minutes of the UTC day that session belongs to yesterday (lab_busy, not
-lab_daily_limit). Fails the same on main before #161. Product code is right. Narrow fix, not done: use a fixed time around noon UTC for both calls.
 
 ## Test sessions for acceptance (2026-11-25)
 

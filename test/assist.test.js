@@ -168,7 +168,7 @@ test('outcome: prepared, not saved; approval re-checks tenant and state, runs on
   const past = appt('alpha', 'Pat Lee', -20 * HOUR)
   const future = appt('alpha', 'Lena Ortiz', 20 * HOUR)
   const status = () => db.sql.prepare('SELECT status FROM appointments WHERE id = ?').get(past).status
-  script = [pick(['list_appointments', { state: 'needs_outcome' }]), pick(['prepare_outcome', { ref: 'A2', outcome: 'completed' }]), say('[A2] is ready to approve as completed.')]
+  script = [pick(['list_appointments', { state: 'needs_outcome' }]), pick(['prepare_outcome', { ref: 'A1', outcome: 'completed' }]), say('[A1] is ready to approve as completed.')]
   const r = await post('alpha', { question: 'mark pat done' })
   const p = r.body.proposals[0]
   assert.deepEqual([p.type, p.id, p.outcome, p.before, status()], ['outcome', past, 'completed', { status: 'booked', work: null }, 'booked'])

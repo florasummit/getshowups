@@ -23,6 +23,7 @@ import { sandboxed, testStatus } from '../testbusiness.js'
 import { resumeUrl, confirmUrl, linkToken, verifyLinkToken } from '../links.js'
 import { acquireControl, currentController, releaseControl } from '../conversations/control.js'
 import { internalEmails, isTestLead } from '../testdata.js'
+import { taughtFor } from '../intelligence/knowledge.js'
 import { recordEvent } from '../auditlog.js'
 import { hit } from '../ratelimit.js'
 import { classify, helpText, startText, humanText, cancelText, fallbackText, aiReply, assistantConfigured } from './assistant.js'
@@ -84,7 +85,8 @@ export async function markStage(env, customerId, leadId, stage, now = Date.now()
 // ---------- business facts (verified records only) ----------
 
 // profile: an already-started getProfile read (the receptionist needs it too), so it is read once per turn.
-export async function businessFacts(env, customer, { profile: given } = {}) {
+// role: whose scope the owner's published knowledge is read in (intelligence/knowledge.js).
+export async function businessFacts(env, customer, { profile: given, role = 'followups' } = {}) {
   const db = env.ONBOARDING_DB
   const [profile, pol] = await Promise.all([given || getProfile(db, customer.id).catch(() => null), policiesOrEmpty(db, customer.id)])
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -103,6 +105,7 @@ export async function businessFacts(env, customer, { profile: given } = {}) {
     visit: customer.appointmentMode === 'at_customer',
     beforeVisit: pol.beforeVisit || '',
     cancellation: pol.cancellation || '',
+    taught: (await taughtFor(env, customer, role)).facts,
   }
 }
 

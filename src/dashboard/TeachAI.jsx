@@ -500,6 +500,16 @@ function Teach({ data, dirty, post }) {
     const r = await post({ action: 'teach', text })
     if (r?.proposal) setProposal(r.proposal)
   }
+  // "This answer is wrong" in Test your AI brings the correction here, to finish and review like any change.
+  useEffect(() => {
+    const on = (e) => {
+      setText(e.detail)
+      setProposal(null)
+      document.getElementById('ta-teach')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    window.addEventListener('gsu:correct', on)
+    return () => window.removeEventListener('gsu:correct', on)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const apply = async () => {
     const r = await post({ action: 'apply', ops: proposal.ops, baseUpdatedAt: data.draftUpdatedAt }, 'Change added to your draft. Test it, then publish when you’re ready.')
     if (r) {
@@ -513,7 +523,7 @@ function Teach({ data, dirty, post }) {
         <label className="field">
           <span>Describe the change in your own words</span>
           <textarea rows={3} maxLength={1200} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Ask what the customer needs before asking where they live. We don’t do commercial pools." />
-          <span className="ui-hint">You see exactly what would change before anything is saved.</span>
+          <span className="ui-hint">Rules, facts, seasons, what a job is usually worth: say “remember that…” or describe it. You see exactly what would change before anything is saved.</span>
         </label>
         <div className="ui-form-actions">
           <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim() || dirty}>
@@ -677,6 +687,9 @@ function Test({ data, draft, dirty }) {
                           ))}
                       </p>
                     )}
+                    <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('gsu:correct', { detail: `Correction. A customer asked: “${l}” The answer was: “${t.reply}” That’s wrong. What’s right: ` }))}>
+                      This answer is wrong
+                    </button>
                     <ul className="ta-explain">
                       {t.explanations.map((x) => (
                         <li key={x.code + x.text} className={`ta-explain--${x.code}`}>

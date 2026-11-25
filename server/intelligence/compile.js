@@ -71,7 +71,8 @@ export function turnNote(d, version) {
 
 // The example reply for "Test your AI" (deterministic; the live AI words it naturally).
 // fresh = what THIS message said (only that is acknowledged; earlier facts were acknowledged when they were said).
-export function exampleReply(d, records = {}, fresh = d.known) {
+// taught: what the owner taught that this message asks about (simulate.js).
+export function exampleReply(d, records = {}, fresh = d.known, taught = []) {
   const k = d.known
   const f = fresh || {}
   const bits = []
@@ -86,6 +87,7 @@ export function exampleReply(d, records = {}, fresh = d.known) {
     return bits.join(' ')
   }
   if (d.escalate?.kind === 'excluded') return `Sorry, we don’t do ${String(d.escalate.reason).toLowerCase()}.${(records.services || []).length ? ` We can help with ${records.services.slice(0, 3).map((s) => s.name).join(', ')}.` : ''}${d.escalate.action !== 'decline' ? ' I can record a callback request if you’d like to talk it over with the team.' : ''}`
+  for (const t of taught) bits.push(/[.!?]$/.test(t.text) ? t.text : `${t.text}.`)
   if (ack.length) bits.push(ack[0].startsWith('thanks') ? `${ack[0].replace(/^t/, 'T')}.` : `Got it: ${ack.join(' ')}.`)
   if (d.coverage.status === 'verified_city' && f.city) bits.push(`${k.city} is in our service area.`)
   if (d.coverage.status === 'verified' && f.zip) bits.push('You’re in our service area.')

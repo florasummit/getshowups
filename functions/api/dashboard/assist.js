@@ -2,6 +2,7 @@
 //   GET → { enabled }.
 //   POST { question, topic?, view?, days?, history?, refs?, pending? }
 //     → { kind, answer, raw?, records?, proposals?, withdraw?, go?, refs?, note?, evidence?, days } | { error, evidence?, records? }.
+// POST { restore: true, refs } → { names } (the session business's own records only; a removed or foreign one is left out).
 // error: rate_limited | unchecked | quota | setup | timeout | busy | unavailable; with `try` (questions answered without the
 // model) and, for quota, resumesAt. Where things are and curated definitions need no model and doesn't use the daily allowance.
 import { json, randomToken } from '../../../server/google-oauth.js'
@@ -10,6 +11,7 @@ import { hit, tooManyJson, unhit } from '../../../server/ratelimit.js'
 import { track } from '../../../server/events.js'
 import { chatAccess, evidenceFor, helpFor, isSensitive, SENSITIVE_NOTE, validateQuestion, withoutModel } from '../../../server/assist.js'
 import { placeAnswer, worksWithoutAi } from '../../../server/assist-plain.js'
+import { namesFor } from '../../../server/operator-tools.js'
 import { operate } from '../../../server/operator.js'
 import { answersUsedUp, MIN_CHARGE_MICROS, operatorModel, overBudget } from '../../../server/operator-model.js'
 
@@ -24,7 +26,13 @@ export async function onRequestPost({ request, env }) {
   if (response) return response
   const customer = session.customer
   if (!(await chatAccess(env, customer))) return json(404, { error: 'not_found' })
-  const [error, req] = validateQuestion(await request.json().catch(() => null))
+  const body = await request.json().catch(() => null)
+  // A conversation kept in the owner's browser is opened again: the names behind its references, as they are now. No model.
+  if (body?.restore === true) {
+    if ((await hit(env, 'assistMessage', customer.id)).limited) return tooManyJson(600)
+    return json(200, { names: await namesFor(env, customer, body.refs) })
+  }
+  const [error, req] = validateQuestion(body)
   if (error) return json(400, { error })
   const burst = await hit(env, 'assistMessage', customer.id)
   if (burst.limited) return tooManyJson(burst.retryAfter)

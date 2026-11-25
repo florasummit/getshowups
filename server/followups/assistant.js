@@ -62,6 +62,7 @@ export function factsFor(biz) {
   if (biz.beforeVisit) lines.push(`Before the visit: ${biz.beforeVisit}`)
   if (biz.cancellation) lines.push(`Cancellation policy: ${biz.cancellation}`)
   if (biz.phone) lines.push(`Phone: ${biz.phone}`)
+  for (const t of biz.taught || []) lines.push(`${t.topic}: ${t.text}`)
   return lines.join('\n')
 }
 

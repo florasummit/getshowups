@@ -14,6 +14,9 @@
 // service address when the business visits) before a booking, safety advice for danger, no invented prices, privacy,
 // cost caps. validateConfig refuses anything that tries.
 
+import { INDUSTRIES, industryKey } from './industries.js'
+import { platformRefusal } from './platform-rules.js'
+
 export const SCHEMA_VERSION = 1
 
 // The fixed intake catalog. `platform` items are always required before a booking, whatever the config says.
@@ -67,40 +70,13 @@ export const PLATFORM_RULES = [
   'Daily spending limits and conversation limits always apply.',
 ]
 
-// Industry starting points (owners change everything; these are only defaults for a new draft).
-export const TEMPLATES = {
-  pool: {
-    intake: [['need', true], ['location', true], ['preferred_time', false], ['equipment', false], ['urgency', false], ['existing_customer', false], ['contact', true], ['address', true]],
-    emergency: { triggers: [], action: 'urgent_callback' },
-    escalation: [{ when: 'person', action: 'callback' }],
-  },
-  hvac: {
-    intake: [['need', true], ['urgency', true, true], ['location', true], ['equipment', false], ['preferred_time', false], ['existing_customer', false], ['contact', true], ['address', true]],
-    emergency: { triggers: ['no heat', 'no cooling', 'water leaking'], action: 'callback_and_book' },
-    escalation: [{ when: 'person', action: 'callback' }],
-  },
-  electrical: {
-    intake: [['need', true], ['urgency', true, true], ['location', true], ['preferred_time', false], ['existing_customer', false], ['contact', true], ['address', true]],
-    emergency: { triggers: ['power out', 'breaker keeps tripping', 'hot outlet'], action: 'urgent_callback' },
-    escalation: [{ when: 'person', action: 'callback' }, { when: 'complex', action: 'callback' }],
-  },
-  general: {
-    intake: [['need', true], ['location', true], ['preferred_time', false], ['contact', true], ['address', true]],
-    emergency: { triggers: [], action: 'urgent_callback' },
-    escalation: [{ when: 'person', action: 'callback' }],
-  },
-}
-export function industryKey(text) {
-  const t = String(text || '')
-  if (/pool|spa|hot tub/i.test(t)) return 'pool'
-  if (/hvac|heating|cooling|air condition|furnace|heat pump|a\/c|\bac\b/i.test(t)) return 'hvac'
-  if (/electric/i.test(t)) return 'electrical'
-  return 'general'
-}
+// Industry starting points (owners change everything; these are only defaults for a new draft): industries.js.
+export const TEMPLATES = Object.fromEntries(Object.entries(INDUSTRIES).map(([k, v]) => [k, v.template]))
+export { industryKey }
 
 // A new draft for a business: its industry's template, nothing else assumed.
 export function defaultConfig(records) {
-  const key = industryKey(`${records?.industry || ''} ${(records?.services || []).map((s) => s.name).join(' ')}`)
+  const key = industryKey(records?.industry, (records?.services || []).map((s) => s.name).join(' '))
   const t = TEMPLATES[key]
   return {
     schema: SCHEMA_VERSION,
@@ -113,6 +89,11 @@ export function defaultConfig(records) {
     afterHours: 'book_normally',
     pricing: 'listed',
     style: 'warm',
+    knowledge: [],
+    economics: [],
+    seasons: [],
+    qualify: [],
+    objective: '',
   }
 }
 
@@ -127,7 +108,9 @@ const same = (a, b) => clean(a, 200).toLowerCase() === clean(b, 200).toLowerCase
 // Text that would turn a config field into instructions (prompt injection through the owner's own fields, or an
 // attempt to switch off a platform rule) is refused, never stored.
 const INSTRUCTION_RE = /\b(ignore|disregard|override|forget)\b.{0,40}\b(rules?|instructions?|prompt|above|previous)\b|\bsystem prompt\b|\byou are now\b|\bact as\b|\bjailbreak\b/i
-export const LIMITS = { excluded: 20, triggers: 12, escalation: 10, phrase: 60, service: 80 }
+export const LIMITS = { excluded: 20, triggers: 12, escalation: 10, phrase: 60, service: 80, knowledge: 40, topic: 60, text: 300, economics: 20, seasons: 8, qualify: 10, objective: 160 }
+export const AUDIENCE = { customers: 'Can be told to customers', team: 'Only for you and planning (never told to customers)' }
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 // → { config (normalized), errors: [{ field, code, message }], warnings: [{ field, code, message }] }.
 // `records`: the business's current facts ({ services, towns, zips, visit }) for cross-checks.
@@ -217,6 +200,52 @@ export function validateConfig(input, records = {}) {
 
   for (const [field, allowed] of [['afterHours', AFTER_HOURS], ['pricing', PRICING], ['style', STYLES]]) if (c[field] !== undefined && !Object.hasOwn(allowed, c[field])) err(field, 'unknown_choice', 'Choose one of the options.')
 
+  // What the owner taught about the business. Facts and guidance as data: never instructions, prices or a way around a
+  // platform rule. Prices and services stay in Settings.
+  const okText = (field, t) => {
+    const why = INSTRUCTION_RE.test(t) ? 'Describe the business; instructions to the AI can’t be stored.' : platformRefusal(t)
+    if (why) err(field, 'not_allowed', why)
+    return !why
+  }
+  const knowledge = []
+  const given = Array.isArray(c.knowledge) ? c.knowledge : []
+  if (given.length > LIMITS.knowledge) err('knowledge', 'too_many', `At most ${LIMITS.knowledge} things to know.`)
+  for (const k of given.slice(0, LIMITS.knowledge)) {
+    const topic = clean(k?.topic, LIMITS.topic)
+    const text = clean(k?.text, LIMITS.text)
+    if (!topic || !text) continue
+    if (!okText('knowledge', `${topic}. ${text}`)) continue
+    const audience = k.audience === 'team' ? 'team' : 'customers'
+    if (audience === 'customers' && /\$\s?\d|\b\d+ ?(%|(dollars|usd|percent)\b)/i.test(text)) {
+      err('knowledge', 'price', `“${topic}”: prices and discounts live in Settings → Services, so they can’t be taught here.`)
+      continue
+    }
+    if (/https?:|www\.|\S+@\S+/.test(text)) {
+      err('knowledge', 'link', `“${topic}”: leave out links and email addresses.`)
+      continue
+    }
+    if (audience === 'customers') for (const s of services) if (excluded.some((x) => same(x, s))) warn('knowledge', 'excluded', `“${s}” is listed as not offered.`)
+    if (!knowledge.some((x) => same(x.topic, topic) && x.audience === audience)) knowledge.push({ topic, text, audience })
+  }
+  const economics = []
+  for (const e of (Array.isArray(c.economics) ? c.economics : []).slice(0, LIMITS.economics)) {
+    const service = clean(e?.service, LIMITS.service)
+    const int = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : null)
+    const row = { service, valueCents: int(e?.valueCents, 1, 100_000_000), marginPct: int(e?.marginPct, 0, 100), repeatsPerYear: int(e?.repeatsPerYear, 1, 365) }
+    if (!service || (row.valueCents === null && row.marginPct === null && row.repeatsPerYear === null)) continue
+    if (!services.some((s) => same(s, service)) && !same(service, 'all services')) warn('economics', 'unknown_service', `“${service}” isn’t one of your listed services.`)
+    if (!economics.some((x) => same(x.service, service))) economics.push(row)
+  }
+  const seasons = []
+  for (const x of (Array.isArray(c.seasons) ? c.seasons : []).slice(0, LIMITS.seasons)) {
+    const months = [...new Set((Array.isArray(x?.months) ? x.months : []).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12))].sort((a, b) => a - b)
+    const note = clean(x?.note, LIMITS.text)
+    if (months.length && note && okText('seasons', note)) seasons.push({ months, note })
+  }
+  const qualify = list(c.qualify, LIMITS.qualify, 120, 'qualify').filter((q) => okText('qualify', q))
+  const objective = clean(c.objective, LIMITS.objective)
+  if (objective) okText('objective', objective)
+
   const config = {
     schema: SCHEMA_VERSION,
     industry: Object.hasOwn(TEMPLATES, c.industry) ? c.industry : 'general',
@@ -228,11 +257,18 @@ export function validateConfig(input, records = {}) {
     afterHours: action(c.afterHours, AFTER_HOURS, 'book_normally'),
     pricing: action(c.pricing, PRICING, 'listed'),
     style: action(c.style, STYLES, 'warm'),
+    knowledge,
+    economics,
+    seasons,
+    qualify,
+    objective,
   }
   // (The address item exists for every business; it is only asked when the business visits the customer.)
   if (config.afterHours === 'callback_only' && !records.hoursConfirmed) warn('afterHours', 'hours_unconfirmed', 'Your booking hours aren’t confirmed in Settings yet, so “after hours” can’t be told apart.')
   return { config, errors, warnings }
 }
+
+export const economicsText = (e) => `${e.service}: ${[e.valueCents !== null && `typical job $${(e.valueCents / 100).toLocaleString('en-US')}`, e.marginPct !== null && `${e.marginPct}% margin`, e.repeatsPerYear !== null && `about ${e.repeatsPerYear} a year per customer`].filter(Boolean).join(', ')}`
 
 // Plain-language summary of a config, for the owner (Publish screen, version history, Teach a Change diff).
 export function describeConfig(c, records = {}) {
@@ -250,6 +286,11 @@ export function describeConfig(c, records = {}) {
   lines.push(`After hours: ${AFTER_HOURS[c.afterHours].toLowerCase()}.`)
   lines.push(`Prices: ${PRICING[c.pricing].toLowerCase()}.`)
   lines.push(`Tone: ${STYLES[c.style].toLowerCase()}.`)
+  for (const k of c.knowledge || []) lines.push(`Knows${k.audience === 'team' ? ' (not told to customers)' : ''}: ${k.topic}: ${k.text}`)
+  if (c.qualify?.length) lines.push(`Finds out: ${c.qualify.join('; ')}.`)
+  for (const e of c.economics || []) lines.push(`For planning: ${economicsText(e)}.`)
+  for (const x of c.seasons || []) lines.push(`Season (${x.months.map((m) => MONTHS[m - 1]).join(', ')}): ${x.note}`)
+  if (c.objective) lines.push(`Goal: ${c.objective}`)
   return lines
 }
 
@@ -280,5 +321,13 @@ export function diffConfigs(a, b) {
   if (a.afterHours !== b.afterHours) out.push(`After hours: ${AFTER_HOURS[b.afterHours].toLowerCase()}.`)
   if (a.pricing !== b.pricing) out.push(`Prices: ${PRICING[b.pricing].toLowerCase()}.`)
   if (a.style !== b.style) out.push(`Tone: ${STYLES[b.style].toLowerCase()}.`)
+  const lists = [['Knows', 'knowledge', (k) => `${k.topic}${k.audience === 'team' ? ' (not told to customers)' : ''}: ${k.text}`], ['For planning', 'economics', economicsText], ['Season', 'seasons', (x) => `${x.months.map((m) => MONTHS[m - 1]).join(', ')}: ${x.note}`], ['Finds out', 'qualify', (q) => q]]
+  for (const [label, key, text] of lists) {
+    const was = (a[key] || []).map(text)
+    const is = (b[key] || []).map(text)
+    for (const t of is) if (!was.includes(t)) out.push(`${label}: ${t}`)
+    for (const t of was) if (!is.includes(t)) out.push(`${label} no longer: ${t}`)
+  }
+  if ((a.objective || '') !== (b.objective || '')) out.push(b.objective ? `Goal: ${b.objective}` : 'Goal removed.')
   return out
 }

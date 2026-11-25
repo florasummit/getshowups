@@ -65,6 +65,7 @@ const factText = (f, profile) =>
     f.area && `Towns: ${f.area}`,
     f.visit ? 'The business comes to the customer.' : 'Customers come to the business.',
     'Customers can book a time online.',
+    ...(f.taught || []).map((t) => `${t.topic}: ${t.text}`),
   ]
     .filter(Boolean)
     .join('\n')
@@ -82,7 +83,7 @@ export function writingMessages(req, facts) {
 export async function suggest(env, customer, req) {
   const db = env.ONBOARDING_DB
   const profileRead = getProfile(db, customer.id).catch(() => null)
-  const [biz, profile, claims] = await Promise.all([businessFacts(env, customer, { profile: profileRead }), profileRead, approvedClaimsFor(db, customer.id).catch(() => [])])
+  const [biz, profile, claims] = await Promise.all([businessFacts(env, customer, { profile: profileRead, role: 'writing' }), profileRead, approvedClaimsFor(db, customer.id).catch(() => [])])
   const facts = factText(biz, profile)
   const started = Date.now()
   const done = (r, costMicros = 0) => ({ ...r, costMicros, ms: Date.now() - started })

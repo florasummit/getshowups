@@ -3,6 +3,8 @@
 // playbook is guidance for asking good questions, never facts about the business.
 import { businessFacts } from '../followups/engine.js'
 import { getVoiceSettings, PERSONALITIES, personalityPrompt } from '../voice/style.js'
+import { INDUSTRIES } from '../intelligence/industries.js'
+import { taughtFor } from '../intelligence/knowledge.js'
 import { getProfile } from '../onboarding.js'
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -14,27 +16,10 @@ export function clock(v) {
 }
 
 // Generic, industry-aware guidance. Matched from the owner's industry/services text; 'general' otherwise.
+// Shared with Teach Your AI and the owner's assistant: server/intelligence/industries.js. Only selling GetShowUps itself is here.
+const of = (k) => ({ match: INDUSTRIES[k].match, qualify: INDUSTRIES[k].qualify, urgent: INDUSTRIES[k].urgent })
 export const PLAYBOOKS = {
-  pool: {
-    match: /pool|spa|hot tub/i,
-    qualify: ['pool type and rough size (in-ground or above-ground)', 'what is wrong now (green water, equipment, routine care)', 'one-time visit or recurring service'],
-    urgent: ['electrical sparks or burning smell from pool equipment', 'a child or pet in danger', 'major water leak flooding property'],
-  },
-  hvac: {
-    match: /hvac|heating|cooling|air condition|furnace|heat pump|a\/c|\bac\b/i,
-    qualify: ['heating or cooling problem, or maintenance', 'system type and rough age if known', 'what it is doing (not turning on, blowing warm, noises, leaks)'],
-    urgent: ['smell of gas', 'carbon monoxide alarm going off', 'no heat in freezing weather with vulnerable people at home', 'no cooling in extreme heat with vulnerable people at home', 'electrical burning smell'],
-  },
-  plumbing: {
-    match: /plumb|drain|sewer|water heater|pipe/i,
-    qualify: ['what is happening (leak, clog, no hot water, installation)', 'where in the home', 'whether water is shut off'],
-    urgent: ['burst pipe or active flooding', 'sewage backing up into the home', 'no water at all', 'water heater leaking heavily', 'smell of gas near the water heater'],
-  },
-  cleaning: {
-    match: /clean|maid|janitor|housekeep/i,
-    qualify: ['home size (bedrooms/bathrooms or square feet)', 'one-time, move-in/out, deep clean or recurring', 'pets and any areas to skip or focus on'],
-    urgent: [],
-  },
+  ...Object.fromEntries(Object.keys(INDUSTRIES).filter((k) => k !== 'general').map((k) => [k, of(k)])),
   // GetShowUps selling itself (the GetShowUps business record, industry "Software"): the same engine, guards and
   // records; only the questions and the vocabulary change (a consultation call instead of a visit, no ZIP, no address).
   sales: {
@@ -43,7 +28,7 @@ export const PLAYBOOKS = {
     qualify: ['what kind of service business they run and roughly where', 'how new inquiries reach them today (calls, texts, website, ads) and who answers them', 'what happens to inquiries that arrive while they are on a job', 'whether they book appointments on a calendar today'],
     urgent: [],
   },
-  general: { match: /.*/, qualify: ['what they need done', 'where (if the business comes to them)'], urgent: ['anything that sounds like immediate danger to people or property'] },
+  general: of('general'),
 }
 export function playbookFor(text) {
   for (const [key, p] of Object.entries(PLAYBOOKS)) if (key !== 'general' && p.match.test(text || '')) return { key, ...p }
@@ -54,11 +39,12 @@ export function playbookFor(text) {
 // the records are read together (one D1 round trip's worth of waiting per turn, not five).
 export async function knowledgeFor(env, customer, settingsIn) {
   const profileRead = getProfile(env.ONBOARDING_DB, customer.id).catch(() => null)
-  const [facts, profile, settings, stored] = await Promise.all([
+  const [facts, profile, settings, stored, taught] = await Promise.all([
     businessFacts(env, customer, { profile: profileRead }),
     profileRead,
     settingsIn,
     settingsIn?.voice ? null : getVoiceSettings(env.ONBOARDING_DB, customer.id),
+    taughtFor(env, customer, 'receptionist'),
   ])
   // How the receptionist sounds (migration 0035; defaults before it): the personality preset shapes the prompt.
   const voice = settings?.voice || stored
@@ -74,13 +60,17 @@ export async function knowledgeFor(env, customer, settingsIn) {
     timezone: customer.timezone,
     slotMinutes: customer.slotMinutes,
     hours: days.length ? `${days.join(', ')}, ${clock(customer.dayStart)} to ${clock(customer.dayEnd)} (${customer.timezone})` : '',
-    knowledge: String(settings?.knowledge || '').trim(),
+    // Owner notes, then what the owner taught and published (customer-facing parts only; intelligence/knowledge.js).
+    knowledge: [String(settings?.knowledge || '').trim(), ...taught.facts.map((f) => `${f.topic}: ${f.text}`)].filter(Boolean).join('\n'),
     greeting: String(settings?.greeting || '').trim(),
     personality: PERSONALITIES[voice?.personality] ? voice.personality : 'standard',
     // The owner's stated industry wins; the services list is only a fallback signal.
-    playbook: playbookFor(profile?.industry).key !== 'general' ? playbookFor(profile?.industry) : playbookFor((facts.services || []).map((s) => s.name).join(' ')),
+    playbook: withTaught(playbookFor(profile?.industry).key !== 'general' ? playbookFor(profile?.industry) : playbookFor((facts.services || []).map((s) => s.name).join(' ')), taught),
   }
 }
+
+// The owner's published questions come before the industry's defaults.
+const withTaught = (p, taught) => (taught.qualify.length && !p.sales ? { ...p, qualify: taught.qualify } : p)
 
 // Everything a price could legitimately come from (records + owner-approved answers).
 // A note's price that contradicts a listed service price is left out, so the listed price always wins.

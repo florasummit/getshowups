@@ -38,6 +38,7 @@ export async function waitingNow(c) {
     people5(a.unbooked?.total, () => ids(`SELECT l.id FROM leads l WHERE l.customer = ?1 AND l.status = 'new' AND l.created_at >= ?3 AND NOT ${real} ORDER BY l.created_at LIMIT 5`, c.now - 30 * DAY)),
     people5(a.coverage?.total, () => ids(`SELECT l.id FROM coverage_requests r JOIN leads l ON l.id = r.lead_id AND l.customer = r.customer WHERE r.customer = ?1 AND r.status = 'pending' AND NOT ${real} ORDER BY l.created_at LIMIT 3`)),
   ])
+  const ids2 = async () => (await c.db.prepare(`SELECT a.id FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.status = 'booked' AND a.start_at <= ?3 AND NOT ${real} ORDER BY a.start_at DESC LIMIT 4`).bind(c.customer.id, c.internal, c.now).all()).results
   const kind = (x) => (x === null ? UNREAD : x.total)
   return {
     call_backs_waiting: kind(a.callbacks),
@@ -51,6 +52,7 @@ export async function waitingNow(c) {
     outside_area_requests_waiting_for_a_decision: kind(a.coverage),
     ...(outside.length ? { outside_area_people: outside } : {}),
     past_visits_without_outcome: kind(a.outcomes),
+    ...(a.outcomes?.total ? { past_visits_to_mark: await part(apptRefs(c, await ids2())), past_visits_note: '"done", "came" or "no show" for one of these is prepare_outcome' } : {}),
     card,
   }
 }
