@@ -3,6 +3,7 @@
 // are opaque and stored only as SHA-256. The customer for a dashboard request always comes from here.
 import { ACCEPTANCE } from './acceptance-env.js'
 import { json, missingConfig, randomToken, readCookie, sha256Hex } from './google-oauth.js'
+import { activeDayHours, withDayHoursColumn } from './day-hours.js'
 
 export const LOGIN_COOKIE = '__Host-gsu_login'
 export const SESSION_COOKIE = '__Host-gsu_session'
@@ -34,6 +35,7 @@ export async function createSession(db, email, now = Date.now()) {
 
 export function customerFromRow(row) {
   if (!row?.id) return null
+  const workdays = String(row.workdays).split(',').filter(Boolean).map(Number)
   return {
     id: row.id,
     name: row.name,
@@ -42,7 +44,11 @@ export function customerFromRow(row) {
     slotMinutes: row.slot_minutes,
     dayStart: row.day_start,
     dayEnd: row.day_end,
-    workdays: String(row.workdays).split(',').filter(Boolean).map(Number),
+    workdays,
+    // Booking days with their own hours (migration 0045, server/day-hours.js): { [weekday]: { start, end } }, {} = none.
+    // dayHoursReady: the table exists (a row without the column, e.g. an older query, reads as not ready and no override).
+    dayHours: activeDayHours({ workdays, dayStart: row.day_start, dayEnd: row.day_end, dayHours: row.day_hours }),
+    dayHoursReady: row.day_hours_ready === 1,
     hoursConfirmed: Boolean(row.hours_confirmed_at),
     status: row.status || 'active',
     automations: row.automations !== 0,
@@ -57,17 +63,20 @@ export async function getSession(request, env, now = Date.now()) {
   if (env[ACCEPTANCE]) return env[ACCEPTANCE].session
   const token = readCookie(request, SESSION_COOKIE)
   if (!token || !TOKEN_RE.test(token)) return null
-  const row = await env.ONBOARDING_DB.prepare(
-    `SELECT s.token_hash, s.email, s.created_at AS signed_in_at, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
-       FROM sessions s
-       LEFT JOIN customer_users u ON u.email = s.email
-       LEFT JOIN customers c ON c.id = u.customer
-       LEFT JOIN customer_settings cs ON cs.customer = c.id
-       LEFT JOIN service_settings ss ON ss.customer = c.id
-      WHERE s.token_hash = ?1 AND s.expires_at > ?2`,
+  const tokenHash = await sha256Hex(token)
+  const row = await withDayHoursColumn((dayHours) =>
+    env.ONBOARDING_DB.prepare(
+      `SELECT s.token_hash, s.email, s.created_at AS signed_in_at, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode, ${dayHours}
+         FROM sessions s
+         LEFT JOIN customer_users u ON u.email = s.email
+         LEFT JOIN customers c ON c.id = u.customer
+         LEFT JOIN customer_settings cs ON cs.customer = c.id
+         LEFT JOIN service_settings ss ON ss.customer = c.id
+        WHERE s.token_hash = ?1 AND s.expires_at > ?2`,
+    )
+      .bind(tokenHash, now)
+      .first(),
   )
-    .bind(await sha256Hex(token), now)
-    .first()
   if (!row) return null
   return { tokenHash: row.token_hash, email: row.email, signedInAt: row.signed_in_at, customer: customerFromRow(row) }
 }

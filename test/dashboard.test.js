@@ -488,7 +488,8 @@ test('booking page: only fully set-up businesses are bookable', async () => {
 
 test('booking page: real open slots exclude Google busy time and booked appointments; no private data', async () => {
   const first = (await book.info('alpha')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['allowOther', 'appointmentMode', 'areaCheck', 'askZip', 'brand', 'minutes', 'name', 'offerSms', 'phone', 'policies', 'reach', 'services', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.deepEqual(Object.keys(first).sort(), ['address', 'allowOther', 'appointmentMode', 'areaCheck', 'askZip', 'brand', 'minutes', 'name', 'offerSms', 'phone', 'policies', 'reach', 'services', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.equal(first.address, null, 'no address on record → none (the business address only when the owner shows it, BOOK-08)')
   assert.equal(first.reach, null, 'no phone: the live website or open chat page only, never anything else (none here)')
   assert.equal(first.phone, '', 'the only contact detail is the business’s own phone on record (BOOK-03); none on record → empty')
   assert.deepEqual(first.brand, { product: false, logo: null, accent: null }, 'brand only from a published website; nothing else about the business')

@@ -49,6 +49,10 @@ if a table with a business id is neither erased nor deliberately kept. Google Ad
 (they may be shared with Calendar): the owner is told to remove GetShowUps in their Google Account. Expired sessions of everyone are
 removed a day after they expire (server/sessions-purge.js). Still switched off: ACCOUNT_DELETION_ENABLED. Backups: docs/BACKUPS.md.
 
+Added 2026-11-26 (migration 0045): `booking_day_hours` (a business's booking days with their own hours) and
+`business_addresses` (the business's own address and whether customers may see it) are business data: both are in
+`ERASED_TABLES`, erased with the account, and included in the owner's business export (business.json).
+
 ## 4. Kept after deletion, and why (proposed)
 
 | Record | Contents | Why | Proposed period |

@@ -12,6 +12,7 @@ import { recordEvent } from './auditlog.js'
 import { CUSTOMER_RE } from './invites.js'
 import { testStatus } from './testbusiness.js'
 import { acceptanceEnv } from './acceptance-env.js'
+import { withDayHoursColumn } from './day-hours.js'
 
 export const COOKIE = '__Host-gsu_acceptance'
 export const PAIR_MS = 10 * 60_000
@@ -29,9 +30,11 @@ const newCode = () => [...crypto.getRandomValues(new Uint8Array(64))].filter((b)
 
 // Everything that must hold, read together, every time. → row | null
 const live = (db, tokenHash, now) =>
+  withDayHoursColumn((dayHours) => liveRow(db, tokenHash, now, dayHours))
+const liveRow = (db, tokenHash, now, dayHours) =>
   db
     .prepare(
-      `SELECT s.grant_id, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
+      `SELECT s.grant_id, c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode, ${dayHours}
          FROM acceptance_sessions s
          JOIN acceptance_grants g ON g.id = s.grant_id AND g.customer = s.customer AND g.revoked_at IS NULL AND g.expires_at > ?2
          JOIN test_businesses t ON t.customer = s.customer AND t.is_test = 1

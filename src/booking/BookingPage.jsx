@@ -737,6 +737,7 @@ export default function BookingPage({ id }) {
                     {biz.name} will visit {lead.street}.
                   </li>
                 )}
+                {!lead?.street && biz.appointmentMode !== 'at_customer' && biz.address && <li data-business-address>Where: {biz.address}</li>}
                 {booked.invited !== false && <li>A calendar invitation is on its way to {lead?.email || 'your email'}.</li>}
                 <li>{biz.phone ? `To change or cancel, call ${biz.name}: ${phoneText(biz.phone)}.` : biz.reach ? `To change or cancel, reach ${biz.name} through its ${biz.reach.kind === 'website' ? 'website' : 'chat'}.` : `${biz.name} has your details and will be in touch if anything changes.`}</li>
               </ul>
@@ -824,6 +825,13 @@ function Summary({ biz, product, service, isOther, minutes, request, slot, zone,
           <div>
             <dt>Where</dt>
             <dd>At your address</dd>
+          </div>
+        )}
+        {/* The business's own address: sent only when the owner shows it and customers come to the business (BOOK-08). */}
+        {biz.appointmentMode !== 'at_customer' && biz.address && (
+          <div>
+            <dt>Where</dt>
+            <dd data-business-address>{biz.address}</dd>
           </div>
         )}
       </dl>
