@@ -1,7 +1,8 @@
 // Teach Your AI (src/dashboard/TeachAI.jsx, /api/dashboard/ai-rules): the owner's whole journey on a PoolThru-like
-// business (visits the customer, Mount Pleasant + Charleston, ZIP list): records shown → mark a town fully served →
-// teach a change in plain words → review and add it → test a conversation (no repeated questions) → publish → change
-// again → go back to version 1. Each browser project has its own business (e2e-teach / e2e-teach-m). Published rules
+// business (visits the customer, Mount Pleasant + Charleston, ZIP list): the plain-words box first on the page →
+// records shown → mark a town fully served → teach a change in plain words (every part accounted for) → review and
+// add it → test a conversation (no repeated questions) → publish (told truthfully who gets the rules) → change again
+// → go back to version 1. Each browser project has its own business (e2e-teach / e2e-teach-m). Published rules
 // never reach conversations here (AI_RULES_LIVE_BUSINESSES is unset), and nothing calls a model or the calendar.
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
@@ -25,6 +26,37 @@ test('owner teaches, tests, publishes and rolls back their AI rules; no sideways
   await open(page)
   await expect(page.getByText('Not published yet').first()).toBeVisible()
 
+  // TEACH-05: the plain-words box is the first thing on the page, inside the first screen (phone 390 × 844 too).
+  const box = section(page, 'Teach a change').getByLabel('Describe the change in your own words')
+  const at = await box.boundingBox()
+  expect(at.y + at.height, 'the plain-words box is on the first screen').toBeLessThanOrEqual(page.viewportSize().height)
+  // TEACH-07: one numbering: the four cards are the four numbered sections; wording follows the trade (a pool business).
+  await expect(page.getByRole('navigation', { name: 'Teach Your AI steps' }).getByRole('link')).toHaveCount(4)
+  for (const h of ['1. About your business', '2. How your AI works', '3. Test your AI', '4. Publish']) await expect(page.getByRole('heading', { level: 2, name: h })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: /^5\./ })).toHaveCount(0)
+  await expect(section(page, 'How your AI works').getByText('Pool type or equipment')).toBeVisible()
+  await expect(section(page, 'How your AI works').getByPlaceholder('e.g. a child or pet in danger')).toBeVisible()
+  expect(await page.locator('main.app-main').innerText()).not.toMatch(/system type|no heat|Retell|\(approval\)|pilot/i)
+  // TEACH-01 / TEACH-03: a rule that can't be made is never a bare "Nothing would change.": the reason, where it
+  // lives, wording that works, and no "Add to my draft". The page's own example works when clicked.
+  const early = section(page, 'Teach a change')
+  await box.fill("Don't book green pool cleanups on Fridays. Book people outside my service area.")
+  await early.getByRole('button', { name: 'Suggest the change' }).click()
+  const why = page.getByRole('region', { name: 'Suggested change' })
+  await expect(why.getByText(/Not changed: Which days and times can be booked comes from your booking hours/)).toBeVisible()
+  await expect(why.getByRole('link', { name: 'Open Settings → Booking' })).toHaveAttribute('href', '/dashboard/settings#booking-hours')
+  await expect(why.getByText(/Not changed: People outside your service area are never booked automatically/)).toBeVisible()
+  await expect(why.locator('[data-outcome="not_changed"]')).toHaveCount(2)
+  await expect(why.getByText('Nothing would change.')).toHaveCount(0)
+  await expect(why.getByRole('button', { name: 'Add to my draft' })).toHaveCount(0)
+  await why.getByRole('button', { name: /We don’t do commercial pools/ }).click() // "wording that works" fills the box
+  await expect(box).toHaveValue('We don’t do commercial pools.')
+  await early.locator('[data-teach-examples]').getByRole('button', { name: /usually worth \$450/ }).click()
+  await early.getByRole('button', { name: 'Suggest the change' }).click()
+  await expect(why.getByText('For planning: Green pool cleanup: typical job $450')).toBeVisible()
+  await expect(why.getByRole('button', { name: 'Add to my draft' })).toBeVisible()
+  await why.getByRole('button', { name: 'Discard' }).click()
+
   // 1. About your business: records come from Settings; mark Mount Pleasant as fully served.
   const about = section(page, 'About your business')
   await expect(about.getByText('Weekly pool care ($160/month)')).toBeVisible()
@@ -42,8 +74,10 @@ test('owner teaches, tests, publishes and rolls back their AI rules; no sideways
   await expect(proposal.getByText('Services you don’t offer: added Commercial Pools.')).toBeVisible()
   await expect(proposal.getByText(/Not changed: The service area and the calendar are always checked/)).toBeVisible()
   await expect(proposal.getByText(/already asked before where the job is/)).toBeVisible()
+  await expect(proposal.locator('[data-outcome]')).toHaveCount(3) // every sentence typed is accounted for
   await proposal.getByRole('button', { name: 'Add to my draft' }).click()
   await expect(page.getByText(/Change added to your draft/)).toBeVisible()
+  await expect(page.locator('[data-teach-done]')).toBeInViewport() // TEACH-05: the confirmation is where the owner is looking
   await expect(section(page, 'About your business').getByRole('list', { name: 'Services you don’t offer' })).toContainText('Commercial Pools')
 
   // 4. Test your AI: city + problem + day in one message → recognized, area confirmed by town, the next question is
@@ -58,21 +92,39 @@ test('owner teaches, tests, publishes and rolls back their AI rules; no sideways
   await testAi.getByRole('button', { name: 'Send' }).click()
   await expect(testAi.getByText('Thanks, Jamie. What’s the address for the visit?')).toBeVisible()
   await expect(testAi.getByText(/ZIP code\?/)).toHaveCount(0)
+  // TEACH-06: the page says the test continues the same pretend customer (Start over beside it), a turn doesn't repeat
+  // the previous turn's verdicts, and a different place and job starts a new customer.
+  await expect(testAi.locator('[data-continues]')).toContainText('Same pretend customer')
+  await expect(testAi.locator('[data-continues]').getByRole('button', { name: 'Start over' })).toBeVisible()
+  await expect(testAi.getByText('Mount Pleasant is fully served: no ZIP code needed to confirm the area.')).toHaveCount(1)
+  await testAi.getByPlaceholder('What the customer says next…').fill('Do you do weekly pool care in Charleston?')
+  await testAi.getByRole('button', { name: 'Send' }).click()
+  await expect(testAi.locator('[data-fresh]')).toContainText('treated as a new customer')
+  const last = testAi.locator('.ta-turn').last()
+  await expect(last.getByText(/you serve parts of Charleston/)).toBeVisible()
+  await expect(last).not.toContainText(/Jamie|Mount Pleasant|Friday/)
 
   // 5. Publish v1 (explicit confirmation), then change and publish v2, then go back to v1 (published as v3).
   const pub = section(page, 'Publish')
-  await expect(pub.getByText('First version.')).toBeVisible()
+  // TEACH-07: a first version lists what it contains. TEACH-02: before publishing, one plain sentence says whether
+  // customers get published rules now (here: not yet) and the next step; the checkbox doesn't promise otherwise.
+  await expect(pub.locator('[data-first-version]')).toContainText('First version. It would contain:')
+  await expect(pub.locator('[data-first-version]')).toContainText('Asks for: what they need')
+  await expect(pub.locator('[data-publish-effect="not_yet"]')).toContainText('customers don’t get published rules yet')
+  await expect(pub.locator('[data-publish-effect="not_yet"]')).toContainText('Your next step: publish, then email hello@getshowups.com')
+  await expect(pub.getByLabel('I’ve tested these rules and want customers to get them.')).toHaveCount(0)
   await expect(pub.getByRole('button', { name: 'Publish' })).toBeDisabled()
-  await pub.getByLabel('I’ve tested these rules and want customers to get them.').check()
+  await pub.getByLabel('I’ve tested these rules and want to publish them.').check()
   await pub.getByRole('button', { name: 'Publish' }).click()
   await expect(page.getByText(/Published\. Customers aren’t affected yet/)).toBeVisible()
+  await expect(pub.locator('[data-publish-said]')).toBeInViewport()
   await expect(page.getByText('Version 1 published').first()).toBeVisible()
   await expect(pub.getByText('Your draft matches what’s published.')).toBeVisible()
 
   await section(page, 'About your business').getByLabel('All of Mount Pleasant').uncheck()
   await page.getByRole('button', { name: 'Save draft' }).click()
   await expect(pub.getByText('Fully served towns: removed Mount Pleasant.')).toBeVisible()
-  await pub.getByLabel('I’ve tested these rules and want customers to get them.').check()
+  await pub.getByLabel('I’ve tested these rules and want to publish them.').check()
   await pub.getByRole('button', { name: 'Publish' }).click()
   await expect(page.getByText('Version 2 published').first()).toBeVisible()
   const history = pub.getByRole('list').filter({ hasText: 'Version 1' }).last()
@@ -108,7 +160,7 @@ test('a page showing older rules can’t save over newer ones; refused requests 
   await teach.getByRole('button', { name: 'Suggest the change' }).click()
   const proposal = page.getByRole('region', { name: 'Suggested change' })
   await expect(proposal.getByText(/Not changed: A booking always needs a real open time/)).toBeVisible()
-  await expect(proposal.getByRole('button', { name: 'Add to my draft' })).toBeDisabled()
+  await expect(proposal.getByRole('button', { name: 'Add to my draft' })).toHaveCount(0) // nothing to add: not offered (was: a greyed button)
 })
 
 test('every eligible business has Teach Your AI, even one that never set up its receptionist: a useful first screen, nothing published, no model call @mobile', async ({ page, context }) => {
