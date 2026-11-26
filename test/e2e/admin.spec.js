@@ -348,6 +348,7 @@ test('Growth → Activities: the acquisition plan by tracking code; the founder 
   await expect(row).toHaveAttribute('data-status', 'prepared')
   await row.getByLabel(`Status of ${code}`).selectOption('sent')
   await expect(view.locator(`[data-acq-code="${code}"]`)).toHaveAttribute('data-status', 'sent')
+  await view.locator(`[data-acq-code="${code}"]`).getByText('Name and cost').click()
   await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).fill('pat@example.com')
   await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).blur()
   await expect(view.getByRole('alert')).toContainText('without an email address')

@@ -209,14 +209,19 @@ function CodeRow({ c, canSave, save }) {
                 ))}
               </select>
             </label>
-            <label>
-              <span>Who or where (optional)</span>
-              <input value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() !== c.label && save(c.code, { label })} aria-label={`Label of ${c.code}`} />
-            </label>
-            <label>
-              <span>What it cost you ($)</span>
-              <input type="number" inputMode="decimal" min="0" step="1" value={cost} onChange={(e) => setCost(e.target.value)} onBlur={() => Math.round(Number(cost || 0) * 100) !== c.costCents && save(c.code, { costCents: Math.round(Number(cost || 0) * 100) })} aria-label={`Cost of ${c.code}`} />
-            </label>
+            <details className="acq-more">
+              <summary>Name and cost</summary>
+              <div className="acq-edit">
+                <label>
+                  <span>Who or where (optional)</span>
+                  <input value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() !== c.label && save(c.code, { label })} aria-label={`Label of ${c.code}`} />
+                </label>
+                <label>
+                  <span>What it cost you ($)</span>
+                  <input type="number" inputMode="decimal" min="0" step="1" value={cost} onChange={(e) => setCost(e.target.value)} onBlur={() => Math.round(Number(cost || 0) * 100) !== c.costCents && save(c.code, { costCents: Math.round(Number(cost || 0) * 100) })} aria-label={`Cost of ${c.code}`} />
+                </label>
+              </div>
+            </details>
           </div>
         ) : null}
       </div>

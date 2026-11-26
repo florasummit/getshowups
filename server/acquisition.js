@@ -47,7 +47,8 @@ async function stored(db) {
   }
 }
 
-const ZERO = () => ({ prospects: 0, qualified: 0, consultationsBooked: 0, consultationsAttended: 0, businessesCreated: 0, paying: null, revenueCents: null })
+// Paying and revenue are counted only in live billing (0 = none yet); in test mode they stay null (unavailable).
+const zero = (live) => ({ prospects: 0, qualified: 0, consultationsBooked: 0, consultationsAttended: 0, businessesCreated: 0, paying: live ? 0 : null, revenueCents: live ? 0 : null })
 const add = (t, r) => {
   for (const k of ['prospects', 'qualified', 'consultationsBooked', 'consultationsAttended', 'businessesCreated']) t[k] += Number(r[k] || 0)
   for (const k of ['paying', 'revenueCents']) if (r[k] != null) t[k] = (t[k] ?? 0) + Number(r[k])
@@ -60,6 +61,7 @@ export async function acquisitionOverview(env, attribution, { origin = 'https://
   const saved = new Map(rows.map((r) => [r.code, r]))
   const measured = attribution && !attribution.unavailable ? attribution : null
   const known = new Set()
+  const ZERO = () => zero(Boolean(measured?.live))
   const link = (a, code, page) => `${origin}/${page}/getshowups?utm_source=${a.source}&utm_medium=${a.medium}&utm_campaign=${code}`
   const codeView = (a, code) => {
     known.add(code)
