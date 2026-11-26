@@ -2,7 +2,7 @@
 
 _Update at the end of every task. Newest first._
 
-## Website chat panel (2026-11-25, branch feat/website-chat-panel, DRAFT for the founder's separate review; not released)
+## Website chat panel (2026-11-25, PR #175, live; founder approved the design, migration 0043 and the release)
 - **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link
   (Receptionist → On your website). Off by default; off = the link, byte for byte, so no live site changes at deploy.
 - **How:** the same chat page (/chat/<id>?embed=1, the one receptionist engine) in a frame inside a closed `<details>`:
@@ -17,7 +17,22 @@ _Update at the end of every task. Newest first._
   (site and chat on different sites, as on a customer's own domain): the conversation resumes after a page change.
 - **Not verified:** Safari's handling of framed storage (the chat then starts fresh after a page change, never an
   error) and the microphone inside the frame on real phones ("Open the chat in a new tab" is the fallback for both).
-- **Needs approval:** the design, migration 0043 (after 0042; 0040 stays unapplied), merge. The privacy policy wording is untouched.
+- **Released 2026-11-26 01:0x UTC:** main 9871609, deployment 5f7e636b, rollback a8505dca (main e0540fd). CI on head 8afada2 green.
+  - **Migration 0043 applied 2026-11-26 00:59 UTC, on its own** (0040 still applied nowhere). Before: export
+    ~/getshowups-backups/prod-20261126T005826Z-pre-0043.sql (100 tables, every count equal to production in two
+    queries, integrity ok), rehearsed twice on a copy (existing rows and schema unchanged). After: 101 tables,
+    website_chat_settings empty. Time Travel bookmark before 0043: `00001337-00000000-0000512f-727239663ae350e4588643d280e932fb`
+    (**restoring loses every later write**; approval). A code rollback needs no database change.
+  - **Release check:** healthy; all customer pages and APIs identical.
+  - **Verified in production (read-only):** the three published sites and www.poolthru.com are byte-identical in body and
+    in policy headers before and after (no panel, no frame-src: no owner has turned it on, 0 rows); the owner route
+    refuses signed-out (401) and cross-site (403) requests; the production chat page inside the released panel markup
+    with the site's real policy, desktop and phone, for poolthru-llc and getshowups: 0 chat requests before opening, it
+    opens, shows that business's greeting and quick replies from the one receptionist API, Book online opens a new tab,
+    no sideways scroll. No message was sent; no lead, appointment or conversation was created (counts equal the backup).
+  - **Not verified in production:** an owner flipping the switch signed in (no owner session; covered by the browser
+    tests against the local server), Safari's framed storage, the microphone inside the frame on real phones.
+- The privacy policy wording is untouched; nothing new is stored in a visitor's browser.
 
 ## Account lifecycle, platform controls, booking settings (2026-11-25, PR #169)
 - **Live:** main 1c96237, deployment 70991926, rollback 58ee24a0. CI: 1,042 unit and 306 browser tests. Release check healthy: 7 customer
