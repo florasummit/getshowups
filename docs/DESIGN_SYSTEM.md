@@ -36,7 +36,10 @@ screens do not add new uses.
   section. Ordinary pages read at `--content` (880 px) and start at the logo's left edge; a page that needs room
   (website editor, inboxes, wide tables) adds `app--wide` to the shell, which widens only the content.
 - Never set `max-width` or `margin: auto` on the header or tab row from a page, and never centre a page's content in a
-  different column. `html:has(.app)` reserves the scrollbar gutter so short and long pages do not shift.
+  different column. Do not reserve a scrollbar gutter (`scrollbar-gutter`, `overflow-y: scroll`) on the page: it
+  narrows every screen by a scrollbar and breaks the full-width tools.
+- Shared CSS never sets `display` on a control it did not create: a rule that does can bring back something another
+  rule hides on purpose (the top bar's Help link at 360 px and below).
 - One `h1` per page, the page title, same size everywhere (`.title.title--page`, `.ui-page-title` or `PageHeader`).
 - The browser tab title is set by the shell with `usePageTitle()` on every navigation; pages never assign
   `document.title` themselves.

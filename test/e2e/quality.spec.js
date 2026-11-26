@@ -128,6 +128,25 @@ for (const [shell, token, home, navLabel] of SHELLS) {
   })
 }
 
+// The smallest phone (320 px): the top bar, the tab row and the shared controls must still fit the page.
+test('320 px: no sideways scrolling on Overview, Settings, Ads and the admin console', async ({ page, context }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  for (const [token, paths] of [
+    [OWNER, ['/dashboard', '/dashboard/settings', '/dashboard/ads']],
+    [ADMIN, ['/admin', '/admin/growth']],
+  ]) {
+    await context.clearCookies()
+    await useSession(context, token)
+    for (const path of paths) {
+      await page.goto(path)
+      await expect(page.locator('main.app-main h1').first()).toBeVisible({ timeout: 15_000 })
+      await page.waitForLoadState('networkidle')
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow, `${path}: no sideways scrolling at 320 px`).toBeLessThanOrEqual(0)
+    }
+  }
+})
+
 // ---- touch targets and copy: Overview, Appointments, Settings (owner) and Growth (admin) ----
 const PAGES = [
   ['Overview', OWNER, '/dashboard', 'Dashboard'],
