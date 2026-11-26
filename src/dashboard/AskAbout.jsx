@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } fro
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { HELP } from '../content/help.js'
+import { IDEAS } from '../content/assistant-ideas.js'
 import { asTalk, conversations, forget, forgetAll, hasRefs, keep, newId, snapshot, subscribe } from './assistant-memory.js'
 import { getSelected, setDraft } from './assistant-store.js'
 
@@ -33,19 +34,15 @@ const NOT_READ = {
 const OUT = 'The AI isn’t available, so this is only a list from your records, without analysis or advice.'
 const OTHER = 'The answer included something we couldn’t confirm, so it wasn’t shown. Try asking differently.'
 const BLANK = 'Why isn’t this available yet?'
-const IDEAS = {
-  overview: ['What should I fix first?', 'What’s coming up?'],
-  appointments: ['What’s on this week?', 'Which visits still need an outcome?'],
-  followups: ['Who hasn’t been answered?', 'Draft a follow-up for me'],
-  receptionist: ['Who asked recently?', 'What should I fix first?'],
-  teach: ['What do people ask me for?'],
-  website: ['Who asked recently?'],
-  ads: ['What did my ads bring in?', 'Compare the last 30 days with the 30 before'],
-  settings: ['Who asks from outside my area?', 'What are my hours?'],
-}
 const VIEW = { overview: 'Overview', appointments: 'Appointments', followups: 'Follow-ups', receptionist: 'Receptionist', teach: 'Teach Your AI', website: 'Website', ads: 'Ads', settings: 'Settings' }
 
 const goTo = (where) => window.dispatchEvent(new CustomEvent('gsu:go', { detail: where }))
+// An answer may point at one card of a page ("settings#booking-hours"): the button names it and Home scrolls there.
+const CARD = { 'booking-hours': 'Booking hours', 'closed-dates': 'Closed dates and notice', services: 'Services and prices', business: 'Business', 'google-calendar': 'Google Calendar', details: 'Details on your website', policies: 'What customers should know', 'not-booked': 'Haven’t booked yet' }
+const goLabel = (where) => {
+  const [page, card] = String(where).split('#')
+  return VIEW[page] ? `Open ${VIEW[page]}${CARD[card] ? `: ${CARD[card]}` : ''}` : null
+}
 
 // A change waiting for the owner. Only its button saves it; a withdrawn or saved one can't be pressed again.
 function Proposal({ p, onState }) {
@@ -270,9 +267,9 @@ function Entry({ e, newest, retry, ask, onState }) {
           {e.proposals?.map((p) => (
             <Proposal key={p.key} p={p} onState={(x, st) => onState(e.id, x, st)} />
           ))}
-          {e.go && (
-            <button type="button" className="btn btn-sm btn-quiet" onClick={() => goTo(e.go)}>
-              Open {VIEW[e.go]}
+          {e.go && goLabel(e.go) && (
+            <button type="button" className="btn btn-sm btn-quiet" onClick={() => goTo(e.go)} data-ask-go={e.go}>
+              {goLabel(e.go)}
             </button>
           )}
           {e.note && <p className="fine">{e.note}</p>}
@@ -481,7 +478,7 @@ export default function Assistant({ topic, title, missing, days, loading, view, 
         </button>
       </form>
       <p className="fine">
-        {talk.some((e) => e.kind === 'business') && 'Answers are AI, from your records, and can be wrong. '}Need a person? <a href="mailto:hello@getshowups.com?subject=GetShowUps%20help">Email us</a>
+        {talk.some((e) => e.kind === 'business') && 'Answers are AI, from your records, and can be wrong. '}Need a person? Email <a href="mailto:hello@getshowups.com?subject=GetShowUps%20help">hello@getshowups.com</a>
       </p>
     </section>
   )

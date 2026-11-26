@@ -83,7 +83,7 @@ test('a missing Claude key never uses another feature’s key', async () => {
 
 test('places answer only questions about where things are; data, drafts and reasons stay with the model', () => {
   const at = (question, view = 'overview') => placeAnswer({ question, view, topic: null })
-  for (const [q, go] of [['How do I change my hours?', 'settings'], ['where’s settings', 'settings'], ['Where do I mark outcomes?', 'appointments'], ['how can I connect my domain', 'website'], ['open teach your ai', 'teach'], ['take me to follow-ups', 'followups']]) assert.equal(at(q)?.go, go, q)
+  for (const [q, go] of [['How do I change my hours?', 'settings#booking-hours'], ['where’s settings', 'settings'], ['Where do I mark outcomes?', 'appointments'], ['how can I connect my domain', 'website'], ['open teach your ai', 'teach'], ['take me to follow-ups', 'followups']]) assert.equal(at(q)?.go, go, q)
   assert.match(at('What is this page for?', 'ads').answer, /^This is Ads/)
   for (const q of ['Where is my next appointment?', 'where are my leads coming from', 'where am I losing leads', 'how do I get more leads', 'show me my appointments', 'where should I advertise', 'how do I add a lead', 'where is my booking page', 'What should I change about my hours?']) assert.equal(at(q), null, q)
   for (const q of ['why are leads not booking', 'draft a follow-up for the newest lead', 'mark the first appointment as done', 'should I raise my prices', 'how much revenue did my ads make']) assert.equal(intentOf(q), null, q)

@@ -475,8 +475,9 @@ async function withRevenue(db, customerId, list) {
   return list.map((a) => (a.status === 'showed' ? { ...a, invoicedCents: by.get(a.id)?.invoiced ?? null, paidCents: by.get(a.id)?.paid ?? null } : a))
 }
 
-export async function overview(db, customerId, now = Date.now(), internal = '[]') {
-  const since = now - 30 * DAY
+// `since`: where "the last 30 days" begins. The route passes the start of the business's own calendar day 29 days ago
+// (operator-tools.js last30Start), the same window the assistant counts with, so the two can never show different numbers.
+export async function overview(db, customerId, now = Date.now(), internal = '[]', since = now - 30 * DAY) {
   const one = (sql, ...args) => db.prepare(sql).bind(customerId, ...args).first()
   const leads = await one(`SELECT count(*) AS n FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`, since, internal)
   const counts = await one(
@@ -520,6 +521,13 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
   const recent = await list(
     `SELECT ${apptCols}, ${testCol('?2')} FROM ${apptFrom}
       WHERE a.customer = ?1 AND a.status IN ('showed','no_show') ORDER BY a.start_at DESC LIMIT 25`,
+    internal,
+  )
+  // Cancelled in the last 90 days (by you or the customer), newest change first: listed so a cancelled visit can be found.
+  const cancelled = await list(
+    `SELECT ${apptCols}, ${testCol('?3')} FROM ${apptFrom}
+      WHERE a.customer = ?1 AND a.status = 'cancelled' AND a.updated_at >= ?2 ORDER BY a.updated_at DESC LIMIT 25`,
+    now - 90 * DAY,
     internal,
   )
   const followUp = await list(
@@ -574,6 +582,7 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     needsOutcome: needsOutcome.map(appt),
     // Visits that happened carry their current invoiced/paid amounts (server/revenue.js), once migration 0028 exists.
     recent: await withRevenue(db, customerId, recent.map(appt)),
+    cancelled: cancelled.map(appt),
     // Leads outside the listed ZIPs carry their service-area request (server/coverage.js) for the owner to answer.
     followUp: await withCoverage(
       db,

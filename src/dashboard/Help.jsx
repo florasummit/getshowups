@@ -3,11 +3,11 @@
 // setting has a small HelpTip. Text is curated (content/help.js); opening makes no request (AskAbout.jsx: only when the
 // owner asks). Keyboard: the panel takes focus, Escape or Close closes it and focus returns to what opened it.
 // Mounted once per dashboard (HelpPanel); never put a HelpTip inside a <label>.
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Assistant from './AskAbout.jsx'
 import Icon from '../components/Icon.jsx'
 import { HELP } from '../content/help.js'
-import { close, getOpen, openAssistant, set, talking, useOpen, useView } from './assistant-store.js'
+import { close, getOpen, openAssistant, openHelp, panelReady, set, setPanelReady, talking, useOpen, useView } from './assistant-store.js'
 
 const KIND = { measured: 'Measured from your records', reported: 'Reported by Google', recorded: 'Recorded by you', estimated: 'Includes estimates' }
 const PANEL_ID = 'help-panel'
@@ -39,6 +39,66 @@ export function AssistantButton() {
       <Icon name="sparkles" size={17} />
       <span>Assistant</span>
     </button>
+  )
+}
+
+// "Help" in the header of every owner page (onboarding too). It opens help in the page: the topics below and our email
+// address as text that can be read and copied. Never only a mailto link (in a browser without a mail program that does
+// nothing at all). Where no panel exists (a sign-in problem screen) the address appears right beside the button.
+export const HELP_EMAIL = 'hello@getshowups.com'
+export function HelpButton() {
+  const on = useOpen()?.key === 'help'
+  const [inline, setInline] = useState(false)
+  return (
+    <>
+      <button type="button" className="link-btn" aria-expanded={on || inline} aria-controls={on ? PANEL_ID : undefined} onClick={() => (!panelReady() ? setInline((x) => !x) : on ? close() : openHelp())} data-help-button>
+        Help
+      </button>
+      {inline && (
+        <span className="header-help-inline" role="status">
+          Email <a href={`mailto:${HELP_EMAIL}?subject=GetShowUps%20help`}>{HELP_EMAIL}</a>
+        </span>
+      )}
+    </>
+  )
+}
+
+// What "Help" opens: how to reach a person, then every help topic by the name of the card or number it explains.
+const GROUPS = [
+  ['Settings and pages', (t) => !t.kind],
+  ['Your numbers', (t) => t.kind],
+]
+function HelpIndex() {
+  const from = getOpen()?.from
+  return (
+    <div className="help-index" data-help-index>
+      <p className="help-what">Choose a topic, or ask the Assistant in your own words. A small “?” beside a setting opens the same explanation.</p>
+      <div className="help-contact">
+        <p className="help-contact-title">Talk to a person</p>
+        <p>
+          Email us at <strong className="help-email">{HELP_EMAIL}</strong>. We answer every message.
+        </p>
+        <a className="btn btn-sm btn-quiet" href={`mailto:${HELP_EMAIL}?subject=GetShowUps%20help`}>
+          Write an email
+        </a>
+      </div>
+      {GROUPS.map(([title, pick]) => (
+        <div key={title} className="help-index-group">
+          <p className="help-contact-title">{title}</p>
+          <ul className="help-topics">
+            {Object.entries(HELP)
+              .filter(([, t]) => pick(t))
+              .map(([id, t]) => (
+                <li key={id}>
+                  <button type="button" className="link-btn" onClick={() => set({ key: `help:${id}`, topic: id, from })} data-help-topic={id}>
+                    {t.title}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -107,7 +167,7 @@ function usePlacement(cur) {
     const root = document.documentElement
     root.classList.toggle('help-open', !!cur)
     if (!cur) return
-    const target = cur.key === 'global' ? null : cur.from?.closest('.metric, .metric-row, .title-help') || cur.from
+    const target = cur.key === 'global' || cur.key.startsWith('help') ? null : cur.from?.closest('.metric, .metric-row, .title-help') || cur.from
     const el = document.getElementById(PANEL_ID)
     const place = () => {
       const vv = window.visualViewport
@@ -152,6 +212,10 @@ export function HelpPanel() {
   const key = cur?.key
   usePlacement(cur)
   useEffect(() => {
+    setPanelReady(true)
+    return () => setPanelReady(false)
+  }, [])
+  useEffect(() => {
     if (!key) return
     if (!getOpen()?.quiet) panel.current?.focus({ preventScroll: true })
     const onKey = (e) => e.key === 'Escape' && !e.defaultPrevented && close()
@@ -162,15 +226,22 @@ export function HelpPanel() {
   if (!cur) return null
   const t = cur.topic ? HELP[cur.topic] : null
   const kind = cur.kind || t?.kind
+  const index = key === 'help'
   return (
-    <aside className="help-panel" id={PANEL_ID} role="dialog" aria-labelledby="help-title" tabIndex={-1} ref={panel} data-help-panel={cur.topic || 'assistant'}>
+    <aside className="help-panel" id={PANEL_ID} role="dialog" aria-labelledby="help-title" tabIndex={-1} ref={panel} data-help-panel={index ? 'help' : cur.topic || 'assistant'}>
       <div className="help-scroll">
         <div className="help-head">
-          <h2 id="help-title">{cur.label || t?.title || 'Assistant'}</h2>
+          <h2 id="help-title">{index ? 'Help' : cur.label || t?.title || 'Assistant'}</h2>
           <button type="button" className="help-close" aria-label="Close" onClick={close}>
             <Icon name="close" size={18} />
           </button>
         </div>
+        {index && <HelpIndex />}
+        {key.startsWith('help:') && (
+          <button type="button" className="link-btn help-back" onClick={() => set({ key: 'help', from: cur.from })}>
+            ← All help topics
+          </button>
+        )}
         {t && (
           <div className="help-topic" key={key}>
             {cur.value !== undefined ? (
@@ -204,7 +275,7 @@ export function HelpPanel() {
             </details>
           </div>
         )}
-        <Assistant topic={cur.topic} title={cur.label || t?.title} missing={!!cur.missing} days={cur.days} loading={!!cur.loading} view={at} first={cur.ask} onSent={cur.ask ? () => set({ ...getOpen(), ask: undefined }) : undefined} />
+        {!index && <Assistant topic={cur.topic} title={cur.label || t?.title} missing={!!cur.missing} days={cur.days} loading={!!cur.loading} view={at} first={cur.ask} onSent={cur.ask ? () => set({ ...getOpen(), ask: undefined }) : undefined} />}
       </div>
     </aside>
   )

@@ -5,6 +5,8 @@ import { useSaveState } from './ui-hooks.js'
 import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
 import { suggestionsFor } from '../content/service-suggestions.js'
+import { plural } from '../lib/format.js'
+import { oddZips, US_ZONES } from './owner-lib.js'
 
 // A settings save refused because the saved values changed elsewhere (another tab or device) since this page loaded.
 const CHANGED_ELSEWHERE = 'These settings were changed somewhere else (another tab or device) since this page opened, so this change wasn’t saved. Reload the page to see the latest, then make your change again.'
@@ -23,6 +25,50 @@ const ERRORS = {
 const saved = () => window.dispatchEvent(new Event('gsu:settings-saved'))
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
 
+// Time zone: the US zones by the names people use, then (only when asked for) every other zone. The stored value is the
+// same zone id as before ("America/New_York"); a business already on another zone keeps it, shown by its own name.
+const zoneName = (tz) => tz.replaceAll('_', ' ')
+const OTHER = '__other__'
+// Works controlled (value + onChange) or inside a FormData form (name + defaultValue).
+export function TimeZoneSelect({ value, defaultValue, onChange, name }) {
+  const [own, setOwn] = useState(defaultValue ?? '')
+  const current = value ?? own
+  const named = US_ZONES.some(([id]) => id === current)
+  const [all, setAll] = useState(false)
+  const pick = (e) => {
+    if (e.target.value === OTHER) return setAll(true)
+    setOwn(e.target.value)
+    onChange?.(e.target.value)
+  }
+  return (
+    <select name={name} value={current} onChange={pick} data-time-zone>
+      <optgroup label="United States">
+        {US_ZONES.map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </optgroup>
+      {all ? (
+        <optgroup label="Other">
+          {[...new Set([current, ...timeZones()])]
+            .filter((id) => id && !US_ZONES.some(([us]) => us === id))
+            .map((id) => (
+              <option key={id} value={id}>
+                {zoneName(id)}
+              </option>
+            ))}
+        </optgroup>
+      ) : (
+        <>
+          {!named && current && <option value={current}>{zoneName(current)}</option>}
+          <option value={OTHER}>Other time zone…</option>
+        </>
+      )}
+    </select>
+  )
+}
+
 // `inline` (Settings): the standard save row. Without it (onboarding) the save is the step's full-width button.
 export function BusinessForm({ customer, submitLabel, onSaved, inline = false }) {
   const [name, setName] = useState(customer?.name || '')
@@ -38,9 +84,21 @@ export function BusinessForm({ customer, submitLabel, onSaved, inline = false })
   }
   const [mode, setMode] = useState(customer?.appointmentMode || 'at_business')
   const save = useSaveState()
+  // ZIP entries that don't look like US ZIP codes are named beside the field before anything is saved; the owner fixes
+  // them or says "Save anyway" (a list is never stored with entries the owner wasn't shown).
+  const odd = oddZips(zips, timezone)
+  const [asked, setAsked] = useState(false) // a save was held back for the warning
+  const [accepted, setAccepted] = useState('') // the exact list the owner chose to save anyway
+  const zipField = useRef(null)
 
-  const submit = (e) => {
-    e.preventDefault()
+  const submit = (e, anyway = false) => {
+    e?.preventDefault()
+    if (odd.length && !anyway && accepted !== zips) {
+      setAsked(true)
+      save.reset()
+      return zipField.current?.focus()
+    }
+    setAsked(false)
     save.run(async () => {
       let source
       try {
@@ -78,20 +136,38 @@ export function BusinessForm({ customer, submitLabel, onSaved, inline = false })
       </fieldset>
       <label className="field">
         <span>Time zone</span>
-        <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-          {[...new Set([timezone, ...timeZones()])].map((tz) => (
-            <option key={tz} value={tz}>
-              {tz.replaceAll('_', ' ')}
-            </option>
-          ))}
-        </select>
+        <TimeZoneSelect value={timezone} onChange={setTimezone} />
       </label>
       <label className="field">
         <span>
           Service ZIP codes <em>optional</em>
         </span>
-        <input value={zips} onChange={(e) => setZips(e.target.value)} placeholder="Leave empty to accept everyone" inputMode="text" />
+        <input ref={zipField} value={zips} onChange={(e) => setZips(e.target.value)} placeholder="Leave empty to accept everyone" inputMode="text" aria-describedby={odd.length ? 'zip-warning' : undefined} aria-invalid={odd.length && asked ? true : undefined} />
       </label>
+      {odd.length > 0 && (
+        <div className="zip-warning" id="zip-warning" role={asked ? 'alert' : 'status'} data-zip-warning>
+          <p>
+            {odd.length === 1 ? 'This doesn’t look like a 5-digit ZIP code' : 'These don’t look like 5-digit ZIP codes'}: <strong>{odd.join(', ')}</strong>. Customers are matched on the exact ZIP they type, so a mistyped one never matches.
+          </p>
+          {asked && (
+            <div className="ui-confirm-actions">
+              <button type="button" className="btn btn-sm btn-quiet" onClick={() => zipField.current?.focus()}>
+                Fix the list
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-quiet"
+                onClick={() => {
+                  setAccepted(zips)
+                  submit(null, true)
+                }}
+              >
+                Save anyway
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <SaveBar save={save} block={!inline}>
         {submitLabel}
       </SaveBar>
@@ -146,6 +222,9 @@ export function HoursForm({ customer, submitLabel, onSaved, inline = false }) {
           <input type="time" value={dayEnd} onChange={(e) => setDayEnd(e.target.value)} required step={900} />
         </label>
       </div>
+      <p className="fine" data-hours-note>
+        These times apply to every day you select. A different time on one day (closing early on Fridays, for example) isn’t available.{inline ? ' To close a whole date, use “Closed dates” in the next card.' : ''}
+      </p>
       <label className="field">
         <span>{customer.appointmentMode === 'at_customer' ? 'Visit length' : 'Appointment length'}</span>
         <select value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))}>
@@ -532,7 +611,7 @@ function FunnelLine({ funnel }) {
   const done = funnel.stages.booked + funnel.stages.requested
   return (
     <p className="fine svc-funnel">
-      Last 30 days: {v} visit{v === 1 ? '' : 's'} · {funnel.stages.time} chose a time · {done} booked or requested ({funnel.conversion}%)
+      Last 30 days: {plural(v, 'visit')} · {funnel.stages.time} chose a time · {done} booked or requested ({funnel.conversion}%)
     </p>
   )
 }
@@ -602,7 +681,7 @@ export function AvailabilityForm() {
                   <p className="row-title">{longDate(c.date)}</p>
                   <p className="row-sub">
                     {c.label}
-                    {d.booked[c.date] ? ` ${d.booked[c.date]} booked already: closing doesn’t cancel them.` : ''}
+                    {d.booked[c.date] ? ` ${d.booked[c.date]} booked already: closing doesn’t cancel ${d.booked[c.date] === 1 ? 'it' : 'them'}.` : ''}
                   </p>
                 </div>
                 <button type="button" className="link-btn" onClick={() => setEdit({ ...cur, closures: cur.closures.filter((x) => x.date !== c.date) })}>
