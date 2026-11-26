@@ -95,6 +95,10 @@ test('name links are unambiguous only: two catalog services (or two website serv
   assert.deepEqual(catalogLinks(svcs(['Cleaning', '$1'], ['Cleaning', '$4']), catalog(['Cleaning', '$2'])), [null, null])
   const one = catalog(['Cleaning', '$2'])
   assert.equal(catalogLinks(svcs(['  CLEANING ', '$1']), one)[0].id, one[0].id)
+  // Punctuation and spacing don't matter (the website's "One Time Service" is Settings' "One-Time Service").
+  const pt = catalog(['One-Time Service', '$200+'])
+  assert.equal(catalogLinks(svcs(['One Time Service', '$200+']), pt)[0].id, pt[0].id)
+  assert.equal(addToCatalog(pt, { name: 'one time service' })[2], null, 'no duplicate for the same name written differently')
 })
 
 test('catalogEdits: what the owner changed goes to the catalog; a value the editor merely still shows is never written back', () => {

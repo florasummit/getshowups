@@ -11,7 +11,8 @@
 import { LIMITS as CATALOG_LIMITS, MAX_SERVICES, readServices, validateServices } from './services.js'
 
 export const CATALOG_ID_RE = /^sv_[a-z0-9]{3,16}$/
-const key = (n) => String(n ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
+// Names compare by letters and digits only ("One Time Service" = "one-time service"); ambiguity still means no link.
+const key = (n) => String(n ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const FIELDS = ['name', 'price', 'description']
 
 // The stored catalog (JSON text or array) → normalized services with ids; null when there is no profile row.
