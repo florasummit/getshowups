@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AiWrite from './AiWrite.jsx'
 import { api, phoneText, whenFull } from '../lib/api.js'
-import { Ago, PageHeader, Pill, SaveStatus, Section } from './ui.jsx'
+import { Ago, ConfirmInline, PageHeader, Pill, SaveStatus, Section } from './ui.jsx'
 import { useSaveState } from './ui-hooks.js'
 import ReceptionistVoice from './ReceptionistVoice.jsx'
 
@@ -233,6 +233,9 @@ export default function Receptionist() {
   const power = useSaveState()
   const [turning, setTurning] = useState(null)
   const [powerAt, setPowerAt] = useState('switch')
+  // Turning ON opens a customer-facing channel, so it asks first, right where it was pressed ('switch' | 'header' |
+  // 'empty'); turning OFF saves at once.
+  const [asking, setAsking] = useState(null)
   const panelSave = useSaveState()
   const [paneling, setPaneling] = useState(null)
   const [open, setOpen] = useState(null)
@@ -348,6 +351,21 @@ export default function Receptionist() {
   const panelOn = paneling ?? Boolean(data.websitePanel?.on)
   // "Try it as a customer" is offered only when the customer chat page really opens (capabilities.chatClosed, the same
   // checks as that page). Otherwise: the reason, and when the reason is the off switch, the one tap that fixes it.
+  const confirmOn = (at) => (
+    <ConfirmInline
+      question="Turn on the AI receptionist for your customers?"
+      detail="Your chat page starts answering customers right away, and your website shows its chat link."
+      confirmLabel="Turn on"
+      cancelLabel="Leave it off"
+      danger={false}
+      busy={power.pending}
+      onConfirm={() => {
+        setAsking(null)
+        setEnabled(true, at)
+      }}
+      onCancel={() => setAsking(null)}
+    />
+  )
   const tryIt = (at) =>
     !cap.chatClosed ? (
       <a className="btn btn-quiet btn-sm" href={data.chatUrl} target="_blank" rel="noreferrer">
@@ -362,11 +380,14 @@ export default function Receptionist() {
               ? 'You can try it as a customer once your calendar is connected and your booking hours are confirmed in Settings.'
               : 'The chat isn’t answering right now, so there is nothing to try yet.'}
         </span>
-        {cap.chatClosed === 'off' && (
-          <button type="button" className="btn btn-primary btn-sm" disabled={power.pending} onClick={() => setEnabled(true, at)}>
-            {power.pending ? 'Turning on…' : 'Turn on'}
-          </button>
-        )}
+        {cap.chatClosed === 'off' &&
+          (asking === at ? (
+            confirmOn(at)
+          ) : (
+            <button type="button" className="btn btn-primary btn-sm" disabled={power.pending} onClick={() => setAsking(at)}>
+              {power.pending ? 'Turning on…' : 'Turn on'}
+            </button>
+          ))}
         {powerAt === at && <SaveStatus save={power} />}
       </div>
     )
@@ -531,12 +552,13 @@ export default function Receptionist() {
           <fieldset className="ui-group">
             <legend>Answering</legend>
             <label className="ui-switch-row">
-              <input type="checkbox" role="switch" checked={turning ?? on} disabled={power.pending} onChange={(e) => setEnabled(e.target.checked)} />
+              <input type="checkbox" role="switch" checked={turning ?? on} disabled={power.pending} onChange={(e) => (e.target.checked ? setAsking('switch') : setEnabled(false))} />
               <span>
                 <strong>Answer customers with the AI receptionist</strong>
-                <span className="ui-hint">On your website’s chat and browser voice. It checks your real calendar and books only after the customer confirms. Saved as soon as you switch it.</span>
+                <span className="ui-hint">On your website’s chat and browser voice. It checks your real calendar and books only after the customer confirms. Turning it on asks you first; turning it off is saved at once.</span>
               </span>
             </label>
+            {asking === 'switch' && confirmOn('switch')}
             {powerAt === 'switch' && <SaveStatus save={power} />}
           </fieldset>
           <fieldset className="ui-group">

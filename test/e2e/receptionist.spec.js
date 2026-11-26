@@ -32,22 +32,34 @@ test('receptionist journey: real times, honest hand-off to a recorded callback, 
   await expect(page.locator('[data-try-closed="off"]')).toHaveCount(2)
   await expect(head.locator('[data-try-closed="off"]')).toContainText('the chat page is closed while the receptionist is off')
   await expect(page.getByText('Try it yourself first.')).toHaveCount(0)
+  // Turning ON opens a customer-facing channel: it asks first, where it was pressed; Cancel leaves it off.
   await head.getByRole('button', { name: 'Turn on' }).click()
+  const ask = page.getByRole('group', { name: 'Turn on the AI receptionist for your customers?' })
+  await expect(ask).toContainText('Your chat page starts answering customers right away')
+  await ask.getByRole('button', { name: 'Leave it off' }).click()
+  await expect(ask).toHaveCount(0)
+  expect((await (await page.request.get('/api/dashboard/receptionist')).json()).settings.enabled).toBe(false)
+  await head.getByRole('button', { name: 'Turn on' }).click()
+  await ask.getByRole('button', { name: 'Turn on' }).click()
   await expect(head.getByRole('status')).toContainText('Saved. The receptionist is on.')
   await expect(head).toContainText('Answering on website chat')
   await expect(power).toBeChecked()
   await expect(page.getByRole('link', { name: 'Try it as a customer' })).toHaveCount(2)
   await expect(head.getByRole('link', { name: 'Try it as a customer' })).toHaveAttribute('href', `/chat/${b.id}`)
   await expect(page.getByText('Try it yourself first.')).toBeVisible()
-  // REC-02: the on/off switch saves the moment it changes (like the website-panel switch), with its confirmation
-  // beside it, and the header follows at once. The Save button is only for the greeting, notes and phone choices.
+  // REC-02: the on/off switch needs no Save button: OFF saves the moment it changes (shared confirmation beside it,
+  // header follows at once); ON asks first at the switch and saves on confirm. Save is only for greeting, notes, phone.
   await power.uncheck()
   await expect(page.getByText('Saved. The receptionist is off: customers can’t chat with it.')).toBeVisible()
   await expect(head).toContainText('Off')
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
   expect((await (await page.request.get('/api/dashboard/receptionist')).json()).settings.enabled).toBe(false)
-  await power.check()
+  await power.click()
+  await expect(power).not.toBeChecked() // nothing is on until confirmed
+  expect((await (await page.request.get('/api/dashboard/receptionist')).json()).settings.enabled).toBe(false)
+  await ask.getByRole('button', { name: 'Turn on' }).click()
   await expect(page.getByText('Saved. The receptionist is on.')).toBeVisible()
+  await expect(power).toBeChecked()
   await expect(head).toContainText('Answering on website chat')
   expect((await (await page.request.get('/api/dashboard/receptionist')).json()).settings.enabled).toBe(true)
   await page.getByLabel('Greeting').fill('Hi! Ask me about pool care or I can find you a time.')
