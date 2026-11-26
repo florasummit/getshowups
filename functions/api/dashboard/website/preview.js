@@ -90,7 +90,9 @@ export async function onRequestPost({ request, env }) {
     const page = /^[a-z0-9-]{0,32}$/.test(String(body.page || '')) ? String(body.page || '') : ''
     // The editor says what it is itself (Edit / Preview, draft or live in the status bar): the "Preview. Only you can
     // see this." strip of the private preview page is left out of the frame inside the editor (finding WEB-09).
-    const html = renderSite(await siteBusinessInfo(db, session.customer), content, { preview: true, editing: true, page, pageBase: '#page=', form: { action: '#', token: '', state: null } }).replace('<div class="preview-bar">Preview. Only you can see this.</div>', '')
+    // The editor's content already shows the catalog (website/index.js state); its unsaved typing is shown as typed, and a
+    // service hidden in Settings → Services stays out, like on the public site (server/website-catalog.js).
+    const html = renderSite({ ...(await siteBusinessInfo(db, session.customer)), catalogValues: false }, content, { preview: true, editing: true, page, pageBase: '#page=', form: { action: '#', token: '', state: null } }).replace('<div class="preview-bar">Preview. Only you can see this.</div>', '')
     return json(200, { html, removed: warnings.filter((w) => EDITOR_NOTICE_REASONS.includes(w.reason)).slice(0, 20) })
   } catch (err) {
     console.error('editor preview failed:', err?.name)

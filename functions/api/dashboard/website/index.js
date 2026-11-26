@@ -9,6 +9,7 @@
 //        { action: 'generate' }                    AI copy + three designs from the business details, stored (draft untouched)
 //        { action: 'revise', instruction }         AI revision of the draft ("make it more modern"), stored (draft untouched)
 //        { action: 'apply', generationId, option } make a stored design the private draft (owner photos kept)
+//        { action: 'addService', service: { name, price?, description? } } add a service to the ONE catalog (Settings → Services)
 import { restricted } from '../../../../server/restrictions.js'
 import { recordEvent } from '../../../../server/auditlog.js'
 import { json } from '../../../../server/google-oauth.js'
@@ -30,6 +31,7 @@ import { missingFor, starterSite, textLedStarter } from '../../../../server/site
 import { starterFacts } from '../../../../server/website-import.js'
 import { applyRevision, reviseView } from '../../../../server/website-revise.js'
 import { siteBusinessInfo } from '../../../../server/site-serve.js'
+import { addToCatalog, catalogEdits, editorServices, readCatalog, writeCatalog } from '../../../../server/website-catalog.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
 // redirects by hand-crafting a save: those two fields keep what the stored draft already has (nothing is lost).
@@ -68,14 +70,19 @@ async function rendersCleanly(db, customer, content) {
 async function state(env, customer, email) {
   const db = env.ONBOARDING_DB
   const studio = await studioAccess(env, customer)
-  const [website, hosting, domain, assets, usage, aiKey] = await Promise.all([
+  const [stored, hosting, domain, assets, usage, aiKey, catalog] = await Promise.all([
     loadWebsite(db, customer),
     hostingStatus(db, customer.id, Date.now(), env),
     domainFor(env, customer.id),
     listAssets(db, customer.id),
     aiUsage(env, customer, email),
     studio ? credentialView(env, customer.id).catch(() => null) : null, // Website Studio only
+    readCatalog(db, customer.id).catch(() => null),
   ])
+  // The editor shows linked services as the catalog has them (Settings → Services), so it agrees with the booking page,
+  // and says per service whether it is shared, hidden there, or on the website only (server/website-catalog.js).
+  const { content: draft, hidden } = editorServices(stored.draft, catalog)
+  const website = { ...stored, draft, catalogHidden: hidden }
   // The records a website is built from, read once for the full editor: what it still lacks, and its industry's photos.
   const facts = studio && website.draft?.site ? await starterFacts(env, customer).catch(() => null) : null
   return {
@@ -227,18 +234,38 @@ export async function onRequestPost({ request, env }) {
       // missing: records the starter needed but didn't have (sections left out, never invented), so the owner is asked.
       return json(200, { ...(await state(env, customer, session.email)), starterMissing: missing })
     }
+    // "Add a service" / "Add to booking page" in the website editor: the service goes into the ONE catalog (Settings →
+    // Services, validated there), visible and bookable at once; the editor then lists it on the website, linked by its id.
+    // Only the catalog changes here (the draft is saved by the editor's own autosave). Same name = that service.
+    if (action === 'addService') {
+      const catalog = await readCatalog(db, customer.id)
+      if (!catalog) return json(409, { error: 'no_profile' })
+      const [error, service, next] = addToCatalog(catalog, body.service)
+      if (error) return json(400, { error: 'invalid_service', fields: [error] })
+      if (next && !(await writeCatalog(db, customer.id, next))) return json(409, { error: 'no_profile' })
+      return json(200, { service: { id: service.id, name: service.name, price: service.price, description: service.description, hidden: service.hidden }, added: Boolean(next) })
+    }
     if (action === 'save' || action === 'publish') {
       // `prior`: the saved services, so an AI-designed site keeps each service's id (and its description) whatever the
       // page sends back (server/website.js assignServiceIds).
       const savedSite = await loadWebsite(db, customer)
       const savedDraft = savedSite.draft
       const prior = savedDraft.services
-      const [errors, content] = validateContent(guardLegalPages(await guardStudioFields(env, customer, body.content), savedDraft), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
+      const [errors, validated] = validateContent(guardLegalPages(await guardStudioFields(env, customer, body.content), savedDraft), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
+      // One catalog (server/website-catalog.js): a linked service's name, price or description the owner changed here is
+      // saved to Settings → Services (validated there too), so the booking page and receptionist show it at once.
+      const expect = action === 'publish' || body.force !== true ? (Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined) : undefined
+      if (Number.isFinite(expect) && savedSite.updatedAt != null && savedSite.updatedAt !== expect) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
+      const shared = catalogEdits(validated.services, savedDraft.services, await readCatalog(db, customer.id), { designed: Boolean(validated.site) })
+      if (shared.errors.length) return json(400, { error: 'invalid_content', fields: ['services'] })
+      // Written just before the draft is saved or the version published (never for a refused publish).
+      const commitCatalog = async () => shared.catalog && (await writeCatalog(db, customer.id, shared.catalog))
+      const content = { ...validated, services: shared.services }
       if (action === 'save') {
+        await commitCatalog()
         // baseUpdatedAt: the draft version the page is editing; a newer draft (another tab, the AI designer) → 409
         // with the latest state, never a silent overwrite. `force: true` (the owner chose "keep mine") skips the check.
-        const expect = body.force === true ? undefined : Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
         const saved = await saveDraft(db, customer.id, content, Date.now(), { expect })
         if (saved.conflict) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
         // A recoverable server copy of the draft as it was before this save, at most every 2 minutes of editing (best
@@ -259,7 +286,7 @@ export async function onRequestPost({ request, env }) {
       if (!(await rendersCleanly(db, customer, content))) return json(422, { error: 'render_failed' })
       // baseUpdatedAt: the draft version the owner reviewed. Changed elsewhere since → 409 with the latest state (nothing
       // published); there is no "keep mine" here: the owner reviews the latest draft before it goes live.
-      const expect = Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
+      await commitCatalog()
       const version = await publish(db, customer.id, content, Date.now(), { expect })
       if (version == null) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
       if (await studioAccess(env, customer)) await saveCheckpoint(db, customer.id, content, 'published').catch((e) => console.error('checkpoint failed:', e?.name))
