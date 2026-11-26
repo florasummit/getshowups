@@ -705,6 +705,8 @@ Non-negotiables:
   code, never typed; status and cost are recorded by the founder AFTER acting (audited). Nothing here sends, publishes
   or spends; code never sets "sent". Recorded cost is self-reported, kept apart from measured ad spend, and never feeds
   server/ads/funnel.js. Labels are a company or place, never an email or phone; recipients are never committed (public repo).
+  A NEW code needs the explicit `create: true` intent (existing or catalog code → 409 code_exists, nothing changes; a
+  change to an unknown code → 404 unknown_code); each save writes only its own columns.
 - Billing reconciliation (server/reconcile.js): daily cron + /admin "Run now": Stripe subscriptions + 35 days of paid
   invoices vs our records (status, amount, cancellation, mode, missing either side, payments, billing after deletion).
   Read-only toward Stripe; recorded in audit_log. Auto-applies ONE thing (owner decision 2026-11-18): a subscription we

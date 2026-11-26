@@ -2,6 +2,32 @@
 
 _Update at the end of every task. Newest first._
 
+## Product Excellence: the 85 usability findings (2026-11-26, PR #185, NOT released; needs founder approval)
+Founder mandate: resolve the findings of the 2026-11-25 zero-instruction evaluation through shared components, unify the
+UI, and make the standard permanent. No migrations, no new switches, no new dependencies, no feature work.
+- **Ledger:** docs/quality/USABILITY_FINDINGS.md has a disposition and a guarding test for each of the 85 findings.
+- **Standard:** docs/DESIGN_SYSTEM.md + the "Product quality standards" section in CLAUDE.md. Shared primitives in
+  src/dashboard/ui.jsx (TabBar, SaveBar, SaveButton, SaveStatus, ConfirmInline, Loading, EmptyState), ui-hooks.js
+  (useSaveState, usePageTitle) and src/lib/format.js. Safeguards: test/e2e/quality.spec.js (frame, phone tab row, 44 px
+  targets, owner-copy rules), test/ui-standards.test.js (native dialogs only shrink), test/format.test.js.
+- **Batches (each had its own green PR, merged into #185):** #178 foundation · #179 admin and Growth · #180 customer
+  booking and chat · #181 receptionist and Teach Your AI · #182 onboarding · #183 website builder · #184 dashboard and
+  settings.
+- **Changes customers of our customers see:** multi-page business sites get a row of page links under the name on
+  phones (WEB-02; goldens v2-pool-multipage and v2-starter-full regenerated; desktop and single-page sites
+  byte-identical); /book and /chat documents carry the business's own title and no GetShowUps marketing metadata
+  (CHAT-02, functions/_middleware.js; GetShowUps' own pages keep theirs); the booking page keeps progress on reload,
+  shows all field errors at once, names the time zone, and its confirmation offers the business phone.
+- **API notes:** POST /api/platform/acquisition needs `create: true` for a new code (409 code_exists, 404 unknown_code);
+  GET /api/book/<id> returns the business phone on record; dashboard receptionist route gains `reopen` and the
+  `chatClosed` fact; website `apply` takes `studio: true` (a generated design becomes a full-editor site); draft
+  checkpoints are taken before a save at most every 2 minutes, newest 30 kept; setup-check accepts a dismissal.
+- **Retained by decision (see ledger):** per-day booking hours (feature + schema), a business address on the booking page
+  (no such record), website services vs booking catalog as one list, precedence between receptionist Personality and
+  Teach Tone, a homepage sign-up entry while enrollment is closed, visits counted by booking date vs visit date.
+- **Not measured:** behaviour of the Assistant and Teach Your AI with the production model (tests use a stand-in; the
+  deterministic parts are unit-tested). Nothing was verified in production.
+
 ## Growth → Activities: acquisition by tracking code (2026-11-25, PR #176, live; founder approved the PR and migration 0044)
 **Release record (2026-11-26 UTC):** main fc2eea9, deployment 9000a737-cc3a-460b-a1ce-d43aad1c0b12, rollback 33f38d28-1e5e-4ade-baf5-805648196a26
 (main 348dbe7). Migration 0044 applied alone at 02:53 UTC after two rehearsals on a restored copy (102 tables,
