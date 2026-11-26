@@ -3,6 +3,9 @@
 //   GET ?id=<conversation> → { conversation: { transcript (what the customer saw/heard), events, outcome, … } }
 //   POST { action: 'settings', enabled, mode, greeting, knowledge, transferPhone } → saved settings
 //   POST { action: 'resolve', requestId } → callback request / message marked done
+//   POST { action: 'reopen', requestId } → a done request is open again (back in Needs attention)
+//   A conversation that asked for a person is `handled` once every request it left is done: the page then shows it as
+//   completed (the conversation row itself keeps status 'handoff'; nothing is rewritten).
 //   POST { action: 'website_panel', on } → show the chat in a panel on the website (off = the plain link)
 //   POST { action: 'voice', voiceId?, personality?, pace?, version } → how the receptionist sounds (owner; the voice
 //        must be in the active provider's catalog; version = optimistic concurrency, 409 stale)
@@ -18,7 +21,9 @@ import { resolveRequest } from '../../../../server/attention.js'
 import { recordEvent } from '../../../../server/auditlog.js'
 import { toE164 } from '../../../../server/sms.js'
 import { messagesLive } from '../../../../server/email.js'
-import { getSettings, modelConfigured, receptionistReady, receptionistRequestsReady, visibleTranscript } from '../../../../server/receptionist/engine.js'
+import { getSettings, modelConfigured, receptionistOn, receptionistReady, receptionistRequestsReady, visibleTranscript } from '../../../../server/receptionist/engine.js'
+import { bookableCustomer } from '../../../../server/public.js'
+import { providerSpendAllowed } from '../../../../server/business-accounts.js'
 import { knowledgeFor, knowledgeWarnings, LIMITS } from '../../../../server/receptionist/knowledge.js'
 import { customerVoiceStatus } from '../../../../server/voice/customer.js'
 import { chatPanelSetting, saveChatPanel } from '../../../../server/chat-panel.js'
@@ -64,6 +69,7 @@ export async function onRequestGet({ request, env }) {
         collected: { name: k.name || null, phone: k.phone || null, email: k.email || null, zip: k.zip || null, address: k.street ? `${k.street}, ${k.city || ''} ${String(k.state || '').toUpperCase()} ${k.zip || ''}`.replace(/\s+/g, ' ').trim() : null, need: k.need || null },
         bookedAt: state.booked?.start ? new Date(state.booked.start).toISOString() : null,
         request: request ? { id: request.id, kind: request.kind, open: request.status === 'open', urgent: Boolean(request.urgent) } : null,
+        handled: c.status === 'handoff' && Boolean(request) && request.status !== 'open',
         ended: Boolean(state.endedAt),
         appointmentId: c.appointment_id,
         turns: c.turns,
@@ -84,11 +90,23 @@ export async function onRequestGet({ request, env }) {
   const requests = withRequests
     ? (await db.prepare("SELECT * FROM receptionist_requests WHERE customer = ?1 ORDER BY status = 'open' DESC, created_at DESC LIMIT 50").bind(customer.id).all()).results
     : []
+  // Per conversation: how many requests it left and how many are still open (all of them, not only the 50 listed).
+  const left = withRequests ? (await db.prepare("SELECT conversation_id AS id, count(*) AS n, sum(status = 'open') AS open FROM receptionist_requests WHERE customer = ?1 GROUP BY conversation_id").bind(customer.id).all()).results : []
+  const handled = new Set(left.filter((x) => Number(x.n) > 0 && !Number(x.open)).map((x) => x.id))
   const outbox = requests.length ? (await db.prepare("SELECT id, status FROM email_outbox WHERE customer = ?1 AND template = 'owner_callback'").bind(customer.id).all()).results : []
   const counts = await db
     .prepare("SELECT sum(status = 'booked') AS booked, count(*) AS total FROM receptionist_conversations WHERE customer = ?1 AND turns > 0")
     .bind(customer.id)
     .first()
+  // Can a customer open the chat page right now? The SAME checks as the public chat (functions/api/receptionist/
+  // [customer]/index.js), so "Try it as a customer" is never offered when it would open a closed page.
+  const chatClosed = !settings.enabled
+    ? 'off'
+    : !(await receptionistOn(env, customer).catch(() => false)) || !(await providerSpendAllowed(env, customer.id).catch(() => false))
+      ? 'not_answering'
+      : (await bookableCustomer(env, { customer: customer.id }).catch(() => ({ response: true }))).response
+        ? 'setup'
+        : null
   const voicePrefs = await getVoiceSettings(db, customer.id)
   const admin = isPlatformAdminEmail(env, session.email)
   return json(200, {
@@ -100,6 +118,7 @@ export async function onRequestGet({ request, env }) {
     capabilities: {
       model: modelConfigured(env), // the AI can answer at all
       chat: modelConfigured(env),
+      chatClosed, // null = the customer chat page is open; 'off' | 'not_answering' | 'setup' = why it is closed
       voice: modelConfigured(env) && (await customerVoiceStatus(env, customer.id)) === 'available', // browser microphone calls on the active provider
       voiceStatus: !modelConfigured(env) ? 'not_configured' : await customerVoiceStatus(env, customer.id), // 'testing' = Retell not released yet (RECEPTIONIST_VOICE_BUSINESSES)
       callbacks: withRequests, // callback requests and messages are recorded
@@ -115,7 +134,7 @@ export async function onRequestGet({ request, env }) {
     requests: requests.map((r) => ({ id: r.id, kind: r.kind, name: r.name, phone: r.phone, email: r.email, note: r.note, urgent: Boolean(r.urgent), status: r.status, notification: notification(r, outbox), conversationId: r.conversation_id, createdAt: r.created_at })),
     conversations: convs.map((r) => {
       const st = JSON.parse(r.state || '{}')
-      return { id: r.id, channel: r.channel, status: r.status, outcome: r.outcome, summary: r.summary, customerName: st.customer?.name || null, need: st.customer?.need || null, bookedAt: st.booked?.start ? new Date(st.booked.start).toISOString() : null, ended: Boolean(st.endedAt), turns: r.turns, createdAt: r.created_at, updatedAt: r.updated_at }
+      return { id: r.id, channel: r.channel, status: r.status, handled: r.status === 'handoff' && handled.has(r.id), outcome: r.outcome, summary: r.summary, customerName: st.customer?.name || null, need: st.customer?.need || null, bookedAt: st.booked?.start ? new Date(st.booked.start).toISOString() : null, ended: Boolean(st.endedAt), turns: r.turns, createdAt: r.created_at, updatedAt: r.updated_at }
     }),
   })
 }
@@ -133,6 +152,13 @@ export async function onRequestPost({ request, env }) {
     if (!(await receptionistRequestsReady(db)) || typeof b.requestId !== 'string') return json(400, { error: 'invalid_request' })
     if (!(await resolveRequest(db, session.customer.id, b.requestId, now))) return json(404, { error: 'not_found' })
     await recordEvent(db, { type: 'receptionist.request_resolved', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist_request', id: b.requestId }, outcome: 'success' }).catch(() => {})
+    return json(200, { ok: true })
+  }
+  if (b?.action === 'reopen') {
+    if (!(await receptionistRequestsReady(db)) || typeof b.requestId !== 'string') return json(400, { error: 'invalid_request' })
+    const r = await db.prepare("UPDATE receptionist_requests SET status = 'open', resolved_at = NULL, updated_at = ?3 WHERE id = ?1 AND customer = ?2 AND status = 'resolved'").bind(b.requestId, session.customer.id, now).run()
+    if (!(r?.meta?.changes > 0)) return json(404, { error: 'not_found' })
+    await recordEvent(db, { type: 'receptionist.request_reopened', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist_request', id: b.requestId }, outcome: 'success' }).catch(() => {})
     return json(200, { ok: true })
   }
   if (b?.action === 'website_panel') {

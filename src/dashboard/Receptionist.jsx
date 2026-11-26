@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AiWrite from './AiWrite.jsx'
 import { api, phoneText, whenFull } from '../lib/api.js'
-import { Ago, PageHeader, Pill, Section } from './ui.jsx'
+import { Ago, PageHeader, Pill, SaveStatus, Section } from './ui.jsx'
+import { useSaveState } from './ui-hooks.js'
 import ReceptionistVoice from './ReceptionistVoice.jsx'
 
 // Owner: the AI receptionist. Order = what an owner needs first: is it working → who needs me → what it booked →
@@ -11,16 +12,22 @@ const MODES = [
   ['human_first', 'Your team first, AI if nobody picks up'],
   ['after_hours', 'Your team during business hours, AI after hours'],
 ]
-// How the team was (or wasn't) told about a request — never assumed.
-const NOTIFY = {
-  recorded: ['info', 'Recorded', 'Checking within 5 minutes whether your team can be emailed.'],
-  pending: ['info', 'Email queued', 'An email to your team is on its way.'],
-  sent: ['ok', 'Team emailed', 'Your team was emailed about this.'],
-  failed: ['bad', 'Email failed', 'The email to your team failed. Please call them back from here.'],
-  not_sent: ['warn', 'Not emailed', 'Not emailed (messaging is in test mode). Please check here.'],
-}
+// How the team was (or wasn't) told about a request, never assumed: the state comes from the email records, and each
+// says in one sentence whether an email went out. `emailOn` = owner emails are being delivered (capabilities.staffEmail).
+const NO_EMAIL = 'Emails to your team aren’t switched on yet'
+const notifyFor = (state, emailOn) =>
+  ({
+    recorded: ['info', 'Recorded', emailOn ? 'No email yet: your team is emailed about this within a few minutes.' : `You haven’t been emailed about this. ${NO_EMAIL}, so it waits here.`],
+    pending: ['info', 'Email queued', 'An email to your team about this is on its way.'],
+    sent: ['ok', 'Team emailed', 'Your team was emailed about this.'],
+    failed: ['bad', 'Email failed', 'The email to your team failed, so nobody was told. Please call them back from here.'],
+    not_sent: ['warn', 'Not emailed', `You weren’t emailed about this. ${NO_EMAIL}, so please check this page.`],
+  })[state]
+// A conversation that asked for a person needs attention until every request it left is marked done (`handled`, from
+// the server); then it counts as completed, like the request list above it.
 const CATEGORY = { booked: ['ok', 'Booked'], handoff: ['bad', 'Needs attention'] }
-const category = (c) => CATEGORY[c.status] || ['neutral', 'Completed']
+const kindOf = (c) => (c.status === 'handoff' && c.handled ? 'closed' : CATEGORY[c.status] ? c.status : 'closed')
+const category = (c) => CATEGORY[kindOf(c)] || ['neutral', 'Completed']
 // Plain-language activity for owners. Internal-only events (overlaps, removed narration) are not shown.
 const REASON = {
   slot_unavailable: 'the time was just taken',
@@ -67,13 +74,13 @@ function channelTiles(cap, on, chatUrl, admin, panel) {
     : cap.voiceStatus === 'available'
       ? ['ok', 'Active', 'Customers can talk to it by microphone on your chat page; it books the same way as chat.']
       : cap.voiceStatus === 'testing'
-        ? ['neutral', 'Not turned on yet', `GetShowUps turns browser voice on business by business; this business is not on the list yet. Chat works meanwhile.${admin ? ' Admin: add it to the Retell release list (RECEPTIONIST_VOICE_BUSINESSES) or switch its provider in the Admin Console.' : ''}`]
+        ? ['neutral', 'Not turned on yet', `Customers can’t talk to it by microphone yet; chat answers meanwhile. GetShowUps turns browser voice on business by business: to ask for yours, email hello@getshowups.com. This tile says Active once it is on.${admin ? ' Admin: add it to the Retell release list (RECEPTIONIST_VOICE_BUSINESSES) or switch its provider in the Admin Console.' : ''}`]
         : ['neutral', 'Not available', 'The voice provider is not configured on the platform; chat works meanwhile.']
   return [
-    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', panel ? `Customers chat in a panel on your website, or at ${chatUrl}.` : `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
+    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chatClosed === 'setup' ? ['warn', 'Not reachable yet', 'It is on, but customers can open the chat only once your calendar is connected and your booking hours are confirmed in Settings.'] : cap.chat ? ['ok', 'Active', panel ? `Customers chat in a panel on your website, or at ${chatUrl}.` : `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
     ['Browser voice', voice],
     ['Phone calls', ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']],
-    ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team is emailed about callback requests and messages.'] : ['warn', 'Test mode', 'Emails go only to GetShowUps test recipients until messaging launch; requests still show on this page.']],
+    ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team gets an email about each callback request and message.'] : ['warn', 'Email off', `You won’t get an email about a callback request or message right now. ${NO_EMAIL}; every request shows on this page.`]],
   ]
 }
 function Channels({ cap, on, chatUrl, admin, panel }) {
@@ -90,8 +97,8 @@ function Channels({ cap, on, chatUrl, admin, panel }) {
   )
 }
 
-function Request({ r, onResolve, onView, busy }) {
-  const [tone, label, detail] = NOTIFY[r.notification] || NOTIFY.recorded
+function Request({ r, onResolve, onView, busy, emailOn }) {
+  const [tone, label, detail] = notifyFor(r.notification, emailOn) || notifyFor('recorded', emailOn)
   return (
     <li className="ui-inbox-item">
       <div className="ui-inbox-main">
@@ -105,11 +112,11 @@ function Request({ r, onResolve, onView, busy }) {
           <span>
             Received <Ago t={r.createdAt} />
           </span>
-          <span title={detail}>
-            <Pill tone={tone}>{label}</Pill>
-          </span>
+          <Pill tone={tone}>{label}</Pill>
         </p>
-        <p className="sr-only">{detail}</p>
+        <p className="ui-hint" data-notify={r.notification}>
+          {detail}
+        </p>
       </div>
       <div className="ui-inbox-actions">
         {r.phone && (
@@ -221,7 +228,13 @@ export default function Receptionist() {
   const [form, setForm] = useState(null)
   const [saved, setSaved] = useState(null)
   const [msg, setMsg] = useState('')
-  const [panelMsg, setPanelMsg] = useState('')
+  // The two switches (answering on/off, website panel) save the moment they change, each with its own confirmation
+  // beside the control that was used. `turning` / `paneling` = the choice on its way to the server (shown at once).
+  const power = useSaveState()
+  const [turning, setTurning] = useState(null)
+  const [powerAt, setPowerAt] = useState('switch')
+  const panelSave = useSaveState()
+  const [paneling, setPaneling] = useState(null)
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
   const [filter, setFilter] = useState('all')
@@ -260,7 +273,7 @@ export default function Receptionist() {
     setOpen(id)
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
-  const shown = useMemo(() => (data?.conversations || []).filter((c) => filter === 'all' || c.status === filter || (filter === 'closed' && !CATEGORY[c.status])), [data, filter])
+  const shown = useMemo(() => (data?.conversations || []).filter((c) => filter === 'all' || kindOf(c) === filter), [data, filter])
 
   if (!data) return <div aria-busy="true" className="ui-skeleton-page" />
   if (data.failed)
@@ -289,29 +302,74 @@ export default function Receptionist() {
       load()
     }
   }
-  // Website chat panel: its own small save (not part of the settings form), so flipping it never saves a half-edited greeting.
-  const setPanel = async (value) => {
-    setPanelMsg('')
-    setBusy(true)
-    const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'website_panel', on: value } })
-    setBusy(false)
-    setPanelMsg(status === 200 ? (value ? 'Saved. Your website now opens the chat in a panel. It can take a minute to show.' : 'Saved. Your website shows the chat link. It can take a minute to show.') : 'Couldn’t save. Please try again.')
-    if (status === 200) load()
+  // On/off: saved at once, with the SAVED greeting, notes and phone choices (a half-edited greeting is never saved by
+  // flipping the switch; it keeps waiting for Save). `at` = which control was used, so the confirmation shows there.
+  const setEnabled = (value, at = 'switch') => {
+    setPowerAt(at)
+    setTurning(value)
+    return power
+      .run(async () => {
+        const { status, data: d } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'settings', ...saved, enabled: value } })
+        if (status !== 200) return { error: value ? 'Couldn’t turn it on. Please try again.' : 'Couldn’t turn it off. Please try again.' }
+        setSaved(d.settings)
+        setForm((f) => ({ ...f, enabled: d.settings.enabled }))
+        await load()
+        return { saved: value ? 'Saved. The receptionist is on.' : 'Saved. The receptionist is off: customers can’t chat with it.' }
+      })
+      .finally(() => setTurning(null))
   }
-  const resolve = async (requestId) => {
+  // Website chat panel: the same pattern (its own small save, not part of the settings form).
+  const setPanel = (value) => {
+    setPaneling(value)
+    return panelSave
+      .run(async () => {
+        const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'website_panel', on: value } })
+        if (status !== 200) return { error: true }
+        await load()
+        return { saved: value ? 'Saved. Your website now opens the chat in a panel. It can take a minute to show.' : 'Saved. Your website shows the chat link. It can take a minute to show.' }
+      })
+      .finally(() => setPaneling(null))
+  }
+  const resolve = async (requestId, action = 'resolve') => {
     setBusy(true)
-    const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'resolve', requestId } })
+    const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action, requestId } })
     setBusy(false)
     if (status === 200) load()
   }
   const on = saved.enabled
   // The headline names what answers today (chat, and voice only where it is really on for this business).
-  const overall = !on ? ['neutral', 'Off'] : !cap.chat ? ['bad', 'Not answering'] : cap.voiceStatus === 'available' ? ['ok', 'Answering on chat and browser voice'] : ['ok', 'Answering on website chat']
+  const overall = !on ? ['neutral', 'Off'] : !cap.chat || cap.chatClosed ? ['bad', 'Not answering'] : cap.voiceStatus === 'available' ? ['ok', 'Answering on chat and browser voice'] : ['ok', 'Answering on website chat']
   const attention = data.requests.filter((r) => r.status === 'open')
   const done = data.requests.filter((r) => r.status !== 'open')
   const upcoming = data.conversations.filter((c) => c.bookedAt && new Date(c.bookedAt).getTime() > data.loadedAt)
-  const counts = { all: data.conversations.length, booked: data.conversations.filter((c) => c.status === 'booked').length, handoff: data.conversations.filter((c) => c.status === 'handoff').length }
+  const counts = { all: data.conversations.length, booked: data.conversations.filter((c) => kindOf(c) === 'booked').length, handoff: data.conversations.filter((c) => kindOf(c) === 'handoff').length }
   counts.closed = counts.all - counts.booked - counts.handoff
+  const emailOn = cap.staffEmail === 'live'
+  const panelOn = paneling ?? Boolean(data.websitePanel?.on)
+  // "Try it as a customer" is offered only when the customer chat page really opens (capabilities.chatClosed, the same
+  // checks as that page). Otherwise: the reason, and when the reason is the off switch, the one tap that fixes it.
+  const tryIt = (at) =>
+    !cap.chatClosed ? (
+      <a className="btn btn-quiet btn-sm" href={data.chatUrl} target="_blank" rel="noreferrer">
+        Try it as a customer
+      </a>
+    ) : (
+      <div className="rx-try-off" data-try-closed={cap.chatClosed}>
+        <span className="fine">
+          {cap.chatClosed === 'off'
+            ? 'You can try it as a customer once it’s on: the chat page is closed while the receptionist is off.'
+            : cap.chatClosed === 'setup'
+              ? 'You can try it as a customer once your calendar is connected and your booking hours are confirmed in Settings.'
+              : 'The chat isn’t answering right now, so there is nothing to try yet.'}
+        </span>
+        {cap.chatClosed === 'off' && (
+          <button type="button" className="btn btn-primary btn-sm" disabled={power.pending} onClick={() => setEnabled(true, at)}>
+            {power.pending ? 'Turning on…' : 'Turn on'}
+          </button>
+        )}
+        {powerAt === at && <SaveStatus save={power} />}
+      </div>
+    )
   return (
     <div className="ui-page">
       <PageHeader
@@ -325,9 +383,10 @@ export default function Receptionist() {
           </>
         }
         actions={
-          <a className="btn btn-quiet btn-sm" href={data.chatUrl} target="_blank" rel="noreferrer">
-            Try it as a customer
-          </a>
+          <>
+            {tryIt('header')}
+            {!cap.chatClosed && powerAt === 'header' && <SaveStatus save={power} />}
+          </>
         }
       >
         {on ? 'Answers questions, books real appointments on your calendar, and takes callback requests when someone wants a person.' : 'Turn it on below to answer customers on your website.'}
@@ -338,7 +397,7 @@ export default function Receptionist() {
         {attention.length ? (
           <ul className="ui-inbox">
             {attention.map((r) => (
-              <Request key={r.id} r={r} onResolve={resolve} onView={view} busy={busy} />
+              <Request key={r.id} r={r} onResolve={resolve} onView={view} busy={busy} emailOn={emailOn} />
             ))}
           </ul>
         ) : (
@@ -352,7 +411,12 @@ export default function Receptionist() {
             <ul>
               {done.slice(0, 10).map((r) => (
                 <li key={r.id}>
-                  {r.kind === 'callback' ? 'Callback' : 'Message'}: {r.name} · <Ago t={r.createdAt} />
+                  <span>
+                    {r.kind === 'callback' ? 'Callback' : 'Message'}: {r.name} · <Ago t={r.createdAt} />
+                  </span>
+                  <button type="button" className="link-btn" disabled={busy} onClick={() => resolve(r.id, 'reopen')} aria-label={`Reopen the ${r.kind === 'callback' ? 'callback request' : 'message'} from ${r.name || 'a customer'}`}>
+                    Reopen
+                  </button>
                 </li>
               ))}
             </ul>
@@ -390,10 +454,9 @@ export default function Receptionist() {
             <p>
               <strong>No conversations yet.</strong>
             </p>
-            <p className="fine">When customers chat or talk with the receptionist, every conversation shows up here. Try it yourself first.</p>
-            <a className="btn btn-quiet btn-sm" href={data.chatUrl} target="_blank" rel="noreferrer">
-              Try it as a customer
-            </a>
+            <p className="fine">When customers chat or talk with the receptionist, every conversation shows up here.{cap.chatClosed ? '' : ' Try it yourself first.'}</p>
+            {tryIt('empty')}
+            {!cap.chatClosed && powerAt === 'empty' && <SaveStatus save={power} />}
           </div>
         ) : (
           <>
@@ -448,18 +511,16 @@ export default function Receptionist() {
             <fieldset className="ui-group">
               <legend>How customers open the chat</legend>
               <label className="ui-switch-row">
-                <input type="checkbox" role="switch" checked={data.websitePanel.on} disabled={busy} onChange={(e) => setPanel(e.target.checked)} />
+                <input type="checkbox" role="switch" checked={panelOn} disabled={panelSave.pending} onChange={(e) => setPanel(e.target.checked)} />
                 <span>
                   <strong>Open the chat in a panel on my website</strong>
                   <span className="ui-hint">
-                    {data.websitePanel.on ? 'Visitors chat without leaving your site.' : 'Off: your website shows a “Chat or talk with us” button that opens the chat page.'} It’s the same receptionist either way, and it only appears while the receptionist is
+                    {panelOn ? 'Visitors chat without leaving your site.' : 'Off: your website shows a “Chat or talk with us” button that opens the chat page.'} It’s the same receptionist either way, and it only appears while the receptionist is
                     on.
                   </span>
                 </span>
               </label>
-              <p className="fine" role="status" aria-live="polite">
-                {panelMsg}
-              </p>
+              <SaveStatus save={panelSave} />
             </fieldset>
           </div>
         </Section>
@@ -470,12 +531,13 @@ export default function Receptionist() {
           <fieldset className="ui-group">
             <legend>Answering</legend>
             <label className="ui-switch-row">
-              <input type="checkbox" role="switch" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
+              <input type="checkbox" role="switch" checked={turning ?? on} disabled={power.pending} onChange={(e) => setEnabled(e.target.checked)} />
               <span>
                 <strong>Answer customers with the AI receptionist</strong>
-                <span className="ui-hint">On your website’s chat and browser voice. It checks your real calendar and books only after the customer confirms.</span>
+                <span className="ui-hint">On your website’s chat and browser voice. It checks your real calendar and books only after the customer confirms. Saved as soon as you switch it.</span>
               </span>
             </label>
+            {powerAt === 'switch' && <SaveStatus save={power} />}
           </fieldset>
           <fieldset className="ui-group">
             <legend>What it says and knows</legend>
@@ -491,6 +553,10 @@ export default function Receptionist() {
                 Services, prices, service area and hours come from <a href="/dashboard/settings">Settings</a>, so you only keep them in one place. If a note disagrees with a listed price,
                 the listed price is used.
               </span>
+              <span className="ui-hint" data-also="teach-excluded">
+                A note like “We don’t service commercial pools” is something your AI reads and answers from. <a href="/dashboard/teach#ta-about">Teach Your AI → Services you don’t offer</a> is the stricter list: a
+                service on it is also never booked, once your published rules are used with customers. The two add up, and that list decides whether a booking is refused.
+              </span>
             </label>
             {data.warnings.map((w) => (
               <p key={w} className="ui-callout ui-callout--warn" role="note">
@@ -504,7 +570,11 @@ export default function Receptionist() {
               {cap.callbacks
                 ? 'It explains it can’t transfer them, then records a callback request or a message with their name and number. It shows up in Needs attention above.'
                 : 'It gives them your business phone number.'}{' '}
-              {cap.staffEmail === 'live' ? 'Your team is also emailed.' : 'Team emails are in test mode, so check this page.'}
+              {emailOn ? 'Your team is also emailed.' : `${NO_EMAIL}, so check this page.`}
+            </p>
+            <p className="ui-hint" data-also="teach-handoffs">
+              This always happens, on chat and voice. <a href="/dashboard/teach#ta-how">Teach Your AI → Hand-offs to your team</a> can’t switch it off: a rule there only picks which is offered (a callback request or a message)
+              and adds other situations, once your published rules are used with customers.
             </p>
           </fieldset>
           <details className="ui-group ui-group--advanced rx-phone">
@@ -539,7 +609,7 @@ export default function Receptionist() {
       </Section>
 
       {/* Voice is a refinement of an answering receptionist, so it follows the on/off switch, greeting and notes. */}
-      {data.voice && <ReceptionistVoice voice={data.voice} admin={Boolean(data.admin)} providers={data.providers || null} reload={load} />}
+      {data.voice && <ReceptionistVoice voice={data.voice} admin={Boolean(data.admin)} providers={data.providers || null} reload={load} heard={on && !cap.chatClosed && cap.voiceStatus === 'available'} off={!on} />}
     </div>
   )
 }
