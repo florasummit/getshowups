@@ -108,6 +108,12 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      booking book|request|off, one question. Old {name, price} rows stay valid. Booking page = bookingServices;
                      receptionist/assistant = offeredServices (hidden dropped). The lead keeps a lead_services snapshot (0042);
                      book() takes the length from it (never the browser), checks overlap, and isOfferedSlot uses the span
+  website-catalog.js Websites + the ONE catalog (WEB-14, no migration): a website service LINKED (content.services[].catalogId,
+                     else exactly one catalog name match) renders the catalog's name/price (+ description when it has one) at
+                     request time in all three renderers (biz.catalog from siteBusinessInfo); hidden there = not shown (v2:
+                     item dropped, emptied section hidden); unlinked = its own copy, unchanged. Editor GET shows linked values;
+                     a save writes only fields the owner CHANGED vs the stored draft (never a stale value back) via
+                     validateServices; 'addService' adds to the catalog; removing from the website never touches it
   booking-funnel.js  Booking-page stages per visit (events 'booking_stage', codes only) and the owner's 30-day funnel
   public-brand.js    A business's published logo + accent for its booking/chat pages (never a draft)
   public.js          Guard for the public booking API (only fully set-up businesses)

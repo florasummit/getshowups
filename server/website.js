@@ -8,6 +8,7 @@ import { approvedClaimsFor } from './landing.js'
 import { billingSubscription, getSubscription } from './stripe.js'
 import { validateDesign } from './site-design.js'
 import { validateSpec } from './site-spec.js'
+import { CATALOG_ID_RE } from './website-catalog.js'
 
 export const TEMPLATES = ['clean', 'bold', 'warm']
 // Accent colours, each dark enough for white button text (WCAG AA).
@@ -205,7 +206,9 @@ export function validateContent(body, approvedClaims = [], assetIds = null, { pr
   const errors = []
   const designed = b.site != null
   const listed = (Array.isArray(b.services) ? b.services : [])
-    .map((s) => ({ ...(designed && SERVICE_ID_RE.test(s?.id ?? '') ? { id: s.id } : {}), name: clean(s?.name), price: clean(s?.price), description: clean(s?.description) }))
+    // catalogId: the catalog service it is linked to (server/website-catalog.js); stored only when present, so content
+    // saved without one keeps its exact shape.
+    .map((s) => ({ ...(designed && SERVICE_ID_RE.test(s?.id ?? '') ? { id: s.id } : {}), name: clean(s?.name), price: clean(s?.price), description: clean(s?.description), ...(CATALOG_ID_RE.test(s?.catalogId ?? '') ? { catalogId: s.catalogId } : {}) }))
     .filter((s) => s.name)
   const services = designed ? assignServiceIds(listed, prior) : listed
   const asset = (v) => (v == null || v === '' ? null : String(v))
@@ -435,6 +438,8 @@ export async function liveContent(db, customerId) {
 }
 const defaults = () => ({ template: 'clean', color: 'ocean', about: '', logo: null, hero: null, photos: [], seoTitle: '', seoDescription: '', design: null })
 
+const unlinked = (k, v) => (k === 'catalogId' ? undefined : v)
+
 // The owner's view: draft (saved or generated), live version, recent versions.
 export async function loadWebsite(db, customer) {
   const [w, live, versions] = await Promise.all([
@@ -451,7 +456,8 @@ export async function loadWebsite(db, customer) {
     publishedAt: live?.publishedAt ?? null,
     updatedAt: w?.updated_at ?? null,
     // Unpublished changes: the draft differs from what is live.
-    changed: Boolean(live) && JSON.stringify(draft) !== JSON.stringify(live.content),
+    // (A service's catalog link, server/website-catalog.js, is bookkeeping: it doesn't change what visitors see.)
+    changed: Boolean(live) && JSON.stringify(draft, unlinked) !== JSON.stringify(live.content, unlinked),
     versions: versions.results.map((v) => ({ version: v.version, createdAt: v.created_at, live: v.version === live?.version })),
   }
 }

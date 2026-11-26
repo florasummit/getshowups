@@ -17,6 +17,7 @@ import { hostingStatus, isHosted, liveContent } from './website.js'
 import { connectedHost } from './domains.js'
 import { carryQuery, htmlResponse, renderNotice, renderSite } from './site-render.js'
 import { formToken } from './site-form.js'
+import { parseCatalog } from './website-catalog.js'
 
 const unavailable = () => htmlResponse(404, renderNotice('This website isn’t available', 'Check the address and try again.'), { cache: 'no-store' })
 
@@ -28,7 +29,7 @@ export async function businessForSite(env, id) {
 }
 
 export async function siteBusinessInfo(db, customer) {
-  const p = await db.prepare('SELECT phone, cities FROM business_profiles WHERE customer = ?1').bind(customer.id).first()
+  const p = await db.prepare('SELECT phone, cities, services FROM business_profiles WHERE customer = ?1').bind(customer.id).first()
   const cities = (() => {
     try {
       return JSON.parse(p?.cities || '[]')
@@ -38,7 +39,8 @@ export async function siteBusinessInfo(db, customer) {
   })()
   // Hours: the owner's confirmed booking hours (structured data only; never shown as a promise of availability).
   const hours = customer.hoursConfirmed && customer.workdays?.length ? { dayStart: customer.dayStart, dayEnd: customer.dayEnd, workdays: customer.workdays } : null
-  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities, hours }
+  // catalog: the ONE service catalog (server/website-catalog.js): linked website services show it; null without a profile.
+  return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities, hours, catalog: parseCatalog(p?.services) }
 }
 
 // Where a customer can reach a business that has no phone on record (booking page, BOOK-03): its LIVE website, else its

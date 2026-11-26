@@ -8,7 +8,8 @@ import { api } from '../lib/api.js'
 import { makePhoneCopy, uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 import { ADDABLE, BACKGROUNDS, BUTTONS, FONT_PAIRS, LAYOUTS, PAGE_TYPES, SECTION_LABEL, colorsFor, newId, pageTemplate, sectionTemplate, takenIds, toneOf } from './site-templates.js'
 import { draftPlaces, replacePhoto, usageText } from './photo-refs.js'
-import { ConfirmInline } from './ui.jsx'
+import { ConfirmInline, SaveBar, SaveButton, SaveStatus } from './ui.jsx'
+import { useSaveState } from './ui-hooks.js'
 import { plural } from '../lib/format.js'
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
@@ -855,7 +856,7 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
             </div>
             {tab === 'section' &&
               (section ? (
-                <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} stock={stock} onUploaded={addUploaded} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
+                <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} hiddenIds={website.catalogHidden || []} assets={photoAssets} stock={stock} onUploaded={addUploaded} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
               ) : (
                 <p className="studio-empty">Click any part of your website to edit it.</p>
               ))}
@@ -1260,7 +1261,57 @@ function Items({ label, items, fields, max = 10, onChange, blank }) {
 }
 
 // ---------- section ----------
-function SectionEditor({ section: s, site, page, services, assets, stock, onUploaded, focus, onChange, onServices }) {
+// "Add a service": it goes into the ONE catalog first (Settings → Services, server-validated), then onto the website,
+// linked by its id, so the booking page and receptionist have it too. A name the catalog already has is that service.
+function AddService({ services, onAdded }) {
+  const save = useSaveState()
+  const [name, setName] = useState('')
+  const [price, setPrice] = useState('')
+  const add = (e) => {
+    e.preventDefault()
+    save.run(async () => {
+      if (!name.trim()) return { error: 'Type the service’s name.' }
+      const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'addService', service: { name, price } } })
+      if (status !== 200) return { error: data?.fields?.includes('services_full') ? 'Settings → Services is full (16 services). Remove one there first.' : data?.error === 'no_profile' ? 'Add your business details in Settings first.' : 'That service couldn’t be added. Check the name and price.' }
+      const v = data.service
+      if (services.some((x) => x.catalogId === v.id)) return { error: `${v.name} is already on your website.` }
+      onAdded({ name: v.name, price: v.price, description: v.description || '', catalogId: v.id })
+      setName('')
+      setPrice('')
+      return { saved: data.added ? `Added. ${v.name} is on your booking page too.` : `Added from Settings → Services.` }
+    })
+  }
+  return (
+    <form className="studio-item" onSubmit={add} data-test="add-service">
+      <Text label="New service" value={name} max={60} onChange={setName} />
+      <Text label="Price (optional)" value={price} max={40} onChange={setPrice} />
+      <SaveBar save={save}>Add a service</SaveBar>
+    </form>
+  )
+}
+
+// A service that is on the website only (made before services were shared): one tap puts it in Settings → Services.
+function ShareService({ svc, onShared }) {
+  const save = useSaveState()
+  const share = () =>
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'addService', service: { name: svc.name, price: svc.price, description: svc.description } } })
+      if (status !== 200) return { error: data?.fields?.includes('services_full') ? 'Settings → Services is full (16 services). Remove one there first.' : 'It couldn’t be added. Check the name and price.' }
+      onShared(data.service.id)
+      return { saved: 'Added. Your booking page and receptionist have it now.' }
+    })
+  return (
+    <div className="ui-save">
+      <p className="fine">On your website only: not on your booking page yet.</p>
+      <SaveButton save={save} type="button" className="btn btn-quiet btn-sm" onClick={share}>
+        Add to booking page
+      </SaveButton>
+      <SaveStatus save={save} />
+    </div>
+  )
+}
+
+function SectionEditor({ section: s, site, page, services, hiddenIds = [], assets, stock, onUploaded, focus, onChange, onServices }) {
   const ask = useContext(Ask)
   const set = (k) => (v) => onChange((x) => (v === null ? delete x[k] : (x[k] = v)))
   const head = (
@@ -1302,29 +1353,28 @@ function SectionEditor({ section: s, site, page, services, assets, stock, onUplo
       {s.type === 'services' && (
         <fieldset className="field studio-group">
           <legend>Services</legend>
-          <p className="fine">
-            One list for your whole website: a name or price changed here changes on every page of your draft, and visitors see it when you publish. Your booking page takes its services from <a href="/dashboard/settings#services">Settings → Services</a>, so change a price there too.
+          {/* One catalog (server/website-catalog.js, finding WEB-14): a shared service's name and price ARE Settings → Services. */}
+          <p className="fine" data-test="services-shared">
+            Services and prices are shared with your booking page and receptionist; changes show everywhere as soon as you save. You can also change them in <a href="/dashboard/settings#services">Settings → Services</a>.
           </p>
           {s.items.map((it, i) => {
             const k = (services || []).findIndex((v) => v.id === it.serviceId)
             const svc = services?.[k]
             if (!svc) return null
             return (
-              <div key={it.serviceId} className="studio-item">
+              <div key={it.serviceId} className="studio-item" data-service-sharing={svc.catalogId ? (hiddenIds.includes(svc.catalogId) ? 'hidden' : 'shared') : 'website'}>
                 <Text label="Service" value={svc.name} max={60} onChange={(v) => onServices((l) => (l[k].name = v))} />
                 <Text label="Price (optional)" value={svc.price} max={40} onChange={(v) => onServices((l) => (l[k].price = v))} />
                 <Text label="Description on this page" value={it.text} max={400} area onChange={(v) => onChange((x) => (x.items[i].text = v))} />
-                <button type="button" className="link-btn" onClick={() => ask({ question: `Remove ${svc.name || 'this service'}?`, detail: 'It leaves every page of your draft. You can undo this.', confirmLabel: 'Remove service', run: () => onServices((l) => l.splice(l.findIndex((v) => v.id === it.serviceId), 1)) })}>
-                  Remove service
+                {svc.catalogId && hiddenIds.includes(svc.catalogId) && <p className="fine">Hidden in Settings → Services, so visitors don’t see it. Show it there to put it back.</p>}
+                {!svc.catalogId && <ShareService svc={svc} onShared={(id) => onServices((l) => (l[k].catalogId = id))} />}
+                <button type="button" className="link-btn" onClick={() => ask({ question: `Remove ${svc.name || 'this service'} from your website?`, detail: svc.catalogId ? 'It leaves every page of your website. Your booking page and receptionist keep it (Settings → Services). You can undo this.' : 'It leaves every page of your website. You can undo this.', confirmLabel: 'Remove from website', run: () => onServices((l) => l.splice(l.findIndex((v) => v.id === it.serviceId), 1)) })}>
+                  Remove from website
                 </button>
               </div>
             )
           })}
-          {(services || []).length < 12 && (
-            <button type="button" className="btn btn-quiet btn-sm" onClick={() => onServices((l) => l.push({ name: 'New service', price: '', description: '' }))}>
-              Add a service
-            </button>
-          )}
+          {(services || []).length < 12 && <AddService services={services || []} onAdded={(v) => onServices((l) => l.push(v))} />}
           {(services || []).map((v, k) =>
             v.id ? null : (
               <div key={`new-${k}`} className="studio-item">

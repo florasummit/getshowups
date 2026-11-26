@@ -5,6 +5,7 @@ import { COLORS } from './website.js'
 import { renderDesigned } from './site-designed.js'
 import { renderV2 } from './site-render-v2.js'
 import { displayBrand } from './website.js'
+import { withCatalog } from './website-catalog.js'
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -87,8 +88,12 @@ a:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offse
 @media (prefers-reduced-motion:no-preference){.btn{transition:filter .15s}.btn:hover{filter:brightness(1.08)}}
 `
 
-// biz: { id, name, appointmentMode, phone }  content: website content  opts: { canonical, bookUrl, preview, year }
-export function renderSite(biz, content, opts = {}) {
+// biz: { id, name, appointmentMode, phone, catalog? }  content: website content  opts: { canonical, bookUrl, preview, year }
+// biz.catalog (server/site-serve.js siteBusinessInfo): the business's ONE service catalog; a website service linked to it
+// shows the catalog's name, price and description, and one hidden there isn't shown (server/website-catalog.js).
+// biz.catalogValues === false (the editor's live preview of unsaved typing): only the hidden flag applies.
+export function renderSite(biz, siteContent, opts = {}) {
+  const content = withCatalog(siteContent, biz.catalog, { values: biz.catalogValues !== false })
   // Designed sites (AI-chosen layout from the design system); older content keeps its exact current look.
   // AI-designed sites (v2 spec). Names and prices come from this content's services; towns/phone from records.
   // AI-designed sites show the public brand ("PoolThru", not the legal "Poolthru LLC"); older renderers are unchanged.
