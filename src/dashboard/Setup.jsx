@@ -634,9 +634,9 @@ function WebsiteStep({ onDone, back }) {
         </h1>
         <div className="choice-list" role="radiogroup" aria-label="How do you want to start?">
           {[
-            ['new', 'Create a new website', 'Pick a design. We write it from your details; you can edit everything.'],
-            ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you redesign it here.'],
-            ['design', 'Start from a design', 'Choose one of our professional designs, filled in with your details. No AI needed.'],
+            ['new', 'Create a new website', 'We write it from your details and show you three looks to choose from. You can edit everything.'],
+            ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you restyle it here.'],
+            ['design', 'Start from a design', 'Choose one of our professional layouts, filled in with your details. No AI needed.'],
             ['skip', 'Skip for now', 'Just use your booking link. You can create a website any time.'],
           ]
             // Bringing the current website is part of Website Studio (internal pilot).
@@ -736,7 +736,13 @@ function WebsiteStep({ onDone, back }) {
           {state.error}
         </p>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={next}>
+      {/* ONB-09: a requested change still waiting for "Keep this" / "Go back" is never dropped silently by moving on. */}
+      {pending && (
+        <p className="notice-soft" role="status" data-undecided>
+          Choose “Keep this” or “Go back” for the new version above before you continue.
+        </p>
+      )}
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || Boolean(pending)} onClick={next}>
         Continue
       </button>
       {back && (
