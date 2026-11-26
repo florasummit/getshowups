@@ -113,7 +113,7 @@ function Step({ id, me, done, back, revisit, justPaid }) {
     return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} customer={customer} /> : <LegacyBusiness customer={customer} onDone={done} />
   }
   if (id === 'payment') return revisit ? <PaidStep billing={progress.billing} onDone={done} back={back} /> : <PaymentStep me={me} onDone={done} back={back} />
-  if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid && paid} />
+  if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid} />
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
   if (id === 'calendar') return <CalendarStep onBack={back} connected={revisit} onDone={done} />
   if (id === 'hours') return <HoursStep customer={customer} onDone={done} back={back} />
