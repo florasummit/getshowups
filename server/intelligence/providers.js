@@ -22,11 +22,10 @@ export const retellAdapter = {
   plan(env, { customerId, version }) {
     const live = rulesLiveFor(env, customerId)
     const voice = voiceStatus(env, customerId)
-    const notes = [
-      'Your rules run inside GetShowUps on every call and chat; the Retell voice agent itself is not changed.',
-      live ? `Published version ${version ?? '—'} is used by your receptionist now (chat${voice === 'available' ? ' and voice' : ''}).` : 'Using published rules in real conversations is switched off for your business until GetShowUps turns it on (approval).',
-    ]
-    if (voice !== 'available') notes.push(voice === 'testing' ? 'Voice calls are still in testing for your business.' : 'Voice calls aren’t set up yet.')
+    // Owner-facing sentences (the Publish panel shows them): whether customers get published rules NOW, in plain
+    // words. No vendor name, no internal switch name.
+    const notes = [live ? `Published version ${version ?? '—'} is used by your receptionist now (chat${voice === 'available' ? ' and voice' : ''}).` : 'Customers don’t get published rules yet: GetShowUps switches them on business by business, and until then your receptionist answers the way it does today.']
+    if (live && voice !== 'available') notes.push('Browser voice isn’t on for your business yet, so the rules apply to chat.')
     return { provider: 'retell', mode: 'custom_llm', providerChanges: [], servedBy: 'getshowups_engine', live, voice, notes }
   },
 }

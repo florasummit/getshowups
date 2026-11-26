@@ -73,3 +73,17 @@ export function industryKey(...texts) {
   for (const t of texts) for (const [k, v] of Object.entries(INDUSTRIES)) if (k !== 'general' && t && v.match.test(String(t))) return k
   return 'general'
 }
+
+// Owner-facing words per kind of business (Teach Your AI): the label of the "equipment" question, the example placeholders,
+// and plain-words requests the fixed patterns of teach.js understand without a model (a unit test runs every one of them,
+// so an example shown to an owner always works when typed). Wording only: nothing here reaches a customer conversation.
+export const TRADE_WORDS = {
+  appointment: { equipment: 'What it’s for (details)', equipmentAsk: 'Anything we should know before you come in?', excluded: 'Home visits', urgent: 'severe pain', teach: ['We don’t do home visits.', 'Always ask if it is their first visit.', 'If they ask for a person, take a message.'] },
+  pool: { equipment: 'Pool type or equipment', equipmentAsk: 'What kind of pool or equipment is it?', excluded: 'Commercial pools', urgent: 'a child or pet in danger', teach: ['We don’t do commercial pools.', 'Remember that a green pool cleanup is usually worth $450.', 'Always ask if there is a dog in the yard.'] },
+  hvac: { equipment: 'Equipment or system type', equipmentAsk: 'What kind of equipment or system is it?', excluded: 'New installations', urgent: 'no heat', teach: ['We don’t install equipment, only repair it.', 'Treat a carbon monoxide alarm as an emergency.', 'Remember that a tune-up is usually worth $150.'] },
+  electrical: { equipment: 'Equipment involved', equipmentAsk: 'What equipment is involved?', excluded: 'Commercial work', urgent: 'a hot outlet', teach: ['We don’t do commercial work.', 'Treat a burning smell as an emergency.', 'Always ask if the power is out in the whole house.'] },
+  plumbing: { equipment: 'Fixture or equipment', equipmentAsk: 'Which fixture or equipment is it?', excluded: 'Septic work', urgent: 'a burst pipe', teach: ['We don’t do septic work.', 'Treat a leaking water heater as an emergency.', 'Always ask if the water is shut off.'] },
+  cleaning: { equipment: 'Equipment involved', equipmentAsk: 'Is there any equipment we should know about?', excluded: 'Commercial cleaning', urgent: 'a move-out clean due tomorrow', teach: ['We don’t do commercial cleaning.', 'Always ask if there are pets in the home.', 'Remember that a deep clean is usually worth $300.'] },
+  general: { equipment: 'Equipment involved', equipmentAsk: 'What equipment is involved?', excluded: 'Commercial work', urgent: 'something unsafe at the property', teach: ['We don’t do commercial work.', 'Always ask if anyone will be home.', 'If they ask for a person, take a message.'] },
+}
+export const tradeWords = (key) => TRADE_WORDS[key] || TRADE_WORDS.general

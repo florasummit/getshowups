@@ -49,12 +49,21 @@ test('owner (voice not released for this business): chat Active, browser voice "
   await expect(tile(page, 'Website chat')).toContainText(`/chat/${fixtures.E2E_VOICE_CUSTOMER}`)
   await expect(tile(page, 'Browser voice')).toContainText('Not turned on yet')
   await expect(tile(page, 'Browser voice')).toContainText('business by business')
+  // REC-03: the tile names the next step (no date promised), and the voice card says no customer hears the voice yet.
+  await expect(tile(page, 'Browser voice')).toContainText('to ask for yours, email hello@getshowups.com')
+  await expect(page.locator('#receptionist-voice [data-voice-unheard]')).toContainText('No customer hears this voice yet: browser voice isn’t on for your business')
   await expect(tile(page, 'Browser voice')).not.toContainText('In testing')
   await expect(tile(page, 'Browser voice')).not.toContainText('RECEPTIONIST_VOICE_BUSINESSES')
   await expect(tile(page, 'Phone calls')).toContainText('Not available yet')
   await expect(tile(page, 'Phone calls')).toContainText('No phone line can be connected yet')
-  await expect(tile(page, 'Team notifications')).toContainText('Test mode')
-  await expect(tile(page, 'Team notifications')).toContainText('test recipients')
+  // REC-05: one plain sentence on whether the owner gets an email right now; no internal terms.
+  await expect(tile(page, 'Team notifications')).toContainText('Email off')
+  await expect(tile(page, 'Team notifications')).toContainText('You won’t get an email about a callback request or message right now')
+  await expect(tile(page, 'Team notifications')).not.toContainText(/test recipients|messaging launch|Test mode/)
+  // TEACH-04: each overlapping setting names its counterpart on the other page and how they combine.
+  await expect(page.locator('[data-also="teach-excluded"]')).toContainText('Teach Your AI → Services you don’t offer')
+  await expect(page.locator('[data-also="teach-handoffs"]')).toContainText('Teach Your AI → Hand-offs to your team')
+  await expect(page.locator('[data-also="teach-tone"]')).toContainText('Teach Your AI → Tone')
   const text = await page.locator('main.app-main').innerText()
   expect(text).not.toMatch(/Retell|ElevenLabs|OpenAI/)
   await expect(page.locator('[data-provider-control]')).toHaveCount(0)
@@ -87,6 +96,8 @@ test('owner (voice released for this business): browser voice is Active with wha
   await expect(page.locator('.ui-page-head')).toContainText('Answering on chat and browser voice')
   await expect(tile(page, 'Browser voice')).toContainText('Active')
   await expect(tile(page, 'Browser voice')).toContainText('by microphone')
+  await expect(page.locator('#receptionist-voice')).toBeVisible()
+  await expect(page.locator('[data-voice-unheard]')).toHaveCount(0) // customers can hear it: no "nobody hears this" note
   await expect(tile(page, 'Website chat')).toContainText('Active')
   const info = await (await page.request.get(`/api/receptionist/${fixtures.E2E_VOICE_M_CUSTOMER}`)).json()
   expect([info.voice, info.voiceStatus]).toEqual([true, 'available'])
@@ -102,7 +113,7 @@ test('website chat panel: the owner turns it on; the published site opens the sa
   const panel = page.getByRole('switch', { name: /Open the chat in a panel on my website/ })
   await expect(panel).not.toBeChecked()
   await expect(page.getByText('Off: your website shows a “Chat or talk with us” button')).toBeVisible()
-  // The switch shows the SAVED choice: it flips when the save returns, not on the click.
+  // Saved the moment it changes, with the shared confirmation beside it (the same as the on/off switch, REC-02).
   await panel.click()
   await expect(page.getByText('Saved. Your website now opens the chat in a panel.')).toBeVisible()
   await expect(panel).toBeChecked()

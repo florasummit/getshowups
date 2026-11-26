@@ -61,6 +61,10 @@ test('owner: browses, previews (one at a time), picks a voice, personality and p
   await section.getByRole('radio', { name: 'A little slower' }).click()
   await section.getByRole('button', { name: 'Save voice' }).click()
   await expect(section.getByRole('status')).toContainText('Saved.')
+  // REC-03: the save never claims calls use the voice when no customer can hear it (browser voice is on only for the
+  // phone project's business here; phone calls don't exist anywhere).
+  await expect(section.getByRole('status')).toContainText(mobile(info) ? 'New voice conversations use this from now on.' : 'No customer hears it yet')
+  await expect(section.getByRole('status')).not.toContainText('New calls')
   await expect(section.locator('[data-current-voice]')).toContainText('Adrian')
   await expect(section.locator('[data-current-voice]')).toContainText('Masculine · American · Young')
   await noSideScroll(page)
@@ -69,6 +73,10 @@ test('owner: browses, previews (one at a time), picks a voice, personality and p
   await expect(after.locator('[data-current-voice]')).toContainText('Adrian')
   await expect(after.getByRole('radio', { name: /Calm & Reassuring/ })).toBeChecked()
   await expect(after.getByRole('radio', { name: 'A little slower' })).toHaveAttribute('aria-checked', 'true')
+  // REC-06: the chosen pace is clearly marked on page load (filled, like the selected filter chips), the others are not.
+  const fill = (name) => after.getByRole('radio', { name, exact: true }).evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(await fill('A little slower')).not.toBe(await fill('Normal'))
+  expect(await fill('Normal')).toBe(await fill('A little faster'))
   // Stored server-side with the version; a save carrying an old version is refused (409), nothing overwritten.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
   expect([me.voice.voiceId, me.voice.voiceName, me.voice.personality, me.voice.pace]).toEqual(['11labs-Adrian', 'Adrian', 'calm', 'slower'])

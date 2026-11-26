@@ -5,7 +5,7 @@
 //
 // Platform rules are applied here regardless of the config: area checked before times, need + contact (+ address for
 // visits) before a booking, safety first, ZIP list checked at booking (booking integrity: areaFor in booking.js).
-import { INTAKE } from './schema.js'
+import { INTAKE, intakeLabel } from './schema.js'
 
 const lc = (s) => String(s || '').toLowerCase().trim()
 const sameTown = (a, b) => lc(a) === lc(b)
@@ -72,6 +72,8 @@ export function decide(config, records, known = {}) {
   const missingRequired = items.filter((i) => i.required && !done.includes(i.id)).map((i) => i.id)
   const explanations = []
   const say = (code, text) => explanations.push({ code, text })
+  // Owner-facing explanations use the trade's own words (schema.js intakeLabel).
+  const label = (id) => intakeLabel(id, config?.industry).toLowerCase()
 
   // Hand-offs and refusals, strongest first. Safety is a platform rule; the owner chooses what follows it.
   let escalate = null
@@ -180,15 +182,15 @@ export function decide(config, records, known = {}) {
   }
   if (flow === 'handoff' && escalate.action !== 'decline') nextAsk = !known.name || !known.phone ? 'contact' : null
 
-  if (nextAsk && INTAKE[nextAsk]) say('next', `Asks next: ${nextAsk === 'location' && coverage.basis?.startsWith('town') ? 'their ZIP code' : INTAKE[nextAsk].label.toLowerCase()}.`)
-  if (!canOfferTimes && COVERAGE_OK.has(coverage.status) && !blocksBooking) say('times_wait', `Before offering times, it still needs: ${timesBlockers.map((b) => INTAKE[b]?.label.toLowerCase() || b).join(', ')}.`)
+  if (nextAsk && INTAKE[nextAsk]) say('next', `Asks next: ${nextAsk === 'location' && coverage.basis?.startsWith('town') ? 'their ZIP code' : label(nextAsk)}.`)
+  if (!canOfferTimes && COVERAGE_OK.has(coverage.status) && !blocksBooking) say('times_wait', `Before offering times, it still needs: ${timesBlockers.map((b) => (INTAKE[b] ? label(b) : b)).join(', ')}.`)
   if (canOfferTimes && !blocksBooking) say('times', 'It can look up open times now. (Times are never guessed: the calendar is checked first.)')
-  if (canOfferTimes && !canBook) say('book_wait', `To book, it still needs: ${bookBlockers.map((b) => (b === 'zip' ? 'their ZIP code' : INTAKE[b]?.label.toLowerCase() || b)).join(', ')}.`)
+  if (canOfferTimes && !canBook) say('book_wait', `To book, it still needs: ${bookBlockers.map((b) => (b === 'zip' ? 'their ZIP code' : INTAKE[b] ? label(b) : b)).join(', ')}.`)
   if (canBook) say('book_ready', 'Everything needed to book is known: the AI reads the time back and books only after a clear yes.')
   if (intents.has('price') && config?.pricing === 'no_prices') say('pricing', 'Asked about price: the AI doesn’t quote prices; your team confirms them.')
   else if (intents.has('price') && config?.pricing === 'visit_first') say('pricing', 'Asked about price: the AI explains prices are confirmed after the visit.')
   else if (intents.has('price')) say('pricing', 'Asked about price: only prices exactly as listed in your services are said.')
   if (intents.has('reschedule') || intents.has('cancel')) say('reschedule', 'Wants to change or cancel a booking: the AI can’t change existing bookings; it points them to the link in their confirmation email or records a callback request.')
   if (known.hesitant) say('hesitant', 'The customer sounded unsure: the AI gives them time and asks one simple question.')
-  return { known, coverage, satisfied: done, missingRequired, nextAsk, canOfferTimes, timesBlockers, canBook, bookBlockers, escalate, flow, explanations }
+  return { known, coverage, satisfied: done, missingRequired, nextAsk, canOfferTimes, timesBlockers, canBook, bookBlockers, escalate, flow, explanations, industry: config?.industry || 'general' }
 }

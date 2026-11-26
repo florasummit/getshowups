@@ -5,6 +5,7 @@
 //   exampleReply(): the deterministic example reply "Test your AI" shows (labelled as an example, not the live wording).
 // Small on purpose: every extra prompt token is paid on every turn and adds latency.
 import { INTAKE, AFTER_HOURS } from './schema.js'
+import { tradeWords } from './industries.js'
 
 const q = (s) => `"${String(s).replace(/"/g, "'")}"`
 
@@ -97,7 +98,7 @@ export function exampleReply(d, records = {}, fresh = d.known, taught = []) {
     need: 'What can we help you with?',
     urgency: 'Is this urgent, or something that can wait a few days?',
     location: d.coverage.ask === 'confirm_location' ? 'Which location is the job at?' : d.coverage.ask === 'confirm_zip' ? 'Could you double-check that ZIP code for me?' : d.coverage.basis === 'town_partly_served' || d.coverage.basis === 'town_not_listed' ? 'What’s the ZIP code there?' : 'What’s the ZIP code where you need the service?',
-    equipment: 'What kind of equipment or system is it?',
+    equipment: tradeWords(d.industry).equipmentAsk,
     existing_customer: 'Have you used us before?',
     preferred_time: 'What day works best for you?',
     contact: 'What’s your name and the best phone number to reach you?',

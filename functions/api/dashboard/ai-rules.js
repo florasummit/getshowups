@@ -1,9 +1,9 @@
 // /api/dashboard/ai-rules — Teach Your AI (server/intelligence/). Session business only; 404 unless studioAccess()
 // (AI_STUDIO_BUSINESSES + migration 0033). POST is same-origin and rate-limited.
 //   GET → state (records summary, draft + stamp, live version, history, plain-language summaries, problems, platform
-//         rules, choices, how the voice provider is affected, suggestions)
+//         rules, choices and example words in the business's trade, how the voice provider is affected, suggestions)
 //   POST { action: 'save', config, baseUpdatedAt }            → draft saved (409 conflict / 422 invalid_config)
-//   POST { action: 'teach', text }                            → a PROPOSAL (nothing saved)
+//   POST { action: 'teach', text }                            → a PROPOSAL (nothing saved); `clauses` accounts for every part typed
 //   POST { action: 'apply', ops, baseUpdatedAt }              → proposal ops re-applied to the CURRENT draft, validated, saved
 //   POST { action: 'simulate', lines, use: 'draft'|'live', config? } → text simulation (nothing stored or sent)
 //   POST { action: 'publish', baseUpdatedAt, confirm: true }  → new live version (409 / 422)
@@ -13,7 +13,8 @@ import { json } from '../../../server/google-oauth.js'
 import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson } from '../../../server/ratelimit.js'
 import { getSettings, receptionistReady } from '../../../server/receptionist/engine.js'
-import { AFTER_HOURS, EMERGENCY_ACTIONS, ESCALATION_ACTIONS, ESCALATION_WHEN, INTAKE, PLATFORM_RULES, PRICING, STYLES, validateConfig } from '../../../server/intelligence/schema.js'
+import { AFTER_HOURS, EMERGENCY_ACTIONS, ESCALATION_ACTIONS, ESCALATION_WHEN, INTAKE, PLATFORM_RULES, PRICING, STYLES, intakeLabel, validateConfig } from '../../../server/intelligence/schema.js'
+import { tradeWords } from '../../../server/intelligence/industries.js'
 import { loadRules, liveRules, publishDraft, resetDraft, rollbackTo, saveDraft } from '../../../server/intelligence/store.js'
 import { recordsFor, rulesLiveFor, studioAccess } from '../../../server/intelligence/access.js'
 import { track } from '../../../server/events.js'
@@ -22,7 +23,8 @@ import { simulate, SIM_LIMITS } from '../../../server/intelligence/simulate.js'
 import { recommendations } from '../../../server/intelligence/recommend.js'
 import { voiceAdapter } from '../../../server/intelligence/providers.js'
 
-const CHOICES = { intake: Object.fromEntries(Object.entries(INTAKE).map(([id, i]) => [id, { label: i.label, platform: Boolean(i.platform), visitOnly: Boolean(i.visitOnly) }])), afterHours: AFTER_HOURS, pricing: PRICING, emergencyActions: EMERGENCY_ACTIONS, escalationWhen: ESCALATION_WHEN, escalationActions: ESCALATION_ACTIONS, styles: STYLES }
+// Labels in the business's own trade words (a pool business is never asked about a "system type").
+const choicesFor = (industry) => ({ intake: Object.fromEntries(Object.entries(INTAKE).map(([id, i]) => [id, { label: intakeLabel(id, industry), platform: Boolean(i.platform), visitOnly: Boolean(i.visitOnly) }])), afterHours: AFTER_HOURS, pricing: PRICING, emergencyActions: EMERGENCY_ACTIONS, escalationWhen: ESCALATION_WHEN, escalationActions: ESCALATION_ACTIONS, styles: STYLES })
 const stampOf = (v) => (v === null || v === undefined ? null : Number.isSafeInteger(v) ? v : NaN)
 
 async function state(env, customer, now = Date.now()) {
@@ -34,7 +36,9 @@ async function state(env, customer, now = Date.now()) {
     records: { name: records.name, industry: records.industry, services: records.services, towns: records.towns, zipCount: records.zips.length, zips: records.zips.slice(0, 60), visit: records.visit, hoursConfirmed: records.hoursConfirmed },
     ...rules,
     platformRules: PLATFORM_RULES,
-    choices: CHOICES,
+    choices: choicesFor(rules.draft.industry),
+    // Example wording for this kind of business; every `teach` example is understood by the fixed patterns (no model).
+    words: (({ excluded, urgent, teach }) => ({ excluded, urgent, teach }))(tradeWords(rules.draft.industry)),
     status: { receptionistOn: Boolean(receptionist.enabled), rulesLive: rulesLiveFor(env, customer.id), provider: voiceAdapter().plan(env, { customerId: customer.id, version: rules.liveVersion }) },
     suggestions: await recommendations(db, customer.id, rules.live || rules.draft, records, now),
     limits: SIM_LIMITS,
@@ -102,7 +106,7 @@ export async function onRequestPost({ request, env }) {
       // Cost and latency of the model call (numbers and codes only; never what the owner typed).
       if (asked && p.ok) await track(env, 'ai_teach_model', { customer: customer.id, props: { costMicros: p.costMicros, ms: Date.now() - started, ...(p.modelError ? { error: p.modelError } : {}) } })
       if (!p.ok) return json(400, { error: p.error })
-      return json(200, { proposal: { source: p.source, ops: p.ops, changes: p.changes, notes: p.notes, refused: p.refused, conflicts: p.conflicts, warnings: p.warnings, notUnderstood: p.notUnderstood, approvable: p.approvable } })
+      return json(200, { proposal: { source: p.source, ops: p.ops, changes: p.changes, notes: p.notes, refused: p.refused, conflicts: p.conflicts, warnings: p.warnings, notUnderstood: p.notUnderstood, clauses: p.clauses, approvable: p.approvable } })
     }
 
     if (b.action === 'simulate') {

@@ -489,9 +489,26 @@ test('"talk to a person": no live transfer is offered; a callback request is one
   // Mark done.
   assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: ownerCookie, body: { action: 'resolve', requestId: rows[0].id } })).status, 200)
   assert.equal((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: ownerCookie })).json().counts.needsAttention, 0)
-  // Another business can't resolve or see it.
+  // REC-04: once its request is done, the conversation no longer needs attention (list and detail agree with the
+  // request list); the stored conversation row is not rewritten. A done request can be reopened (audited), and then
+  // both say "needs attention" again.
+  const convOf = async () => (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: ownerCookie })).json().conversations.find((c) => c.id === rows[0].conversation_id)
+  const detailOf = async () => (await call(ownerApi, 'GET', `/api/dashboard/receptionist?id=${rows[0].conversation_id}`, { cookie: ownerCookie })).json().conversation
+  assert.deepEqual([(await convOf()).status, (await convOf()).handled, (await detailOf()).handled, (await detailOf()).request.open], ['handoff', true, true, false])
+  assert.equal(db.sql.prepare('SELECT status FROM receptionist_conversations WHERE id = ?').get(rows[0].conversation_id).status, 'handoff')
+  assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: ownerCookie, body: { action: 'reopen', requestId: rows[0].id } })).status, 200)
+  o = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie: ownerCookie })).json()
+  assert.deepEqual([o.counts.needsAttention, o.requests[0].status, (await convOf()).handled, (await detailOf()).handled], [1, 'open', false, false])
+  assert.equal(db.sql.prepare('SELECT resolved_at FROM receptionist_requests WHERE id = ?').get(rows[0].id).resolved_at, null)
+  assert.equal(db.sql.prepare("SELECT count(*) AS n FROM audit_log WHERE action = 'receptionist.request_reopened'").get().n, 1)
+  assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: ownerCookie, body: { action: 'reopen', requestId: rows[0].id } })).status, 404, 'already open: nothing to reopen')
+  assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: ownerCookie, body: { action: 'reopen' } })).status, 400)
+  // Another business can't resolve, reopen or see it.
   await seed('beta')
   assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: await owner('beta'), body: { action: 'resolve', requestId: rows[0].id } })).status, 404)
+  await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: ownerCookie, body: { action: 'resolve', requestId: rows[0].id } })
+  assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie: await owner('beta'), body: { action: 'reopen', requestId: rows[0].id } })).status, 404)
+  assert.equal(db.sql.prepare('SELECT status FROM receptionist_requests WHERE id = ?').get(rows[0].id).status, 'resolved')
 })
 
 test('leave a message: recorded with a phone or email; emergencies → safety first + urgent callback guidance', async () => {
@@ -604,6 +621,22 @@ test('owner screen: real capability statuses (phone line never claimed), setting
   const cookie = await owner('alpha')
   const g = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json()
   assert.deepEqual([g.ready, g.settings.enabled, g.capabilities.phoneLine, g.capabilities.voice, g.capabilities.callbacks], [true, false, false, false, true])
+  // REC-01: "Try it as a customer" is offered only when the customer chat page really opens. chatClosed says why it
+  // is closed, by the same checks as the public chat route (off → 'off'; on → open exactly when that route says enabled).
+  const chatPage = async () => (await call(infoApi, 'GET', '/api/receptionist/alpha', { params: { customer: 'alpha' } })).json()
+  assert.equal(g.capabilities.chatClosed, 'off')
+  assert.notEqual((await chatPage()).enabled, true)
+  enable('alpha')
+  assert.equal((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json().capabilities.chatClosed === null, (await chatPage()).enabled === true, 'open for the owner exactly when it is open for a customer')
+  assert.equal((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json().capabilities.chatClosed, null)
+  const key = env.RECEPTIONIST_ANTHROPIC_API_KEY
+  delete env.RECEPTIONIST_ANTHROPIC_API_KEY
+  assert.equal((await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json().capabilities.chatClosed, 'not_answering')
+  env.RECEPTIONIST_ANTHROPIC_API_KEY = key
+  db.sql.prepare("UPDATE customers SET hours_confirmed_at = NULL WHERE id = 'alpha'").run()
+  assert.deepEqual([(await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json().capabilities.chatClosed, (await chatPage()).error], ['setup', 'not_found'])
+  db.sql.prepare("UPDATE customers SET hours_confirmed_at = 5 WHERE id = 'alpha'").run()
+  db.sql.prepare("DELETE FROM receptionist_settings WHERE customer = 'alpha'").run()
   assert.equal((await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie, body: { action: 'settings', enabled: true, mode: 'robot' } })).status, 400)
   const ok = await call(ownerApi, 'POST', '/api/dashboard/receptionist', { cookie, body: { action: 'settings', enabled: true, mode: 'after_hours', greeting: 'Hi from alpha!', knowledge: 'We do not service hot tubs.', transferPhone: '843-555-0100' } })
   assert.deepEqual(ok.json().settings, { enabled: true, mode: 'after_hours', greeting: 'Hi from alpha!', knowledge: 'We do not service hot tubs.', transferPhone: '+18435550100' })

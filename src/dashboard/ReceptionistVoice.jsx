@@ -53,7 +53,9 @@ function PreviewButton({ voice, playing, onPlay }) {
   )
 }
 
-export default function ReceptionistVoice({ voice, admin, providers, reload }) {
+// heard = a customer can hear this voice today (the receptionist is on AND browser voice is on for this business; phone
+// calls don't exist). When nobody can, the card says so and a save never claims that calls use it.
+export default function ReceptionistVoice({ voice, admin, providers, reload, heard = false, off = false }) {
   const [form, setForm] = useState({ voiceId: voice.voiceId, personality: voice.personality, pace: voice.pace })
   const [catalog, setCatalog] = useState(null)
   const [choosing, setChoosing] = useState(false)
@@ -88,7 +90,7 @@ export default function ReceptionistVoice({ voice, admin, providers, reload }) {
     const { status, data } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'voice', ...form, version: voice.version } })
     setBusy(false)
     if (status === 200) {
-      setMsg('Saved. New calls use this from now on.')
+      setMsg(heard ? 'Saved. New voice conversations use this from now on.' : 'Saved. No customer hears it yet: it’s used once browser voice is on for your business.')
       setChoosing(false)
       reload()
     } else if (status === 409 && data?.error === 'stale') {
@@ -104,6 +106,12 @@ export default function ReceptionistVoice({ voice, admin, providers, reload }) {
   }
   return (
     <Section title="Receptionist voice" label="Receptionist voice" id="receptionist-voice">
+      {!heard && (
+        <p className="ui-callout ui-callout--info" role="note" data-voice-unheard>
+          No customer hears this voice yet: {off ? 'the receptionist is off' : 'browser voice isn’t on for your business'}, and phone calls aren’t available. You can choose the voice now; it’s saved and used once
+          customers can talk to your receptionist.
+        </p>
+      )}
       <form className="ui-settings" onSubmit={save} aria-label="Receptionist voice settings">
         <fieldset className="ui-group">
           <legend>Voice</legend>
@@ -179,7 +187,11 @@ export default function ReceptionistVoice({ voice, admin, providers, reload }) {
         </fieldset>
         <fieldset className="ui-group">
           <legend>Personality</legend>
-          <p className="ui-hint">How it comes across. Your prices, service area and booking rules never change with the personality.</p>
+          <p className="ui-hint">How it comes across, in chat and voice. Your prices, service area and booking rules never change with the personality.</p>
+          <p className="ui-hint" data-also="teach-tone">
+            <a href="/dashboard/teach#ta-how">Teach Your AI → Tone</a> is a second setting for its wording. Once your published rules are used with customers, your AI is given both and neither replaces the other, so pick two that
+            agree (for example Professional & Polished here with Polite and formal there).
+          </p>
           <div className="rx-choice-grid" role="radiogroup" aria-label="Personality">
             {voice.personalities.map((p) => (
               <label key={p.id} className={`rx-choice${form.personality === p.id ? ' rx-choice--on' : ''}`}>
