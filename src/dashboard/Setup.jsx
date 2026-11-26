@@ -36,7 +36,13 @@ export default function Setup({ me, reload }) {
   const preview = progress.steps.length === 1 && Boolean(me.signupPlan) && me.checkoutOpen !== false
   const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : progress.steps
   const [editing, setEditing] = useState(null)
-  const [justPaid, setJustPaid] = useState(false)
+  // Back from checkout: Stripe's confirmation can arrive before this page loads, so the plan step is already behind
+  // the owner and never gets to say so. The next step says it once (only when the server reports the plan paid).
+  const [justPaid, setJustPaid] = useState(() => new URLSearchParams(window.location.search).get('billing') === 'success')
+  const paid = steps.find((x) => x.id === 'payment')?.done === true
+  useEffect(() => {
+    if (paid && new URLSearchParams(window.location.search).get('billing')) window.history.replaceState(null, '', '/dashboard')
+  }, [paid])
   const pos = stepPosition(steps, editing)
   const { index, current } = pos
   const done = (info) => {
@@ -79,7 +85,7 @@ export default function Setup({ me, reload }) {
           </ol>
         )}
         <section key={current} className={`panel enter ${current === 'website' || current === 'publish' ? 'panel--wide panel--site' : current === 'address' ? 'panel--medium' : 'panel--narrow'}`} aria-labelledby="step-title">
-          <Step id={current} me={me} done={done} back={!preview && pos.back !== undefined ? () => setEditing(pos.back) : null} revisit={index < pos.frontier} justPaid={justPaid} />
+          <Step id={current} me={me} done={done} back={!preview && pos.back !== undefined ? () => setEditing(pos.back) : null} revisit={index < pos.frontier} justPaid={justPaid && paid} />
         </section>
         {!me.customer && (
           <details className="panel panel--narrow" data-own-account>
@@ -107,7 +113,7 @@ function Step({ id, me, done, back, revisit, justPaid }) {
     return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} customer={customer} /> : <LegacyBusiness customer={customer} onDone={done} />
   }
   if (id === 'payment') return revisit ? <PaidStep billing={progress.billing} onDone={done} back={back} /> : <PaymentStep me={me} onDone={done} back={back} />
-  if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid} />
+  if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid && paid} />
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
   if (id === 'calendar') return <CalendarStep onBack={back} connected={revisit} onDone={done} />
   if (id === 'hours') return <HoursStep customer={customer} onDone={done} back={back} />
@@ -814,19 +820,24 @@ function PublishStep({ onDone, back }) {
 // A calendar date as people say it ("Thu, Nov 26"), the same wording the dashboard's setup check uses.
 const dayText = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 
-// What the dashboard would ask about right after setup (a public holiday on a booking day in the next weeks, no minimum
-// notice), asked here instead, each with one sensible answer. Nothing is applied until the owner taps it; "Not now"
-// leaves booking exactly as it is (the item stays in Settings → Setup check).
+// What the dashboard raises right after setup, shown here first (ONB-04): the setup check's "Fix now" and "Important"
+// items (GET /api/dashboard/setup-check, the same list the Overview and Settings read). The two that have one sensible
+// answer (a public holiday on a booking day in the next weeks; no minimum notice) get a one-tap choice, saved through
+// the same closed-dates and minimum-notice route Settings uses. Nothing is applied until the owner taps it; "Not now"
+// leaves booking exactly as it is, and the item stays in Settings → Setup check. The others link to where they are fixed.
+const ONE_TAP = ['holiday_open', 'no_notice']
 function Decisions() {
   const [d, setD] = useState(null)
+  const [check, setCheck] = useState([])
   const [skipped, setSkipped] = useState([])
   const [applied, setApplied] = useState([])
   const [state, setState] = useState({})
   useEffect(() => {
     api('/api/dashboard/availability').then(({ status, data }) => setD(status === 200 ? data : null))
+    api('/api/dashboard/setup-check').then(({ status, data }) => setCheck(status === 200 ? data.items.filter((x) => x.level !== 'optional' && !ONE_TAP.includes(x.id)) : []))
   }, [])
   const open = setupDecisions(d).filter((x) => !skipped.includes(x.id))
-  if (!open.length && !applied.length) return null
+  if (!open.length && !applied.length && !check.length) return null
   const accept = async (x) => {
     setState({ busy: x.id })
     const { status, data } = await api('/api/dashboard/availability', { method: 'POST', body: acceptDecision(d, x) })
@@ -838,7 +849,7 @@ function Decisions() {
   return (
     <section className="setup-decisions" aria-labelledby="decisions-title" data-decisions>
       <h2 id="decisions-title" className="setup-decisions-title">
-        {open.length ? 'Before customers book' : 'Saved'}
+        {open.length || check.length ? 'Before customers book' : 'Saved'}
       </h2>
       {open.length > 0 && <p className="fine">Nothing changes unless you choose it. You can change these any time in Settings.</p>}
       <ul className="rows">
@@ -855,6 +866,16 @@ function Decisions() {
               <button type="button" className="link-btn" disabled={Boolean(state.busy)} onClick={() => setSkipped((k) => [...k, x.id])}>
                 Not now<span className="sr-only">: {x.kind === 'holiday' ? x.label : 'minimum notice'}</span>
               </button>
+            </div>
+          </li>
+        ))}
+        {check.map((x) => (
+          <li key={x.id} className="row" data-decision="check" data-check={x.id}>
+            <div className="row-main">
+              <p className="row-title">{x.title}</p>
+              <p className="row-sub">
+                {x.why} <a href={`/dashboard/${x.where}`}>{x.fix}</a>
+              </p>
             </div>
           </li>
         ))}

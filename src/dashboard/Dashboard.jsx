@@ -59,6 +59,7 @@ const clearInvite = () => {
 const clearPlan = () => {
   try {
     localStorage.removeItem(PLAN_KEY)
+    localStorage.removeItem('gsu_invited')
   } catch {
     // ignore
   }
@@ -67,7 +68,17 @@ const clearPlan = () => {
 // The entry for people who were told they may start (testers, businesses we set up by hand) while public sign-up is
 // closed: INVITED_HREF (src/lib/enrollment.js), linked from the homepage and from "Welcome back". It only changes the wording
 // of this screen: who may create a business is decided by the server after sign-in, exactly as before.
-const cameInvited = () => new URLSearchParams(window.location.search).get('invited') === '1'
+// Remembered with the plan (same browser, across the Google round trip and a later signed-out visit), and forgotten
+// with it once the account has a business.
+const INVITED_KEY = 'gsu_invited'
+function cameInvited() {
+  try {
+    if (new URLSearchParams(window.location.search).get('invited') === '1') localStorage.setItem(INVITED_KEY, '1')
+    return localStorage.getItem(INVITED_KEY) === '1'
+  } catch {
+    return new URLSearchParams(window.location.search).get('invited') === '1'
+  }
+}
 
 function SignIn({ invite, plan }) {
   const message = LOGIN_ERRORS[new URLSearchParams(window.location.search).get('login_error')]

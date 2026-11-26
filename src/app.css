@@ -1680,6 +1680,12 @@
   align-items: center;
   gap: 8px 16px;
 }
+.setup-decisions .row-actions .btn {
+  flex: none;
+}
+.setup-decisions .row-actions .link-btn {
+  margin: 0;
+}
 .share-link-row {
   display: flex;
   flex-wrap: wrap;

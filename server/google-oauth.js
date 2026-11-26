@@ -289,7 +289,7 @@ export const LOGO_SVG =
   '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b0b0c"/><path d="M19.3 9.5H9a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h11a3 3 0 0 0 3-3V13.2" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 7v4M15 7v4" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"/><path d="M9.5 16L13 19.5L23.21 9.29" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M27.1 5.4L21.09 6.74L25.76 11.41Z" fill="#fff"/></svg>'
 const PRODUCT_CSS =
   'body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#f8fafc;color:#111216;font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}' +
-  'header{background:#fff;border-bottom:1px solid #e3e2de}header div{max-width:880px;margin:0 auto;padding:18px 20px}' +
+  'header{background:#fff;border-bottom:1px solid #e3e2de}header div{max-width:1400px;margin:0 auto;padding:18px clamp(20px,4vw,32px)}' +
   '.logo{display:inline-flex;align-items:center;gap:10px;color:#111216;font-weight:750;font-size:1.15rem;letter-spacing:-.02em;text-decoration:none}.logo span span{color:#c2410c}' +
   'main{flex:1;display:grid;place-items:start center;padding:48px 20px}' +
   '.panel{box-sizing:border-box;width:100%;max-width:460px;padding:clamp(24px,5vw,36px);border:1px solid #fff;border-radius:22px;background:#fff;box-shadow:0 2px 4px rgb(10 11 15/.05),0 24px 60px rgb(10 11 15/.12)}' +
