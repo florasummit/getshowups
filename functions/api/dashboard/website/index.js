@@ -18,7 +18,7 @@ import { approvedClaimsFor } from '../../../../server/landing.js'
 import { displayBrand, assetIdsFor, COLORS, generateContent, hostingStatus, isHosted, loadWebsite, publish, restore, saveDraft, TEMPLATES, unpublish, validateContent } from '../../../../server/website.js'
 import { listAssets } from '../../../../server/assets.js'
 import { domainFor } from '../../../../server/domains.js'
-import { FONTS, PALETTES } from '../../../../server/site-design.js'
+import { FONTS, PALETTES, industryKey, stockFor } from '../../../../server/site-design.js'
 import { aiConfigured, generateWebsite, getGeneration, reviseWebsite } from '../../../../server/website-ai.js'
 import { hit, tooManyJson } from '../../../../server/ratelimit.js'
 import { aiUsage, recordAiUse } from '../../../../server/ai-usage.js'
@@ -26,7 +26,7 @@ import { credentialView } from '../../../../server/ai-credentials.js'
 import { hasStudioOutput, studioAccess, studioPublishAllowed } from '../../../../server/website-studio.js'
 import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } from '../../../../server/website-history.js'
 import { renderSite } from '../../../../server/site-render.js'
-import { starterSite } from '../../../../server/site-starter.js'
+import { missingFor, starterSite, textLedStarter } from '../../../../server/site-starter.js'
 import { starterFacts } from '../../../../server/website-import.js'
 import { siteBusinessInfo } from '../../../../server/site-serve.js'
 
@@ -75,6 +75,8 @@ async function state(env, customer, email) {
     aiUsage(env, customer, email),
     studio ? credentialView(env, customer.id).catch(() => null) : null, // Website Studio only
   ])
+  // The records a website is built from, read once for the full editor: what it still lacks, and its industry's photos.
+  const facts = studio && website.draft?.site ? await starterFacts(env, customer).catch(() => null) : null
   return {
     studio, // Website Studio for this business (server/website-studio.js): designer, own AI key, import
     brand: displayBrand(customer.name, website.draft), // the public name the editor's templates use
@@ -89,6 +91,13 @@ async function state(env, customer, email) {
     ready: customer.hoursConfirmed && Boolean(await env.GOOGLE_TOKENS.get(`google:${customer.id}`)),
     writer: aiConfigured(env) || aiKey?.status === 'ok', // AI copy available (otherwise the template is used)
     checkpoints: studio ? await listCheckpoints(db, customer.id).catch(() => []) : [], // recoverable draft copies
+    // What the website still lacks (records the starter needed, a services section): derived on every load, so the
+    // notice stays until it is resolved (server/site-starter.js missingFor). Empty without a multi-page site.
+    missing: facts ? missingFor(website.draft, facts) : [],
+    // The licensed photos that suit this business (server/site-design.js stockFor: its own industry's only, none for
+    // industries without approved photos). Offered in the editor's photo fields so the photo a design started with
+    // stays choosable after the owner tried another one (finding WEB-07). Never offered for the gallery.
+    stock: facts && !textLedStarter(website.draft, facts) ? stockFor(industryKey({ industry: facts.industry, services: website.draft.services || [], description: facts.description, name: facts.name })).map((x) => `stock:${x.id}`) : [],
     aiKey, // the business's own Claude/OpenAI key (provider + last 4 only), if any
     aiUsage: usage, // today's AI allowance (server/ai-usage.js); manual edits are never limited
     options: {
@@ -171,6 +180,18 @@ export async function onRequestPost({ request, env }) {
         await assetIdsFor(db, customer.id),
       )
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
+      // One editor (finding WEB-01): from the Website tab the chosen design becomes the multi-page website the editor,
+      // History and publishing use, through the same starter path as every other new website (records + this content,
+      // the design's look; nothing invented). `studio` is sent only for a business that has no website yet; without it
+      // (onboarding, an existing single-page website choosing another design) the content keeps its shape.
+      if (body.studio === true && (await studioAccess(env, customer))) {
+        const { site } = starterSite(content, await starterFacts(env, customer), { kinds: ['contact', 'privacy'], now: Date.now(), design: content.design })
+        const [siteErrors, withSite] = validateContent({ ...content, site }, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior: content.services })
+        if (siteErrors.length) return json(400, { error: 'invalid_content', fields: siteErrors })
+        await saveDraft(db, customer.id, withSite)
+        await track(env, 'website_starter', { customer: customer.id })
+        return json(200, await state(env, customer, session.email))
+      }
       await saveDraft(db, customer.id, content)
       return json(200, await state(env, customer, session.email))
     }
@@ -181,9 +202,12 @@ export async function onRequestPost({ request, env }) {
       const loaded = await loadWebsite(db, customer)
       if (loaded.draft.site) return json(409, { error: 'designed_site' })
       const biz = await starterFacts(env, customer)
-      const { site, missing } = starterSite(loaded.draft, biz, { kinds: ['contact', 'privacy'], now: Date.now() })
+      // A draft that already has a chosen design (made in onboarding or with the older editor) keeps that design's look;
+      // the owner asked for this explicitly ("Open in the full editor"), and the draft as it was is kept in History.
+      const { site, missing } = starterSite(loaded.draft, biz, { kinds: ['contact', 'privacy'], now: Date.now(), design: loaded.draft.design })
       const [errors, content] = validateContent({ ...loaded.draft, site }, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior: loaded.draft.services })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
+      if (!loaded.generated) await saveCheckpoint(db, customer.id, loaded.draft, 'before_editor_switch').catch((e) => console.error('checkpoint failed:', e?.name))
       await saveDraft(db, customer.id, content)
       await track(env, 'website_starter', { customer: customer.id })
       // missing: records the starter needed but didn't have (sections left out, never invented), so the owner is asked.
@@ -192,7 +216,8 @@ export async function onRequestPost({ request, env }) {
     if (action === 'save' || action === 'publish') {
       // `prior`: the saved services, so an AI-designed site keeps each service's id (and its description) whatever the
       // page sends back (server/website.js assignServiceIds).
-      const savedDraft = (await loadWebsite(db, customer)).draft
+      const savedSite = await loadWebsite(db, customer)
+      const savedDraft = savedSite.draft
       const prior = savedDraft.services
       const [errors, content] = validateContent(guardLegalPages(await guardStudioFields(env, customer, body.content), savedDraft), await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior })
       if (errors.length) return json(400, { error: 'invalid_content', fields: errors })
@@ -202,8 +227,9 @@ export async function onRequestPost({ request, env }) {
         const expect = body.force === true ? undefined : Number.isFinite(body.baseUpdatedAt) ? body.baseUpdatedAt : undefined
         const saved = await saveDraft(db, customer.id, content, Date.now(), { expect })
         if (saved.conflict) return json(409, { error: 'conflict', ...(await state(env, customer, session.email)) })
-        // A recoverable server copy at most every 10 minutes of editing (best effort: never fails the save).
-        if (await studioAccess(env, customer)) await maybeCheckpoint(db, customer.id, content).catch((e) => console.error('checkpoint failed:', e?.name))
+        // A recoverable server copy of the draft as it was before this save, at most every 2 minutes of editing (best
+        // effort: never fails the save).
+        if (savedSite.updatedAt != null && (await studioAccess(env, customer))) await maybeCheckpoint(db, customer.id, savedDraft, content).catch((e) => console.error('checkpoint failed:', e?.name))
         return json(200, await state(env, customer, session.email))
       }
       if (body.confirm !== true) return json(400, { error: 'confirmation_required' })

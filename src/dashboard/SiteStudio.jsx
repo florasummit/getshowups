@@ -8,6 +8,8 @@ import { api } from '../lib/api.js'
 import { makePhoneCopy, uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 import { ADDABLE, BACKGROUNDS, BUTTONS, FONT_PAIRS, LAYOUTS, PAGE_TYPES, SECTION_LABEL, colorsFor, newId, pageTemplate, sectionTemplate, takenIds, toneOf } from './site-templates.js'
 import { draftPlaces, replacePhoto, usageText } from './photo-refs.js'
+import { ConfirmInline } from './ui.jsx'
+import { plural } from '../lib/format.js'
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
 // Per-viewer conveniences, per business (storeKey). Every read and write is wrapped: private mode or blocked storage
@@ -37,6 +39,9 @@ const session = store(() => window.sessionStorage)
 // history entry, so Back closes the top layer before leaving Studio; closing a layer from the page removes its entry,
 // and Forward into an entry whose layer was closed never re-opens it. Layers are numbered by depth (history.state).
 const Layers = createContext(null)
+// Questions before something is removed or replaced: asked in the page (one ConfirmInline at the top of the edit panel,
+// brought into view), never in a browser dialog. ask({ question, detail, confirmLabel, danger, run }).
+const Ask = createContext(() => {})
 function useHistoryLayers() {
   const open = useRef([]) // [{ id, depth, close }]
   const skip = useRef(0)
@@ -161,7 +166,11 @@ function startState(website, storeKey) {
   }
 }
 
-function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoints = [], storeKey, onSaved, onUnsaved }) {
+function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoints = [], versions = [], restoring = false, onRestoreVersion, stock = [], storeKey, onSaved, onUnsaved }) {
+  const [asking, setAsking] = useState(null)
+  const ask = useCallback((q) => setAsking(q), [])
+  // Where "+ Add a page…" was chosen: the page types are offered right there ('bar' = under the page menu, 'panel').
+  const [addingPage, setAddingPage] = useState(null)
   const start = useMemo(() => startState(website, storeKey), []) // eslint-disable-line react-hooks/exhaustive-deps -- once per editor
   const writeBackup = useCallback((v) => local.write(start.backupKey, v), [start])
   const [content, setContent] = useState(start.content)
@@ -193,6 +202,13 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
     const copies = new Set(Object.values(content.variants || {}))
     return assets.filter((a) => !copies.has(a.id) && !a.logo && a.id !== content.logo)
   }, [assets, content.variants, content.logo])
+  // A photo uploaded from a photo field (not only from the Photos tab): it joins the library with its phone-sized copy.
+  // (The copy is recorded a moment later, as its own edit, so it never overwrites the edit that places the photo.)
+  const changeRef = useRef(null)
+  const addUploaded = (r) => {
+    setAssets((l) => [{ ...r.asset, createdAt: Date.now() }, ...l, ...(r.small ? [r.small] : [])])
+    if (r.small) setTimeout(() => changeRef.current?.((c) => (c.variants = { ...(c.variants || {}), [r.asset.id]: r.small.id })), 60)
+  }
   const biz = useMemo(
     () => ({ name: brand || 'Our business', services: content.services || [], area: content.area || '', about: content.about || '', photos: photoAssets.map((a) => a.id), visit: Boolean(visit) }),
     [brand, visit, content.services, content.area, content.about, photoAssets],
@@ -212,6 +228,9 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
     dirty.current = true
     setContent(next)
   }
+  useEffect(() => {
+    changeRef.current = change
+  })
   const undo = () => {
     if (!past.length) return
     setFuture((f) => [content, ...f])
@@ -555,15 +574,22 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
     delete copy.hidden
     p.sections.splice(i + 1, 0, copy)
   })
-  const removeSection = (id) => {
-    if (!window.confirm('Remove this section? You can undo this.')) return
-    editPage((p) => p.sections.splice(p.sections.findIndex((x) => x.id === id), 1))
-    setSelected(null)
-    setSelRect(null)
-  }
+  const removeSection = (id) =>
+    ask({
+      question: `Remove the “${SECTION_LABEL[page.sections[sectionAt(id)]?.type] || 'section'}” section?`,
+      detail: 'It leaves this page of your draft. You can undo this.',
+      confirmLabel: 'Remove section',
+      run: () => {
+        editPage((p) => p.sections.splice(p.sections.findIndex((x) => x.id === id), 1))
+        setSelected(null)
+        setSelRect(null)
+      },
+    })
   const addSectionAfter = (id, type) => {
     change((c) => {
       const p = c.site.pages[pageIndex]
+      // A Services section lists the shared services: with none yet it would be empty (and dropped), so it starts with one.
+      if (type === 'services' && !c.services?.length) c.services = [{ name: 'New service', price: '', description: '' }]
       const s2 = sectionTemplate(type, biz, newId(type, takenIds(c.site)))
       const at = id ? p.sections.findIndex((x) => x.id === id) + 1 : p.sections.length
       p.sections.splice(at || p.sections.length, 0, s2)
@@ -594,7 +620,6 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
 
   // Bring back an earlier server copy of the draft (the current draft is kept as a copy first, so this can be undone).
   const restoreVersion = async (id) => {
-    if (!window.confirm('Bring back this earlier version of your draft? Your current draft is kept in History, so you can switch back. Your live website doesn’t change.')) return
     const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'restoreCheckpoint', id } })
     if (status !== 200) return setSave({ state: 'failed', retrying: false })
     dirty.current = false
@@ -622,6 +647,7 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
   const popValue = pop ? readAt(pop.sid, pop.path) : null
 
   return (
+    <Ask.Provider value={ask}>
     <section className={`studio${full ? ' studio--full' : ''}`} aria-label="Website Studio editor">
       <div className="studio-bar">
         <label className="studio-page">
@@ -630,9 +656,9 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
             value={page.slug}
             onChange={(e) => {
               if (e.target.value === '__add') {
+                // The page types appear right here, under the menu that was used (finding WEB-11).
                 setMode('edit')
-                setTab('page')
-                setTimeout(() => document.getElementById('studio-add-page')?.focus(), 50)
+                setAddingPage('bar')
                 return
               }
               setSlug(e.target.value)
@@ -676,6 +702,11 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
         </div>
         <SaveState save={save} onRetry={() => saveNow()} />
       </div>
+      {addingPage === 'bar' && (
+        <div className="studio-notice studio-addpage">
+          <AddPage site={site} biz={biz} autoFocus onDone={(made) => (setAddingPage(null), made && (change((c) => c.site.pages.push(clone(made))), setSlug(made.slug), setSelected(null)))} />
+        </div>
+      )}
       {resumed && (
         <div className="studio-notice" role="status">
           <span>We brought back the changes you hadn’t saved yet.</span>
@@ -780,6 +811,8 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
                   path={pop.path}
                   section={page.sections.find((x) => x.id === pop.sid)}
                   assets={photoAssets}
+                  stock={stock}
+                  onUploaded={addUploaded}
                   change={(fn) => editPage((p) => fn(p.sections.find((x) => x.id === pop.sid)))}
                   onRemoved={() => setPop(null)}
                   onMore={() => setTab('photos')}
@@ -790,6 +823,23 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
         </div>
         {mode === 'edit' && (
           <aside className="studio-panel" aria-label="Edit panel">
+            {asking && (
+              <div className="studio-ask" ref={(el) => el?.scrollIntoView?.({ block: 'nearest' })}>
+                <ConfirmInline
+                  question={asking.question}
+                  detail={asking.detail}
+                  confirmLabel={asking.confirmLabel}
+                  danger={asking.danger !== false}
+                  busy={Boolean(asking.busy)}
+                  onConfirm={async () => {
+                    setAsking((a) => ({ ...a, busy: true }))
+                    await asking.run()
+                    setAsking(null)
+                  }}
+                  onCancel={() => setAsking(null)}
+                />
+              </div>
+            )}
             <div className="studio-tabs" role="tablist" aria-label="Edit">
               {[
                 ...(section ? [['section', SECTION_LABEL[section.type]]] : []),
@@ -805,11 +855,11 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
             </div>
             {tab === 'section' &&
               (section ? (
-                <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
+                <SectionEditor key={section.id + focus} section={section} site={site} page={page} services={content.services} assets={photoAssets} stock={stock} onUploaded={addUploaded} focus={focus} onChange={editSection} onServices={(fn) => change((c) => fn(c.services))} />
               ) : (
                 <p className="studio-empty">Click any part of your website to edit it.</p>
               ))}
-            {tab === 'page' && <PageEditor site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} actionsFor={actionsFor} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s2) => (setSlug(s2), setSelected(null))} onAdd={(type) => addSectionAfter(selected, type)} />}
+            {tab === 'page' && <PageEditor adding={addingPage === 'panel'} onAdding={(on) => setAddingPage(on ? 'panel' : null)} site={site} page={page} pageIndex={pageIndex} selected={selected} biz={biz} actionsFor={actionsFor} onSelect={(id) => (setSelected(id), setTab('section'))} onPage={editPage} onSite={(fn) => change((c) => fn(c.site, c))} onGo={(s2) => (setSlug(s2), setSelected(null))} onAdd={(type) => addSectionAfter(selected, type)} />}
             {tab === 'site' && (
               <>
                 <LogoPanel
@@ -824,7 +874,7 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
                   }}
                   onUploaded={(a) => setAssets((l) => [a, ...l])}
                 />
-                <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} services={content.services} onServices={(fn) => change((c) => fn(c.services))} />
+                <LookEditor site={site} onSite={(fn) => change((c) => fn(c.site, c))} />
               </>
             )}
             {tab === 'photos' && (
@@ -852,11 +902,12 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
                 }}
               />
             )}
-            {tab === 'history' && <HistoryPanel checkpoints={checkpoints} busy={save.state !== 'saved'} onRestore={restoreVersion} />}
+            {tab === 'history' && <HistoryPanel checkpoints={checkpoints} versions={versions} busy={save.state !== 'saved' || restoring} onRestore={restoreVersion} onRestoreVersion={onRestoreVersion} />}
           </aside>
         )}
       </div>
     </section>
+    </Ask.Provider>
   )
 }
 
@@ -988,7 +1039,7 @@ function Popover({ rect, stage, tall = false, onClose, children }) {
 // The clicked photo: choose another, frame it (focus point + shape), describe it.
 // "No photo" really removes it: a section photo is cleared; an opening's photo block is removed (a photo block without a
 // photo would be empty). It used to be ignored, so an unwanted picture could be swapped but never removed.
-function PhotoPop({ path, section, assets, change, onMore, onRemoved }) {
+function PhotoPop({ path, section, assets, stock, onUploaded, change, onMore, onRemoved }) {
   const block = /^blocks\.\d+$/.test(path) ? Number(path.split('.')[1]) : null
   const b = block !== null ? section?.blocks?.[block] : null
   const value = b ? b.image : section?.image
@@ -998,6 +1049,8 @@ function PhotoPop({ path, section, assets, change, onMore, onRemoved }) {
       value={value}
       alt={b ? b.alt : section?.imageAlt}
       assets={assets}
+      stock={stock}
+      onUploaded={onUploaded}
       onChange={(v) => {
         if (v) return change((s2) => (b ? (s2.blocks[block].image = v) : (s2.image = v)))
         change((s2) => (b ? s2.blocks.splice(block, 1) : delete s2.image))
@@ -1115,11 +1168,26 @@ function Framing({ src, focus, aspect, onFocus, onAspect }) {
   )
 }
 
-function ImageField({ label, value, alt, assets, onChange, onAlt, focus, aspect, onFocus, onAspect }) {
+// `stock`: the licensed photos that suit this business (the ones a design starts with): they stay choosable after the
+// owner tried another photo. `onUploaded`: a photo can be added right here (finding WEB-07), not only under Photos.
+function ImageField({ label, value, alt, assets, stock = [], onUploaded, onChange, onAlt, focus, aspect, onFocus, onAspect }) {
+  const [state, setState] = useState({})
   const id = value?.startsWith('asset:') ? value.slice(6) : null
-  // The picture in use, when it isn't one of the choices (a stock photo, or a logo that was placed as a photo): shown so
-  // the owner can see exactly what "No photo" removes.
-  const current = value && !assets.some((a) => a.id === id) ? (id ? `/site-assets/${id}` : value.startsWith('stock:') ? `/site-stock/${value.slice(6)}-sm.jpg` : null) : null
+  // The picture in use, when it isn't one of the choices (a logo that was placed as a photo, a photo of another
+  // industry): shown so the owner can see exactly what "No photo" removes.
+  const current = value && !assets.some((a) => a.id === id) && !stock.includes(value) ? (id ? `/site-assets/${id}` : value.startsWith('stock:') ? `/site-stock/${value.slice(6)}-sm.jpg` : null) : null
+  const upload = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > 10 * 1024 * 1024) return setState({ error: `${file.name} is larger than 10 MB. Choose a smaller photo.` })
+    setState({ busy: true })
+    const r = await uploadPhotoWithCopy(file)
+    setState(r.error ? { error: r.error } : {})
+    if (!r.asset) return
+    onUploaded?.(r)
+    onChange(`asset:${r.asset.id}`)
+  }
   return (
     <fieldset className="field studio-group">
       <legend>{label}</legend>
@@ -1135,13 +1203,30 @@ function ImageField({ label, value, alt, assets, onChange, onAlt, focus, aspect,
             <img src={a.url} alt="" />
           </button>
         ))}
+        {stock.map((ref) => (
+          <button key={ref} type="button" className="studio-thumb" data-stock aria-pressed={ref === value} onClick={() => onChange(ref)} aria-label="Use this photo from our library">
+            <img src={`/site-stock/${ref.slice(6)}-sm.jpg`} alt="" />
+          </button>
+        ))}
+      </div>
+      <div className="studio-photo-actions">
+        {onUploaded && (
+          <label className="btn btn-quiet btn-sm">
+            {state.busy ? 'Uploading…' : 'Upload a photo'}
+            <input type="file" accept="image/*" className="sr-only" onChange={upload} disabled={state.busy} data-testid="field-photo-file" />
+          </label>
+        )}
         {value && (
           <button type="button" className="link-btn" onClick={() => onChange(null)}>
             No photo
           </button>
         )}
       </div>
-      {!assets.length && <p className="fine">Add photos under Photos first.</p>}
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
       {onAlt && <Text label="Describe the photo (for screen readers and Google)" value={alt} max={140} onChange={onAlt} />}
     </fieldset>
   )
@@ -1175,7 +1260,8 @@ function Items({ label, items, fields, max = 10, onChange, blank }) {
 }
 
 // ---------- section ----------
-function SectionEditor({ section: s, site, page, services, assets, focus, onChange, onServices }) {
+function SectionEditor({ section: s, site, page, services, assets, stock, onUploaded, focus, onChange, onServices }) {
+  const ask = useContext(Ask)
   const set = (k) => (v) => onChange((x) => (v === null ? delete x[k] : (x[k] = v)))
   const head = (
     <>
@@ -1195,20 +1281,20 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
           ) : b.kind === 'button' ? (
             <ButtonFields key={i} title="Button" cta={{ label: b.label, target: b.target }} site={site} page={page} call={false} autoFocus={focus === 'button'} onChange={(c) => onChange((x) => Object.assign(x.blocks[i], c))} />
           ) : b.kind === 'media' ? (
-            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} onChange={(v) => onChange((x) => (v ? (x.blocks[i].image = v) : x.blocks.splice(i, 1)))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
+            <ImageField key={i} label="Photo" value={b.image} alt={b.alt} assets={assets} stock={stock} onUploaded={onUploaded} onChange={(v) => onChange((x) => (v ? (x.blocks[i].image = v) : x.blocks.splice(i, 1)))} onAlt={(v) => onChange((x) => (x.blocks[i].alt = v))} focus={b.focus} aspect={b.aspect} onFocus={(v) => onChange((x) => (x.blocks[i].focus = v))} onAspect={(v) => onChange((x) => (x.blocks[i].aspect = v))} />
           ) : null,
         )}
       {s.type === 'hero' && (
         <>
           <ButtonFields title="Main button" cta={s.primaryCta} site={site} page={page} autoFocus={focus === 'button'} onChange={set('primaryCta')} />
           <ButtonFields title="Second button" cta={s.secondaryCta} site={site} page={page} removable onChange={set('secondaryCta')} />
-          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
+          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} stock={stock} onUploaded={onUploaded} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
         </>
       )}
       {(s.type === 'text' || s.type === 'imageText') && <Text label="Text" value={s.body} max={2400} area autoFocus={focus === 'text'} onChange={set('body')} />}
       {s.type === 'imageText' && (
         <>
-          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
+          <ImageField label="Photo" value={s.image} alt={s.imageAlt} assets={assets} stock={stock} onUploaded={onUploaded} onChange={set('image')} onAlt={set('imageAlt')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />
           <Choice label="Photo side" value={s.imageSide} options={[['left', 'Left'], ['right', 'Right']]} onChange={set('imageSide')} />
           <ButtonFields title="Button" cta={s.cta} site={site} page={page} removable onChange={set('cta')} />
         </>
@@ -1216,7 +1302,9 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
       {s.type === 'services' && (
         <fieldset className="field studio-group">
           <legend>Services</legend>
-          <p className="fine">Names and prices are shared by your whole website and booking page.</p>
+          <p className="fine">
+            One list for your whole website: a name or price changed here changes on every page of your draft, and visitors see it when you publish. Your booking page takes its services from <a href="/dashboard/settings#services">Settings → Services</a>, so change a price there too.
+          </p>
           {s.items.map((it, i) => {
             const k = (services || []).findIndex((v) => v.id === it.serviceId)
             const svc = services?.[k]
@@ -1226,9 +1314,25 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
                 <Text label="Service" value={svc.name} max={60} onChange={(v) => onServices((l) => (l[k].name = v))} />
                 <Text label="Price (optional)" value={svc.price} max={40} onChange={(v) => onServices((l) => (l[k].price = v))} />
                 <Text label="Description on this page" value={it.text} max={400} area onChange={(v) => onChange((x) => (x.items[i].text = v))} />
+                <button type="button" className="link-btn" onClick={() => ask({ question: `Remove ${svc.name || 'this service'}?`, detail: 'It leaves every page of your draft. You can undo this.', confirmLabel: 'Remove service', run: () => onServices((l) => l.splice(l.findIndex((v) => v.id === it.serviceId), 1)) })}>
+                  Remove service
+                </button>
               </div>
             )
           })}
+          {(services || []).length < 12 && (
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => onServices((l) => l.push({ name: 'New service', price: '', description: '' }))}>
+              Add a service
+            </button>
+          )}
+          {(services || []).map((v, k) =>
+            v.id ? null : (
+              <div key={`new-${k}`} className="studio-item">
+                <Text label="Service" value={v.name} max={60} onChange={(x) => onServices((l) => (l[k].name = x))} />
+                <Text label="Price (optional)" value={v.price} max={40} onChange={(x) => onServices((l) => (l[k].price = x))} />
+              </div>
+            ),
+          )}
           <label className="check">
             <input type="checkbox" checked={s.showPrices !== false} onChange={(e) => onChange((x) => (x.showPrices = e.target.checked))} /> Show prices
           </label>
@@ -1254,7 +1358,7 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
         </fieldset>
       )}
       {s.type === 'cta' && <ButtonFields title="Button" cta={s.cta} site={site} page={page} autoFocus={focus === 'button'} onChange={set('cta')} />}
-      {s.type === 'cta' && s.layout === 'split' && <ImageField label="Photo" value={s.image} assets={assets} onChange={set('image')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />}
+      {s.type === 'cta' && s.layout === 'split' && <ImageField label="Photo" value={s.image} assets={assets} stock={stock} onUploaded={onUploaded} onChange={set('image')} focus={s.imageFocus} aspect={s.imageAspect} onFocus={set('imageFocus')} onAspect={set('imageAspect')} />}
       {s.type === 'contact' && (
         <>
           <Choice label="Form" value={s.form || 'none'} options={[['none', 'No form (booking button only)'], ['contact', 'Contact form'], ['quote', 'Quote-request form']]} onChange={set('form')} />
@@ -1279,10 +1383,9 @@ function SectionEditor({ section: s, site, page, services, assets, focus, onChan
 }
 
 // ---------- page ----------
-function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect, onPage, onSite, onGo, onAdd }) {
+function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect, onPage, onSite, onGo, onAdd, adding: addingPage, onAdding }) {
+  const ask = useContext(Ask)
   const [adding, setAdding] = useState('')
-  const [newPage, setNewPage] = useState('')
-  const [service, setService] = useState('')
   const [drag, setDrag] = useState(null)
   // Drag a row onto another to move it there (the first screen of the home page stays first).
   const dropOn = (to) => {
@@ -1366,11 +1469,17 @@ function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect
                 <button
                   type="button"
                   className="link-btn"
-                  onClick={() => {
-                    if (!window.confirm(`Delete the ${p.navLabel} page? Buttons that pointed to it will go to your booking page instead. You can undo this.`)) return
-                    onSite((st) => st.pages.splice(i, 1))
-                    onGo('')
-                  }}
+                  onClick={() =>
+                    ask({
+                      question: `Delete the ${p.navLabel} page?`,
+                      detail: 'Buttons that pointed to it will go to your booking page instead. You can undo this.',
+                      confirmLabel: 'Delete page',
+                      run: () => {
+                        onSite((st) => st.pages.splice(i, 1))
+                        onGo('')
+                      },
+                    })
+                  }
                 >
                   Delete
                 </button>
@@ -1379,27 +1488,37 @@ function PageEditor({ site, page, pageIndex, selected, biz, actionsFor, onSelect
           </li>
         ))}
       </ol>
-      {site.pages.length < 10 && (
-        <div className="studio-add">
-          <Choice id="studio-add-page" label="Add a page" value={newPage} options={[['', 'Choose…'], ...PAGE_TYPES]} onChange={setNewPage} />
-          {newPage === 'service' && <Choice label="Which service" value={service} options={[['', 'Choose…'], ...biz.services.map((s) => [s.id, s.name])]} onChange={setService} />}
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={!newPage || (newPage === 'service' && !service)}
-            onClick={() => {
-              const made = pageTemplate(newPage, biz, site, { service: biz.services.find((s) => s.id === service) })
-              setNewPage('')
-              setService('')
-              if (!made) return
-              onSite((st) => st.pages.push(clone(made)))
-              onGo(made.slug)
-            }}
-          >
-            Add page
+      {site.pages.length < 10 &&
+        (addingPage ? (
+          <AddPage site={site} biz={biz} autoFocus onDone={(made) => (onAdding(false), made && (onSite((st) => st.pages.push(clone(made))), onGo(made.slug)))} />
+        ) : (
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => onAdding(true)}>
+            Add a page…
           </button>
-        </div>
-      )}
+        ))}
+    </div>
+  )
+}
+
+// Choose a page type (and, for one service, which) and add it. Shown where "Add a page" was pressed: under the page
+// menu, or in the Pages list. onDone(page | null).
+function AddPage({ site, biz, autoFocus = false, onDone }) {
+  const [kind, setKind] = useState('')
+  const [service, setService] = useState('')
+  const box = useRef(null)
+  useEffect(() => {
+    if (autoFocus) box.current?.querySelector('select')?.focus()
+  }, [autoFocus])
+  return (
+    <div className="studio-add" ref={box}>
+      <Choice id="studio-add-page" label="Add a page" value={kind} options={[['', 'Choose…'], ...PAGE_TYPES]} onChange={setKind} />
+      {kind === 'service' && <Choice label="Which service" value={service} options={[['', 'Choose…'], ...biz.services.map((v) => [v.id, v.name])]} onChange={setService} />}
+      <button type="button" className="btn btn-sm" disabled={!kind || (kind === 'service' && !service)} onClick={() => onDone(pageTemplate(kind, biz, site, { service: biz.services.find((v) => v.id === service) }) || null)}>
+        Add page
+      </button>
+      <button type="button" className="btn btn-quiet btn-sm" onClick={() => onDone(null)}>
+        Cancel
+      </button>
     </div>
   )
 }
@@ -1468,7 +1587,7 @@ function LogoPanel({ logo, assets, variants, onLogo, onUploaded }) {
 }
 
 // ---------- look ----------
-function LookEditor({ site, onSite, services, onServices }) {
+function LookEditor({ site, onSite }) {
   const t = site.theme
   const tone = toneOf(t.colors) || 'custom'
   const pair = FONT_PAIRS.find(([h, b]) => h === t.headingFont && b === t.bodyFont)
@@ -1487,22 +1606,6 @@ function LookEditor({ site, onSite, services, onServices }) {
       <Choice label="Corners" value={String(t.radius <= 2 ? 0 : t.radius <= 10 ? 8 : t.radius <= 18 ? 14 : 24)} options={[['0', 'Square'], ['8', 'Slightly rounded'], ['14', 'Rounded'], ['24', 'Very rounded']]} onChange={(v) => onSite((st) => (st.theme.radius = Number(v)))} />
       <h3>Footer</h3>
       <Text label="Footer line" value={site.footer.text} max={200} onChange={(v) => onSite((st) => (st.footer.text = v))} />
-      <h3>Services and prices</h3>
-      <p className="fine">Shared by your website and booking page.</p>
-      {(services || []).map((s, i) => (
-        <div key={s.id || i} className="studio-item">
-          <Text label="Service" value={s.name} max={60} onChange={(v) => onServices((l) => (l[i].name = v))} />
-          <Text label="Price (optional)" value={s.price} max={40} onChange={(v) => onServices((l) => (l[i].price = v))} />
-          <button type="button" className="link-btn" onClick={() => window.confirm(`Remove ${s.name}?`) && onServices((l) => l.splice(i, 1))}>
-            Remove service
-          </button>
-        </div>
-      ))}
-      {(services || []).length < 12 && (
-        <button type="button" className="btn btn-quiet btn-sm" onClick={() => onServices((l) => l.push({ name: 'New service', price: '', description: '' }))}>
-          Add a service
-        </button>
-      )}
     </div>
   )
 }
@@ -1517,6 +1620,7 @@ function LookEditor({ site, onSite, services, onServices }) {
 // `stamp`: the dashboard's draft stamp (website.updatedAt): a publish or a version restore changes what the live website
 // shows, so usage is read again (otherwise "your live website" would be stale and Delete withheld or offered wrongly).
 function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemoved, onReload, onReplace, onHidden }) {
+  const ask = useContext(Ask)
   const [state, setState] = useState({})
   const [usage, setUsage] = useState(null) // { [id]: usage } | null while loading | { failed }
   const [hidden, setHidden] = useState([])
@@ -1566,11 +1670,17 @@ function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemov
     if (added.length) onAdded(added)
     setState(error ? { error } : {})
   }
-  const remove = async (id) => {
+  const remove = (id) => {
     const s = statusOf({ id })
     const where = s.stored ? usageText([], { ...s.u, draft: false, live: false }).join(' and ') : ''
-    const ask = where ? `Delete this photo for good? It isn’t on your website or in your draft, but ${where} still show it: they will no longer, and restoring them can’t bring it back.` : 'Delete this photo for good? It isn’t used anywhere on your website, in saved versions or in History.'
-    if (!window.confirm(ask)) return
+    ask({
+      question: 'Delete this photo for good?',
+      detail: where ? `It isn’t on your website or in your draft, but ${where} still show it: they will no longer, and restoring them can’t bring it back.` : 'It isn’t used anywhere on your website, in saved versions or in History.',
+      confirmLabel: 'Delete photo',
+      run: () => destroy(id),
+    })
+  }
+  const destroy = async (id) => {
     const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'destroy', id, confirm: true } })
     if (status === 200) {
       for (const x of data.removed || [id]) onRemoved(x)
@@ -1579,8 +1689,11 @@ function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemov
     } else setState({ error: data?.error === 'live' ? 'That photo is on your live website. Remove it from your website and publish first.' : data?.error === 'in_draft' ? 'That photo is in your draft. Remove it from your website first.' : 'Couldn’t delete that photo. Please try again.' })
     loadUsage()
   }
-  const hide = async (id, on) => {
-    if (on && !window.confirm('Hide this photo? It leaves your photo list and the photo choices. It is kept, so restoring a saved version or an earlier draft that shows it still works. You can show it again below.')) return
+  const hide = (id, on) =>
+    on
+      ? ask({ question: 'Hide this photo?', detail: 'It leaves your photo list and the photo choices. It is kept, so restoring a saved version or an earlier draft that shows it still works. You can show it again below.', confirmLabel: 'Hide photo', danger: false, run: () => setHidden2(id, true) })
+      : setHidden2(id, false)
+  const setHidden2 = async (id, on) => {
     const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: on ? 'hide' : 'show', id } })
     if (status === 200) {
       if (on) onHidden(id)
@@ -1591,10 +1704,17 @@ function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemov
   }
   const replace = (from, to) => {
     const n = draftPlaces(content, from).length
-    if (!window.confirm(`Use the new photo in ${n === 1 ? 'that place' : `all ${n} places`} in your draft? You can undo this. Your live website changes only when you publish.`)) return
-    const count = onReplace(from, to)
-    setReplacing(null)
-    setState({ note: count ? `Replaced in your draft (${count} place${count === 1 ? '' : 's'}). Publish to show it on your live website.` : 'Nothing to replace.' })
+    ask({
+      question: `Use the new photo in ${n === 1 ? 'that place' : `all ${n} places`} in your draft?`,
+      detail: 'You can undo this. Your live website changes only when you publish.',
+      confirmLabel: 'Replace photo',
+      danger: false,
+      run: () => {
+        const count = onReplace(from, to)
+        setReplacing(null)
+        setState({ note: count ? `Replaced in your draft (${plural(count, 'place')}). Publish to show it on your live website.` : 'Nothing to replace.' })
+      },
+    })
   }
   // Phone-sized copies for photos uploaded before copies existed (made in this browser from our own copy).
   const makeCopies = async () => {
@@ -1607,20 +1727,20 @@ function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemov
       else failed++
     }
     if (made.length) onAdded(made)
-    setState(failed ? { error: `Phone versions made for ${made.length} photos; ${failed} couldn’t be made (try again later).` } : { note: `Phone versions made for ${made.length} photo${made.length === 1 ? '' : 's'}.` })
+    setState(failed ? { error: `Phone versions made for ${made.length} photos; ${failed} couldn’t be made (try again later).` } : { note: `Phone versions made for ${plural(made.length, 'photo')}.` })
   }
-  const cleanup = async () => {
-    if (!window.confirm('Remove every photo that isn’t used anywhere (your draft, your live website, saved versions or earlier drafts)? Photos in use are kept.')) return
+  const cleanup = () => ask({ question: 'Remove every photo that isn’t used anywhere?', detail: 'That means not in your draft, your live website, saved versions or earlier drafts. Photos in use are kept.', confirmLabel: 'Remove unused photos', run: cleanupNow })
+  const cleanupNow = async () => {
     setState({ busy: 'Removing unused photos…' })
     const { status, data } = await api('/api/dashboard/website/assets', { method: 'POST', body: { action: 'cleanup' } })
     if (status !== 200) return setState({ error: 'Couldn’t remove unused photos. Please try again.' })
     await onReload()
-    setState({ note: data.removed ? `Removed ${data.removed} unused file${data.removed === 1 ? '' : 's'} (${(data.bytesFreed / 1048576).toFixed(1)} MB freed). Photos in use were kept.` : 'Every photo is in use; nothing was removed.' })
+    setState({ note: data.removed ? `Removed ${plural(data.removed, 'unused file')} (${(data.bytesFreed / 1048576).toFixed(1)} MB freed). Photos in use were kept.` : 'Every photo is in use; nothing was removed.' })
   }
   return (
     <div className="studio-photos">
       <p className="fine">
-        {photos.length} photos · {(used / 1048576).toFixed(1)} of 50 MB used. Photos are resized before they’re stored, with a smaller copy for phones. Videos aren’t hosted.
+        {plural(photos.length, 'photo')} · {(used / 1048576).toFixed(1)} of 50 MB used. Photos are resized before they’re stored, with a smaller copy for phones. Videos aren’t hosted.
       </p>
       <div className="studio-photo-actions">
         <label className="btn btn-sm">
@@ -1723,27 +1843,84 @@ function PhotosPanel({ assets, variants, content, saved, stamp, onAdded, onRemov
 }
 
 // ---------- history ----------
-const REASON = { autosave: 'Saved while editing', published: 'Published', before_restore: 'Before a restore', before_version_restore: 'Before going back to a published version', before_designer_change: 'Before a designer change' }
-function HistoryPanel({ checkpoints, busy, onRestore }) {
-  const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+const REASON = { autosave: 'While editing', published: 'When you published', before_restore: 'Before a restore', before_version_restore: 'Before going back to a published version', before_designer_change: 'Before a designer change', before_editor_switch: 'Before opening the full editor' }
+const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+// ONE place for every earlier version (finding WEB-12): copies of the draft (restoring changes only the draft) and the
+// versions that were published (restoring changes the live website). Each can be looked at first (finding WEB-03).
+function HistoryPanel({ checkpoints, versions = [], busy, onRestore, onRestoreVersion }) {
+  const ask = useContext(Ask)
   return (
     <div className="studio-history-panel">
-      <p className="fine">Earlier versions of your draft, saved automatically (the newest 20 are kept). Restoring one changes only your draft.</p>
+      <h3>Earlier drafts</h3>
+      <p className="fine">Copies of your draft, kept every couple of minutes while you edit and whenever you publish or restore (the newest 30). Restoring one changes only your draft, not your live website.</p>
       {busy && <p className="fine">Waiting for your latest changes to save…</p>}
-      {!checkpoints.length && <p className="fine">No earlier versions yet. One is saved every 10 minutes while you edit, and when you publish.</p>}
-      <ol className="studio-sections">
+      {!checkpoints.length && <p className="fine">No earlier drafts yet. The first one is kept when you make your next change.</p>}
+      <ol className="studio-sections studio-versions" aria-label="Earlier drafts">
         {checkpoints.map((c) => (
           <li key={c.id}>
             <span>
               <strong>{when(c.createdAt)}</strong>
-              <span className="fine"> · {REASON[c.reason] || 'Saved'} · {c.pages} page{c.pages === 1 ? '' : 's'}</span>
+              <span className="fine"> · {REASON[c.reason] || 'Saved'} · {plural(c.pages, 'page')}</span>
             </span>
-            <button type="button" className="link-btn" disabled={busy} onClick={() => onRestore(c.id)}>
-              Restore
-            </button>
+            <span className="studio-section-actions">
+              <a className="link-btn" href={`/api/dashboard/website/preview?checkpoint=${c.id}`} target="_blank" rel="noreferrer" aria-label={`View the draft from ${when(c.createdAt)} in a new tab`}>
+                View
+              </a>
+              <button
+                type="button"
+                className="link-btn"
+                disabled={busy}
+                aria-label={`Restore the draft from ${when(c.createdAt)}`}
+                onClick={() =>
+                  ask({
+                    question: `Go back to your draft from ${when(c.createdAt)}?`,
+                    detail: 'Everything in your draft goes back to how it was then: text, prices, photos, the order of sections and pages you added or removed since. Your draft as it is now is kept here in History, so you can switch back. Your live website doesn’t change.',
+                    confirmLabel: 'Restore this draft',
+                    danger: false,
+                    run: () => onRestore(c.id),
+                  })
+                }
+              >
+                Restore
+              </button>
+            </span>
           </li>
         ))}
       </ol>
+      {versions.length > 0 && onRestoreVersion && (
+        <>
+          <h3>Published versions</h3>
+          <p className="fine">Each time you publish, that version is kept. Restoring one makes it your live website again straight away.</p>
+          <ol className="studio-sections studio-versions" aria-label="Published versions">
+            {versions.map((v) => (
+              <li key={v.version}>
+                <span>
+                  <strong>Published {when(v.createdAt)}</strong>
+                  {v.live && <span className="studio-tag">Live now</span>}
+                </span>
+                {!v.live && (
+                  <button
+                    type="button"
+                    className="link-btn"
+                    disabled={busy}
+                    aria-label={`Restore the version published ${when(v.createdAt)}`}
+                    onClick={() =>
+                      ask({
+                        question: `Make the version published ${when(v.createdAt)} your live website again?`,
+                        detail: 'Visitors will see it right away, and your draft becomes that version too. Your draft as it is now is kept above under Earlier drafts, and you can switch back from this list.',
+                        confirmLabel: 'Restore this version',
+                        run: () => onRestoreVersion(v),
+                      })
+                    }
+                  >
+                    Restore
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
     </div>
   )
 }

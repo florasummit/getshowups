@@ -23,7 +23,7 @@ test('PoolThru today: published AI site, no import, domain waiting for the www c
   )
   assert.deepEqual(state(s), [
     ['content', true, 'Ready'],
-    ['edit', true, 'Draft ready'],
+    ['edit', true, 'Reviewed'], // not "Draft ready" once it is live (WEB-12)
     ['publish', true, 'Live'],
     ['domain', false, 'Needs your DNS change'],
     ['verify', false, 'After the switch'],

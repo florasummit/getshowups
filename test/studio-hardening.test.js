@@ -192,7 +192,7 @@ test('replace: every draft slot of the photo changes (sections, gallery without 
   const [a, b, c] = ids(5, 6, 7)
   const draft = content({ hero: a, photos: [a, b], logo: a, design: { ...DESIGN, heroImage: `asset:${a}` }, site: SITE(a, b) })
   const places = draftPlaces(draft, a).map((p) => p.label)
-  assert.deepEqual(places, ['Home · Hero', 'Home · Gallery', 'Home · Hero', 'Home · Booking (hidden)', 'About · Benefits', 'Main photo', 'Photo gallery', 'Design photo'])
+  assert.deepEqual(places, ['Home · Top of page', 'Home · Gallery', 'Home · Top of page', 'Home · Booking (hidden)', 'About · Benefits', 'Main photo', 'Photo gallery', 'Design photo'])
   const { content: out, count } = replacePhoto(draft, a, b)
   assert.equal(count, 8)
   assert.equal(JSON.stringify(out).includes(`asset:${a}`), false)

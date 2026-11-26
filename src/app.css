@@ -2434,6 +2434,10 @@
   padding: 12px 14px;
   border-top: 1px solid var(--border);
 }
+.design-card-head {
+  border-top: 0;
+  border-bottom: 1px solid var(--border);
+}
 .scaled-frame {
   position: relative;
   overflow: hidden;
@@ -2882,7 +2886,12 @@ body.studio-full-open { overflow: hidden; }
 }
 .studio-pop-close:hover { background: var(--ink-100); }
 /* Side panel */
-.studio-panel { position: sticky; top: 12px; max-height: calc(100vh - 40px); overflow-y: auto; padding: 4px 2px 16px; }
+/* As tall as the preview beside it, with its own scrolling: after "Edit my website" the preview and this panel fit the
+   window together and nothing in the panel is cut off (finding WEB-09). */
+.studio-panel { position: sticky; top: 12px; max-height: max(584px, calc(100vh - 146px)); overflow-y: auto; padding: 4px 2px 16px; }
+.site-edit-anchor { scroll-margin-top: 8px; }
+.site-missing ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.site-switch-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0; }
 .studio-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 0; margin-bottom: 14px; border-bottom: 1px solid var(--st-line); }
 .studio-tabs button {
   white-space: nowrap; padding: 8px 9px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; font: inherit;
@@ -2915,8 +2924,8 @@ body.studio-full-open { overflow: hidden; }
   font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; color: inherit;
 }
 .studio-tag { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--ink-100); color: var(--ink-500); }
-.studio-row-actions { display: flex; align-items: center; color: var(--ink-600); opacity: 0; transition: opacity 0.12s; }
-.studio-sections li:hover .studio-row-actions, .studio-sections li:focus-within .studio-row-actions, .studio-sections li.is-selected .studio-row-actions { opacity: 1; }
+/* Always visible: no control that only appears on hover (finding WEB-13). */
+.studio-row-actions { display: flex; align-items: center; color: var(--ink-600); }
 .studio-row-actions .studio-sbar-btn:hover:not(:disabled) { background: var(--ink-100); }
 .studio-section-actions { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; }
 .studio-add { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
@@ -2934,7 +2943,19 @@ body.studio-full-open { overflow: hidden; }
   .studio-stage { padding: 8px; }
   .studio-stage iframe { height: 64vh; min-height: 420px; }
   .studio-panel { position: static; max-height: none; overflow: visible; }
-  .studio-row-actions { opacity: 1; }
+}
+/* A question before something is removed or replaced (ConfirmInline), kept in view at the top of the edit panel. */
+.studio-ask { position: sticky; top: 0; z-index: 2; margin-bottom: 12px; padding: 12px; border-radius: 10px; background: var(--white); border: 1px solid var(--st-line); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
+.studio-addpage { align-items: end; }
+.studio-addpage .studio-add { flex: 1; }
+.studio-versions li { justify-content: space-between; flex-wrap: wrap; padding: 6px 4px; }
+.studio-versions .studio-tag { margin-left: 6px; }
+/* Touch (finding WEB-13): every control of the editor is at least 44 px on phones and touch screens. */
+@media (pointer: coarse), (max-width: 640px) {
+  .studio-icon-btn, .studio-tabs button, .studio-menu button, .studio-section-name, .studio-sbar-name { min-height: 44px; }
+  .studio-sbar-btn, .studio-pop-close { width: 44px; height: 44px; }
+  .studio :is(.studio-section-actions, .studio-photo-row-actions, .studio-item-actions, .studio-thumbs, .studio-photo-actions, .studio-notice, .studio-versions li, .studio-hidden-photos li) > .link-btn { min-height: 44px; display: inline-flex; align-items: center; }
+  .studio-bar .segmented button, .studio-bar .segmented--sm button { min-height: 44px; }
 }
 .studio-framing { display: grid; gap: 8px; margin-bottom: 10px; }
 .studio-focus { position: relative; padding: 0; border: 1px solid var(--ink-200); border-radius: 8px; overflow: hidden; cursor: crosshair; background: none; max-width: 260px; }
@@ -5554,22 +5575,22 @@ html:has(.app) {
 
 /* ---- Touch targets: on a touch screen or a phone-width window every control of the app is at least 44 px tall.
    Kept visually small on purpose (listed in test/e2e/quality.spec.js): text links inside a sentence and the "?" help
-   mark, whose tap area is extended instead. The website editor (.studio) has its own pass (finding WEB-13). ---- */
+   mark, whose tap area is extended instead. The website editor (.studio) follows the same rule (finding WEB-13). ---- */
 @media (pointer: coarse), (max-width: 640px) {
-  .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, .fchip, .metric-row-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden'])):not(.studio *) {
+  .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, .fchip, .metric-row-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden'])) {
     min-height: 44px;
   }
-  .app :is(.icon-btn, .ui-icon-btn):not(.studio *) {
+  .app :is(.icon-btn, .ui-icon-btn) {
     min-width: 44px;
   }
-  .app summary:not(.studio *) {
+  .app summary {
     align-content: center;
   }
   /* Text buttons standing on their own (not inside a sentence). */
-  .app :is(.link-btn, .settings-nav a):not(:is(p, span, label) > *, .studio *) {
+  .app :is(.link-btn, .settings-nav a):not(:is(p, span, label) > *) {
     min-height: 44px;
   }
-  .app a:is(.link-btn, .settings-nav a):not(:is(p, span, label) > *, .studio *, .panel *) {
+  .app a:is(.link-btn, .settings-nav a):not(:is(p, span, label) > *, .panel *) {
     display: inline-flex;
     align-items: center;
   }

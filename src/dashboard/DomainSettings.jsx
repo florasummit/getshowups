@@ -36,17 +36,20 @@ function Copy({ value }) {
     <button
       type="button"
       className="link-btn"
-      onClick={async () => {
+      onClick={async (e) => {
+        const shown = e.currentTarget.previousElementSibling
         try {
           await navigator.clipboard.writeText(value)
           setDone(true)
           setTimeout(() => setDone(false), 1500)
         } catch {
-          window.prompt('Copy this', value)
+          // The browser refused the clipboard: the value shown next to this button is selected, ready to copy by hand.
+          if (shown) window.getSelection()?.selectAllChildren(shown)
+          setDone('manual')
         }
       }}
     >
-      {done ? 'Copied' : 'Copy'}
+      {done === 'manual' ? 'Selected: press Ctrl+C or ⌘C' : done ? 'Copied' : 'Copy'}
     </button>
   )
 }

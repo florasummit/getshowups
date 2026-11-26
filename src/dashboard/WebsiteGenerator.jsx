@@ -2,9 +2,10 @@
 // business details; the owner picks one (previews render the stored result, no further AI calls) and it
 // becomes the private draft. "Describe a change": one request revises the draft; the owner keeps it or
 // goes back. The live website changes only when the owner publishes.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { ScaledFrame } from './WebsiteEditor.jsx'
+import { recallPending, rememberPending, setPendingRevision } from './website-data.js'
 
 const FAIL = { 503: 'Our website designer is busy. Please try again in a minute.' }
 // Errors from the business's own Claude/OpenAI key, in plain words.
@@ -38,7 +39,7 @@ export function Allowance({ usage, kind, noun, ownKey = null }) {
       <p className="fine" data-allowance-note={kind}>
         {own
           ? `This is a GetShowUps daily safety limit, not your ${own[1]} credit. These run on your own ${own[0]} API key and ${own[1]} bills you for them.`
-          : 'This is the daily limit of the AI writer included with GetShowUps (no API key needed). Editing by hand is never limited.'}
+          : 'Included with GetShowUps at no extra cost. Editing by hand is never limited.'}
       </p>
     </>
   )
@@ -54,28 +55,79 @@ const failText = (status, data, noun) =>
         ? 'That’s a lot of requests in a few minutes. Please wait a moment and try again.'
         : OWN_KEY[data?.error] || FAIL[status]
 
-export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false, ownKey = null }) {
-  const [gen, setGen] = useState(null)
+// `studio`: the chosen design becomes the multi-page website the full editor uses (Website tab, a business with no
+// website yet); the three previews then show exactly that. `storeKey`: this business (so an unanswered set of designs
+// is still offered after a reload). `onFallback`: offered when designs can't be made. `bare` + `trigger`: the caller owns
+// the start button (the Website tab's start cards): nothing is shown until designs are asked for (trigger counts up).
+export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, onUsage, templates = false, ownKey = null, studio = false, storeKey = null, onFallback = null, bare = false, trigger = 0, onBusy = null }) {
+  const [gen, setGenState] = useState(null)
   const [state, setState] = useState({})
+  const grid = useRef(null)
+  const setGen = (g) => {
+    setGenState(g)
+    rememberPending('designs', storeKey, g)
+  }
+  // Designs made before a reload are still offered (they already counted against today's allowance).
+  useEffect(() => {
+    let live = true
+    recallPending('designs', storeKey, studio ? 'studio=1&' : '').then((kept) => live && kept?.designs?.length && setGenState((g) => g || kept))
+    return () => {
+      live = false
+    }
+  }, [storeKey, studio])
+  // The designs (and the first "Use this design") come into view when they arrive.
+  useEffect(() => {
+    if (gen) grid.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }, [gen])
   const generate = async () => {
     setState({ busy: 'writing' })
+    onBusy?.(true)
     const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: templates ? 'template' : 'generate' } })
+    onBusy?.(false)
     if (data?.aiUsage) onUsage?.(data.aiUsage)
     if (status === 200) {
       setGen(data.generation)
       setState({})
     } else setState({ error: failText(status, data, 'new designs') || 'We couldn’t create it just now. Please try again.' })
   }
+  const asked = useRef(trigger)
+  useEffect(() => {
+    if (trigger === asked.current) return
+    asked.current = trigger
+    generate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per press of the caller's button
+  }, [trigger])
   const choose = async (option) => {
     setState({ busy: option })
-    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'apply', generationId: gen.id, option } })
+    const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'apply', generationId: gen.id, option, ...(studio ? { studio: true } : {}) } })
     if (status === 200) {
       setGen(null)
       setState({})
       onApplied(data)
+    } else if (status === 404) {
+      setGen(null)
+      setState({ error: 'Those designs are no longer available. Please create them again.' })
     } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t use that design. Please try again.' })
   }
 
+  if (!gen && bare) {
+    if (!state.busy && !state.error) return null
+    return (
+      <div className="generator">
+        {state.busy && <p className="fine" role="status">Designing your website… this takes about 15 seconds.</p>}
+        {state.error && (
+          <p className="form-error" role="alert">
+            {state.error}
+          </p>
+        )}
+        {state.error && onFallback && (
+          <button type="button" className="btn btn-quiet" onClick={onFallback}>
+            Build it from my business details instead
+          </button>
+        )}
+      </div>
+    )
+  }
   if (!gen) {
     return (
       <div className="generator">
@@ -90,23 +142,29 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
             {state.error}
           </p>
         )}
+        {state.error && onFallback && (
+          <button type="button" className="btn btn-quiet" onClick={onFallback}>
+            Build it from my business details instead
+          </button>
+        )}
       </div>
     )
   }
   return (
-    <div className="generator">
+    <div className="generator" ref={grid}>
       <p className="lede">Choose a design. You can change anything afterwards.</p>
       {gen.source === 'template' && <p className="fine">Designed from your details using our standard layouts.</p>}
       <div className="design-grid">
         {gen.designs.map((d, i) => (
           <div key={i} className="design-card">
-            <ScaledFrame title={`${d.name || `Design ${i + 1}`} design`} src={`/api/dashboard/website/preview?generation=${gen.id}&option=${i}`} height={1400} />
-            <div className="design-card-foot">
+            {/* Name and button first: the choice is on screen without scrolling past a tall preview (ONB-07). */}
+            <div className="design-card-foot design-card-head">
               <strong>{d.name || `Design ${i + 1}`}</strong>
-              <button type="button" className="btn btn-primary btn-sm" disabled={state.busy != null} onClick={() => choose(i)}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={state.busy != null} onClick={() => choose(i)} aria-label={`Use this design: ${d.name || `Design ${i + 1}`}`}>
                 {state.busy === i ? 'Applying…' : 'Use this design'}
               </button>
             </div>
+            <ScaledFrame title={`${d.name || `Design ${i + 1}`} design`} src={`/api/dashboard/website/preview?generation=${gen.id}&option=${i}${studio ? '&studio=1' : ''}`} height={1400} />
           </div>
         ))}
       </div>
@@ -125,10 +183,35 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
 const SUGGESTIONS = ['Make it more modern', 'Make it warmer and friendlier', 'Use my photos', 'Make it simpler', 'Try a dark look']
 
 // "Describe a change": one AI revision of the private draft, shown before anything is saved.
-export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null }) {
+// The version waiting for an answer is announced to the rest of the page (setPendingRevision), so nothing claims
+// "All changes saved" or lets the owner walk past it meanwhile, and it is still offered after a reload (`storeKey`).
+export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null, storeKey = null }) {
   const [text, setText] = useState('')
-  const [rev, setRev] = useState(null)
+  const [rev, setRevState] = useState(null)
   const [state, setState] = useState({})
+  const preview = useRef(onPreview)
+  useEffect(() => {
+    preview.current = onPreview
+  })
+  const setRev = (r) => {
+    setRevState(r)
+    rememberPending('revision', storeKey, r)
+    setPendingRevision(r)
+    preview.current?.(r)
+  }
+  useEffect(() => {
+    let live = true
+    recallPending('revision', storeKey).then((kept) => {
+      if (!live || !kept) return
+      setRevState(kept)
+      setPendingRevision(kept)
+      preview.current?.(kept)
+    })
+    return () => {
+      live = false
+      setPendingRevision(null)
+    }
+  }, [storeKey])
   const send = async (instruction) => {
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/website', { method: 'POST', body: { action: 'revise', instruction } })
@@ -136,7 +219,6 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null 
     if (status === 200) {
       setRev(data.generation)
       setState({})
-      onPreview?.(data.generation)
       // Bring the new version into view.
       requestAnimationFrame(() => document.querySelector('.site-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } else setState({ error: failText(status, data, 'AI changes') || 'We couldn’t make that change just now. Please try again.' })
@@ -148,14 +230,17 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null 
       setRev(null)
       setText('')
       setState({})
-      onPreview?.(null)
       onApplied(data)
+    } else if (status === 404) {
+      setRev(null)
+      setState({ error: 'That version is no longer available. Please ask for the change again.' })
     } else setState({ error: data?.error === 'designed_site' ? DESIGNED_SITE : 'Couldn’t save that version. Please try again.' })
   }
   if (rev) {
     return (
       <div className="revise">
         <p className="lede">Here’s the new version. Keep it?</p>
+        <p className="fine">It isn’t saved yet. Keep it, or go back to your draft as it was.</p>
         <div className="card-actions">
           <button type="button" className="btn btn-primary" disabled={state.busy} onClick={keep}>
             Keep this
@@ -164,10 +249,7 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null 
             type="button"
             className="btn btn-quiet"
             disabled={state.busy}
-            onClick={() => {
-              setRev(null)
-              onPreview?.(null)
-            }}
+            onClick={() => setRev(null)}
           >
             Go back
           </button>

@@ -13,8 +13,6 @@ const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^
 // shrink: converting a file to ConfirmInline (src/dashboard/ui.jsx) means lowering or removing its number here; a new
 // call anywhere fails the test.
 const NATIVE_CONFIRMS = {
-  'src/dashboard/SiteStudio.jsx': 8, // WEB-12
-  'src/dashboard/WebsiteTab.jsx': 1, // WEB-12
   'src/dashboard/Home.jsx': 1, // SET-05 (leaving a tab with unsaved changes)
   'src/dashboard/FollowUps.jsx': 2, // WEB-12 (same pattern; dashboard batch)
   'src/dashboard/ProviderControl.jsx': 2, // ADM-02 batch (admin voice provider switch / rollback)
@@ -39,7 +37,6 @@ test('no new native confirm() dialogs in the dashboard or the admin console (the
 // Native alert() / prompt() still in place (same rule: the list only shrinks). The prompt() ones are the fallback of a
 // Copy button when the clipboard is refused; show the value selected in the page instead.
 const NATIVE_ALERTS = {
-  'src/dashboard/DomainSettings.jsx': 1, // Copy fallback (website batch)
   'src/dashboard/Home.jsx': 1, // Copy fallback (ONB-03, dashboard batch)
   'src/dashboard/FollowUps.jsx': 1, // alert after pausing messages (dashboard batch, with the confirm above it)
   'src/admin/Growth.jsx': 1, // Copy fallback (GROW-02, admin batch)
