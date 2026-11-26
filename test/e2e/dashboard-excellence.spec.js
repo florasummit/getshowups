@@ -141,3 +141,14 @@ test('help opens in the page; the assistant answers its own suggestion from the 
   await panel.locator('[data-ask-go="settings#booking-hours"]').last().click()
   await expect(page.locator('#booking-hours h2')).toBeInViewport()
 })
+
+test('overview: "Share your booking link" carries the link and a copy control that names it (ONB-03) @mobile', async ({ page, context }, info) => {
+  await useSession(context, phone(info) ? fixtures.E2E_VOICE_M_SESSION_TOKEN : fixtures.E2E_VOICE_SESSION_TOKEN)
+  await page.goto('/dashboard')
+  const step = page.getByRole('region', { name: 'Next step' })
+  await expect(step).toContainText('Share your booking link')
+  await expect(step.locator('[data-booking-link] a')).toHaveAttribute('href', /\/book\/e2e-voice/)
+  await expect(step.getByRole('button', { name: 'Copy booking link' })).toBeVisible()
+  // No copy control says only "Copy link".
+  await expect(page.getByRole('button', { name: 'Copy link', exact: true })).toHaveCount(0)
+})
