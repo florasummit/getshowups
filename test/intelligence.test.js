@@ -17,7 +17,7 @@ import { INDUSTRIES, TRADE_WORDS } from '../server/intelligence/industries.js'
 import { understand, mergeFacts, saidByCustomer } from '../server/intelligence/understand.js'
 import { decide, coverageOf } from '../server/intelligence/decide.js'
 import { rulesInstructions, turnNote } from '../server/intelligence/compile.js'
-import { propose, ruleOps, applyOps, TEACH_SCHEMA } from '../server/intelligence/teach.js'
+import { propose, ruleOps, applyOps, splitClauses, TEACH_SCHEMA } from '../server/intelligence/teach.js'
 import { simulate } from '../server/intelligence/simulate.js'
 import { rulesLiveFor, studioEnabled } from '../server/intelligence/access.js'
 import { retellAdapter } from '../server/intelligence/providers.js'
@@ -687,6 +687,46 @@ test('teach: a suggestion is never a bare "nothing would change": every clause s
   assert.deepEqual([price.approvable, price.ops, price.clauses[0].outcome], [false, [], 'not_changed'])
   // What is approved is exactly what was shown: the kept operations, re-applied to the draft.
   assert.deepEqual(diffConfigs(draft, validateConfig(applyOps(draft, two.ops).config, POOL).config), two.changes)
+})
+
+test('teach: one sentence with several requests is read clause by clause; a list stays a list; nothing that is another kind of request is ever stored as a service', async () => {
+  const draft = defaultConfig(POOL)
+  const go = async (text) => {
+    const p = await propose({}, text, draft, POOL)
+    for (const x of p.proposed.services.excluded) assert.doesNotMatch(x, /ask|dog|quote|\$|book|outside|area|always|moon/i, `${text} → ${x}`)
+    for (const c of p.clauses) assert.ok(c.changes.length + c.notes.length + c.reasons.length > 0, c.text)
+    return p
+  }
+  const a = await go("We don't do hot tubs, and quote $50 for weekly pool care")
+  assert.deepEqual(a.clauses.map((c) => [c.text, c.outcome]), [["We don't do hot tubs", 'changed'], ['quote $50 for weekly pool care', 'not_changed']])
+  assert.deepEqual([a.changes, a.approvable], [['Services you don’t offer: added Hot Tubs.'], true])
+  assert.match(a.clauses[1].reasons[0].reason, /Prices come only from your services in Settings/)
+  const b = await go("We don't do commercial pools and always ask if there is a dog in the yard")
+  assert.deepEqual(b.clauses.map((c) => c.outcome), ['changed', 'changed'])
+  assert.deepEqual(b.changes, ['Services you don’t offer: added Commercial Pools.', 'Finds out: whether there is a dog in the yard'])
+  const c = await go("We don't do hot tubs and book people outside my service area")
+  assert.deepEqual(c.clauses.map((x) => [x.text, x.outcome]), [["We don't do hot tubs", 'changed'], ['book people outside my service area', 'not_changed']])
+  assert.match(c.clauses[1].reasons[0].reason, /never booked automatically/)
+  assert.deepEqual(c.proposed.services.excluded, ['Hot Tubs'])
+  // A list inside one request stays a list.
+  assert.deepEqual((await go("We don't do hot tubs and spas")).proposed.services.excluded, ['Hot Tubs', 'Spas'])
+  assert.deepEqual((await go("We don't do hot tubs, spas or commercial pools.")).proposed.services.excluded, ['Hot Tubs', 'Spas', 'Commercial Pools'])
+  assert.deepEqual((await propose({}, 'We serve Charleston and Mount Pleasant', draft, POOL)).proposed.coverage.cityWide, ['Charleston', 'Mount Pleasant'])
+  assert.deepEqual(splitClauses('Remember that we bring our own ladders and we clean up afterwards'), ['Remember that we bring our own ladders and we clean up afterwards'])
+  assert.deepEqual(splitClauses('If they ask for a person, take a message and don’t book'), ['If they ask for a person, take a message and don’t book'])
+  // Adversarial: joined with "but", three requests, a part nothing can place, and a non-service after "we don't do".
+  const d = await go("Be brief but don't quote prices, and always ask whether the gate is locked")
+  assert.deepEqual([d.clauses.map((x) => x.outcome), d.changes.length], [['changed', 'changed', 'changed'], 3])
+  const e = await go("We don't do hot tubs and please paint the moon green")
+  assert.deepEqual(e.clauses.map((x) => [x.text, x.outcome, x.reasons[0]?.reason]), [["We don't do hot tubs", 'changed', undefined], ['please paint the moon green', 'not_changed', 'I couldn’t turn this into a rule yet.']])
+  const f = await go("We don't do anything outside our service area or quote $50 jobs")
+  assert.deepEqual([f.proposed.services.excluded, f.approvable, f.clauses[0].outcome], [[], false, 'not_changed'])
+  const g = await go("We don't do repairs if the customer has a dog")
+  assert.deepEqual([g.proposed.services.excluded, g.notUnderstood], [[], ["We don't do repairs if the customer has a dog"]])
+  // A cut that would lose meaning is not made: the sentence the patterns understand as a whole stands.
+  const h = await go('After hours, take a message and don’t book.')
+  assert.deepEqual([h.clauses.length, h.changes], [1, ['After hours: don’t book after hours; take a callback request instead.']])
+  assert.deepEqual((await go("We don't install equipment, only repair it.")).proposed.services.excluded, ['Equipment installation'])
 })
 
 test('teach: every example the page offers works as written, for every kind of business, without a model (TEACH-03, TEACH-07)', async () => {

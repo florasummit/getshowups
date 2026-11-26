@@ -71,6 +71,23 @@ function monthsIn(s) {
   return one ? [monthNo(one[1])] : null
 }
 
+// One sentence may carry several requests joined by "and" / "but" ("we don't do hot tubs and always ask about dogs").
+// It is cut ONLY where the words after the joiner start a new request (a subject or an instruction verb), so a list
+// inside one request ("we don't do hot tubs and spas", "we serve Charleston and Summerville") stays whole. Facts
+// ("remember that…"), conditions ("if…", "when…") and corrections are never cut: their wording is the content.
+const STARTS_REQUEST = "(?:we|i|you|please|always|never|don'?t|do not|ask|book|quote|charge|treat|remember|note|be|say|tell|collect|schedule|accept|stop|skip|make sure|keep|give|offer|record|check|find out|determine|forget|sound|speak|talk|serve|cover|take)"
+const JOINER = new RegExp(`\\s*,?\\s+(?:and|but)(?:\\s+(?:also|then|please))?\\s+(?=${STARTS_REQUEST}\\b)`, 'i')
+export function splitClauses(sentence) {
+  const s = String(sentence || '').trim()
+  if (/^(?:please )?(?:remember|know|note|correction|if|when)\b/i.test(s)) return [s]
+  const parts = s.split(JOINER).map((x) => x.trim()).filter(Boolean)
+  return parts.length > 1 ? parts.map((x, i) => (i < parts.length - 1 ? x.replace(/[,;]+$/, '') : x)) : [s]
+}
+// A "service we don't offer" must read like a service: short, no price, and not another kind of request (a question,
+// an area or booking rule). Otherwise the clause is left unplaced (the owner is told), never stored as a service.
+const NOT_A_SERVICE = new RegExp(`^${STARTS_REQUEST}\\b|[$\\d]|\\b(?:if|whether|outside|before|after|when|unless|because|customers?|callers?|people|zip|area)\\b`, 'i')
+const serviceLike = (name) => name.trim().split(/\s+/).length <= 5 && !NOT_A_SERVICE.test(name.trim())
+
 // One sentence → ops (or null when no fixed pattern applies).
 export function ruleOps(sentence) {
   const s = sentence
@@ -131,12 +148,12 @@ export function ruleOps(sentence) {
     const verb = m[1].toLowerCase()
     const obj = listOf(m[2])
     const items = verb === 'install' || verb === 'replace' ? [obj.length ? `${titled(obj[0])} ${verb === 'install' ? 'installation' : 'replacement'}` : verb === 'install' ? 'Installations' : 'Replacements'] : obj.map(titled)
-    if (items.length) return items.map((value) => ({ kind: 'exclude', value }))
+    if (items.length) return obj.every(serviceLike) ? items.map((value) => ({ kind: 'exclude', value })) : null
   }
   if (/\b(?:only|just) (?:do |handle )?(?:repairs?|fix(?:es)?|repair it|fix it)\b|\brepairs? only\b/i.test(s) && /install|replac/i.test(s)) return [{ kind: 'exclude', value: 'Installations' }]
   if (/\bwe only (?:do )?repairs?\b|\brepairs? only\b/i.test(s)) return [{ kind: 'exclude', value: 'Installations' }]
   m = s.match(/\bwe (?:now |also )+(?:do|offer|handle|provide) (.+?)[.!?]?$/i)
-  if (m) return listOf(m[1]).map((value) => ({ kind: 'include', value: titled(value) }))
+  if (m) return listOf(m[1]).every(serviceLike) ? listOf(m[1]).map((value) => ({ kind: 'include', value: titled(value) })) : null
   // Coverage: "we serve Charleston and Mount Pleasant" / "we cover all of Summerville"
   m = s.match(/\bwe (?:serve|cover|service|work in|go to|travel to)\b (?:all (?:of )?|the whole (?:of |city of )?|everywhere in |anywhere in |the entire (?:city of )?)?(.+?)[.!?]?$/i)
   if (m && !/\bzip/i.test(m[1])) {
@@ -434,7 +451,14 @@ export async function propose(env, text, draft, records, { allowModel } = {}) {
   // A correction is read as a whole (the wrong answer is quoted in it, so its words are not the request).
   const correction = /^correction\b/i.test(String(text).trim())
   const listed = (records?.services || []).map((x) => String(x.name || ''))
-  const parts = sentences.map((s, at) => {
+  // Each sentence is read clause by clause when it joins several requests; when a cut leaves a part no pattern can
+  // place but the sentence as a whole is understood, the whole sentence stands (the cut was wrong, not the owner).
+  const clausesOf = (s) => {
+    if (correction) return [s]
+    const cut = splitClauses(s)
+    return cut.length > 1 && cut.some((c) => !ruleOps(c)) && ruleOps(s) ? [s] : cut
+  }
+  const parts = sentences.flatMap(clausesOf).map((s, at) => {
     const ops = correction ? null : ruleOps(s)
     // A job value names the service the way the owner listed it, when it is one of theirs.
     return { at, text: s, ops: ops && ops.map((o) => ({ ...o, text: o.text || s, ...(o.kind === 'worth' ? { phrase: listed.find((n) => same(n, o.phrase)) || o.phrase } : {}) })) }
