@@ -10,6 +10,8 @@ import { getPolicies } from './policies.js'
 import { liveContent } from './website.js'
 
 const ORDER = { critical: 0, important: 1, optional: 2 }
+// A calendar date as people say it ("Thu, Nov 26"): owners never see 2026-11-26 (docs/DESIGN_SYSTEM.md "Copy").
+const dayText = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const plain = (s) => String(s ?? '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9$+]+/g, ' ').replace(/\b(llc|inc|co|corp|ltd)\b/g, '').replace(/\s+/g, ' ').trim()
 const RECURRING = /\b(weekly|biweekly|bi-weekly|monthly|maintenance plan|every (week|month|other week)|recurring|subscription|membership|plan)\b/i
 const UNIT = /\b(per|each|every|a)\s+(visit|month|week|year|season|hour|hr|job|service|stop|pool|unit|sq|square)|\/\s?(visit|mo|month|wk|week|yr|year|hr|hour|season)|\b(monthly|weekly|hourly|flat|fixed|one[- ]time)\b/i
@@ -36,7 +38,7 @@ export async function setupCheck(env, customer, now = Date.now()) {
     const today = dateIn(now, customer.timezone)
     const closed = new Set(rules.closures.map((c) => c.date))
     const open = holidays(today, 21).filter((h) => !closed.has(h.date) && customer.workdays.includes(weekday(h.date)))
-    if (open.length) add('holiday_open', 'critical', `Customers can book ${open.map((h) => `${h.label} (${h.date})`).join(' and ')}`, 'It’s one of your booking days and isn’t marked closed.', 'Add it to Closed dates, or ignore this if you work that day.', 'settings#closed-dates')
+    if (open.length) add('holiday_open', 'critical', `Customers can book ${open.map((h) => `${h.label} (${dayText(h.date)})`).join(' and ')}`, 'It’s one of your booking days and isn’t marked closed.', 'Add it to Closed dates, or ignore this if you work that day.', 'settings#closed-dates')
     if (rules.minNoticeMinutes === 0) add('no_notice', 'important', 'Customers can book a time that starts in minutes', 'No minimum notice is set.', 'Choose a minimum notice.', 'settings#closed-dates')
   }
   if (visits && !customer.serviceZips.length) add('no_area', 'important', 'Anyone, anywhere, can book a visit', 'You visit customers and no service ZIP codes are listed.', 'List the ZIP codes you serve. Others can still ask, and you decide.', 'settings#business')

@@ -374,7 +374,6 @@ export default function Growth() {
   const [r, setR] = useState(null)
   const load = () => api('/api/platform/growth').then(({ status, data }) => setR(status === 200 ? data : { error: true }))
   useEffect(() => {
-    document.title = 'Growth · GetShowUps'
     load()
   }, [])
   if (!r) return <p className="fine">Loading…</p>

@@ -1,6 +1,7 @@
 // Business and booking-hours forms, shared by setup and settings.
 import { useEffect, useRef, useState } from 'react'
-import { LoadError } from './ui.jsx'
+import { LoadError, SaveBar, SaveStatus } from './ui.jsx'
+import { useSaveState } from './ui-hooks.js'
 import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
 import { suggestionsFor } from '../content/service-suggestions.js'
@@ -22,29 +23,37 @@ const ERRORS = {
 const saved = () => window.dispatchEvent(new Event('gsu:settings-saved'))
 const errorText = (code) => ERRORS[code] || 'Something went wrong. Please try again.'
 
-export function BusinessForm({ customer, submitLabel, onSaved }) {
+// `inline` (Settings): the standard save row. Without it (onboarding) the save is the step's full-width button.
+export function BusinessForm({ customer, submitLabel, onSaved, inline = false }) {
   const [name, setName] = useState(customer?.name || '')
   const [timezone, setTimezone] = useState(customer?.timezone || browserTimeZone())
-  const [zips, setZips] = useState((customer?.serviceZips || []).join(', '))
+  // The stored ZIP list as text. When a save changes it (the server tidies the list) the field follows, without
+  // remounting the form: a remount would drop the "Saved" confirmation.
+  const storedZips = (customer?.serviceZips || []).join(', ')
+  const [zips, setZips] = useState(storedZips)
+  const [seenZips, setSeenZips] = useState(storedZips)
+  if (storedZips !== seenZips) {
+    setSeenZips(storedZips)
+    setZips(storedZips)
+  }
   const [mode, setMode] = useState(customer?.appointmentMode || 'at_business')
-  const [state, setState] = useState({})
+  const save = useSaveState()
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
-    setState({ saving: true })
-    let source
-    try {
-      source = localStorage.getItem('gsu_source') || undefined
-    } catch {
-      source = undefined
-    }
-    const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, appointmentMode: mode, source } })
-    if (status === 200 || status === 201) {
-      saved()
-      return onSaved?.(data)
-    }
-    if (data.error === 'already_exists') return onSaved?.(data)
-    setState({ error: errorText(data.error) })
+    save.run(async () => {
+      let source
+      try {
+        source = localStorage.getItem('gsu_source') || undefined
+      } catch {
+        source = undefined
+      }
+      const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, appointmentMode: mode, source } })
+      if (status === 200 || status === 201) saved()
+      else if (data.error !== 'already_exists') return { error: errorText(data.error) }
+      onSaved?.(data)
+      return undefined
+    })
   }
 
   return (
@@ -83,43 +92,36 @@ export function BusinessForm({ customer, submitLabel, onSaved }) {
         </span>
         <input value={zips} onChange={(e) => setZips(e.target.value)} placeholder="Leave empty to accept everyone" inputMode="text" />
       </label>
-      {state.error && (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      )}
-      <button className="btn btn-primary btn-lg btn-block" disabled={state.saving}>
-        {state.saving ? 'Saving…' : submitLabel}
-      </button>
+      <SaveBar save={save} block={!inline}>
+        {submitLabel}
+      </SaveBar>
     </form>
   )
 }
 
 const LENGTHS = [30, 45, 60, 90, 120]
 
-export function HoursForm({ customer, submitLabel, onSaved }) {
+export function HoursForm({ customer, submitLabel, onSaved, inline = false }) {
   const [workdays, setWorkdays] = useState(customer.workdays)
   const [dayStart, setDayStart] = useState(customer.dayStart)
   const [dayEnd, setDayEnd] = useState(customer.dayEnd)
   const [slotMinutes, setSlotMinutes] = useState(customer.slotMinutes)
-  const [state, setState] = useState({})
+  const save = useSaveState()
   // The saved hours this form started from: sent as `base` (a change made elsewhere meanwhile → 409, nothing replaced).
   const base = useRef({ workdays: customer.workdays, dayStart: customer.dayStart, dayEnd: customer.dayEnd, slotMinutes: customer.slotMinutes })
 
   const toggle = (d) => setWorkdays((w) => (w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort()))
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
-    setState({ saving: true })
-    const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes, base: base.current } })
-    if (status === 200) {
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes, base: base.current } })
+      if (status !== 200) return { error: status === 409 ? CHANGED_ELSEWHERE : errorText(data.error) }
       base.current = data.hours || base.current
       saved()
-      setState({ saved: true })
-      setTimeout(() => setState((s) => (s.saved ? {} : s)), 2000)
-      return onSaved?.()
-    }
-    setState({ error: status === 409 ? CHANGED_ELSEWHERE : errorText(data.error) })
+      onSaved?.()
+      return undefined
+    })
   }
 
   return (
@@ -154,14 +156,9 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
           ))}
         </select>
       </label>
-      {state.error && (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      )}
-      <button className="btn btn-primary btn-lg btn-block" disabled={state.saving}>
-        {state.saving ? 'Saving…' : state.saved ? 'Saved ✓' : submitLabel}
-      </button>
+      <SaveBar save={save} block={!inline}>
+        {submitLabel}
+      </SaveBar>
     </form>
   )
 }
@@ -169,7 +166,7 @@ export function HoursForm({ customer, submitLabel, onSaved }) {
 // Business details shown on the website (phone, what you do, towns, description).
 export function ProfileForm({ onSaved }) {
   const [p, setP] = useState(undefined)
-  const [state, setState] = useState({})
+  const save = useSaveState()
   // The saved details this form shows (only when they loaded): sent as `base`, so a change made elsewhere meanwhile is
   // never silently replaced (409 conflict).
   const base = useRef(null)
@@ -190,23 +187,23 @@ export function ProfileForm({ onSaved }) {
   }, [])
   if (p === null) return <LoadError what="your details" onRetry={load} />
   if (p === undefined) return <div aria-busy="true" />
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
-    setState({ saving: true })
-    const { status, data } = await api('/api/dashboard/profile', {
-      method: 'POST',
-      body: { phone: f.get('phone'), industry: f.get('industry'), description: f.get('description'), cities: f.get('cities'), services: p.services || [], ...(base.current ? { base: base.current } : {}) },
-    })
-    if (status === 200) {
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/profile', {
+        method: 'POST',
+        body: { phone: f.get('phone'), industry: f.get('industry'), description: f.get('description'), cities: f.get('cities'), services: p.services || [], ...(base.current ? { base: base.current } : {}) },
+      })
+      if (status === 409) return { error: CHANGED_ELSEWHERE }
+      if (status !== 200) return { error: data.fields?.includes('phone') ? 'Enter a 10-digit US phone number, or leave it empty.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the details and try again.' }
       base.current = data.profile
       setP(data.profile)
-      setState({ saved: true })
       window.dispatchEvent(new CustomEvent('gsu:profile', { detail: data.profile }))
       saved()
       onSaved?.()
-    } else if (status === 409) setState({ error: CHANGED_ELSEWHERE })
-    else setState({ error: data.fields?.includes('phone') ? 'Enter a 10-digit US phone number, or leave it empty.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the details and try again.' })
+      return undefined
+    })
   }
   return (
     <form className="form" onSubmit={submit}>
@@ -227,19 +224,7 @@ export function ProfileForm({ onSaved }) {
         <textarea name="description" rows={3} maxLength={400} defaultValue={p.description || ''} />
       </label>
       <AiWrite field="description" draft />
-      {state.error && (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      )}
-      {state.saved && (
-        <p className="fine" role="status">
-          Saved.
-        </p>
-      )}
-      <button className="btn btn-quiet btn-block" disabled={state.saving}>
-        Save details
-      </button>
+      <SaveBar save={save}>Save details</SaveBar>
     </form>
   )
 }
@@ -254,7 +239,7 @@ const POLICY_ERRORS = {
 // What customers should know: shown on the booking page and in the confirmation and day-before reminder.
 export function PoliciesForm() {
   const [p, setP] = useState(undefined)
-  const [state, setState] = useState({})
+  const save = useSaveState()
   const base = useRef(null) // the saved policies this form shows (see ProfileForm)
   const load = () =>
     api('/api/dashboard/policies').then(({ status, data }) => {
@@ -266,18 +251,18 @@ export function PoliciesForm() {
   }, [])
   if (p === null) return <LoadError what="these notes" onRetry={load} />
   if (p === undefined) return <div aria-busy="true" />
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
-    setState({ saving: true })
-    const { status, data } = await api('/api/dashboard/policies', { method: 'POST', body: { beforeVisit: f.get('beforeVisit'), cancellation: f.get('cancellation'), ...(base.current ? { base: base.current } : {}) } })
-    if (status === 200) {
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/policies', { method: 'POST', body: { beforeVisit: f.get('beforeVisit'), cancellation: f.get('cancellation'), ...(base.current ? { base: base.current } : {}) } })
+      if (status === 409) return { error: CHANGED_ELSEWHERE }
+      if (status !== 200) return { error: POLICY_ERRORS[data.fields?.[0]] || 'Couldn’t save. Please try again.' }
       base.current = data.policies
       setP(data.policies)
-      setState({ saved: true })
       saved()
-    } else if (status === 409) setState({ error: CHANGED_ELSEWHERE })
-    else setState({ error: POLICY_ERRORS[data.fields?.[0]] || 'Couldn’t save. Please try again.' })
+      return undefined
+    })
   }
   return (
     <form className="form" onSubmit={submit}>
@@ -292,19 +277,7 @@ export function PoliciesForm() {
         <textarea name="cancellation" rows={2} maxLength={300} defaultValue={p.cancellation} placeholder="Please cancel at least 24 hours ahead." />
       </label>
       <AiWrite field="cancellation" />
-      {state.error && (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      )}
-      {state.saved && (
-        <p className="fine" role="status">
-          Saved.
-        </p>
-      )}
-      <button className="btn btn-quiet btn-block" disabled={state.saving}>
-        Save
-      </button>
+      <SaveBar save={save}>Save</SaveBar>
     </form>
   )
 }
@@ -326,7 +299,9 @@ export function ServicesForm() {
   const [p, setP] = useState(undefined)
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(null)
-  const [state, setState] = useState({})
+  const [state, setState] = useState({}) // "Copy from my website": busy / note / error
+  const save = useSaveState() // the form's save
+  const otherSave = useSaveState() // the "Other / Not sure" box saves on change
   const [booking, setBooking] = useState(null)
   const base = useRef(null)
   const load = () =>
@@ -359,36 +334,44 @@ export function ServicesForm() {
   }
   const ideas = suggestionsFor(p.industry, list.map((r) => r.name))
   const fromWebsite = async () => {
+    save.reset()
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/website')
     const found = (status === 200 ? data.draft?.services || [] : []).filter((x) => x?.name).slice(0, 16).map((x) => ({ ...blankService(), name: String(x.name).slice(0, 60), price: String(x.price || '').slice(0, 40), description: String(x.description || '').slice(0, 160) }))
     if (found.length) setRows(found)
     setState(found.length ? { note: 'Copied from your website. Check them, then save.' } : { error: 'Your website lists no services.' })
   }
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     const industry = p.industry || new FormData(e.currentTarget).get('industry')
-    setState({ busy: true })
+    setState({})
     const services = list
       .filter((r) => r.name.trim())
       .map((r) => ({ ...(r.id ? { id: r.id } : {}), name: r.name, price: r.price || '', description: r.description || '', slots: r.slots || 1, hidden: r.hidden === true, booking: r.booking || 'book', question: r.question?.label?.trim() ? { label: r.question.label, required: r.question.required === true } : null }))
-    const { status, data } = await api('/api/dashboard/profile', { method: 'POST', body: { phone: p.phone, industry, description: p.description, cities: p.cities || [], services, ...(base.current ? { base: base.current } : {}) } })
-    if (status === 200) {
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/profile', { method: 'POST', body: { phone: p.phone, industry, description: p.description, cities: p.cities || [], services, ...(base.current ? { base: base.current } : {}) } })
+      if (status !== 200) return { error: status === 409 ? CHANGED_ELSEWHERE : data.fields?.includes('services:unapproved_claim') ? 'Please remove promises like guarantees, discounts or ratings from names, prices and descriptions.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the services and try again: names up to 60 characters, prices up to 40, descriptions up to 160.' }
       base.current = data.profile
       setP(data.profile)
       setRows(null)
       setOpen(null)
-      setState({ saved: true })
       window.dispatchEvent(new CustomEvent('gsu:profile', { detail: data.profile }))
       saved()
-    } else setState({ error: status === 409 ? CHANGED_ELSEWHERE : data.fields?.includes('services:unapproved_claim') ? 'Please remove promises like guarantees, discounts or ratings from names, prices and descriptions.' : data.fields?.includes('industry') ? 'Tell us what kind of business this is.' : 'Please check the services and try again: names up to 60 characters, prices up to 40, descriptions up to 160.' })
+      return { saved: 'Saved. Your booking page and the receptionist use it now. Your website changes when you edit and publish it.' }
+    })
   }
-  const toggleOther = async (allowOther) => {
-    setBooking((b) => ({ ...b, options: { ...b.options, allowOther } }))
-    const { status } = await api('/api/dashboard/booking', { method: 'POST', body: { allowOther } })
-    if (status !== 200) loadBooking()
-    else saved()
-  }
+  // Saves on change: the same confirmation as a save button, next to the box (reference usage of the pattern).
+  const toggleOther = (allowOther) =>
+    otherSave.run(async () => {
+      setBooking((b) => ({ ...b, options: { ...b.options, allowOther } }))
+      const { status } = await api('/api/dashboard/booking', { method: 'POST', body: { allowOther } })
+      if (status !== 200) {
+        loadBooking() // show what is actually stored
+        return { error: 'Couldn’t save that. Please try again.' }
+      }
+      saved()
+      return undefined
+    })
   return (
     <form className="form svc-form" onSubmit={submit}>
       <p className="fine">What customers can book, and what the receptionist and the assistant say you do. Write what a price covers: “$300 per month”, “From $150 per visit”, “$95 per hour”.</p>
@@ -509,21 +492,24 @@ export function ServicesForm() {
           {state.error}
         </p>
       )}
-      {(state.saved || state.note) && (
+      {state.note && save.status !== 'saved' && (
         <p className="fine" role="status">
-          {state.saved ? 'Saved. Your booking page and the receptionist use it now. Your website changes when you edit and publish it.' : state.note}
+          {state.note}
         </p>
       )}
-      <button className="btn btn-quiet btn-block" disabled={state.busy}>
+      <SaveBar save={save} disabled={state.busy}>
         Save services
-      </button>
+      </SaveBar>
       {booking && (
         <div className="svc-booking">
           {booking.options?.ready && (
-            <label className="check">
-              <input type="checkbox" checked={booking.options.allowOther !== false} onChange={(e) => toggleOther(e.target.checked)} />
-              <span>Offer “Other / Not sure” on the booking page (customers describe what they need)</span>
-            </label>
+            <>
+              <label className="check">
+                <input type="checkbox" checked={booking.options.allowOther !== false} disabled={otherSave.pending} onChange={(e) => toggleOther(e.target.checked)} />
+                <span>Offer “Other / Not sure” on the booking page (customers describe what they need)</span>
+              </label>
+              <SaveStatus save={otherSave} />
+            </>
           )}
           <p className="fine">
             <a href={`${booking.bookingUrl}?preview=1`} target="_blank" rel="noopener">
@@ -569,7 +555,7 @@ export function AvailabilityForm() {
   const [edit, setEdit] = useState(null)
   const [date, setDate] = useState('')
   const [label, setLabel] = useState('')
-  const [state, setState] = useState({})
+  const save = useSaveState()
   const load = () => api('/api/dashboard/availability').then(({ status, data }) => setD(status === 200 ? data : null))
   useEffect(() => {
     load()
@@ -579,18 +565,19 @@ export function AvailabilityForm() {
   if (!d.ready) return <p className="fine">Closed dates and minimum notice aren’t available yet. Meanwhile, block time in Google Calendar and mark it Busy; booking follows it.</p>
   const cur = edit ?? { minNoticeMinutes: d.minNoticeMinutes, closures: d.closures }
   const add = (x) => setEdit({ ...cur, closures: [...cur.closures.filter((c) => c.date !== x.date), x].sort((a, b) => a.date.localeCompare(b.date)) })
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     const body = date ? { ...cur, closures: [...cur.closures.filter((c) => c.date !== date), { date, label }] } : cur
-    setState({ busy: true })
-    const { status, data } = await api('/api/dashboard/availability', { method: 'POST', body: { ...body, base: { minNoticeMinutes: d.minNoticeMinutes, closures: d.closures } } })
-    if (status !== 200) return setState({ error: status === 409 && data.error === 'conflict' ? CHANGED_ELSEWHERE : AVAIL_ERRORS[data.error] || 'Couldn’t save. Please try again.' })
-    setD(data)
-    setEdit(null)
-    setDate('')
-    setLabel('')
-    setState({ saved: true })
-    saved()
+    save.run(async () => {
+      const { status, data } = await api('/api/dashboard/availability', { method: 'POST', body: { ...body, base: { minNoticeMinutes: d.minNoticeMinutes, closures: d.closures } } })
+      if (status !== 200) return { error: status === 409 && data.error === 'conflict' ? CHANGED_ELSEWHERE : AVAIL_ERRORS[data.error] || 'Couldn’t save. Please try again.' }
+      setD(data)
+      setEdit(null)
+      setDate('')
+      setLabel('')
+      saved()
+      return { saved: 'Saved. Customers see it now.' }
+    })
   }
   const suggested = d.suggested.filter((h) => !cur.closures.some((c) => c.date === h.date))
   return (
@@ -619,7 +606,7 @@ export function AvailabilityForm() {
                   </p>
                 </div>
                 <button type="button" className="link-btn" onClick={() => setEdit({ ...cur, closures: cur.closures.filter((x) => x.date !== c.date) })}>
-                  Remove<span className="sr-only"> {c.date}</span>
+                  Remove<span className="sr-only"> {longDate(c.date)}</span>
                 </button>
               </li>
             ))}
@@ -649,19 +636,7 @@ export function AvailabilityForm() {
           <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} />
         </label>
       </div>
-      {state.error && (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      )}
-      {state.saved && (
-        <p className="fine" role="status">
-          Saved. Customers see it now.
-        </p>
-      )}
-      <button className="btn btn-quiet btn-block" disabled={state.busy}>
-        Save closed dates and notice
-      </button>
+      <SaveBar save={save}>Save closed dates and notice</SaveBar>
     </form>
   )
 }

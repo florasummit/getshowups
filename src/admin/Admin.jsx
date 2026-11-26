@@ -6,7 +6,8 @@ import Logo from '../components/Logo.jsx'
 import { BusinessControls, Closures, ReasonAction } from './Controls.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
-import { Pill } from '../dashboard/ui.jsx'
+import { Pill, TabBar } from '../dashboard/ui.jsx'
+import { usePageTitle } from '../dashboard/ui-hooks.js'
 import '../app.css'
 
 const Review = lazyPage(() => import('./Review.jsx'))
@@ -1531,27 +1532,15 @@ function Console({ me }) {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // ONE place names the browser tab, on every section change: "<nav label> · Admin · GetShowUps".
+  usePageTitle(`${SECTIONS.find(([id]) => id === section)[1]} · Admin`)
   return (
     <div className={`app${section !== 'overview' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
         <SignOut email={me.email} to="/admin" />
       </header>
-      <nav className="tabs" aria-label="Admin">
-        {SECTIONS.map(([id, label, href]) => (
-          <a
-            key={id}
-            href={href}
-            aria-current={section === id ? 'page' : undefined}
-            onClick={(e) => {
-              e.preventDefault()
-              go(id, href)
-            }}
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
+      <TabBar label="Admin" tabs={SECTIONS} current={section} onGo={go} />
       <main className="app-main">
         {section === 'review' ? (
           <Suspense fallback={<div aria-busy="true" />}>

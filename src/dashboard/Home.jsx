@@ -16,7 +16,8 @@ import { setAssistantView } from './assistant-store.js'
 import Insight from './Insight.jsx'
 import Scorecard from './Scorecard.jsx'
 import { useInsights } from './insights-data.js'
-import { LoadError, Pill } from './ui.jsx'
+import { LoadError, Pill, TabBar } from './ui.jsx'
+import { usePageTitle } from './ui-hooks.js'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
 const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
@@ -518,7 +519,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       </section>
       <section className="card" id="business">
         <TitleHelp help="service_area">Business</TitleHelp>
-        <BusinessForm key={c.serviceZips.join()} customer={c} submitLabel="Save business" onSaved={reload} />
+        <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} inline />
       </section>
       <section className="card" id="services">
         <h2 className="card-title">Services and prices</h2>
@@ -534,7 +535,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       </section>
       <section className="card" id="booking-hours">
         <TitleHelp help="hours">Booking hours</TitleHelp>
-        <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} />
+        <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} inline />
       </section>
       <section className="card" id="closed-dates">
         <h2 className="card-title">Closed dates and notice</h2>
@@ -633,10 +634,8 @@ export default function Home({ me, reload }) {
     window.addEventListener('gsu:changed', on)
     return () => window.removeEventListener('gsu:changed', on)
   }, [reload, loadOverview])
-  // On narrow screens the tab bar scrolls: keep the current tab in view.
-  useEffect(() => {
-    document.querySelector('.tabs [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
-  }, [view])
+  // The browser tab names the page (the tab row itself keeps the current tab in view: TabBar).
+  usePageTitle(tabs.find(([id]) => id === view)?.[1])
   const go = (where) => {
     const tab = where === 'billing' ? 'settings' : where
     if (tab !== view && document.querySelector('.app-main form[data-dirty]') && !window.confirm('You have changes that aren’t saved. Leave this page and lose them?')) return
@@ -656,21 +655,7 @@ export default function Home({ me, reload }) {
         <Logo href="/" />
         <SignOut email={me.email} extra={<AssistantButton />} />
       </header>
-      <nav className="tabs" aria-label="Dashboard">
-        {tabs.map(([id, label]) => (
-          <a
-            key={id}
-            href={id === 'overview' ? '/dashboard' : `/dashboard/${id}`}
-            aria-current={view === id ? 'page' : undefined}
-            onClick={(e) => {
-              e.preventDefault()
-              go(id)
-            }}
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
+      <TabBar label="Dashboard" tabs={tabs.map(([id, label]) => [id, label, id === 'overview' ? '/dashboard' : `/dashboard/${id}`])} current={view} onGo={go} />
       {/* A form someone typed in is marked until it is submitted, so changing tabs never silently drops the text. */}
       <main
         className="app-main"

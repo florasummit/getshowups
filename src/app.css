@@ -5444,3 +5444,216 @@ html.help-open .app {
     justify-content: flex-start;
   }
 }
+
+/* ============ Product quality foundation (2026-11-26, docs/DESIGN_SYSTEM.md) ============ */
+/* Shared layer for the signed-in product (.app = dashboard, onboarding, admin). The customer booking page (.booking),
+   the public chat page (.rcp), the marketing site and business websites are NOT in scope and are untouched. */
+
+/* ---- ONE page frame: the top bar and the tab row sit at the same place on every tab and every admin section. ----
+   --frame is the shell's width; --content the reading width of an ordinary page. A page that needs room (app--wide:
+   website editor, inboxes, wide tables) widens ONLY its content; a narrow page starts at the same left edge as the
+   logo, so nothing jumps sideways when the tab changes. */
+.app {
+  --frame: 1400px;
+  --content: 880px;
+}
+.app > .app-header,
+.app > .tabs-wrap {
+  max-width: var(--frame);
+  margin-inline: auto;
+}
+.app > .tabs-wrap ~ .app-main {
+  max-width: var(--content);
+  margin-left: max(0px, calc((100% - var(--frame)) / 2));
+  margin-right: auto;
+}
+.app--wide > .tabs-wrap ~ .app-main {
+  max-width: var(--frame);
+}
+
+/* A short page (no scrollbar) and a long one must not differ by half a scrollbar: the gutter is always reserved. */
+html:has(.app) {
+  scrollbar-gutter: stable;
+}
+
+/* ONE page-title size for every top-level page (h1), whichever class the page used. */
+.app-main h1.title,
+.app-main h1.ui-page-title,
+.app-main h1.cc-title {
+  font-size: 1.55rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+@media (max-width: 640px) {
+  .app-main h1.title,
+  .app-main h1.ui-page-title,
+  .app-main h1.cc-title {
+    font-size: 1.35rem;
+  }
+}
+
+/* ---- Tab row (ui.jsx TabBar). It scrolls inside itself when the tabs don't fit; the side that has more fades out
+   and shows an arrow, so a cut-off label never looks like the end of the row. The page itself never scrolls sideways. */
+.tabs-wrap {
+  position: relative;
+}
+.tabs-wrap > .tabs {
+  max-width: none;
+  margin: 0;
+  padding-inline: var(--gutter);
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 44px;
+  overscroll-behavior-x: contain;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.tabs-wrap > .tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  scroll-snap-align: start;
+}
+.tabs-wrap[data-more-end] > .tabs {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 76px), transparent calc(100% - 30px));
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 76px), transparent calc(100% - 30px));
+}
+.tabs-wrap[data-more-start] > .tabs {
+  mask-image: linear-gradient(90deg, transparent 30px, #000 76px);
+  -webkit-mask-image: linear-gradient(90deg, transparent 30px, #000 76px);
+}
+.tabs-wrap[data-more-start][data-more-end] > .tabs {
+  mask-image: linear-gradient(90deg, transparent 30px, #000 76px, #000 calc(100% - 76px), transparent calc(100% - 30px));
+  -webkit-mask-image: linear-gradient(90deg, transparent 30px, #000 76px, #000 calc(100% - 76px), transparent calc(100% - 30px));
+}
+.tabs-more {
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  display: none;
+  place-items: center;
+  width: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-900);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tabs-more--start {
+  left: 0;
+}
+.tabs-more--end {
+  right: 0;
+}
+.tabs-wrap[data-more-start] > .tabs-more--start,
+.tabs-wrap[data-more-end] > .tabs-more--end {
+  display: grid;
+}
+
+/* ---- Touch targets: on a touch screen or a phone-width window every control of the app is at least 44 px tall.
+   Kept visually small on purpose (listed in test/e2e/quality.spec.js): text links inside a sentence and the "?" help
+   mark, whose tap area is extended instead. The website editor (.studio) has its own pass (finding WEB-13). ---- */
+@media (pointer: coarse), (max-width: 640px) {
+  .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, .field input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'])):not(.studio *) {
+    min-height: 44px;
+  }
+  .app :is(.icon-btn, .ui-icon-btn):not(.studio *) {
+    min-width: 44px;
+  }
+  .app summary:not(.studio *) {
+    align-content: center;
+  }
+  /* Text buttons standing on their own (not inside a sentence). */
+  .app :is(.link-btn, .settings-nav a):not(:is(p, span, label) > *, .studio *) {
+    min-height: 44px;
+  }
+  .app a:is(.link-btn, .settings-nav a):not(:is(p, span, label) > *, .studio *, .panel *) {
+    display: inline-flex;
+    align-items: center;
+  }
+  .app .help-tip {
+    position: relative;
+  }
+  .app .help-tip::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+  }
+}
+
+/* ---- Saving (ui.jsx SaveBar / SaveButton / SaveStatus + ui-hooks.js useSaveState): ONE pattern. ---- */
+.ui-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+.ui-save > .ui-save-error {
+  flex: 1 0 100%;
+  order: -1;
+}
+.ui-save--block {
+  flex-direction: column;
+  align-items: stretch;
+}
+.ui-save-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--ok-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  animation: rise 0.18s var(--ease);
+}
+.ui-save-status::before {
+  content: '✓';
+  content: '✓' / '';
+}
+.ui-save-error {
+  margin: 0;
+}
+
+/* ---- Confirming a destructive action in the page (ui.jsx ConfirmInline). ---- */
+.ui-confirm {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.ui-confirm-q {
+  margin: 0;
+  font-weight: 650;
+}
+.ui-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* ---- Waiting states (ui.jsx Loading / EmptyState). ---- */
+.ui-loading {
+  display: grid;
+}
+.ui-loading .ui-skeleton-block {
+  height: 96px;
+}
+.ui-empty-title {
+  margin: 0;
+  font-weight: 650;
+}
+.ui-empty-state > .ui-hint {
+  margin: 0;
+  max-width: 56ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-save-status {
+    animation: none;
+  }
+}

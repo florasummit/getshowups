@@ -351,9 +351,6 @@ export default function Control() {
       live = false
     }
   }, [reload])
-  useEffect(() => {
-    document.title = 'Control Center · GetShowUps'
-  }, [])
   const section = sectionOf(params)
   const count = (id) =>
     !o || o.error

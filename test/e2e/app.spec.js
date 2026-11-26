@@ -107,7 +107,9 @@ test('owner updates booking hours in settings', async ({ page, context }) => {
   const hours = page.locator('.card', { has: page.getByRole('heading', { name: 'Booking hours' }) })
   await hours.getByLabel('Appointment length').selectOption('30')
   await hours.getByRole('button', { name: 'Save hours' }).click()
-  await expect(hours.getByRole('button', { name: 'Saved ✓' })).toBeVisible()
+  // The one save pattern: the button comes back and a "Saved." confirmation appears beside it.
+  await expect(hours.getByRole('status')).toHaveText('Saved.')
+  await expect(hours.getByRole('button', { name: 'Save hours' })).toBeEnabled()
   expect((await (await page.request.get('/api/dashboard/me')).json()).customer.slotMinutes).toBe(30)
   await expect(page.locator('[data-status="healthy"]')).toContainText('Connected')
 })
