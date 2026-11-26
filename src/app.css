@@ -4342,6 +4342,12 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .growth .sim-table thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
 .growth .sim-table td { font-variant-numeric: tabular-nums; }
 .growth .row-main, .growth .row-title, .growth .row-sub, .growth dd { min-width: 0; overflow-wrap: anywhere; }
+.growth .acq-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.growth .acq-edit label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--text-muted); min-width: 0; }
+.growth .acq-edit input, .growth .acq-edit select, .growth .acq-add input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--ink-100); border-radius: 8px; font: inherit; background: #fff; color: inherit; }
+.growth .acq-tools { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.growth .acq-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; }
+.growth .acq-add input { flex: 1 1 12rem; max-width: 16rem; }
 .growth .row { flex-wrap: wrap; }
 @media (max-width: 560px) { .growth .sim-table { font-size: 0.85rem; } .growth .sim-table th, .growth .sim-table td { padding: 6px 4px; } }
 

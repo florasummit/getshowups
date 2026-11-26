@@ -62,6 +62,7 @@ removed a day after they expire (server/sessions-purge.js). Still switched off: 
 | `test_businesses` | Test flag | Keeps test data out of metrics | With the tombstone |
 | `acceptance_pairings` | Pairing codes (hashes) | Test sessions | Minutes: expired rows removed at the next pairing |
 | `receptionist_voice_defaults` | Platform-wide default voice provider history (versions; ids of businesses a version pinned) | Platform configuration, not business data | Permanent (business ids only, no personal data) |
+| `acquisition_codes` | GetShowUps' own acquisition plan (migration 0044): per tracking code, the status and cost the founder recorded, and an optional company or place label | Platform operations, not business data; no business id | Permanent (no email addresses or phone numbers: labels refuse them) |
 | `stripe_events`, `rate_limits`, `sessions` | Event ids, hashed keys, sign-in sessions (not tied to the business) | Idempotency, abuse prevention | Their own expiry |
 
 ## 5. Processors and backups (what we can and can't control)

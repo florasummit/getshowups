@@ -3,12 +3,15 @@
 // overview). Simulate is a scenario model over editable assumptions (prefilled from measured data when the sample is
 // big enough, otherwise labelled assumptions); its price field is for modeling only and never touches Stripe. Decide
 // is the server's deterministic recommendation with its sample and evidence strength. Nothing here spends or changes
-// anything; nothing here is a forecast.
+// anything; nothing here is a forecast. Activities is the prepared acquisition plan by tracking code: results are
+// measured from the link's code, status and cost are what the founder records after acting (POST
+// /api/platform/acquisition, audited). Recording never sends, publishes or spends anything.
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { FIELDS, DEFAULTS, normalizeAssumptions, compare, sensitivity } from '../../server/growth-model.js'
 
 const MODES = [
+  ['activities', 'Activities'],
   ['measure', 'Measure'],
   ['simulate', 'Simulate'],
   ['decide', 'Decide'],
@@ -141,6 +144,191 @@ function Simulate({ baseline }) {
   )
 }
 
+const STATUS = { prepared: ['Prepared', ''], approved: ['Approved', 'info'], sent: ['Sent', 'ok'], followed_up: ['Followed up', 'ok'], replied: ['Replied', 'ok'], declined: ['Said no', 'neutral'] }
+const ACQ_ERR = { not_ready: 'Status tracking isn’t set up yet (database update 0044).', invalid_label: 'Use a company or place name, without an email address or phone number.', invalid_cost: 'Enter a cost between $0 and $100,000.', invalid_code: 'Use lowercase letters, numbers and dashes (2–32 characters).' }
+const cell = (r, k) => (r == null || r[k] == null ? '—' : k === 'revenueCents' ? money(r[k]) : String(r[k]))
+const RESULT_COLS = [
+  ['prospects', 'Prospects'],
+  ['qualified', 'Qualified'],
+  ['consultationsBooked', 'Demos booked'],
+  ['consultationsAttended', 'Attended'],
+  ['businessesCreated', 'Signed up'],
+  ['paying', 'Paying'],
+  ['revenueCents', 'Paid revenue'],
+]
+
+function Copy({ text, label }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button
+      type="button"
+      className="link-btn"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          setDone(true)
+          setTimeout(() => setDone(false), 1500)
+        } catch {
+          window.prompt('Copy this link', text)
+        }
+      }}
+    >
+      {done ? 'Copied' : label}
+    </button>
+  )
+}
+
+function CodeRow({ c, canSave, save }) {
+  const [label, setLabel] = useState(c.label)
+  const [cost, setCost] = useState(c.costCents ? String(c.costCents / 100) : '')
+  return (
+    <li className="row acq-code" data-acq-code={c.code} data-status={c.status}>
+      <div className="row-main">
+        <p className="row-title">
+          <code>{c.code}</code> {c.label ? `· ${c.label} ` : ''}
+          <span className={`tag tag--${STATUS[c.status][1]}`}>{STATUS[c.status][0]}</span> {c.followUpDue ? <span className="tag tag--bad">Follow-up due</span> : null}
+        </p>
+        <p className="row-sub">
+          {c.sentAt ? `Sent ${day(c.sentAt)}. ` : ''}
+          {c.followedUpAt ? `Followed up ${day(c.followedUpAt)}. ` : ''}
+          {c.repliedAt ? `${c.status === 'declined' ? 'Said no' : 'Replied'} ${day(c.repliedAt)}. ` : ''}
+          {c.results ? RESULT_COLS.map(([k, l]) => `${l} ${cell(c.results, k)}`).join(' · ') : 'Results unavailable.'}
+        </p>
+        <p className="row-sub acq-tools">
+          <Copy text={c.links.book} label="Copy booking link" /> <Copy text={c.links.chat} label="Copy chat link" />
+        </p>
+        {canSave ? (
+          <div className="acq-edit">
+            <label>
+              <span>Status</span>
+              <select value={c.status} onChange={(e) => save(c.code, { status: e.target.value })} aria-label={`Status of ${c.code}`}>
+                {Object.entries(STATUS).map(([v, [l]]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Who or where (optional)</span>
+              <input value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() !== c.label && save(c.code, { label })} aria-label={`Label of ${c.code}`} />
+            </label>
+            <label>
+              <span>What it cost you ($)</span>
+              <input type="number" inputMode="decimal" min="0" step="1" value={cost} onChange={(e) => setCost(e.target.value)} onBlur={() => Math.round(Number(cost || 0) * 100) !== c.costCents && save(c.code, { costCents: Math.round(Number(cost || 0) * 100) })} aria-label={`Cost of ${c.code}`} />
+            </label>
+          </div>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+function Activities({ a, reload }) {
+  const [msg, setMsg] = useState(null)
+  const [adding, setAdding] = useState({})
+  if (!a) return <p className="form-error">Activities are unavailable.</p>
+  const save = async (code, change, activity) => {
+    setMsg(null)
+    const { status, data } = await api('/api/platform/acquisition', { method: 'POST', body: { code, ...change, ...(activity ? { activity } : {}) } })
+    if (status !== 200) return setMsg(ACQ_ERR[data?.error] || 'Couldn’t save that. Try again.')
+    await reload()
+  }
+  const t = a.totals
+  return (
+    <div className="stack-lg" data-growth-activities>
+      <section className="card" aria-label="Acquisition summary">
+        <p className="fine">
+          Results are measured from each link’s tracking code{a.days ? ` (last ${a.days} days)` : ''}; test leads are left out. Status and cost are what you record after you act. Recording here never sends a message, publishes anything or spends money.
+          {a.live === false ? ' Billing is in Stripe test mode, so nobody counts as paying and no revenue is shown.' : ''}
+        </p>
+        <ul className="rows">
+          <li className="row" data-acq-total="outreach">
+            <div className="row-main">
+              <p className="row-title">Outreach</p>
+              <p className="row-sub">
+                {t.codes} tracking codes · {t.approved} approved, not sent · {t.sent} sent · {t.replied} replied · {t.declined} said no{t.followUpsDue ? ` · ${t.followUpsDue} follow-up${t.followUpsDue === 1 ? '' : 's'} due` : ''}
+              </p>
+            </div>
+          </li>
+          <li className="row" data-acq-total="results">
+            <div className="row-main">
+              <p className="row-title">
+                From these activities <span className={`tag tag--${t.results ? 'ok' : 'neutral'}`}>{t.results ? 'Measured' : 'Unavailable'}</span>
+              </p>
+              <p className="row-sub">{t.results ? RESULT_COLS.map(([k, l]) => `${l} ${cell(t.results, k)}`).join(' · ') : 'The GetShowUps sales business is not set up, so prospects can’t be counted.'}</p>
+            </div>
+          </li>
+          <li className="row" data-acq-total="cost">
+            <div className="row-main">
+              <p className="row-title">Cost</p>
+              <p className="row-sub">
+                Recorded by you: {money(t.recordedCostCents)} (your own entries) · Ad spend measured by the platforms: {t.adSpendCents == null ? 'none synced' : money(t.adSpendCents)} · Cost per paying customer: {t.costPerPayingCents == null ? 'unavailable until a prospect pays in live billing' : money(t.costPerPayingCents)}
+              </p>
+            </div>
+          </li>
+        </ul>
+        {!a.available ? <p className="fine" data-acq-notready>Status and cost can’t be saved until database update 0044 is applied. Links and results already work.</p> : null}
+        {msg ? <p className="form-error" role="alert">{msg}</p> : null}
+      </section>
+      {a.activities.map((act) => (
+        <section key={act.key} className="card" data-acq-activity={act.key}>
+          <h2 className="card-title">
+            {act.n}. {act.title}
+          </h2>
+          <p className="fine">
+            {act.channel}
+            {act.paid ? ' · needs your budget approval; nothing is spent from here' : ''}
+            {act.derived === 'followUp' ? ` · ${t.followUpsDue ? `${t.followUpsDue} due now (marked below)` : 'none due'}: a sent code with no reply after 4 days is marked “Follow-up due”.` : ''}
+            {act.derived === 'destination' ? ' · results are counted on the activity whose link brought the visitor.' : ''}
+          </p>
+          {act.codes.length ? (
+            <ul className="rows">
+              {act.codes.map((c) => (
+                <CodeRow key={`${c.code}:${c.status}:${c.label}:${c.costCents}`} c={c} canSave={a.available} save={save} />
+              ))}
+            </ul>
+          ) : null}
+          {a.available && !act.derived ? (
+            <form
+              className="acq-add"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const code = (adding[act.key] || '').trim().toLowerCase()
+                if (code) save(code, { status: 'prepared' }, act.key).then(() => setAdding((x) => ({ ...x, [act.key]: '' })))
+              }}
+            >
+              <input value={adding[act.key] || ''} onChange={(e) => setAdding((x) => ({ ...x, [act.key]: e.target.value }))} placeholder="new code, e.g. out-06" maxLength={32} aria-label={`New tracking code for ${act.title}`} />
+              <button type="submit" className="link-btn">
+                Add a tracking code
+              </button>
+            </form>
+          ) : null}
+        </section>
+      ))}
+      {a.other?.length ? (
+        <section className="card" data-acq-other>
+          <h2 className="card-title">Other sources</h2>
+          <p className="fine">Prospects who did not arrive through a tracking code above (homepage buttons, a typed address, an ad campaign).</p>
+          <ul className="rows">
+            {a.other.map((o) => (
+              <li key={`${o.source}|${o.campaign}`} className="row">
+                <div className="row-main">
+                  <p className="row-title">
+                    {o.source}
+                    {o.campaign ? ` (${o.campaign})` : ''}
+                  </p>
+                  <p className="row-sub">{RESULT_COLS.map(([k, l]) => `${l} ${cell(o, k)}`).join(' · ')}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  )
+}
+
 function Decide({ d }) {
   const sample = d.sample ? Object.entries(d.sample).map(([k, v]) => (typeof v === 'object' ? `${FIELDS[k]?.label || k}: ${v.num} of ${v.den}${v.rate != null ? ` (${pctOf(v.rate)}, threshold ${pctOf(v.threshold)})` : ''}` : `${k}: ${v}`)).join(' · ') : ''
   return (
@@ -179,9 +367,10 @@ function Decide({ d }) {
 export default function Growth() {
   const [mode, setMode] = useState('measure')
   const [r, setR] = useState(null)
+  const load = () => api('/api/platform/growth').then(({ status, data }) => setR(status === 200 ? data : { error: true }))
   useEffect(() => {
     document.title = 'Growth · GetShowUps'
-    api('/api/platform/growth').then(({ status, data }) => setR(status === 200 ? data : { error: true }))
+    load()
   }, [])
   if (!r) return <p className="fine">Loading…</p>
   if (r.error) return <p className="form-error">Couldn’t load Growth.</p>
@@ -197,7 +386,7 @@ export default function Growth() {
           </button>
         ))}
       </div>
-      {mode === 'measure' ? <Measure m={r.measure} /> : mode === 'simulate' ? <Simulate baseline={r.baseline} /> : <Decide d={r.decide} />}
+      {mode === 'activities' ? <Activities a={r.acquisition} reload={load} /> : mode === 'measure' ? <Measure m={r.measure} /> : mode === 'simulate' ? <Simulate baseline={r.baseline} /> : <Decide d={r.decide} />}
     </div>
   )
 }
