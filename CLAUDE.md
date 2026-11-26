@@ -247,6 +247,30 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Marketing copy: no testimonials, logos, or performance claims. Describe only what works today; label anything not live
   as coming soon. Growth $499/month (plan id founding), no trial, ad spend separate; Enterprise from $10,000/month, Contact sales only. Get started → /dashboard?plan=founding.
 
+## Product quality standards (docs/DESIGN_SYSTEM.md)
+
+Every UI change in the signed-in product (dashboard, onboarding, admin) follows docs/DESIGN_SYSTEM.md, uses the shared
+primitives and passes the quality spec (test/e2e/quality.spec.js + test/ui-standards.test.js + test/format.test.js).
+Primitives: src/dashboard/ui.jsx (Pill, PageHeader, Section, TabBar, SaveBar / SaveButton / SaveStatus, ConfirmInline,
+Loading, EmptyState, LoadError), src/dashboard/ui-hooks.js (useSaveState, usePageTitle), src/lib/format.js (plural,
+humanDate, humanDateTime, money); styles = the `.ui-*` rules and the "Product quality foundation" block ending src/app.css.
+Non-negotiables:
+- ONE save pattern: useSaveState + SaveBar/SaveStatus ("Saving…" → always enabled again → "Saved." role=status ~2.5 s, or
+  the error role=alert that stays); controls that save on change confirm the same way. Nothing saves or fails silently.
+- ONE page frame: header + TabBar at the same x on every tab/section (`--frame` 1400; pages read at `--content` 880 from
+  the logo's left edge; `app--wide` widens only the content); one h1 size; the shell sets the browser title
+  (usePageTitle), pages never assign document.title. Never hand-build a tab row.
+- Touch: every control ≥ 44 px tall on phones/touch (shared rule in app.css); exceptions only in SMALL_ON_PURPOSE with a reason.
+- Errors sit by their field, all at once, with a recovery action; a refused value is never stored; every data view has
+  loading, empty, error (Retry) and ready states.
+- Owner copy: no internal switch/table/code names, no vendor names (except where the owner acts in that vendor's
+  product), no "(s)" plurals, no ISO dates, sentence case. Status = `Pill` tones only.
+- No native confirm()/alert()/prompt(): ConfirmInline (test NATIVE_CONFIRMS may only shrink). No hover-only controls.
+- Progress preserved: reload, Back, tab switch and a failed request never lose what was typed or chosen; views have URLs.
+- AI: answer from records first; a non-answer says why and what to do next; propose → before/after → owner approves;
+  never change anything without approval; no model call the person did not ask for.
+- Phone 390 and desktop 1440 are both intentional: no page-level sideways scroll, primary action on the first screen.
+
 ## Security rules (non-negotiable)
 
 - **Never add a root `wrangler.toml`/`wrangler.json`**: Pages would switch to file-based config and override dashboard bindings.
@@ -776,7 +800,8 @@ new OAuth scopes · live requests that touch customer data (read-only health che
 
 1. Acceptance criteria in the task are met (see docs/WORKFLOW.md template).
 2. `npm run verify:all` passes locally with zero warnings.
-3. New behaviour has unit tests; new UI flows have Playwright coverage.
+3. New behaviour has unit tests; new UI flows have Playwright coverage; UI changes meet docs/DESIGN_SYSTEM.md (its
+   usability acceptance checklist, shared primitives, quality spec).
 4. No secrets/customer data in code, tests, logs, or output; `git status` shows only intended files.
 5. docs/STATUS.md updated (what changed, decisions, next action).
 6. Summary to the human: files changed, test results, **mocked vs live-verified** clearly separated, what needs approval.
