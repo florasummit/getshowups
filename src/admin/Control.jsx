@@ -332,7 +332,7 @@ function Overview({ o, go }) {
 
 // ---------- shell ----------
 const NAV = [
-  ['overview', 'Overview'],
+  ['overview', 'Summary'], // the console has ONE "Overview": the first admin tab (ADM-01)
   ['incidents', 'Incidents'],
   ['accounts', 'Accounts'],
   ['integrations', 'Integrations'],

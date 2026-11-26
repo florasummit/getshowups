@@ -114,7 +114,23 @@ test('admin sees customers, metrics, and customer detail without lead contact da
   const o = await (await page.request.get('/api/platform/overview')).json()
   expect(o.customers.find((c) => c.name === 'E2E Ads Pools')).toMatchObject({ testBusiness: true, subscription: { status: 'active', mrrCents: 49900 } })
   expect(o.metrics.billing?.mrrCents ?? null).toBe(null)
-  await expect(page.locator('.stat', { hasText: 'MRR' }).locator('.stat-value')).toHaveText(/^(No billing yet|Test mode \(no revenue\))$/)
+  // No revenue figure: the value is a dash and the status word says why (the same wording as Growth: ADM-02).
+  const mrr = page.locator('.stat[data-figure="mrr"]')
+  await expect(mrr.locator('.stat-value')).toHaveText('—')
+  await expect(mrr.locator('.stat-label')).toContainText(/MRR\s*(Unavailable|Test mode)/)
+  // ADM-01: the headline numbers and "Needs attention" come first on a desktop; the setup forms are closed, below.
+  if (test.info().project.name !== 'mobile') {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const bottom = async (loc) => {
+      const box = await loc.boundingBox()
+      return box.y + box.height + (await page.evaluate(() => window.scrollY))
+    }
+    expect(await bottom(page.getByRole('region', { name: 'Metrics' }).locator('.stats')), 'metrics on the first screen').toBeLessThanOrEqual(900)
+    const attention = page.getByRole('heading', { name: 'Needs attention' })
+    if (await attention.count()) expect(await bottom(attention), '"Needs attention" within the first 900 px').toBeLessThanOrEqual(900)
+    await expect(page.locator('details[data-sales-setup]')).not.toHaveAttribute('open', '')
+    await expect(page.locator('details[data-create-business]')).not.toHaveAttribute('open', '')
+  }
   await expect(page.locator('.row--link', { hasText: 'E2E Ads Pools' }).locator('[data-test-business]')).toHaveText('Test')
   await page.getByRole('button', { name: 'More metrics' }).click()
   await expect(page.locator('.kv').getByText('Needs cost data').first()).toBeVisible()
@@ -330,40 +346,116 @@ test('Twilio setup per business: steps in its own subaccount, submitting off, a 
   expect((await page.request.get(`/api/platform/messaging?customer=${fixtures.E2E_TEXTS_CUSTOMER}`)).status()).toBe(403)
 })
 
-test('Growth → Activities: the acquisition plan by tracking code; the founder records status and cost; nothing is sent @mobile', async ({ page, context }) => {
+test('Growth → Activities: the acquisition plan by tracking code; the founder records status and cost; nothing is sent @mobile', async ({ page, context }, testInfo) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   const outside = []
   page.on('request', (r) => /stripe|checkout|resend|twilio/i.test(r.url()) && outside.push(r.url()))
   await page.goto('/admin/growth')
-  await page.locator('[data-growth-mode="activities"]').click()
+  // GROW-06: Growth opens on Activities.
+  await expect(page.locator('[data-growth-mode="activities"]')).toHaveAttribute('aria-selected', 'true')
   const view = page.locator('[data-growth-activities]')
   await expect(view.locator('[data-acq-activity]')).toHaveCount(10)
   await expect(view).toContainText('Recording here never sends a message')
+  // GROW-03: every catalog code is a closed single-line row, in order; the 18 of them fit in 1,800 px on a desktop.
+  await expect(view.locator('[data-acq-activity="email-regional"] [data-acq-code]').first()).toHaveAttribute('data-acq-code', 'out-38')
+  await expect(view.locator('[data-acq-code][data-open]')).toHaveCount(0)
+  if (testInfo.project.name !== 'mobile') {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const rows = await view.locator('[data-acq-code]').count()
+    const height = await page.evaluate(() => document.documentElement.scrollHeight)
+    expect(height, `Activities page height with ${rows} closed codes`).toBeLessThanOrEqual(1800 + 45 * Math.max(0, rows - 18))
+  }
+  // GROW-02: in this fixture the GetShowUps sales business does not exist, so every copy control carries a warning.
+  await expect(view.locator('[data-acq-links-warning]')).toContainText('will not open yet')
+  const counter = view.locator('[data-acq-code="counter-01"]')
+  await counter.locator('.acq-row').click()
+  await expect(counter.getByRole('button', { name: 'Copy booking link' })).toBeVisible()
+  await expect(counter.locator('[data-link-warning]')).toContainText('will not open yet')
+  // GROW-08: a printed card is Prepared → Approved → Live (never "Replied" or "Said no"); the status is explained.
+  await expect(counter.getByLabel('Status of counter-01').locator('option')).toHaveText(['Prepared', 'Approved', 'Live'])
+  await expect(counter.locator('[data-acq-status-means]')).toContainText(/^(Prepared|Approved|Live): /)
+  await expect(view.locator('[data-acq-legend]')).toContainText('Approved = you approved the draft')
+  await counter.locator('.acq-row').click()
+  await expect(counter.getByLabel('Status of counter-01')).toHaveCount(0)
+
   // A code of its own so the test never collides with another project's run.
-  const code = `e2e-${test.info().project.name.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 12)}-${Date.now() % 100000}`
+  const code = `e2e-${testInfo.project.name.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 12)}-${Date.now() % 100000}`
   const card = view.locator('[data-acq-activity="referral"]')
-  await card.getByLabel('New tracking code for Referral asks').fill(code)
-  await card.getByRole('button', { name: 'Add a tracking code' }).click()
+  await card.getByRole('button', { name: 'Add a code to Referral asks' }).click()
+  const field = card.getByLabel('New tracking code for Referral asks')
+  const add = card.getByRole('button', { name: 'Add a tracking code' })
+  const refused = card.locator('[data-acq-add] [role="alert"]')
+  // GROW-12: an empty submit says so; a refused code stays in the field.
+  await add.click()
+  await expect(refused).toContainText('Type a code first')
+  await field.fill('Not A Code!')
+  await add.click()
+  await expect(refused).toContainText('lowercase letters')
+  await expect(field).toHaveValue('Not A Code!')
+  // GROW-01: a code that already exists is refused and nothing about it changes.
+  await field.fill('ref-01')
+  await add.click()
+  await expect(refused).toContainText('already a tracking code')
+  await expect(field).toHaveValue('ref-01')
+  await field.fill(code)
+  await add.click()
   const row = view.locator(`[data-acq-code="${code}"]`)
   await expect(row).toHaveAttribute('data-status', 'prepared')
+  await expect(field).toHaveValue('')
+  // The new row is open: marking it sent is one control (two clicks) away, and is confirmed where it happened.
   await row.getByLabel(`Status of ${code}`).selectOption('sent')
-  await expect(view.locator(`[data-acq-code="${code}"]`)).toHaveAttribute('data-status', 'sent')
-  await view.locator(`[data-acq-code="${code}"]`).getByText('Name and cost').click()
-  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).fill('pat@example.com')
-  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).blur()
-  await expect(view.getByRole('alert')).toContainText('without an email address')
-  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Cost of ${code}`).fill('42')
-  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Cost of ${code}`).blur()
+  await expect(row).toHaveAttribute('data-status', 'sent')
+  await expect(row.getByRole('status')).toContainText('Saved')
+  await expect(row.getByLabel(`Status of ${code}`).locator('option')).toHaveText(['Prepared', 'Approved', 'Sent', 'Followed up', 'Replied', 'Said no'])
+  // GROW-01 in the browser: adding the same code again is refused by the server too, and it stays Sent.
+  const again = await page.request.post('/api/platform/acquisition', { data: { code, activity: 'referral', create: true, status: 'prepared' }, headers: { Origin: new URL(page.url()).origin } })
+  expect([again.status(), (await again.json()).error]).toEqual([409, 'code_exists'])
+  await field.fill(code)
+  await add.click()
+  await expect(refused).toContainText('already a tracking code')
+  await expect(row).toHaveAttribute('data-status', 'sent')
+  // GROW-07: name and cost save on Enter, say "Saved", keep the row open, and the cost shows on the row.
+  const label = row.getByLabel(`Label of ${code}`)
+  await label.fill('pat@example.com')
+  await label.press('Enter')
+  await expect(row.getByRole('alert')).toContainText('without an email address')
+  await expect(label).toHaveValue('pat@example.com')
+  await label.fill('Harbor Pools')
+  await label.press('Enter')
+  await expect(row.getByRole('status')).toContainText('Saved')
+  await expect(row.locator('.acq-row-label')).toHaveText('Harbor Pools')
+  const cost = row.getByLabel(`Cost of ${code}`)
+  await cost.fill('42')
+  await cost.press('Enter')
+  await expect(row.locator('[data-acq-cost]')).toHaveText('Cost $42')
+  await expect(row).toHaveAttribute('data-open', '')
   await expect(view.locator('[data-acq-total="cost"]')).toContainText('Recorded by you: $')
-  // Saved: a reload shows the same status.
+  // GROW-03: one typed field reaches the code; the filter narrows by what was recorded.
+  await view.getByLabel('Find a tracking code').fill(code)
+  await expect(view.locator('[data-acq-code]')).toHaveCount(1)
+  await view.getByLabel('Find a tracking code').fill('')
+  await view.locator('[data-acq-filter="sent"]').click()
+  await expect(row).toBeVisible()
+  await expect(view.locator('[data-acq-code="counter-01"]')).toHaveCount(0)
+  // The filter and the open row survive a visit to another Growth tab and Back (GROW-06).
+  await page.locator('[data-growth-mode="decide"]').click()
+  await expect(page).toHaveURL(/\/admin\/growth#decide$/)
+  await page.goBack()
+  await expect(view.locator('[data-acq-filter="sent"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(row).toHaveAttribute('data-open', '')
+  // Saved: a reload shows the same status, name and cost.
   await page.reload()
-  await page.locator('[data-growth-mode="activities"]').click()
-  await expect(page.locator(`[data-acq-code="${code}"]`)).toHaveAttribute('data-status', 'sent')
+  const after = page.locator(`[data-acq-code="${code}"]`)
+  await expect(after).toHaveAttribute('data-status', 'sent')
+  await expect(after.locator('.acq-row-label')).toHaveText('Harbor Pools')
+  await expect(after.locator('[data-acq-cost]')).toHaveText('Cost $42')
   expect(outside).toEqual([])
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 800 })
+    await after.locator('.acq-row').click()
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow, `activities overflow at ${width}px`).toBeLessThanOrEqual(0)
+    await after.locator('.acq-row').click()
   }
 })
 
@@ -372,17 +464,40 @@ test('Growth: Measure labels every figure; Simulate changes outputs without touc
   const billingCalls = []
   page.on('request', (r) => /stripe|billing|checkout/i.test(r.url()) && billingCalls.push(r.url()))
   await page.goto('/admin')
+  // ADM-02: what the Overview says about MRR, Paying customers and Retention (value and status word)…
+  await page.getByRole('button', { name: 'More metrics' }).click()
+  const figures = async () => Object.fromEntries(await page.locator('[data-figure]').evaluateAll((els) => els.map((el) => [el.getAttribute('data-figure'), `${el.getAttribute('data-figure-value')} · ${el.getAttribute('data-figure-status')}`])))
+  const onOverview = await figures()
+  expect(Object.keys(onOverview).sort()).toEqual(['mrr', 'payingCustomers', 'retention'])
   await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Growth' }).click()
   await expect(page).toHaveURL(/\/admin\/growth$/)
   await expect(page.getByRole('heading', { name: 'Growth', level: 1 })).toBeVisible()
+  // GROW-06: the tab is part of the address; reload keeps it.
+  await page.locator('[data-growth-mode="measure"]').click()
+  await expect(page).toHaveURL(/\/admin\/growth#measure$/)
+  await page.reload()
   // Measure: every row carries a kind; test-mode billing is never shown as revenue.
   const measure = page.locator('[data-growth-measure]')
   await expect(measure.locator('[data-measure="mrr"]')).toHaveAttribute('data-kind', 'unavailable')
   await expect(measure.locator('[data-measure="payingCustomers"]')).toHaveAttribute('data-kind', 'test')
   expect(await measure.locator('[data-measure][data-kind]').count()).toBeGreaterThan(8)
   await expect(measure).toContainText('test businesses and test leads excluded')
+  // …is exactly what Growth says (ADM-02), and the status word is on the screen in both places.
+  expect(await figures()).toEqual(onOverview)
+  for (const [key, text] of Object.entries(onOverview)) await expect(measure.locator(`[data-figure="${key}"]`)).toContainText(text.split(' · ')[1])
+  // GROW-09: two headings, customers' numbers apart from GetShowUps' own funnel.
+  await expect(measure.locator('[data-measure-group]')).toHaveCount(2)
+  await expect(measure.locator('[data-measure-group="customers"] [data-measure]')).toHaveCount(4)
+  await expect(measure.getByRole('heading', { level: 2 })).toHaveText(['Your customers’ results', 'GetShowUps’ own sales funnel'])
+  await expect(measure).not.toContainText(/\(s\)|\(es\)|Sample \d|tables are missing/)
+  const prospectsKnown = (await measure.locator('[data-measure="salesLeads"]').getAttribute('data-kind')) !== 'unavailable'
   // Simulate: raising the close rate raises new customers; the price field is modeling only (no billing request).
   await page.locator('[data-growth-mode="simulate"]').click()
+  await expect(page).toHaveURL(/\/admin\/growth#simulate$/)
+  // GROW-04: no ad campaigns of GetShowUps' own here, so "Acquisition spend" is an assumption, whatever customers spend.
+  await expect(page.locator('[data-sim-field="spendPerMonthCents"]')).toHaveAttribute('data-sim-source', 'assumption')
+  await expect(page.locator('[data-sim-scenario="Cost per new customer"]')).toHaveText('—')
+  await expect(page.locator('[data-sim-payback]')).toContainText('pay that cost back')
   const cell = page.locator('[data-sim-scenario="New customers"]')
   const before = await cell.textContent()
   await page.locator('[data-sim-field="closeRate"] input').fill('90')
@@ -390,6 +505,23 @@ test('Growth: Measure labels every figure; Simulate changes outputs without touc
   await page.locator('[data-sim-field="priceMonthlyCents"] input').fill('999')
   await expect(page.locator('[data-sim-scenario="New MRR"]')).not.toHaveText('—')
   await expect(page.locator('[data-sim-limits]')).toContainText('Not a forecast')
+  // GROW-10: 150% is refused where it was typed (the baseline stands in); a negative amount reads −$, never $-.
+  const close = page.locator('[data-sim-field="closeRate"]')
+  await close.locator('input').fill('150')
+  await expect(close.getByRole('alert')).toContainText('Enter a percentage from 0 to 100')
+  await expect(cell).toHaveText(before)
+  await close.locator('input').fill('')
+  await expect(close.getByRole('alert')).toContainText('Enter a percentage from 0 to 100')
+  await page.locator('[data-sim-field="priceMonthlyCents"] input').fill('1')
+  await expect(page.locator('[data-sim-delta]')).toContainText('−$')
+  await expect(page.locator('[data-growth-simulate]')).not.toContainText('$-')
+  // GROW-06: what was typed survives a visit to another tab, and Back returns to the previous tab.
+  await close.locator('input').fill('55')
+  await page.locator('[data-growth-mode="measure"]').click()
+  await expect(measure).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL(/\/admin\/growth#simulate$/)
+  await expect(close.locator('input')).toHaveValue('55')
   await page.locator('[data-sim-reset]').click()
   await expect(cell).toHaveText(before)
   expect(billingCalls).toEqual([])
@@ -399,6 +531,12 @@ test('Growth: Measure labels every figure; Simulate changes outputs without touc
   await expect(decide).toContainText('Experiment')
   await expect(decide).toContainText('Evidence')
   await expect(decide).toContainText('Nothing runs by itself')
+  // GROW-05: it names a prepared activity by its title, never a count Measure shows as unavailable, never an ad test.
+  await expect(decide.locator('[data-decide-experiment]')).toContainText(/“(Emails to Charleston owners|Emails to owners outside Charleston|Referral asks|Supply-counter card|Founder post|Live demo for an owner you know|Association or chamber listing)”/)
+  if (!prospectsKnown) await expect(decide).not.toContainText(/\d+ prospects?\b/)
+  await expect(decide).not.toContainText(/Meta or Google|homepage entry is live/)
+  await decide.getByRole('button', { name: 'Open Activities' }).click()
+  await expect(page).toHaveURL(/\/admin\/growth#activities$/)
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 800 })
     for (const mode of ['activities', 'measure', 'simulate', 'decide']) {
@@ -415,6 +553,7 @@ test('account types: the console creates a sandbox business (test-marked, compli
   await page.goto('/admin')
   const name = `E2E Sandbox ${testInfo.project.name}`
   const create = page.locator('[data-create-business]')
+  await create.locator('summary').first().click() // a setup form: closed until opened (ADM-01)
   await create.locator('[data-create-name]').fill(name)
   await create.locator('[data-create-type]').selectOption('sandbox')
   await create.locator('[data-create-submit]').click()

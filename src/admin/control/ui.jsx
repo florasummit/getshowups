@@ -2,6 +2,7 @@
 // small presentational components every view shares. No data fetching here.
 import { useEffect, useRef } from 'react'
 import { hrefFor, takeFocus } from './lib.js'
+import { Pill } from '../../dashboard/ui.jsx'
 
 // A real link (middle-click / open in new tab work) that navigates in place on a normal click.
 export function Link({ to, go, children, className, ...rest }) {
@@ -22,10 +23,13 @@ export function Link({ to, go, children, className, ...rest }) {
   )
 }
 
+// The Control Center's status chip IS the shared Pill (one chip style in the whole console); `plain` = no dot.
 export function Badge({ tone = 'neutral', plain = false, children, ...rest }) {
   return (
-    <span className={`cc-badge cc-badge--${tone}${plain ? ' cc-badge--plain' : ''}`} {...rest}>
-      {children}
+    <span className="cc-badge" {...rest}>
+      <Pill tone={tone} dot={!plain}>
+        {children}
+      </Pill>
     </span>
   )
 }

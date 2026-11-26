@@ -187,9 +187,8 @@ for (const [label, token, path, navLabel] of PAGES.filter(([l]) => l !== 'Growth
   })
 }
 
-// GROW-09 (admin batch): Growth → Measure still prints "STRIPE_LIVE_ENABLED" (server/growth.js notes) and other
-// internal terms. Admin engineer: fix the copy, then change test.fixme to test.
-test.fixme('copy: Growth shows no internal switch names and no ISO dates (GROW-09) @mobile', async ({ page, context }) => {
+// GROW-09: Growth → Measure used to print "STRIPE_LIVE_ENABLED" (server/growth.js notes) and other internal terms.
+test('copy: Growth shows no internal switch names and no ISO dates (GROW-09) @mobile', async ({ page, context }) => {
   await useSession(context, ADMIN)
   await page.goto('/admin/growth')
   await settled(page, 'Admin', 'Growth')

@@ -8,6 +8,7 @@ import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
 import { Pill, TabBar } from '../dashboard/ui.jsx'
 import { usePageTitle } from '../dashboard/ui-hooks.js'
+import { sharedFigures } from './figures.js'
 import '../app.css'
 
 const Review = lazyPage(() => import('./Review.jsx'))
@@ -67,21 +68,28 @@ function Metrics({ m }) {
   const noBilling = testMode ? 'Test mode' : '—'
   // On-site businesses (the business visits the customer) are judged by completed jobs, not customer show-ups.
   const outcome = m.showUpRate30 == null && m.completionRate30 != null ? ['Job completion', pct(m.completionRate30)] : ['Show-up rate', pct(m.showUpRate30)]
+  // MRR, Paying customers and Retention read exactly as on Growth → Measure: one formatter over the same facts.
+  const shared = sharedFigures(m.billing, m.retention30)
+  const figure = (key) => (
+    <span data-figure={key} data-figure-value={shared[key].value} data-figure-status={shared[key].status}>
+      {shared[key].value} <Pill tone={shared[key].tone}>{shared[key].status}</Pill>
+    </span>
+  )
   const main = [
     ['Customers', m.customers.total],
     ['Activation', pct(m.activationRate)],
     ['Booking conversion', pct(m.bookingConversion30)],
     outcome,
-    ['MRR', b ? money(b.mrrCents, b.currency) : testMode ? 'Test mode (no revenue)' : 'No billing yet'],
+    ['MRR', shared.mrr.value, 'mrr'],
   ]
   const extra = [
     ['ARR', b ? money(b.arrCents, b.currency) : noBilling],
-    ['Paying customers', b ? b.payingCustomers : noBilling],
+    ['Paying customers', figure('payingCustomers')],
     ['Trialing', b ? b.trialing : noBilling],
     ['Revenue (30 days)', b ? money(b.revenue30Cents, b.currency) : noBilling],
     ['Revenue growth', b ? pct(b.revenueGrowth30) : noBilling],
     ['Churn (30 days)', b ? pct(b.churn30) : noBilling],
-    ['Retention (30 days)', pct(m.retention30)],
+    ['Retention (customers active 30 days after setup)', figure('retention')],
     ['First booking rate', pct(m.firstBookingRate)],
     ['Visit rate (on-site businesses)', pct(m.visitRate30)],
     ['Job completion (on-site businesses)', pct(m.completionRate30)],
@@ -94,16 +102,18 @@ function Metrics({ m }) {
   return (
     <section aria-label="Metrics">
       <div className="stats stats--5">
-        {main.map(([label, value]) => (
-          <div key={label} className="stat">
+        {main.map(([label, value, key]) => (
+          <div key={label} className="stat" data-figure={key} data-figure-value={key ? shared[key].value : undefined} data-figure-status={key ? shared[key].status : undefined}>
             <p className={`stat-value stat-value--sm ${/[a-z]/i.test(String(value)) && !/%$/.test(String(value)) ? 'stat-value--text' : ''}`}>{value}</p>
-            <p className="stat-label">{label}</p>
+            <p className="stat-label">
+              {label} {key ? <Pill tone={shared[key].tone}>{shared[key].status}</Pill> : null}
+            </p>
           </div>
         ))}
       </div>
       {testMode && (
         <p className="fine" data-billing-test-mode>
-          Billing is in Stripe test mode: {plural(m.billing.testSubscriptions, 'active test subscription')}, not counted as revenue.
+          {shared.mrr.note}
         </p>
       )}
       <button type="button" className="link-btn more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
@@ -269,7 +279,7 @@ function AccountType({ id, onChanged }) {
           <dt>Operating environment</dt>
           <dd data-account-environment={cur.environment}>
             {cur.environment === 'sandbox' ? 'Sandbox (test business: test Ads accounts only, test recipients only, no live Stripe, out of metrics)' : 'Production'}
-            {a.testMark.test !== (cur.environment === 'sandbox') && <span className="tag tag--bad"> test mark out of step</span>}
+            {a.testMark.test !== (cur.environment === 'sandbox') && <Pill tone="bad">Test mark out of step</Pill>}
           </dd>
         </div>
         <div>
@@ -415,9 +425,9 @@ function CustomerDetail({ id, onBack, onChanged }) {
       {d.attention.length > 0 && (
         <p className="tags">
           {d.attention.map((a) => (
-            <span key={a} className="tag tag--bad">
+            <Pill key={a} tone="bad">
               {ATTENTION[a]}
-            </span>
+            </Pill>
           ))}
         </p>
       )}
@@ -852,9 +862,9 @@ function MessagingOps() {
         <>
           <p className="tags">
             {SWITCHES.map(([k, l, bad]) => (
-              <span key={k} className={`tag${m.switches[k] && bad ? ' tag--bad' : ''}`}>
+              <Pill key={k} tone={m.switches[k] && bad ? 'bad' : 'neutral'}>
                 {l}: {m.switches[k] ? 'on' : 'off'}
-              </span>
+              </Pill>
             ))}
           </p>
           {!m.ready ? (
@@ -888,7 +898,7 @@ function MessagingOps() {
                     <li key={r.customer} className="row">
                       <div className="row-main">
                         <p className="row-title">
-                          {r.name} <span className="tag">{REG_STATUS[r.status]}</span>
+                          {r.name} <Pill tone={r.status === 'approved' ? 'ok' : r.status === 'rejected' || r.status === 'suspended' ? 'bad' : r.status === 'pending' ? 'warn' : 'neutral'}>{REG_STATUS[r.status]}</Pill>
                         </p>
                         <p className="row-sub">
                           {r.customer} · owner approved: {r.ownerApproved ? 'yes' : 'no'} · sender: {r.hasSender ? 'set' : 'not set'}
@@ -1148,7 +1158,7 @@ function AcceptanceTesting() {
               <li key={g.id} className="row">
                 <div className="row-main">
                   <p className="row-title">
-                    {g.customer} <span className={`tag ${open ? 'tag--ok' : ''}`}>{open ? 'active' : g.revoked_at ? 'revoked' : 'expired'}</span>
+                    {g.customer} <Pill tone={open ? 'ok' : 'neutral'}>{open ? 'Active' : g.revoked_at ? 'Revoked' : 'Expired'}</Pill>
                   </p>
                   <p className="row-sub">{g.last_used_at ? `Last used ${date(g.last_used_at)}` : 'Not used yet'} · until {date(g.expires_at)}</p>
                 </div>
@@ -1173,11 +1183,11 @@ function CustomerRows({ list, onOpen }) {
         <li key={c.id} className="row row--link" onClick={() => onOpen(c.id)}>
           <div className="row-main">
             <p className="row-title">
-              {c.name} <span className={`tag ${c.onboarding === 'live' ? 'tag--ok' : ''}`}>{ONBOARDING[c.onboarding]}</span>
-              {c.appointmentMode === 'at_customer' && <span className="tag">On-site</span>}
+              {c.name} <Pill tone={c.onboarding === 'live' ? 'ok' : c.onboarding === 'suspended' ? 'bad' : 'neutral'}>{ONBOARDING[c.onboarding]}</Pill>
+              {c.appointmentMode === 'at_customer' && <Pill tone="neutral">On-site</Pill>}
               {c.testBusiness && (
-                <span className="tag" data-test-business>
-                  Test
+                <span data-test-business>
+                  <Pill tone="neutral">Test</Pill>
                 </span>
               )}
             </p>
@@ -1216,8 +1226,10 @@ function CreateBusiness({ onCreated }) {
     }
   }
   return (
-    <section className="card" aria-label="Create an internal or sandbox business" data-create-business>
-      <h2 className="card-title">Create an internal or sandbox business</h2>
+    <details className="card admin-setup" data-create-business>
+      <summary>
+        <span className="card-title">Create an internal or sandbox business</span>
+      </summary>
       <p className="fine">Complimentary accounts for GetShowUps’ own use: never a Stripe checkout. A sandbox is a test business (out of metrics, test providers only). An internal live business has real customers and counts in operations, never in paying customers or MRR.</p>
       <form className="form" onSubmit={submit}>
         <label className="field">
@@ -1253,7 +1265,7 @@ function CreateBusiness({ onCreated }) {
           </p>
         )}
       </form>
-    </section>
+    </details>
   )
 }
 
@@ -1285,8 +1297,16 @@ function SalesSetup() {
   }
   if (!status || status.error) return null
   return (
-    <section className="card" aria-label="GetShowUps sells itself" data-sales-setup>
-      <h2 className="card-title">GetShowUps sells itself</h2>
+    <details className="card admin-setup" data-sales-setup>
+      <summary>
+        <span className="card-title">GetShowUps sales setup</span>
+        {SALES_KINDS.map(([kind, title]) => (
+          <span key={kind} className="admin-setup-state">
+            {title}: <Pill tone={!status[kind]?.exists ? 'neutral' : status[kind].calendarConnected ? 'ok' : 'warn'}>{!status[kind]?.exists ? 'Not created' : status[kind].calendarConnected ? 'Ready' : 'Calendar not connected'}</Pill>
+          </span>
+        ))}
+      </summary>
+      <p className="fine">GetShowUps sells itself with its own product: these two records are created once each; the activity links on Growth open only when the sales assistant exists and its calendar is connected.</p>
       <ul className="ui-list">
         {SALES_KINDS.map(([kind, title, what]) => {
           const st = status[kind]
@@ -1332,7 +1352,7 @@ function SalesSetup() {
           {error}
         </p>
       )}
-    </section>
+    </details>
   )
 }
 
@@ -1367,8 +1387,6 @@ function Overview({ me }) {
           {inviting ? 'Close' : 'Invite customer'}
         </button>
       </div>
-      <SalesSetup />
-      <CreateBusiness onCreated={load} />
       {inviting && (
         <section className="card enter">
           <h2 className="card-title">Invite a new customer</h2>
@@ -1376,7 +1394,6 @@ function Overview({ me }) {
         </section>
       )}
       <Metrics m={data.metrics} />
-      <Closures onOpen={setSelected} />
 
       {attention.length > 0 && (
         <section className="card">
@@ -1386,13 +1403,18 @@ function Overview({ me }) {
               <li key={c.id} className="row row--link" onClick={() => setSelected(c.id)}>
                 <div className="row-main">
                   <p className="row-title">
-                    {c.name} {c.testBusiness && <span className="tag" data-test-business>Test</span>}
+                    {c.name}{' '}
+                    {c.testBusiness && (
+                      <span data-test-business>
+                        <Pill tone="neutral">Test</Pill>
+                      </span>
+                    )}
                   </p>
                   <p className="tags">
                     {c.attention.map((a) => (
-                      <span key={a} className="tag tag--bad">
+                      <Pill key={a} tone="bad">
                         {ATTENTION[a]}
-                      </span>
+                      </Pill>
                     ))}
                   </p>
                 </div>
@@ -1401,6 +1423,8 @@ function Overview({ me }) {
           </ul>
         </section>
       )}
+
+      <Closures onOpen={setSelected} />
 
       <section className="card" aria-labelledby="customers-title">
         <div className="page-head">
@@ -1436,6 +1460,10 @@ function Overview({ me }) {
         </section>
       )}
 
+      {/* Setup forms: used once in a while, so they sit below the numbers and the lists, closed until opened (ADM-01). */}
+      <SalesSetup />
+      <CreateBusiness onCreated={load} />
+
       {me.billingConfigured && <Plans />}
 
       {me.billingConfigured && <Reconciliation />}
@@ -1453,7 +1481,7 @@ function Overview({ me }) {
               <li key={m.id} className="row">
                 <div className="row-main">
                   <p className="row-title">
-                    {m.subject} <span className={`tag ${m.status === 'sent' ? 'tag--ok' : m.status === 'failed' ? 'tag--bad' : ''}`}>{m.status === 'pending' ? 'not sent' : m.status}</span>
+                    {m.subject} <Pill tone={m.status === 'sent' ? 'ok' : m.status === 'failed' ? 'bad' : 'neutral'}>{m.status === 'pending' ? 'Not sent' : m.status === 'sent' ? 'Sent' : m.status === 'failed' ? 'Failed' : m.status}</Pill>
                   </p>
                   <p className="row-sub">
                     {m.to_email} · {date(m.created_at)}

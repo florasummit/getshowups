@@ -3,6 +3,7 @@
 // (server/ops/), so a newly registered capability appears here without any change to this file.
 import { useEffect, useMemo, useState } from 'react'
 import { api, fmt } from '../lib/api.js'
+import { Pill } from '../dashboard/ui.jsx'
 
 const STATUS_LABEL = {
   live_verified: 'Live-verified',
@@ -32,9 +33,12 @@ const GROUP_HELP = {
   approval: 'Built and switched off. Each needs your explicit decision to turn on.',
   not_built: 'Not built. Nothing waits on these unless they become needed.',
 }
+// Status chips are the shared Pill and its five tones (docs/DESIGN_SYSTEM.md); the words carry the exact state.
+const STATUS_TONE = { live_verified: 'ok', built_tested: 'info', sandbox: 'warn', disabled: 'neutral', missing: 'neutral', unknown: 'warn' }
+const OUTCOME_TONE = { failure: 'bad', success: 'ok' }
 const Badge = ({ s }) => (
-  <span className={`tag st st--${s}`} data-status={s}>
-    {STATUS_LABEL[s] || s}
+  <span data-status={s}>
+    <Pill tone={STATUS_TONE[s] || 'neutral'}>{STATUS_LABEL[s] || s}</Pill>
   </span>
 )
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
@@ -49,7 +53,7 @@ function Capability({ c, names }) {
           {c.openFailures.length > 0 && <span className="bad"> · {plural(c.openFailures.length, 'problem')}</span>}
         </span>
         <span className="cap-badges">
-          {HEALTH_LABEL[c.health] && ['failing', 'degraded'].includes(c.health) && <span className={`tag hl hl--${c.health}`} data-health={c.health}>{HEALTH_LABEL[c.health]}</span>}
+          {HEALTH_LABEL[c.health] && ['failing', 'degraded'].includes(c.health) && <span data-health={c.health}><Pill tone={c.health === 'failing' ? 'bad' : 'warn'}>{HEALTH_LABEL[c.health]}</Pill></span>}
           <Badge s={c.status} />
         </span>
       </summary>
@@ -149,7 +153,7 @@ function CapabilityEvents({ id }) {
     <ul className="cap-events" data-cap-events={id}>
       {ev.slice(0, 10).map((e) => (
         <li key={e.seq}>
-          <span className={`tag ${e.outcome === 'failure' ? 'tag--bad' : e.outcome === 'success' ? 'tag--ok' : ''}`}>{e.outcome}</span> {e.action}
+          <Pill tone={OUTCOME_TONE[e.outcome] || 'neutral'}>{e.outcome}</Pill> {e.action}
           {e.customer ? ` · ${e.customer}` : ''} · {when(e.at)}
         </li>
       ))}
@@ -442,7 +446,7 @@ function BusinessDetail({ b }) {
                 <p className="row-title">{c.name}</p>
                 <p className="row-sub">{c.summary}</p>
               </div>
-              <span className={`tag ${c.status === 'ok' ? 'tag--ok' : c.status === 'attention' ? 'tag--bad' : ''}`}>{c.status}</span>
+              <Pill tone={c.status === 'ok' ? 'ok' : c.status === 'attention' ? 'bad' : 'neutral'}>{c.status}</Pill>
             </li>
           ))}
         </ul>
@@ -537,7 +541,7 @@ function BusinessDetail({ b }) {
               <li key={e.seq} className="row">
                 <div className="row-main">
                   <p className="row-title">
-                    {e.action} <span className={`tag ${e.outcome === 'failure' ? 'tag--bad' : e.outcome === 'success' ? 'tag--ok' : ''}`}>{e.outcome}</span>
+                    {e.action} <Pill tone={OUTCOME_TONE[e.outcome] || 'neutral'}>{e.outcome}</Pill>
                   </p>
                   <p className="row-sub">
                     {e.actorType === 'admin' ? e.actor : e.actorType} · {when(e.at)}
@@ -574,6 +578,9 @@ export default function Review() {
       <div className="page-head">
         <h1 className="title title--page">Business Review</h1>
       </div>
+      <p className="fine" data-review-what>
+        Everything GetShowUps can do, feature by feature: what is live, what runs in test mode only, what is switched off and waiting on your decision, and what is failing right now.
+      </p>
       <div className="seg" role="tablist" aria-label="Business Review views">
         {[
           ['platform', 'Platform'],

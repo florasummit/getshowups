@@ -42,7 +42,6 @@ const NATIVE_ALERTS = {
   'src/dashboard/DomainSettings.jsx': 1, // Copy fallback (website batch)
   'src/dashboard/Home.jsx': 1, // Copy fallback (ONB-03, dashboard batch)
   'src/dashboard/FollowUps.jsx': 1, // alert after pausing messages (dashboard batch, with the confirm above it)
-  'src/admin/Growth.jsx': 1, // Copy fallback (GROW-02, admin batch)
 }
 
 test('no new native alert() or prompt() in the dashboard or the admin console (the allowlist only shrinks)', () => {

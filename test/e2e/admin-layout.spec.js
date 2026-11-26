@@ -19,8 +19,9 @@ async function measure(page) {
     const column = main?.querySelector('.cc-main')
     const nav = main?.querySelector('.cc-nav') // a real side navigation (Control Center) takes its own column
     const widest = Math.max(0, ...Array.from(main?.children || [], (el) => el.getBoundingClientRect().width))
-    const beside = nav && column && nav.getBoundingClientRect().right <= column.getBoundingClientRect().left // side by side, not stacked
-    const navWidth = beside ? column.getBoundingClientRect().left - main.getBoundingClientRect().left : 0
+    // Side by side (the navigation stands to the right of the content since ADM-03; before, to its left), not stacked.
+    const beside = nav && column && (nav.getBoundingClientRect().left >= column.getBoundingClientRect().right || nav.getBoundingClientRect().right <= column.getBoundingClientRect().left)
+    const navWidth = beside ? main.getBoundingClientRect().width - column.getBoundingClientRect().width : 0
     return { main: (main?.getBoundingClientRect().width || 0) - navWidth, content: column ? column.getBoundingClientRect().width : widest, overflow: document.documentElement.scrollWidth - Math.min(window.innerWidth, screen.width) }
   })
 }
@@ -60,4 +61,29 @@ test('every admin section fills the content column when reached by tab clicks wi
   await expectFullWidth(page, 'Voice Lab')
   await page.goForward()
   await expectFullWidth(page, 'Control Center')
+})
+
+// ADM-03: the page heading starts at the same x in all five sections (the Control Center's side navigation stands
+// beside the content, it no longer pushes the heading), after a tab click and after a direct load.
+test('the page heading starts at the same x in every admin section', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/admin')
+  const nav = page.getByRole('navigation', { name: 'Admin' })
+  const headingX = async (label) => {
+    await expect(nav.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page')
+    const h1 = page.locator('main.app-main h1').first()
+    await expect(h1).toBeVisible({ timeout: 15_000 })
+    return Math.round((await h1.boundingBox()).x)
+  }
+  const first = await headingX('Overview')
+  for (const label of TABS) {
+    await nav.getByRole('link', { name: label, exact: true }).click()
+    expect(Math.abs((await headingX(label)) - first), `${label}: heading x`).toBeLessThanOrEqual(1)
+  }
+  await page.goto('/admin/control?view=incidents')
+  expect(Math.abs((await headingX('Control Center')) - first), 'Control Center → Incidents (direct link)').toBeLessThanOrEqual(1)
+  // The Control Center's own first page is "Summary": only one thing in the console is called Overview (ADM-01).
+  await expect(page.getByRole('navigation', { name: 'Control Center' }).getByRole('link')).toHaveText([/^Summary/, /^Incidents/, /^Accounts/, /^Integrations/, /^Testing/])
+  await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveCount(1)
 })

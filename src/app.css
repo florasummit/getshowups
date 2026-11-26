@@ -3897,6 +3897,15 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
   border-radius: 10px;
 }
 
+/* Admin Overview: setup forms used once in a while sit below the numbers, closed until opened (finding ADM-01). */
+.admin-setup > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; cursor: pointer; }
+.admin-setup > summary .card-title { margin: 0; }
+.admin-setup > summary::after { content: '▸'; margin-left: auto; color: var(--text-muted); }
+.admin-setup[open] > summary::after { content: '▾'; }
+.admin-setup > summary::-webkit-details-marker { display: none; }
+.admin-setup[open] > summary { margin-bottom: 12px; }
+.admin-setup-state { color: var(--text-muted); font-size: var(--fs-sm); }
+.stat-label .ui-pill { margin-left: 2px; }
 /* Admin: the invite action is the page's one primary; search matches the field style. */
 .app .search {
   min-height: 42px;
@@ -4342,14 +4351,54 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .growth .sim-table thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
 .growth .sim-table td { font-variant-numeric: tabular-nums; }
 .growth .row-main, .growth .row-title, .growth .row-sub, .growth dd { min-width: 0; overflow-wrap: anywhere; }
-.growth .acq-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.growth .growth-group + .growth-group { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--ink-100); }
+.growth .growth-group .card-title { margin-bottom: 2px; }
+.growth .field .form-error, .growth .field .fine { margin: 0; font-size: 0.85rem; }
+/* Activities: one compact section per activity; each tracking code is a single-line row that opens its controls. */
+.growth .acq-summary .row { padding: 6px 0; align-items: flex-start; }
+@media (min-width: 900px) {
+  .growth .acq-summary .rows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; margin-top: 8px; }
+  .growth .acq-summary .row { border-top: 0; }
+}
+.growth .acq-warn { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-text); font-size: 0.9rem; overflow-wrap: anywhere; }
+.growth .acq-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.growth .acq-bar .fchips { margin-bottom: 0; }
+.growth .acq-bar .search { flex: 0 1 16rem; min-width: 0; }
+.growth .acq-act { padding: 4px 0 0; border-top: 1px solid var(--ink-100); }
+.growth .acq-act-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.growth .acq-act-title { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: 0; }
+.growth .acq-act-meta { flex: 1 1 16rem; min-width: 0; margin: 0; color: var(--text-muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.growth .acq-act-add { margin-left: auto; font-size: 0.85rem; }
+.growth .acq-rows { list-style: none; margin: 0; padding: 0 0 2px; }
+.growth .acq-row { display: grid; grid-template-columns: 8.5rem minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 1fr) 7rem 1rem; gap: 2px 12px; align-items: center; width: 100%; min-height: 32px; padding: 2px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.growth .acq-row:hover, .growth .acq-code[data-open] > .acq-row { background: var(--ink-50); }
+.growth .acq-row code { font-weight: 650; overflow-wrap: anywhere; }
+.growth .acq-row-label, .growth .acq-row-result { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.growth .acq-row-result, .growth .acq-row-cost, .growth .acq-none, .growth .acq-row-chev { color: var(--text-muted); font-size: 0.9rem; }
+.growth .acq-row-cost { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.growth .acq-row-pills { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.growth .acq-panel { display: grid; gap: 8px; padding: 6px 8px 14px; }
+.growth .acq-panel > * { margin: 0; min-width: 0; }
+.growth .acq-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 8px 12px; max-width: 46rem; }
 .growth .acq-edit label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--text-muted); min-width: 0; }
-.growth .acq-edit input, .growth .acq-edit select, .growth .acq-add input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--ink-100); border-radius: 8px; font: inherit; background: #fff; color: inherit; }
-.growth .acq-more { grid-column: 1 / -1; }
-.growth .acq-more summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); padding: 8px 0; }
-.growth .acq-tools { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.growth .acq-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; }
+.growth .acq-edit input, .growth .acq-edit select, .growth .acq-add input, .growth .acq-copy input { min-width: 0; width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; font: inherit; background: var(--white); color: inherit; }
+.growth .acq-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.growth .acq-copy { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; max-width: 100%; }
+.growth .acq-copy input { width: 26rem; max-width: 100%; }
+.growth .acq-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
 .growth .acq-add input { flex: 1 1 12rem; max-width: 16rem; }
+.growth .acq-add .ui-save-error, .growth .acq-add .ui-save-status { flex: 1 1 100%; }
+@media (pointer: coarse) { .growth .acq-row { min-height: 44px; } }
+@media (max-width: 760px) {
+  .growth .acq-row { grid-template-columns: minmax(0, 1fr) auto 1rem; grid-template-areas: 'code pills chev' 'label label chev' 'result cost chev'; min-height: 44px; padding: 8px 4px; }
+  .growth .acq-row code { grid-area: code; }
+  .growth .acq-row-pills { grid-area: pills; justify-content: flex-end; }
+  .growth .acq-row-label { grid-area: label; }
+  .growth .acq-row-result { grid-area: result; }
+  .growth .acq-row-cost { grid-area: cost; }
+  .growth .acq-row-chev { grid-area: chev; }
+  .growth .acq-bar .search { flex: 1 1 100%; }
+}
 .growth .row { flex-wrap: wrap; }
 @media (max-width: 560px) { .growth .sim-table { font-size: 0.85rem; } .growth .sim-table th, .growth .sim-table td { padding: 6px 4px; } }
 

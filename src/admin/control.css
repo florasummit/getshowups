@@ -16,10 +16,21 @@
 .cc {
   --cc-line: var(--ink-200);
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 220px;
   gap: 32px;
   align-items: start;
   padding-top: 20px;
+}
+/* The page heading starts at the same x as every other admin section (finding ADM-03): the content takes the first
+   column and the side navigation stands beside it on the right. The navigation stays first in the markup (keyboard
+   and reading order; on a narrow screen it is the row above the content). */
+.cc > .cc-main {
+  grid-column: 1;
+  grid-row: 1;
+}
+.cc > .cc-nav {
+  grid-column: 2;
+  grid-row: 1;
 }
 /* One column, no side nav (Voice Lab, Voice providers). Lives next to .cc on purpose: a modifier of this grid must be
    in the same stylesheet, or a page gets it only when another page's chunk happens to have loaded it. */
@@ -358,56 +369,11 @@ button.cc-item:hover {
 }
 
 /* ---------- badges ---------- */
+/* Status chips are the shared Pill (src/dashboard/ui.jsx, .ui-pill in app.css): one chip style across the console.
+   .cc-badge only carries the data attributes of a chip. */
 .cc-badge {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--neutral-bg);
-  color: var(--neutral-text);
-  font-size: var(--fs-xs);
-  font-weight: 650;
-  line-height: 1.6;
-  white-space: nowrap;
-}
-.cc-badge::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--neutral-dot);
-}
-.cc-badge--ok {
-  background: var(--ok-bg);
-  color: var(--ok-text);
-}
-.cc-badge--ok::before {
-  background: var(--ok-dot);
-}
-.cc-badge--warn {
-  background: var(--warn-bg);
-  color: var(--warn-text);
-}
-.cc-badge--warn::before {
-  background: var(--warn-dot);
-}
-.cc-badge--bad {
-  background: var(--bad-bg);
-  color: var(--bad-text);
-}
-.cc-badge--bad::before {
-  background: var(--bad-dot);
-}
-.cc-badge--info {
-  background: var(--info-bg);
-  color: var(--info-text);
-}
-.cc-badge--info::before {
-  background: var(--info-dot);
-}
-.cc-badge--plain::before {
-  display: none;
+  vertical-align: middle;
 }
 
 /* ---------- filters / search ---------- */
@@ -922,6 +888,11 @@ button.cc-item:hover {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     padding-top: 12px;
+  }
+  .cc > .cc-nav,
+  .cc > .cc-main {
+    grid-column: 1;
+    grid-row: auto;
   }
   .cc-nav {
     position: static;
