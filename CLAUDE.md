@@ -315,6 +315,9 @@ Non-negotiables:
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
+- One date per label (DASH-08): bookings by appointments.created_at ("bookings made"), visits / no-shows / jobs completed /
+  recorded values by appointments.start_at (outcome as recorded). Overview (booking.js overview, window = rangeOf
+  'last_30_days') and the assistant (operator-tools.js rangeStats, assist-plain countsLine) share it; labels say which.
 - Revenue metrics (MRR/ARR/paying/revenue/churn) only when live billing is on (`stripeLiveEnabled`); in Stripe test mode
   they are null with `billing.mode: 'test'` (a count of test subscriptions), never shown as revenue. In live mode only
   subscriptions recorded live in `subscription_modes` (webhook `event.livemode`, migration 0013) and payments with
@@ -467,6 +470,8 @@ Non-negotiables:
 - OAuth client migration: stored connections carry `clientId`; `oauthClient()` refreshes with the issuing client
   (GOOGLE_LEGACY_CLIENT_ID/SECRET for the previous one). Cross-client reconnects archive, never revoke.
 - `GOOGLE_API_MOCK_ORIGIN` is test-only and honored only for http://127.0.0.1:port. Never set it in production.
+- Calendar OAuth callback success (ONB-10): a dashboard session of the invite's business → 303 to a fixed path
+  (/dashboard, or /dashboard/settings#google-calendar on reconnect) after every check; otherwise the confirmation page.
 - State-changing dashboard routes (POST) must check `isSameOrigin()`; GET routes must be read-only.
 - Validate customer IDs with `CUSTOMER_RE` before any storage lookup.
 - Website URLs typed by owners go through `normalizeWebsiteUrl()` (server/url.js): example.com → https://example.com,
@@ -657,6 +662,9 @@ Non-negotiables:
   when the receptionist is off), AI_RULES_LIVE_BUSINESSES (receptionist uses the PUBLISHED version; chat + Retell
   voice through the same engine), AI_RULES_ENABLED=false kill switch; live list empty = exactly the pre-rules behaviour.
   Retell needs no agent change (custom LLM served by our engine; providers.js is the adapter boundary).
+  Precedence (TEACH-04): with live rules, systemPrompt(k, channel, { rules }) (chat, Retell, OpenAI/ElevenLabs instructions)
+  ends with the rules block + ONE ordered block (knowledge.js soundOrder): published Tone first, the receptionist
+  Personality only where the rules say nothing; voice + pace are session settings, unaffected. Not live = byte-identical.
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
   the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the

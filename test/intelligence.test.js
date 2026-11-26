@@ -17,6 +17,8 @@ import { INDUSTRIES, TRADE_WORDS } from '../server/intelligence/industries.js'
 import { understand, mergeFacts, saidByCustomer } from '../server/intelligence/understand.js'
 import { decide, coverageOf } from '../server/intelligence/decide.js'
 import { rulesInstructions, turnNote } from '../server/intelligence/compile.js'
+import { systemPrompt, soundOrder } from '../server/receptionist/knowledge.js'
+import { PERSONALITIES } from '../server/voice/style.js'
 import { propose, ruleOps, applyOps, splitClauses, TEACH_SCHEMA } from '../server/intelligence/teach.js'
 import { simulate } from '../server/intelligence/simulate.js'
 import { rulesLiveFor, studioEnabled } from '../server/intelligence/access.js'
@@ -24,6 +26,7 @@ import { retellAdapter } from '../server/intelligence/providers.js'
 import { anthropicSchemaProblems } from './schema-limits.js'
 import { respond, startConversation, loadConversation } from '../server/receptionist/engine.js'
 import { attachRetellSocket } from '../server/receptionist/voice.js'
+import { voiceInstructions } from '../server/voice/tools.js'
 import * as rulesApi from '../functions/api/dashboard/ai-rules.js'
 import * as meApi from '../functions/api/dashboard/me.js'
 
@@ -188,6 +191,37 @@ test('simulate: no repeated questions across a multi-turn conversation; the exam
   assert.match(s.turns[1].reply, /Thanks, Jamie\. What’s the address for the visit\?/)
   assert.equal(s.turns[2].canBook, true)
   assert.ok(s.turns[0].explanations.some((e) => /no ZIP code needed/.test(e.text)))
+})
+
+test('TEACH-04: with live published rules, Tone outranks Personality in ONE ordered block; without them the prompt is exactly today\'s', () => {
+  const k = (personality) => ({ name: 'PoolThru', industry: 'Pool service', description: '', services: POOL.services, zips: POOL.zips, area: 'Mount Pleasant', hours: 'Monday, 8:00 AM to 5:00 PM', closed: [], slotMinutes: 60, visit: true, phone: '', beforeVisit: '', cancellation: '', knowledge: '', greeting: '', personality, playbook: { key: 'pool', qualify: ['what is wrong with the pool'], urgent: [] } })
+  const formal = { config: validateConfig({ ...defaultConfig(POOL), style: 'formal' }, POOL).config, records: POOL }
+  for (const channel of ['chat', 'voice']) {
+    // No live rules: the personality tail exactly as before (nothing reordered, nothing added).
+    const plain = systemPrompt(k('upbeat'), channel)
+    assert.ok(plain.endsWith(`${PERSONALITIES.upbeat.prompt}\nThe personality changes only how you sound. Facts, prices, the service area, booking steps and every rule above stay exactly as they are.`))
+    assert.equal(systemPrompt(k('upbeat'), channel, { rules: null }), plain)
+    assert.doesNotMatch(plain, /priority order|owner-published rules/)
+    assert.ok(!systemPrompt(k('standard'), channel).includes('# Personality'))
+    // Live rules: records prompt, then the rules block, then ONE ordered block; the preset heading is gone.
+    const live = systemPrompt(k('upbeat'), channel, { rules: formal })
+    const base = plain.slice(0, plain.indexOf(`\n\n${PERSONALITIES.upbeat.prompt}`))
+    assert.ok(live.startsWith(`${base}\n\n${rulesInstructions(formal.config, formal.records)}\n\n# How you sound, in priority order\n`), 'facts and rules first, unchanged')
+    assert.ok(!live.includes('# Personality'), 'the preset is not a separate, unranked block')
+    const order = ['1. Business rules (highest priority): the owner\'s published tone is "polite and formal". It decides your wording.', '2. Personality (applies where the rules say nothing): Upbeat and energetic', 'Where it disagrees with the business rules, the business rules win.', 'Neither changes facts, prices, the service area, booking steps or any rule above.']
+    let at = -1
+    for (const line of order) {
+      const i = live.indexOf(line)
+      assert.ok(i > at, `in order: ${line}`)
+      at = i
+    }
+    assert.equal(live.split('# How you sound, in priority order').length, 2, 'one block')
+    // Balanced (no preset wording): the rules' tone alone, still stated with its priority.
+    const balanced = systemPrompt(k('standard'), channel, { rules: formal })
+    assert.match(balanced, /1\. Business rules \(highest priority\)/)
+    assert.doesNotMatch(balanced, /2\. Personality/)
+  }
+  assert.match(soundOrder(k('calm'), { style: 'warm' }), /tone is "warm and friendly"[\s\S]*2\. Personality \(applies where the rules say nothing\): Calm and reassuring/)
 })
 
 test('compile: the rules block is short and has no business facts; the turn note names the one next question', () => {
@@ -416,6 +450,10 @@ test('API: every eligible business (no allowlist, migration applied), session bu
   assert.equal(body.status.rulesLive, false)
   assert.equal(body.status.provider.provider, 'retell')
   assert.deepEqual(body.status.provider.providerChanges, [], 'custom-LLM agent: nothing to change at Retell')
+  // TEACH-04: Tone shows the Receptionist's Personality as its default (Balanced when none chosen; this business only).
+  assert.deepEqual(body.status.personality, { id: 'standard', name: 'Balanced' })
+  db.sql.prepare("INSERT INTO receptionist_voice_settings (customer, personality, updated_by, updated_at) VALUES ('alpha', 'calm', 'ref:x', 1)").run()
+  assert.deepEqual((await get(a)).json().status.personality, { id: 'calm', name: 'Calm & Reassuring' })
   assert.equal((await post(a, { action: 'save', config: body.draft, baseUpdatedAt: null }, 'https://evil.example')).status, 403)
   // Before migration 0033: hidden, never broken.
   db = d1({ skip: ['0033'] })
@@ -573,6 +611,8 @@ test('engine (live rules): the model is told what is known and the ONE next ques
   const first = modelRequests[0]
   assert.match(first.system[0].text, /How this business wants conversations handled/)
   assert.match(first.system[0].text, /does NOT offer: "Equipment installation"/)
+  // TEACH-04: the engine ends its live-rules prompt with the ONE ordered block (business rules first).
+  assert.match(first.system[0].text, /How this business wants conversations handled[\s\S]*\n# How you sound, in priority order\n1\. Business rules \(highest priority\)/)
   assert.ok(first.tools.some((t) => t.name === 'note_answer'))
   const note = first.messages.filter((m) => m.role === 'system').at(-1).content
   assert.match(note, /town=Summerville/)
@@ -828,6 +868,13 @@ test('voice (Retell custom LLM, mocked socket): a call uses the same published r
   await publishRules('alpha', validateConfig({ ...defaultConfig(POOL), coverage: { cityWide: ['Mount Pleasant'] } }, { ...POOL, towns: ['Mount Pleasant', 'Charleston'] }).config)
   Object.assign(env, { AI_RULES_LIVE_BUSINESSES: 'alpha', RETELL_API_KEY: 'retell_SECRET', RETELL_AGENT_ID: 'agent_abc123def', RETELL_WS_SECRET: 'w'.repeat(40), RECEPTIONIST_VOICE_BUSINESSES: 'alpha' })
   const c = await cust('alpha')
+  // TEACH-04: the other providers' instructions (OpenAI / ElevenLabs) use the same order: rules → how you sound → voice manner.
+  const vi = (await voiceInstructions(env, c)).instructions
+  assert.match(vi, /How this business wants conversations handled[\s\S]*# How you sound, in priority order[\s\S]*# How you speak on this call/)
+  env.AI_RULES_LIVE_BUSINESSES = ''
+  const off = (await voiceInstructions(env, c)).instructions
+  assert.doesNotMatch(off, /How this business wants|priority order/, 'not live: exactly the records prompt + voice manner')
+  env.AI_RULES_LIVE_BUSINESSES = 'alpha'
   const conv = await startConversation(env, c, 'voice')
   db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES ('call_rules_0001', 'alpha', ?, 'retell', ?)").run(conv.id, Date.now())
   const sent = []
@@ -838,6 +885,7 @@ test('voice (Retell custom LLM, mocked socket): a call uses the same published r
     assert.ok(body.stream, 'voice streams')
     assert.match(body.system[0].text, /speaking out loud/)
     assert.match(body.system[0].text, /How this business wants conversations handled/)
+    assert.match(body.system[0].text, /# How you sound, in priority order/)
     const note = body.messages.filter((m) => m.role === 'system').at(-1).content
     assert.match(note, /need=Green pool cleanup/)
     assert.match(note, /area verified: Mount Pleasant is fully served/)

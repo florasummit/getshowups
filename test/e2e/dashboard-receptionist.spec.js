@@ -64,6 +64,9 @@ test('owner (voice not released for this business): chat Active, browser voice "
   await expect(page.locator('[data-also="teach-excluded"]')).toContainText('Teach Your AI → Services you don’t offer')
   await expect(page.locator('[data-also="teach-handoffs"]')).toContainText('Teach Your AI → Hand-offs to your team')
   await expect(page.locator('[data-also="teach-tone"]')).toContainText('Teach Your AI → Tone')
+  // TEACH-04 precedence: published Tone wins for wording; Personality fills the rest; no "pick two that agree" workaround.
+  await expect(page.locator('[data-also="teach-tone"]')).toContainText('takes priority over this for wording')
+  await expect(page.locator('main.app-main')).not.toContainText('pick two that')
   const text = await page.locator('main.app-main').innerText()
   expect(text).not.toMatch(/Retell|ElevenLabs|OpenAI/)
   await expect(page.locator('[data-provider-control]')).toHaveCount(0)
@@ -152,4 +155,14 @@ test('website chat panel: the owner turns it on; the published site opens the sa
   await expect(site.locator('a[data-gsu-chat]')).toContainText('Chat or talk with us')
   await expect(site.locator('details[data-gsu-chat-panel]')).toHaveCount(0)
   await visitor.close()
+})
+
+test('TEACH-04: Teach Your AI → Tone shows the receptionist Personality as its default and says published Tone takes priority @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_TOUR_SESSION_TOKEN)
+  await page.goto('/dashboard/teach')
+  const hint = page.locator('[data-also="receptionist-personality"]')
+  await expect(hint).toContainText('your published Tone decides the wording and takes priority')
+  await expect(hint).toContainText(/Receptionist → Personality \((Balanced|Warm & Friendly|Professional & Polished|Calm & Reassuring|Upbeat & Energetic)\) is the default/)
+  await expect(hint.getByRole('link', { name: 'Receptionist → Personality' })).toHaveAttribute('href', '/dashboard/receptionist#receptionist-voice')
+  await expect(page.locator('main.app-main')).not.toContainText('pick two that')
 })

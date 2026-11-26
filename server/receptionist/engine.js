@@ -31,7 +31,7 @@ import { areaFor, checkZip } from '../zipcode.js'
 import { knowledgeFor, systemPrompt, factText } from './knowledge.js'
 import { spokenToDigits } from './digits.js'
 import { activeRules, decisionFor, noteAnswer, observe, ruleBlock, NOTE_ANSWER_TOOL } from '../intelligence/runtime.js'
-import { rulesInstructions, turnNote } from '../intelligence/compile.js'
+import { turnNote } from '../intelligence/compile.js'
 import { understand, mergeFacts } from '../intelligence/understand.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
@@ -813,8 +813,8 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     note('rules', true, [`v${rules.version}`, ...flags].join(';'))
   }
   if (notes.length) transcript.push({ role: 'system', content: notes.join('\n') })
-  const prompt = systemPrompt(k, channel, { requests })
-  const system = [{ type: 'text', text: rules ? `${prompt}\n\n${rulesInstructions(rules.config, rules.records)}` : prompt, cache_control: { type: 'ephemeral' } }]
+  // Live rules: the prompt ends with the rules block and ONE ordered "how you sound" block (knowledge.js soundOrder).
+  const system = [{ type: 'text', text: systemPrompt(k, channel, { requests, rules }), cache_control: { type: 'ephemeral' } }]
   const tools = rules ? [...TOOLS, NOTE_ANSWER_TOOL] : TOOLS
   let spent = 0
   const tokens = { in: 0, cr: 0, cw: 0, out: 0 } // what the provider reported this turn (cached reads apart)

@@ -77,9 +77,6 @@ export function rangeOf({ period, from, to }, tz, now) {
   return P ? span(P[0], P[1], period.replace(/_/g, ' ')) : null
 }
 
-// Where "the last 30 days" begins for this business: its own calendar day 29 days ago. Overview counts from here too.
-export const last30Start = (tz, now = Date.now()) => rangeOf({ period: 'last_30_days' }, tz, now).from
-
 // ---------- records ----------
 // Cut text says so: a request that ends early must not read as one that asks for nothing.
 const tidy = (v) => {
@@ -240,7 +237,7 @@ export async function rangeStats(c, r) {
   const [l, b, v, m, p, u] = await Promise.all([
     one(c, `SELECT count(*) AS n, coalesce(sum(l.status = 'unqualified'), 0) AS outside FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND l.created_at < ?3 ${T}`, ...a),
     one(c, `SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.created_at >= ?2 AND a.created_at < ?3 AND a.status IN ('booked','showed','no_show') ${T}`, ...a),
-    one(c, `SELECT coalesce(sum(a.status IN ('booked','showed','no_show')), 0) AS n, coalesce(sum(a.status = 'showed'), 0) AS showed, coalesce(sum(a.status = 'no_show'), 0) AS no_show, coalesce(sum(a.status = 'booked' AND a.start_at <= ?5), 0) AS unmarked FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 ${T}`, ...a, c.now),
+    one(c, `SELECT coalesce(sum(a.status IN ('booked','showed','no_show')), 0) AS n, coalesce(sum(a.status = 'showed'), 0) AS showed, coalesce(sum(a.status = 'no_show'), 0) AS no_show, coalesce(sum(a.status = 'booked' AND a.start_at <= ?5), 0) AS unmarked, coalesce(sum(a.status = 'showed' AND ao.work = 'completed'), 0) AS completed FROM appointments a JOIN leads l ON l.id = a.lead_id LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 ${T}`, ...a, c.now),
     (await adsAccess(c.env, c.customer)) ? one(c, 'SELECT count(*) AS n, sum(spend_cents) AS s, sum(clicks) AS k, min(date) AS d FROM ad_metrics_daily WHERE customer = ?1 AND date >= ?2 AND date <= ?3', r.days[0], r.days[1]) : null,
     one(c, `SELECT sum(x.amount_cents) AS s, count(x.amount_cents) AS n FROM revenue_entries x JOIN appointments a ON a.id = x.appointment_id AND a.customer = x.customer JOIN leads l ON l.id = a.lead_id WHERE x.customer = ?1 AND x.kind = 'paid' AND a.status = 'showed' AND a.start_at >= ?2 AND a.start_at < ?3 ${T} AND x.id = (SELECT max(y.id) FROM revenue_entries y WHERE y.appointment_id = x.appointment_id AND y.kind = 'paid')`, ...a).catch(() => null),
     one(c, `SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?3 AND ${UNPAID} ${T}`, ...a).catch(() => null),
@@ -249,12 +246,15 @@ export async function rangeStats(c, r) {
     period: r.label,
     dates: `${r.days[0]} to ${r.days[1]}`,
     ...(r.to > c.now ? { note: 'This period is not over yet.' } : {}),
+    // DASH-08: the same definitions as Overview (server/booking.js overview), one date per count.
+    counted_by: 'new_inquiries and bookings_made: the day they were made. visits_*, no_shows, jobs_completed, past_visits_without_outcome and payments: the day the visit was scheduled, with the outcome as recorded.',
     new_inquiries: Number(l.n),
     inquiries_outside_service_area: Number(l.outside),
     bookings_made: Number(b.n),
     visits_scheduled: Number(v.n),
     visits_happened: Number(v.showed),
     no_shows: Number(v.no_show),
+    jobs_completed: Number(v.completed),
     past_visits_without_outcome: Number(v.unmarked),
     visits_happened_without_recorded_payment: u ? Number(u.n) : 'could not be read',
     payments_recorded: p?.n ? usd(p.s) : 'none recorded',
@@ -340,7 +340,7 @@ export const TOOLS = [
     if (!rows.length && !req.length) return { matches: 0, note: 'No customer of this business by that name. If it is another company, you only have this business: say that in one sentence, without figures or anything about what this business has recorded.' }
     return { matches: rows.length + req.length, items: [...(await Promise.all(rows.map((x) => withContact(c, x, leadOut(c, x), x.id)))), ...req.map((x) => requestOut(c, x))] }
   }),
-  tool('business_numbers', 'Counts for one period, by the date things happened: inquiries, bookings, visits, no-shows, payments recorded, ad spend.', { period: PERIOD, from: D8, to: D8 }, [], async (c, a) => {
+  tool('business_numbers', 'Counts for one period, the same as Overview: inquiries and bookings by the day they were made; visits, no-shows, jobs completed and payments by the day the visit was scheduled (see counted_by). Ad spend.', { period: PERIOD, from: D8, to: D8 }, [], async (c, a) => {
     const r = rangeOf(a.period || a.from ? a : { period: 'last_30_days' }, c.tz, c.now)
     return r ? rangeStats(c, r) : { error: 'invalid_period' }
   }),

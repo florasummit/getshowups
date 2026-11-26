@@ -182,7 +182,7 @@ export default function TeachAI() {
       <div className="ta-layout">
         <div className="ta-main">
           <About rec={rec} draft={draft} edit={edit} words={words} />
-          <How draft={draft} rec={rec} c={c} edit={edit} platformRules={data.platformRules} words={words} />
+          <How draft={draft} rec={rec} c={c} edit={edit} platformRules={data.platformRules} words={words} personality={data.status?.personality} />
           <SaveBar dirty={dirty} busy={busy} save={save} problems={problems} discard={() => take(data)} />
         </div>
         <aside className="ta-side">
@@ -308,7 +308,7 @@ function About({ rec, draft, edit, words }) {
   )
 }
 
-function How({ draft, rec, c, edit, platformRules, words }) {
+function How({ draft, rec, c, edit, platformRules, words, personality }) {
   const items = draft.intake.filter((i) => !(c.intake[i.id].visitOnly && !rec.visit))
   const move = (id, dir) =>
     edit((d) => {
@@ -457,8 +457,8 @@ function How({ draft, rec, c, edit, platformRules, words }) {
       <fieldset className="ui-group ta-selects">
         <legend>Hours, prices and tone</legend>
         <p className="ui-hint" data-also="receptionist-personality">
-          Tone is about wording. <a href="/dashboard/receptionist#receptionist-voice">Receptionist → Personality</a> also shapes how it comes across, in chat and voice. Your AI is given both and neither replaces the other, so
-          pick two that agree (for example Polite and formal here with Professional & Polished there).
+          How it sounds: your published Tone decides the wording and takes priority. Where these rules say nothing, your{' '}
+          <a href="/dashboard/receptionist#receptionist-voice">Receptionist → Personality</a> ({personality?.name || 'Balanced'}) is the default, and the voice and pace you chose there always apply.
         </p>
         <label className="field">
           <span>After hours</span>

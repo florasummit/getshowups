@@ -19,6 +19,7 @@ import {
   encrypt,
   idTokenClaims,
   missingConfig,
+  NO_STORE,
   productPage as page, // the owner is mid-setup or in Settings: the product's own header, card and button (ONB-10)
   readCookie,
   revokeUnlessInUse,
@@ -26,6 +27,7 @@ import {
   timingSafeEqual,
 } from '../../../../server/google-oauth.js'
 import { consumeInvite, releaseInvite } from '../../../../server/invites.js'
+import { getSession } from '../../../../server/auth.js'
 import { track } from '../../../../server/events.js'
 
 const clear = { 'Set-Cookie': stateCookie('', 0) }
@@ -183,6 +185,13 @@ export async function onRequestGet({ request, env }) {
       console.error('Could not retire previous Google grant:', err?.message)
     }
   }
+
+  // ONB-10: an owner signed in to THIS business (dashboard session, read server-side) goes straight on: a 303 to a fixed
+  // path, no script, after every check above. A first connection continues setup (the next step shows "Google Calendar
+  // connected"); a reconnect returns to Settings → Google Calendar. Anyone else (an admin-issued link opened without a
+  // dashboard session, or a session of another business) gets the confirmation page as before.
+  const member = await getSession(request, env).then((s) => s?.customer?.id === invite.customer, () => false)
+  if (member) return new Response(null, { status: 303, headers: { Location: existing ? '/dashboard/settings#google-calendar' : '/dashboard', ...NO_STORE, ...clear } })
 
   return page(
     200,

@@ -237,9 +237,10 @@ function WebsiteCard({ me, site, go }) {
 function Stats({ stats, visit, upcoming }) {
   const recorded = stats.showed + stats.noShow
   const rows = [
-    ['New inquiries', stats.leads, 'inquiries', 'people who left details'],
-    ['Booked', stats.booked, 'booked', 'cancelled ones left out'],
-    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed', 'you marked as happened'],
+    // DASH-08: each tile says which date it counts by (the assistant counts the same way: operator-tools.js rangeStats).
+    ['New inquiries', stats.leads, 'inquiries', 'came in these 30 days'],
+    ['Booked', stats.booked, 'booked', 'bookings made these 30 days, cancelled left out'],
+    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed', 'scheduled these 30 days, marked as happened'],
   ]
   if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`, 'show_rate'])
   if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`, 'completed'])

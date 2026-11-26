@@ -13,7 +13,6 @@
 import { TOOLS, executeTool, event, getSettings, receptionistRequestsReady, noteZipDeferral } from '../receptionist/engine.js'
 import { knowledgeFor, systemPrompt } from '../receptionist/knowledge.js'
 import { activeRules } from '../intelligence/runtime.js'
-import { rulesInstructions } from '../intelligence/compile.js'
 
 export const VOICE_TOOL_NAMES = TOOLS.map((t) => t.name)
 export const TOOL_KINDS_SET = new Set(VOICE_TOOL_NAMES)
@@ -43,8 +42,8 @@ export async function voiceInstructions(env, customer, now = Date.now()) {
   const settings = await getSettings(db, customer.id)
   const k = await knowledgeFor(env, customer, settings)
   const rules = await activeRules(env, customer, now).catch(() => null)
-  const base = systemPrompt(k, 'voice', { requests: await receptionistRequestsReady(db) })
-  return { instructions: `${base}\n\n${rules ? `${rulesInstructions(rules.config, rules.records)}\n\n` : ''}${VOICE_STYLE}`, knowledge: k, rules, greeting: settings?.greeting || `Hi, this is ${k.name}. How can I help?` }
+  const base = systemPrompt(k, 'voice', { requests: await receptionistRequestsReady(db), rules })
+  return { instructions: `${base}\n\n${VOICE_STYLE}`, knowledge: k, rules, greeting: settings?.greeting || `Hi, this is ${k.name}. How can I help?` }
 }
 
 const persist = (env, customer, conv, now) =>
