@@ -98,6 +98,24 @@ One shared engine (`server/receptionist/`) answers customers of every eligible b
 - **Data:** stored in `receptionist_*` tables (migrations 0026, 0027), kept 365 days (purged by the scheduler) and erased with
   the account. The privacy policy names Anthropic and Retell.
 
+## Website chat panel (migration 0043)
+
+The owner chooses how visitors open the chat from the business website (Receptionist → On your website):
+
+- **Off (default):** the "Chat or talk with us" button links to the chat page, as before. Without a row in
+  `website_chat_settings`, or before 0043 is applied, a site is byte for byte what it was.
+- **On:** the same button opens a panel on the site. The panel is the chat page itself (`/chat/<id>?embed=1`) in a
+  frame inside a closed `<details>` element (`server/chat-panel.js`): one receptionist engine, the same conversation
+  rules, limits, voice and privacy line. No script is added to the business site. The frame is `loading="lazy"`, so
+  nothing of the chat loads (and no view is counted) until a visitor opens it. The page's policy gains
+  `frame-src <our origin>` for that site only. "Open the chat in a new tab" stays for browsers that block the frame
+  or the microphone; inside the panel, Book online and Privacy open in a new tab.
+- **Conversation:** kept in the frame's session storage, so it resumes when the visitor reopens the panel on another
+  page of the site in the same tab. Browsers isolate framed pages per site; where a browser gives the frame no
+  storage, the chat still works and starts fresh after a page change (never an error).
+- **Limits:** the panel appears only while the receptionist is on; ad parameters ride along as with the link; the
+  panel is not part of the static export (the export keeps the link). The save is audited (`receptionist.website_panel`).
+
 ## Owner rules (Teach Your AI)
 
 Owners can configure how the receptionist works (intake order, exclusions, fully served towns, urgent situations,

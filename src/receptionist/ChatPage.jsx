@@ -325,11 +325,14 @@ export default function ChatPage({ id }) {
   }
 
   const embed = embedMode()
+  // Inside a website panel, links that leave the chat open in a new tab: the panel is too small for the booking page,
+  // and the visitor keeps the site they were on.
+  const out = embed ? { target: '_blank', rel: 'noopener' } : {}
   if (!info) return <div className="pub chat" aria-busy="true" />
   if (info.missing) {
     return (
       <div className="pub chat chat--notice">
-        <h1 className="chat-empty">This page isn’t available.</h1>
+        <h1 className="chat-empty">{embed ? 'Chat isn’t available right now. Please try again in a moment.' : 'This page isn’t available.'}</h1>
       </div>
     )
   }
@@ -340,7 +343,7 @@ export default function ChatPage({ id }) {
           <BrandMark name={info.name} brand={info.brand} />
         </h1>
         <p className="chat-empty">
-          Chat isn’t available right now. <a href={`/book/${id}`}>Book online</a>
+          Chat isn’t available right now. <a href={`/book/${id}`} {...out}>Book online</a>
           {info.phone && (
             <>
               {' '}
@@ -559,7 +562,7 @@ export default function ChatPage({ id }) {
                   </button>
                 )}
                 {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
-                <a href={`/book/${id}`}>Book online</a>
+                <a href={`/book/${id}`} {...out}>Book online</a>
               </p>
               {testing ? (
                 <p className="chat-legal" data-test-session={info.test.provider}>
@@ -577,7 +580,7 @@ export default function ChatPage({ id }) {
             </>
           )}
           <p className="chat-legal">
-            AI assistant for {info.name}, powered by GetShowUps. It can’t transfer calls. <a href="/privacy">Privacy</a>
+            AI assistant for {info.name}, powered by GetShowUps. It can’t transfer calls. <a href="/privacy" {...out}>Privacy</a>
           </p>
         </div>
       </footer>

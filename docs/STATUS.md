@@ -2,6 +2,23 @@
 
 _Update at the end of every task. Newest first._
 
+## Website chat panel (2026-11-25, branch feat/website-chat-panel, DRAFT for the founder's separate review; not released)
+- **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link
+  (Receptionist → On your website). Off by default; off = the link, byte for byte, so no live site changes at deploy.
+- **How:** the same chat page (/chat/<id>?embed=1, the one receptionist engine) in a frame inside a closed `<details>`:
+  no script on the business site, nothing loads until a visitor opens it, the page's policy allows that one frame only
+  (frame-src our origin), "Open the chat in a new tab" stays. server/chat-panel.js; migration 0043 (website_chat_settings).
+- **Why during the V1 freeze:** a founder requirement (2026-11-25: prepare the panel with owner on/off for review).
+- **Complete:** owner switch (saved on its own, audited, shown in the Website chat tile, in the data export, erased with
+  the account); inside the panel Book online and Privacy open in a new tab; a chat that can't load says so in the panel.
+- **Verified:** unit tests (off = identical page, on = panel + policy, another business untouched, before 0043 = link and
+  the setting hidden, audited); browser tests on desktop and phone against the real server (owner turns it on, the
+  published site opens the chat in the panel, nothing loads before, no script, off again = the link); a cross-site check
+  (site and chat on different sites, as on a customer's own domain): the conversation resumes after a page change.
+- **Not verified:** Safari's handling of framed storage (the chat then starts fresh after a page change, never an
+  error) and the microphone inside the frame on real phones ("Open the chat in a new tab" is the fallback for both).
+- **Needs approval:** the design, migration 0043 (after 0042; 0040 stays unapplied), merge. The privacy policy wording is untouched.
+
 ## Account lifecycle, platform controls, booking settings (2026-11-25, PR #169)
 - **Live:** main 1c96237, deployment 70991926, rollback 58ee24a0. CI: 1,042 unit and 306 browser tests. Release check healthy: 7 customer
   pages unchanged, 0 exceptions, records and secret names unchanged (one logged line: the daily reconciliation's known sandbox leftovers, real 0).

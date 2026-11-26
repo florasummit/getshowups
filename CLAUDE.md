@@ -529,7 +529,9 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   (unreadable table → treated as test). Rows are never deleted. PoolThru and GetShowUps are real, never marked.
 - Attendance changes are always reversible and recorded in appointment_changes.
 - AI receptionist (server/receptionist/, migration 0026; docs/RECEPTIONIST.md): ONE engine for website chat
-  (/chat/<id>, linked from the business site — still no script on the site) and voice (Retell custom LLM over
+  (/chat/<id>, linked from the business site — still no script on the site) or, when the owner chose it, shown in a
+  panel on the site (server/chat-panel.js, migration 0043: the same page in a frame inside a closed <details>, CSP
+  frame-src our origin only for those sites; off = the link, byte for byte) and voice (Retell custom LLM over
   /api/receptionist/llm/<call_id>; calls are created by our server and routed ONLY by that call id). Real Claude
   inference (RECEPTIONIST_ANTHROPIC_API_KEY, its own secret; RECEPTIONIST_ENABLED=false = kill switch); off per business
   until the owner turns it on. Knowledge = the business's records + owner notes only. Tools run server-side, bound to

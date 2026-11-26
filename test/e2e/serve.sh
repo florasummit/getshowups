@@ -254,7 +254,9 @@ for E in "$E2E_VOICE_CUSTOMER:$E2E_VOICE_SESSION_TOKEN" "$E2E_VOICE_M_CUSTOMER:$
   INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$VC.example', '$VC', $NOW);
   INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$VT")', 'owner@$VC.example', $NOW, $FAR);
   INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$VC', '(843) 555-0188', 'Pool service', 'Pool care.', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280/month\"}]', '[\"Charleston\"]', $NOW);
-  INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VC', 1, 'ai_first', 'Hi! Thanks for calling Voice Pools.', $NOW);"
+  INSERT INTO receptionist_settings (customer, enabled, mode, greeting, updated_at) VALUES ('$VC', 1, 'ai_first', 'Hi! Thanks for calling Voice Pools.', $NOW);
+  INSERT INTO website_versions (customer, version, content, created_at) VALUES ('$VC', 1, '$PUBLISHED', $NOW);
+  INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES ('$VC', '$PUBLISHED', 1, $NOW, $NOW);"
 done
 VS=$E2E_VOICE_SWITCH_CUSTOMER
 d1 "$VOICE_SQL

@@ -3,6 +3,7 @@
 //   GET ?id=<conversation> → { conversation: { transcript (what the customer saw/heard), events, outcome, … } }
 //   POST { action: 'settings', enabled, mode, greeting, knowledge, transferPhone } → saved settings
 //   POST { action: 'resolve', requestId } → callback request / message marked done
+//   POST { action: 'website_panel', on } → show the chat in a panel on the website (off = the plain link)
 //   POST { action: 'voice', voiceId?, personality?, pace?, version } → how the receptionist sounds (owner; the voice
 //        must be in the active provider's catalog; version = optimistic concurrency, 409 stale)
 //   Platform admins only (server-checked; the owner UI never shows these):
@@ -20,6 +21,7 @@ import { messagesLive } from '../../../../server/email.js'
 import { getSettings, modelConfigured, receptionistReady, receptionistRequestsReady, visibleTranscript } from '../../../../server/receptionist/engine.js'
 import { knowledgeFor, knowledgeWarnings, LIMITS } from '../../../../server/receptionist/knowledge.js'
 import { customerVoiceStatus } from '../../../../server/voice/customer.js'
+import { chatPanelSetting, saveChatPanel } from '../../../../server/chat-panel.js'
 import { checkProviderSwitch, getVoiceSettings, isPlatformAdminEmail, ownerView, providerOverview, rollbackProvider, saveVoicePreferences, switchProvider, voiceSettingsReady } from '../../../../server/voice/settings.js'
 
 const MODES = ['ai_first', 'human_first', 'after_hours']
@@ -107,6 +109,8 @@ export async function onRequestGet({ request, env }) {
     settings,
     warnings: knowledgeWarnings(k),
     chatUrl: `/chat/${customer.id}`,
+    // Website chat panel (owner's choice; null until migration 0043 is applied: the setting is hidden).
+    websitePanel: await chatPanelSetting(db, customer.id).then((p) => (p.available ? { on: p.on } : null)),
     counts: { booked: Number(counts?.booked) || 0, needsAttention: requests.filter((r) => r.status === 'open').length, total: Number(counts?.total) || 0 },
     requests: requests.map((r) => ({ id: r.id, kind: r.kind, name: r.name, phone: r.phone, email: r.email, note: r.note, urgent: Boolean(r.urgent), status: r.status, notification: notification(r, outbox), conversationId: r.conversation_id, createdAt: r.created_at })),
     conversations: convs.map((r) => {
@@ -130,6 +134,13 @@ export async function onRequestPost({ request, env }) {
     if (!(await resolveRequest(db, session.customer.id, b.requestId, now))) return json(404, { error: 'not_found' })
     await recordEvent(db, { type: 'receptionist.request_resolved', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist_request', id: b.requestId }, outcome: 'success' }).catch(() => {})
     return json(200, { ok: true })
+  }
+  if (b?.action === 'website_panel') {
+    if (typeof b.on !== 'boolean') return json(400, { error: 'invalid_request' })
+    const r = await saveChatPanel(db, session.customer.id, b.on, now)
+    if (!r.ok) return json(409, { error: r.error })
+    await recordEvent(db, { type: 'receptionist.website_panel', actorType: 'owner', actor: session.email, customer: session.customer.id, capability: 'receptionist', resource: { type: 'receptionist', id: session.customer.id }, outcome: 'success', details: { on: r.on } }).catch(() => {})
+    return json(200, { websitePanel: { on: r.on } })
   }
   if (b?.action === 'voice') {
     const r = await saveVoicePreferences(env, session.customer, { voiceId: b.voiceId, personality: b.personality, pace: b.pace, version: b.version }, session.email, now)
