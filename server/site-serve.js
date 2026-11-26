@@ -37,7 +37,9 @@ export async function siteBusinessInfo(db, customer) {
     }
   })()
   // Hours: the owner's confirmed booking hours (structured data only; never shown as a promise of availability).
-  const hours = customer.hoursConfirmed && customer.workdays?.length ? { dayStart: customer.dayStart, dayEnd: customer.dayEnd, workdays: customer.workdays } : null
+  // Days with their own hours (server/day-hours.js) only when there are any, so other sites' content stays as before.
+  const own = customer.dayHours && Object.keys(customer.dayHours).length ? { dayHours: customer.dayHours } : {}
+  const hours = customer.hoursConfirmed && customer.workdays?.length ? { dayStart: customer.dayStart, dayEnd: customer.dayEnd, workdays: customer.workdays, ...own } : null
   return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities, hours }
 }
 

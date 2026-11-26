@@ -27,6 +27,7 @@ import { keep } from './fit.js'
 import { addProposal, withdrawProposals } from './proposal-set.js'
 import { serviceAreaChange } from './proposals.js'
 import { validateHours } from './customers.js'
+import { hoursGroups } from './day-hours.js'
 import { findRequests, NEEDS_OWNER, requestById, UNANSWERED } from './attention.js'
 import { pageState, waitingNow } from './app-state.js'
 
@@ -547,12 +548,16 @@ export const TOOLS = [
     [],
     async (c, a) => {
       const cur = { dayStart: c.customer.dayStart, dayEnd: c.customer.dayEnd, workdays: [...c.customer.workdays].sort(), slotMinutes: c.customer.slotMinutes }
+      // Days with their own hours keep them (this prepares the default range only); the texts show the whole picture.
+      const own = c.customer.dayHours && Object.keys(c.customer.dayHours).length ? c.customer.dayHours : null
+      const text = (h) => hoursText(own ? { ...h, dayHours: own } : h)
       const [error, v] = validateHours({ dayStart: a.open ?? cur.dayStart, dayEnd: a.close ?? cur.dayEnd, workdays: a.days ?? cur.workdays, slotMinutes: a.appointment_minutes ?? cur.slotMinutes })
       if (error) return { error }
       const after = { dayStart: v.dayStart, dayEnd: v.dayEnd, workdays: v.workdays, slotMinutes: v.slotMinutes }
       if (JSON.stringify(after) === JSON.stringify(cur)) return { already: true, note: 'Those are the current hours.' }
-      addProposal(c, { type: 'hours', before: cur, after, from: hoursText(cur), to: hoursText(after), effects: ['Changes which times people can book from now on. Appointments already booked stay.'] })
-      return { prepared: true, before: hoursText(cur), after: hoursText(after), note: 'Shown to the owner with an Approve button. Not saved.' }
+      const effects = ['Changes which times people can book from now on. Appointments already booked stay.', ...(own ? ['Days with their own hours in Settings → Booking hours keep them.'] : [])]
+      addProposal(c, { type: 'hours', before: cur, after, from: text(cur), to: text(after), effects })
+      return { prepared: true, before: text(cur), after: text(after), note: 'Shown to the owner with an Approve button. Not saved.' }
     },
   ),
   tool('withdraw_prepared', 'Withdraw what was prepared and is waiting for approval, when the owner does not want it. which: P1, P2… as listed under WAITING FOR THE OWNER\'S APPROVAL, or a person\'s reference. all: only when they said everything.', { which: { type: 'string' }, all: { type: 'boolean' } }, [], async (c, a) => withdrawProposals(c, a)),
@@ -576,7 +581,8 @@ const clock12 = (t) => {
   const [h, m] = t.split(':').map(Number)
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
 }
-export const hoursText = (h) => `${h.workdays.map((d) => DAYS[d]).join(', ')} ${clock12(h.dayStart)} to ${clock12(h.dayEnd)}, ${h.slotMinutes} minutes each`
+// Days with their own hours (h.dayHours, server/day-hours.js) are their own group; without any: one range, as before.
+export const hoursText = (h) => `${hoursGroups(h).map((g) => `${g.days.map((d) => DAYS[d]).join(', ')} ${clock12(g.start)} to ${clock12(g.end)}`).join('; ')}, ${h.slotMinutes} minutes each`
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]))
 // Runs one tool call. Unknown tools, unknown arguments and wrong types never reach a query.

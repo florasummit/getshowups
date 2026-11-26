@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
-import { AvailabilityForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
+import { AvailabilityForm, BusinessAddressForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
 import { CalendarDisconnect, CloseBusiness, Notices, People, Services, SetupCheck, SignInSecurity, YourAccount, YourData } from './AccountSettings.jsx'
 import PlanDetails from './PlanCard.jsx'
 import { connectCalendar } from '../lib/connect.js'
@@ -590,6 +590,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       <section className="card" id="business">
         <TitleHelp help="service_area">Business</TitleHelp>
         <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} inline />
+        <BusinessAddressForm mode={c.appointmentMode} />
       </section>
       <section className="card" id="services">
         <h2 className="card-title">Services and prices</h2>

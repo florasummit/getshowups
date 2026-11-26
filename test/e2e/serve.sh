@@ -306,6 +306,18 @@ INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$
 npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
+# Business details (business-details.spec.js): per-day hours saved in Settings, and a public address on the booking page.
+d1 "
+INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+  ('$E2E_DETAILS_CUSTOMER', 'Harbor Studio', 'America/New_York', '', '09:00', '17:00', '1,2,3,4,5', $NOW, $NOW, $NOW);
+INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$E2E_DETAILS_CUSTOMER.example', '$E2E_DETAILS_CUSTOMER', $NOW);
+INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_DETAILS_SESSION_TOKEN")', 'owner@$E2E_DETAILS_CUSTOMER.example', $NOW, $FAR);
+INSERT INTO business_addresses (customer, street, unit, city, state, zip, public, updated_at) VALUES
+  ('$E2E_DETAILS_CUSTOMER', '12 Harbor St', 'Suite 2', 'Charleston', 'SC', '29401', 1, $NOW);
+"
+npx wrangler kv key put "google:$E2E_DETAILS_CUSTOMER" "$(record "$E2E_DETAILS_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
+
 # Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
 # kept (changed since). So every seeded business is a ROLLOUT PIN on Retell (same behaviour as before for every other

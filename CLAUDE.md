@@ -462,6 +462,16 @@ Non-negotiables:
   (arrival is never completion). value_cents is self-reported booking value: never call it revenue caused by
   GetShowUps. Service addresses never go to logs, events, or platform admin views. Booked times are start times
   (no arrival windows).
+- Business details (migration 0045, fail-soft: before it exactly today's behaviour). Per-day booking hours
+  (server/day-hours.js, booking_day_hours JSON {weekday: {start, end}}): customers.day_start/day_end/workdays stay the
+  default and are never rewritten by it; an override applies only to a listed booking day. ONE rule, hoursFor /
+  hoursGroups, for every reader (computeSlots, receptionist withinHours + knowledge, assistant hoursText/proposals,
+  follow-ups businessFacts, website hoursText + JSON-LD, export); no override = byte-identical text. The customer object
+  carries dayHours/dayHoursReady (getCustomer/getSession subquery, retried without it on no such table). Saved only by
+  Settings → Booking hours ("Different hours on some days", same batch as the default, base-checked); onboarding and
+  pages without dayHours leave it untouched. Business address (server/business-address.js, business_addresses, lead
+  address rules): Settings → Business, "Show this address to customers" off by default; public ONLY when public = 1 AND
+  at_business (GET /api/book/<id> `address`, else null; booking page summary + confirmation "Where:"). Not on websites yet.
 - Google ties one user's refresh tokens for a client to ONE grant: never revoke a token that a stored connection for the
   same Google account + client may still use. Use `revokeUnlessInUse()`; `revokeToken()` directly only when unshared.
 - OAuth client migration: stored connections carry `clientId`; `oauthClient()` refreshes with the issuing client

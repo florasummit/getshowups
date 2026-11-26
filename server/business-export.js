@@ -11,8 +11,10 @@ import { loadWebsite } from './website.js'
 import { blobBytes } from './assets.js'
 import { domainFor } from './domains.js'
 import { visibleTranscript } from './receptionist/engine.js'
+import { getBusinessAddress } from './business-address.js'
 
 export const MAX_ROWS = 10000
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MAX_HEAVY = 1500 // conversations and website versions (large rows)
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const at = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : '')
@@ -69,7 +71,7 @@ export async function businessExport(env, customer, now = Date.now()) {
   addCsv('ad_results.csv', ['date', 'platform', 'campaign', 'spend', 'clicks', 'impressions'], ads.map((m) => [m.date, m.platform, m.campaign_id, money(m.spend_cents), m.clicks, m.impressions]))
 
   const one = (sql) => db.prepare(sql).bind(id).first().catch((err) => (String(err?.message).includes('no such table') ? null : Promise.reject(err)))
-  const [profile, policies, rules, rec, ai, versions, site, siteVersions, domain, chatPanel, options] = await Promise.all([
+  const [profile, policies, rules, rec, ai, versions, site, siteVersions, domain, chatPanel, options, address] = await Promise.all([
     getProfile(db, id),
     getPolicies(db, id),
     bookingRules(db, id),
@@ -81,8 +83,9 @@ export async function businessExport(env, customer, now = Date.now()) {
     domainFor(env, id),
     chatPanelSetting(db, id),
     bookingOptions(db, id),
+    getBusinessAddress(db, id),
   ])
-  addJson('business.json', { id, name: customer.name, timezone: customer.timezone, appointmentMode: customer.appointmentMode, serviceZips: customer.serviceZips, hours: { days: customer.workdays, from: customer.dayStart, to: customer.dayEnd, minutes: customer.slotMinutes }, bookingNoticeMinutes: rules.minNoticeMinutes, closedDates: rules.closures, bookingPage: { offerOtherNotSure: options.allowOther }, profile, policies, receptionist: rec && { on: Boolean(rec.enabled), mode: rec.mode, greeting: rec.greeting, knowledge: rec.knowledge, websitePanel: chatPanel.on }, domain: domain ? { hostname: domain.hostname, status: domain.status } : null })
+  addJson('business.json', { id, name: customer.name, timezone: customer.timezone, appointmentMode: customer.appointmentMode, serviceZips: customer.serviceZips, hours: { days: customer.workdays, from: customer.dayStart, to: customer.dayEnd, minutes: customer.slotMinutes, differentDays: Object.fromEntries(Object.entries(customer.dayHours || {}).map(([d, r]) => [WEEKDAYS[d], { from: r.start, to: r.end }])) }, address: address.address, bookingNoticeMinutes: rules.minNoticeMinutes, closedDates: rules.closures, bookingPage: { offerOtherNotSure: options.allowOther }, profile, policies, receptionist: rec && { on: Boolean(rec.enabled), mode: rec.mode, greeting: rec.greeting, knowledge: rec.knowledge, websitePanel: chatPanel.on }, domain: domain ? { hostname: domain.hostname, status: domain.status } : null })
   addJson('ai_knowledge.json', { draft: ai ? JSON.parse(ai.draft) : null, publishedVersion: ai?.live_version ?? null, versions: versions.map((v) => ({ version: v.version, note: v.note, at: at(v.created_at), config: JSON.parse(v.config) })) })
   addJson('website.json', { draft: site.draft, liveVersion: site.liveVersion, versions: siteVersions.map((v) => ({ version: v.version, at: at(v.created_at), content: JSON.parse(v.content) })) })
 

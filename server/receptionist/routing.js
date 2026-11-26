@@ -4,13 +4,17 @@
 //   after_hours — staff answer during business hours (AI on no-answer); the AI answers outside them.
 // Returns a plan the telephony adapter executes: { answer: 'ai' | 'human', onNoAnswer: 'ai' | null, transfer: E.164 | null,
 // ringSeconds }. Website chat and browser voice calls are always answered by the AI (no staff ringing on the web).
+import { hoursFor } from '../day-hours.js'
+
 const HM = (v) => (/^\d{1,2}:\d{2}$/.test(String(v)) ? Number(String(v).split(':')[0]) * 60 + Number(String(v).split(':')[1]) : Number(v))
 
 export function withinHours(customer, now = Date.now()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: customer.timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now)).map((x) => [x.type, x.value]))
   const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday)
   const minutes = Number(p.hour) * 60 + Number(p.minute)
-  return (customer.workdays || []).includes(day) && minutes >= HM(customer.dayStart) && minutes < HM(customer.dayEnd)
+  // That weekday's own hours when it has them (server/day-hours.js), else the default range.
+  const range = hoursFor(customer, day)
+  return Boolean(range) && minutes >= HM(range.start) && minutes < HM(range.end)
 }
 
 export const RING_SECONDS = 20

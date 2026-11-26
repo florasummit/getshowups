@@ -7,6 +7,7 @@
 import { FONTS } from './site-spec.js'
 import { stockById } from './site-design.js'
 import { compositionRoles } from './design-blocks.js'
+import { hoursGroups } from './day-hours.js'
 
 // CSS for features added after sites were published; emitted only on pages that use them (see extraCss in renderV2).
 const EXTRA_CSS = {
@@ -25,18 +26,26 @@ const clock = (hm) => {
   if (!Number.isInteger(h) || !Number.isInteger(m)) return ''
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
 }
-export function hoursText(hours) {
-  const days = [...new Set(hours.workdays)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b)
+const daysText = (list) => {
   const runs = []
-  for (const d of days) {
+  for (const d of list) {
     const last = runs.at(-1)
     if (last && d === last[1] + 1) last[1] = d
     else runs.push([d, d])
   }
-  const dayText = runs.map(([a, b]) => (a === b ? DAY_SHORT[a] : b === a + 1 ? `${DAY_SHORT[a]}, ${DAY_SHORT[b]}` : `${DAY_SHORT[a]}–${DAY_SHORT[b]}`)).join(', ')
-  const from = clock(hours.dayStart)
-  const to = clock(hours.dayEnd)
-  return [dayText, from && to ? `${from} – ${to}` : ''].filter(Boolean).join(' · ')
+  return runs.map(([a, b]) => (a === b ? DAY_SHORT[a] : b === a + 1 ? `${DAY_SHORT[a]}, ${DAY_SHORT[b]}` : `${DAY_SHORT[a]}–${DAY_SHORT[b]}`)).join(', ')
+}
+// Booking days with their own hours (hours.dayHours, server/day-hours.js) get their own part ("Mon–Thu · 9:00 AM – 5:00 PM;
+// Fri · 9:00 AM – 4:00 PM"); without any, one part exactly as before.
+export function hoursText(hours) {
+  const days = [...new Set(hours.workdays)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b)
+  return hoursGroups({ ...hours, workdays: days })
+    .map((g) => {
+      const from = clock(g.start)
+      const to = clock(g.end)
+      return [daysText(g.days), from && to ? `${from} – ${to}` : ''].filter(Boolean).join(' · ')
+    })
+    .join('; ')
 }
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const paras = (s) =>
@@ -410,7 +419,7 @@ export function renderV2(biz, spec, opts = {}) {
       ...(shareImage ? { image: shareImage } : {}),
       ...(biz.phone ? { telephone: biz.phone } : {}),
       ...(biz.cities?.length ? { areaServed: biz.cities } : {}),
-      ...(biz.hours ? { openingHoursSpecification: [{ '@type': 'OpeningHoursSpecification', dayOfWeek: biz.hours.workdays.map((d) => DAYS[d]).filter(Boolean), opens: biz.hours.dayStart, closes: biz.hours.dayEnd }] } : {}),
+      ...(biz.hours ? { openingHoursSpecification: hoursGroups(biz.hours).map((g) => ({ '@type': 'OpeningHoursSpecification', dayOfWeek: g.days.map((d) => DAYS[d]).filter(Boolean), opens: g.start, closes: g.end })) } : {}),
     },
     ...(faqs.length ? [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map((f) => ({ '@type': 'Question', name: f.question, acceptedAnswer: { '@type': 'Answer', text: f.answer } })) }] : []),
   ]

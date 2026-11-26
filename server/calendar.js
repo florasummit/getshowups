@@ -2,6 +2,7 @@
 // customer dashboard. Only free/busy data is ever requested; event details are never read.
 // Results contain status codes and allowlisted error codes only: no tokens, no event data.
 import { CALENDAR_SCOPES, decrypt, googleApi, googleFetch, oauthClient, refreshAccessToken } from './google-oauth.js'
+import { hoursFor } from './day-hours.js'
 const CODE_RE = /^[A-Za-z_]{1,40}$/
 const safeCode = (value) => (typeof value === 'string' && CODE_RE.test(value) ? value : 'other')
 
@@ -207,14 +208,14 @@ export function isValidTimeZone(tz) {
 const hm = (s) => s.split(':').map(Number)
 
 // Open slots within booking hours that do not overlap any busy interval and start after `now`.
-// rules: { timezone, slotMinutes, dayStart 'HH:MM', dayEnd 'HH:MM', workdays [0-6], closedDates? ['YYYY-MM-DD'], minNoticeMinutes? }
+// rules: { timezone, slotMinutes, dayStart 'HH:MM', dayEnd 'HH:MM', workdays [0-6], dayHours? { [weekday]: { start, end } },
+//   closedDates? ['YYYY-MM-DD'], minNoticeMinutes? }. Each day's range comes from server/day-hours.js hoursFor (the
+//   default range unless that booking day has its own); the grid starts at that day's start.
 // span (1-4): a service that takes `span` slots (server/services.js): starts stay on the same grid, the whole length
 // must fit the day and be free. span 1 = exactly the slots offered before services had lengths.
 // Returns { slots: [{ start, end }] (epoch ms), rangeStart, rangeEnd }.
 export function computeSlots({ busy, rules, now, days, span = 1 }) {
   const today = partsIn(now, rules.timezone)
-  const [sh, sm] = hm(rules.dayStart)
-  const [eh, em] = hm(rules.dayEnd)
   const slotMs = rules.slotMinutes * 60 * 1000
   const lenMs = slotMs * (Number.isInteger(span) && span >= 1 && span <= 4 ? span : 1)
   const closed = new Set(rules.closedDates || [])
@@ -222,8 +223,11 @@ export function computeSlots({ busy, rules, now, days, span = 1 }) {
   const slots = []
   for (let i = 0; i < days; i++) {
     const date = new Date(Date.UTC(today.y, today.m - 1, today.d + i))
-    if (!rules.workdays.includes(date.getUTCDay())) continue
+    const range = hoursFor(rules, date.getUTCDay())
+    if (!range) continue
     if (closed.has(date.toISOString().slice(0, 10))) continue
+    const [sh, sm] = hm(range.start)
+    const [eh, em] = hm(range.end)
     const [y, m, d] = [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()]
     const dayEnd = zonedToUtc(y, m, d, eh, em, rules.timezone)
     for (let start = zonedToUtc(y, m, d, sh, sm, rules.timezone); start + lenMs <= dayEnd; start += slotMs) {

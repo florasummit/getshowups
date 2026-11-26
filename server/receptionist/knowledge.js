@@ -2,6 +2,7 @@
 // policies, owner-approved answers) plus a generic industry playbook (how to qualify, what counts as urgent). The
 // playbook is guidance for asking good questions, never facts about the business.
 import { bookingRules } from '../booking-rules.js'
+import { hoursGroups } from '../day-hours.js'
 import { addDays, dateIn } from '../dates.js'
 import { businessFacts } from '../followups/engine.js'
 import { getVoiceSettings, PERSONALITIES, personalityPrompt } from '../voice/style.js'
@@ -65,7 +66,8 @@ export async function knowledgeFor(env, customer, settingsIn) {
     slotMinutes: customer.slotMinutes,
     // Closed dates in the booking window, so a closed day is called closed, never "fully booked".
     closed: closedSoon(rules, customer.timezone),
-    hours: days.length ? `${days.join(', ')}, ${clock(customer.dayStart)} to ${clock(customer.dayEnd)} (${customer.timezone})` : '',
+    // Days with their own hours are their own group (server/day-hours.js); without any: one line, as before.
+    hours: days.length ? `${hoursGroups(customer).map((g) => `${g.days.map((d) => DAYS[d]).filter(Boolean).join(', ')}, ${clock(g.start)} to ${clock(g.end)}`).join('; ')} (${customer.timezone})` : '',
     // Owner notes, then what the owner taught and published (customer-facing parts only; intelligence/knowledge.js).
     knowledge: [String(settings?.knowledge || '').trim(), ...taught.facts.map((f) => `${f.topic}: ${f.text}`)].filter(Boolean).join('\n'),
     greeting: String(settings?.greeting || '').trim(),
