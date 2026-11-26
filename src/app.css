@@ -5179,7 +5179,7 @@ html.help-open .app {
 
 /* The smallest phones: the assistant panel carries the email link instead. */
 @media (max-width: 360px) {
-  .header-user:has(.assist-btn) > a.link-btn {
+  .header-user:has(.assist-btn) > :is(a.link-btn, [data-help-button], .header-help-inline) {
     display: none;
   }
 }
