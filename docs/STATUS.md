@@ -2,7 +2,15 @@
 
 _Update at the end of every task. Newest first._
 
-## Growth → Activities: acquisition by tracking code (2026-11-25, PR open, NOT released; migration 0044 needs approval)
+## Growth → Activities: acquisition by tracking code (2026-11-25, PR #176, live; founder approved the PR and migration 0044)
+**Release record (2026-11-26 UTC):** main fc2eea9, deployment 9000a737-cc3a-460b-a1ce-d43aad1c0b12, rollback 33f38d28-1e5e-4ade-baf5-805648196a26
+(main 348dbe7). Migration 0044 applied alone at 02:53 UTC after two rehearsals on a restored copy (102 tables,
+`acquisition_codes` 0 rows; 0040 still NOT applied). Backup ~/getshowups-backups/prod-20261126T025218Z-pre-0044.sql
+(integrity ok, 101 tables row-for-row equal to production); Time Travel bookmark before 0044
+00001357-00000028-0000512f-ba081ec2e97b6008038f4d71a80e2bb6. scripts/release.sh: HEALTHY (live pages unchanged,
+refusals ok, 0 exceptions). After release every table equals the backup except audit_log +1 (platform.release) and
+rate_limits. New route: 401 signed out, 403 cross-site. Not verified in production: saving a status as the signed-in
+admin (no admin session; covered by CI browser tests). Outreach and ad spend remain on hold (founder, 2026-11-25).
 Founder request: run customer acquisition from Admin → Growth, reusing what exists.
 - **What already existed and is reused:** tracked links (utm codes kept on booking-page and chat leads,
   server/ads/attribution.js) and server/sales-attribution.js (prospect → demo booked → attended → business created →
@@ -21,7 +29,7 @@ Founder request: run customer acquisition from Admin → Growth, reusing what ex
 - **Verified:** unit tests walk the real routes (tracked link → public lead route → booked demo → attended → business →
   live subscription and payment) on the in-memory database with Google as a stand-in: SIMULATED data. Production has
   no outreach sent and no paying customer; nothing there was changed.
-- **Next:** founder approves the PR and migration 0044 (applied alone; 0040 stays unapplied), then the first batch.
+- **Next:** founder decides on outreach batch 1 (held). Usability evaluation and quality plan in progress.
 
 ## Website chat panel (2026-11-25, PR #175, live; founder approved the design, migration 0043 and the release)
 - **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link
