@@ -264,13 +264,34 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   // Use it in the opening and frame it: square crop, focus point by keyboard.
   await frame.locator('.hero-media').click()
   const photoGroup = studio.getByRole('dialog', { name: 'Edit' })
-  await photoGroup.locator('.studio-thumb').last().click()
+  await photoGroup.locator('.studio-thumb:not([data-stock])').last().click()
   await photoGroup.getByLabel('Shape').selectOption('1x1')
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
   await expect(frame.locator('.hero-media img')).toHaveAttribute('srcset', /800w/)
   await photoGroup.getByRole('button', { name: /Point to keep in view/ }).focus()
   await page.keyboard.press('ArrowLeft')
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /object-position:45% 50%/)
+  await saved()
+
+  // WEB-07: a photo can be uploaded right in this panel (no trip to the Photos tab), and the photo the design started
+  // with stays one of the choices after another photo was tried.
+  const mine = await frame.locator('.hero-media img').getAttribute('src')
+  const other = (await import('node:fs')).readdirSync('public/site-stock').filter((f) => f.endsWith('.jpg') && !f.includes('-sm'))[1]
+  if (!(await photoGroup.isVisible())) await frame.locator('.hero-media').click()
+  await photoGroup.getByTestId('field-photo-file').setInputFiles(`public/site-stock/${other}`)
+  await expect(frame.locator('.hero-media img')).not.toHaveAttribute('src', mine, { timeout: 20_000 })
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('src', /^\/site-assets\//)
+  await saved()
+  if (!(await photoGroup.isVisible())) await frame.locator('.hero-media').click()
+  await expect(photoGroup.locator('.studio-thumb[data-stock]').first()).toBeVisible()
+  await photoGroup.locator('.studio-thumb[data-stock]').first().click()
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('src', /^\/site-stock\//)
+  await saved()
+  if (!(await photoGroup.isVisible())) await frame.locator('.hero-media').click()
+  await photoGroup.locator(`.studio-thumb:not([data-stock]) img[src="${mine}"]`).click()
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('src', mine)
+  await photoGroup.getByLabel('Shape').selectOption('1x1')
+  await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
   await saved()
 
   // History: earlier server copies of the draft; restoring one changes only the draft and can itself be undone.

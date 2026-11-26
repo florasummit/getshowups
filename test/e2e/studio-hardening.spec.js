@@ -256,3 +256,68 @@ test('audit screenshots at 1440 and 390 wide', async ({ browser }) => {
     await context.close()
   }
 })
+
+// Product Excellence (WEB-09, WEB-11, WEB-13). Read-only: nothing is added, saved or published here.
+test('editor layout and controls: in view after "Edit my website", page types where "Add a page" was chosen, no hover-only or undersized controls @mobile', async ({ page, context }, info) => {
+  const mobile = info.project.name === 'mobile'
+  await useSession(context, tokenFor(info))
+  if (!mobile) await page.setViewportSize({ width: 1440, height: 900 })
+  await openWebsiteTab(page)
+  const studio = studioOf(page)
+
+  // WEB-09: the status bar is the only thing above the editor; "Edit my website" brings the whole editor into the
+  // window: its bar, the preview and the edit panel, each scrolling inside itself.
+  await page.getByRole('region', { name: 'Your website, step by step' }).getByRole('button', { name: 'Edit my website' }).click()
+  if (!mobile) {
+    await expect.poll(async () => { const y = Math.round((await studio.boundingBox()).y); return y >= 0 && y <= 100 }, { timeout: 10_000 }).toBe(true) // just below the dashboard's own header
+    await page.waitForTimeout(600) // the smooth scroll has settled
+    const vh = page.viewportSize().height
+    const box = async (sel) => studio.locator(sel).first().boundingBox()
+    const [bar, stage, panel] = [await box('.studio-bar'), await box('.studio-stage'), await box('.studio-panel')]
+    expect(bar.y, 'the editor bar is on screen').toBeGreaterThanOrEqual(0)
+    expect(stage.y + stage.height, 'the preview fits the window').toBeLessThanOrEqual(vh)
+    expect(panel.y + panel.height, 'the edit panel fits the window').toBeLessThanOrEqual(vh)
+    // Nothing in the panel is cut off: its last control can be scrolled into view inside the panel.
+    await studio.getByRole('tab', { name: 'Sections' }).click()
+    const last = studio.getByRole('button', { name: 'Add a page…' })
+    await last.scrollIntoViewIfNeeded()
+    await expect(last).toBeInViewport({ ratio: 1 })
+  }
+
+  // WEB-11: "+ Add a page…" in the page menu shows the page types right under that menu (not at the end of a tab).
+  const pageSelect = studio.getByRole('combobox').first()
+  await pageSelect.scrollIntoViewIfNeeded()
+  await pageSelect.selectOption('__add')
+  const types = studio.getByRole('combobox', { name: 'Add a page', exact: true })
+  await expect(types).toBeFocused()
+  const [menu, form] = [await pageSelect.boundingBox(), await types.boundingBox()]
+  expect(form.y - (menu.y + menu.height), 'directly below the page menu').toBeLessThan(mobile ? 320 : 120)
+  await expect(studio.locator('.studio-addpage').getByRole('button', { name: 'Add page' })).toBeDisabled()
+  await studio.locator('.studio-addpage').getByRole('button', { name: 'Cancel' }).click()
+  await expect(types).toHaveCount(0)
+
+  // WEB-13: section controls are visible without hovering…
+  await studio.getByRole('tab', { name: 'Sections' }).click()
+  const row = studio.locator('.studio-sections li').nth(1)
+  await expect(row.locator('.studio-row-actions')).toHaveCSS('opacity', '1')
+  await expect(row.getByRole('button', { name: /^More for / })).toBeVisible()
+  // …and on a phone every control of the editor is at least 44 px tall (text links inside a sentence excepted).
+  if (mobile) {
+    for (const tab of ['Sections', 'Style', 'Photos', 'History']) {
+      await studio.getByRole('tab', { name: tab }).click()
+      const small = await studio.evaluate((root) => {
+        const out = []
+        for (const el of root.querySelectorAll('button, a.btn, a.link-btn, label.btn, select, summary, [role="tab"]')) {
+          if (el.matches(':is(p, label) > .link-btn, :is(p, label) > a, p > span > .link-btn')) continue
+          if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue
+          const r = el.getBoundingClientRect()
+          if (r.width < 2 || r.height < 2) continue
+          if (r.height < 43.5) out.push(`${el.tagName.toLowerCase()}.${String(el.className).trim().split(/\s+/).join('.')} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)}" ${Math.round(r.height)}px`)
+        }
+        return [...new Set(out)]
+      })
+      expect(small, `${tab}: editor controls under 44 px on a phone`).toEqual([])
+    }
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})

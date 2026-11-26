@@ -65,16 +65,18 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
   const grid = useRef(null)
   const setGen = (g) => {
     setGenState(g)
-    rememberPending('designs', storeKey, g)
+    // The standard layouts cost nothing and are made again in a moment: only AI designs are remembered.
+    if (!templates) rememberPending('designs', storeKey, g)
   }
   // Designs made before a reload are still offered (they already counted against today's allowance).
   useEffect(() => {
     let live = true
+    if (templates) return undefined
     recallPending('designs', storeKey, studio ? 'studio=1&' : '').then((kept) => live && kept?.designs?.length && setGenState((g) => g || kept))
     return () => {
       live = false
     }
-  }, [storeKey, studio])
+  }, [storeKey, studio, templates])
   // The designs (and the first "Use this design") come into view when they arrive.
   useEffect(() => {
     if (gen) grid.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
