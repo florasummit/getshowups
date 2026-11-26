@@ -39,6 +39,31 @@ export function starterTheme(key) {
   }
 }
 
+// The look of one of the three designs offered by "Create my website" (server/site-design.js: palette, lettering, shape,
+// first-screen and services layouts), expressed as the multi-page site's theme: the design the owner picked opens in
+// the same editor as every other website. Only named options are read; anything unknown keeps the starter look.
+const HERO_FROM_DESIGN = { split: 'split', immersive: 'overlay', stacked: 'stacked', typographic: 'editorial' }
+const RADIUS_FROM_SHAPE = { sharp: 0, soft: 10, round: 22 }
+export function lookFromDesign(design, fallback) {
+  if (!design || typeof design !== 'object' || !PALETTES[design.palette] || !LOOKS[design.fonts]) return fallback
+  const p = PALETTES[design.palette]
+  const f = LOOKS[design.fonts]
+  return {
+    name: String(design.name || fallback.name || 'Starter').slice(0, 30),
+    theme: {
+      ...fallback.theme,
+      colors: { bg: p.bg, surface: p.surface, ink: p.ink, muted: p.muted, accent: p.accent, onAccent: p.onAccent, line: p.line },
+      headingFont: f.headFile,
+      bodyFont: f.bodyFile,
+      headingWeight: f.headWeight,
+      radius: RADIUS_FROM_SHAPE[design.shape] ?? fallback.theme.radius,
+    },
+    heroImage: typeof design.heroImage === 'string' ? design.heroImage : null,
+    heroLayout: HERO_FROM_DESIGN[design.hero] || null,
+    servicesLayout: ['cards', 'rows', 'tiles'].includes(design.services) ? design.services : null,
+  }
+}
+
 // Starter privacy text, matched to what the website actually does (forms + booking always; AI chat/voice only when the
 // receptionist is on). Always marked as a draft for the owner to review: it is not legal advice.
 export function starterPrivacy(biz) {
@@ -161,9 +186,10 @@ export function textLedStarter(content, biz) {
 
 // biz: { name, industry, description, phone, chat, visit, cities[], hoursConfirmed, policies } (server/website-import.js
 // starterFacts). kinds: extra pages to create (see PAGE_KINDS). Returns { site, added[], missing[] }.
-export function starterSite(content, biz, { kinds = [], privacy = null, now = Date.now() } = {}) {
+// design: a chosen design from "Create my website" (content.design shape); its look replaces the industry's starter look.
+export function starterSite(content, biz, { kinds = [], privacy = null, now = Date.now(), design = null } = {}) {
   const key = industryKey({ industry: biz.industry, services: content.services || [], description: biz.description, name: biz.name })
-  const look = starterTheme(key)
+  const look = lookFromDesign(design, starterTheme(key))
   // The logo is never the first-screen photo (it stays in the header). HVAC has no approved licensed photo yet, so an
   // HVAC starter is text-led unless the owner uploaded their own (owner decision 2026-11-19).
   const image = content.hero && content.hero !== content.logo ? `asset:${content.hero}` : textLedStarter(content, biz) ? null : look.heroImage
@@ -178,7 +204,7 @@ export function starterSite(content, biz, { kinds = [], privacy = null, now = Da
     {
       type: 'hero',
       id: 'top',
-      layout: image ? 'split' : 'minimal',
+      layout: image ? (look.heroLayout && look.heroLayout !== 'editorial' ? look.heroLayout : 'split') : look.heroLayout === 'editorial' ? 'editorial' : 'minimal',
       height: image ? 'tall' : 'auto',
       image,
       imageAlt: '',
@@ -190,7 +216,7 @@ export function starterSite(content, biz, { kinds = [], privacy = null, now = Da
       // record and disappears if it is removed (never a dead link, never a number copied into the page).
       secondaryCta: { label: 'Call', target: 'call' },
     },
-    ...(content.services?.length ? [{ type: 'services', id: 'services', heading: 'Services', layout: 'cards', showPrices: true, items: [] }] : []),
+    ...(content.services?.length ? [{ type: 'services', id: 'services', heading: 'Services', layout: look.servicesLayout || 'cards', showPrices: true, items: [] }] : []),
     bookingSteps(visit),
     ...(content.about && !aboutPage ? [{ type: 'text', id: 'about', heading: `About ${biz.name}`.slice(0, 120), body: content.about }] : []),
     // Towns and confirmed hours are read from the records at render time; with neither, the section isn't shown.
@@ -244,4 +270,22 @@ export function faqFromPolicies(policies, visit) {
   ]
   if (!own.length) return []
   return visit ? [{ question: 'Do you come to me?', answer: 'Yes. We come to your address; you enter it when you book.' }, ...own] : own
+}
+
+// What a website still lacks, derived from the records and the draft on every load (never stored), so the owner keeps
+// being told until it is resolved: phone / hours / area / policies = the record doesn't exist yet (those parts are left
+// out, never invented); services = no service on record; services_section = services exist but no visible section
+// shows them (an owner may publish like that, and is told so when publishing).
+export function missingFor(content, biz) {
+  const pages = content?.site?.pages
+  if (!Array.isArray(pages)) return []
+  const shows = (type) => pages.some((p) => (p.sections || []).some((s) => s.type === type && !s.hidden))
+  const cities = Array.isArray(biz.cities) ? biz.cities.filter(Boolean) : []
+  return [
+    ...(biz.phone ? [] : ['phone']),
+    ...(content.services?.length ? (shows('services') ? [] : ['services_section']) : ['services']),
+    ...(biz.hoursConfirmed ? [] : ['hours']),
+    ...(cities.length ? [] : ['area']),
+    ...(faqFromPolicies(biz.policies, Boolean(biz.visit)).length ? [] : ['policies']),
+  ]
 }

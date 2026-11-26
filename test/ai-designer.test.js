@@ -1142,36 +1142,62 @@ test('phone-sized photos: the draft maps each photo to its small copy; pages off
   assert.equal(res.headers.get('Cache-Control'), 'public, max-age=86400')
 })
 
-test('draft checkpoints: taken on save (at most every 10 min) and publish; newest 20 kept; restore brings one back and is itself undoable; Studio and owner only', async () => {
-  const { KEEP, saveCheckpoint } = await import('../server/website-history.js')
+test('draft checkpoints: the draft before a save, at most every 2 minutes (several restore points in one session), and on publish; newest kept; each can be viewed, restored, and the restore undone; Studio and owner only', async () => {
+  const { KEEP, EVERY_MS, saveCheckpoint } = await import('../server/website-history.js')
+  const preview = await import('../functions/api/dashboard/website/preview.js')
   const c = await cookieFor('owner@pools.example')
   const s = await cookieFor('owner@salon.example')
   const save = async (headline) => {
     const w = (await call(website, 'GET', { cookie: c })).json.website
     return call(website, 'POST', { cookie: c, body: { action: 'save', content: { ...w.draft, headline }, baseUpdatedAt: w.updatedAt } })
   }
+  const age = (ms) => db.sql.prepare("UPDATE website_generations SET created_at = created_at - ? WHERE customer = 'pools' AND json_extract(content, '$.kind') = 'checkpoint'").run(ms)
   await addKey('pools')
   await call(designer, 'POST', { cookie: c, body: { action: 'message', message: 'Design my website' } })
+  const designed = (await call(website, 'GET', { cookie: c })).json.website.draft.headline
+  age(EVERY_MS + 1000) // the designer's own checkpoint is from an earlier sitting
   await save('First headline')
   await save('Second headline')
-  let cps = (await call(website, 'GET', { cookie: c })).json.checkpoints
-  assert.equal(cps.length, 1, 'one checkpoint within 10 minutes of editing')
-  assert.equal(cps[0].reason, 'autosave')
-  // Older checkpoints beyond the newest 20 are removed (copies only).
-  for (let i = 0; i < KEEP + 5; i++) await saveCheckpoint(db, 'pools', { headline: `old ${i}` }, 'autosave', Date.now() - 1000 * (100 - i))
+  let cps = (await call(website, 'GET', { cookie: c })).json.checkpoints.filter((x) => x.reason === 'autosave')
+  assert.equal(cps.length, 1, 'one checkpoint for edits seconds apart')
+  // WEB-03: editing over a few minutes leaves more than one point to go back to, each holding the draft as it was
+  // BEFORE the save that created it (so the newest never just repeats the current draft).
+  age(EVERY_MS + 1000)
+  await save('Third headline')
+  age(EVERY_MS + 1000)
+  await save('Fourth headline')
+  cps = (await call(website, 'GET', { cookie: c })).json.checkpoints.filter((x) => x.reason === 'autosave')
+  assert.equal(cps.length, 3)
+  const kept = db.sql.prepare("SELECT json_extract(content, '$.draft.headline') AS h FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.reason') = 'autosave' ORDER BY created_at").all().map((x) => x.h)
+  assert.deepEqual(kept, [designed, 'Second headline', 'Third headline'])
+  // A save that changes nothing leaves no checkpoint.
+  age(EVERY_MS + 1000)
+  await save('Fourth headline')
+  assert.equal((await call(website, 'GET', { cookie: c })).json.checkpoints.filter((x) => x.reason === 'autosave').length, 3)
+  // Each can be looked at before restoring: the owner's private preview of that copy; never another business's.
+  const view = (cookie, id) => preview.onRequestGet({ request: new Request(`${ORIGIN}/api/dashboard/website/preview?checkpoint=${id}`, { headers: { Cookie: cookie } }), env })
+  const second = db.sql.prepare("SELECT id FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.draft.headline') = 'Second headline' AND json_extract(content, '$.reason') = 'autosave'").get()
+  const seen = await view(c, second.id)
+  assert.equal(seen.status, 200)
+  assert.match(await seen.text(), /Preview\. Only you can see this\./)
+  assert.equal((await view(s, second.id)).status, 404)
+  assert.equal((await view(c, 'f'.repeat(32))).status, 404)
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.headline, 'Fourth headline', 'viewing changes nothing')
+  // Older checkpoints beyond the newest KEEP are removed (copies only).
+  for (let i = 0; i < KEEP + 5; i++) await saveCheckpoint(db, 'pools', { headline: `old ${i}` }, 'autosave', Date.now() - 1000 * (10000 - i))
   cps = (await call(website, 'GET', { cookie: c })).json.checkpoints
   assert.equal(cps.length, KEEP)
   assert.equal(db.sql.prepare("SELECT count(*) n FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.kind') = 'checkpoint'").get().n, KEEP)
-  // Restore the 'First headline' save… (taken from the earliest autosave of this session, now the newest of its kind)
-  const target = db.sql.prepare("SELECT id FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.draft.headline') = 'First headline'").get()
+  // Restore the copy taken before 'Third headline' was saved (still among the newest)…
+  const target = db.sql.prepare("SELECT id FROM website_generations WHERE customer = 'pools' AND json_extract(content, '$.draft.headline') = 'Second headline'").get()
   assert.ok(target, 'the session checkpoint survived (it is among the newest)')
   const r = await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: target.id } })
   assert.equal(r.status, 200)
-  assert.equal(r.json.website.draft.headline, 'First headline')
+  assert.equal(r.json.website.draft.headline, 'Second headline')
   // …and the draft from before the restore was kept, so the restore can be undone.
   const before = r.json.checkpoints.find((x) => x.reason === 'before_restore')
   assert.ok(before)
-  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: before.id } })).json.website.draft.headline, 'Second headline')
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'restoreCheckpoint', id: before.id } })).json.website.draft.headline, 'Fourth headline')
   // Another business can't restore (or see) these; a checkpoint is never "applied" as a generation.
   assert.equal((await call(website, 'POST', { cookie: s, body: { action: 'restoreCheckpoint', id: target.id } })).status, 404)
   assert.deepEqual((await call(website, 'GET', { cookie: s })).json.checkpoints, [])

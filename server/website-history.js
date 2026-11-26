@@ -2,14 +2,17 @@
 // a regretted change can be undone across sessions (session undo/redo is in the browser; published versions are in
 // website_versions). Stored in website_generations as { kind: 'checkpoint', reason, draft } (no new table: no
 // migration), never served publicly, never counted as AI use (source 'template', cost 0).
-//   - taken automatically: on a save when the newest checkpoint is older than EVERY_MS, before a restore, on publish;
+//   - taken automatically: on a save when the newest checkpoint is older than EVERY_MS (a copy of the draft as it was
+//     BEFORE that save, so every entry is a point the owner can go back to and the newest one never just repeats the
+//     current draft), before a restore, on publish;
 //   - bounded: the newest KEEP checkpoints per business are kept, older checkpoints are removed (copies only; the draft
-//     and published versions are never touched);
+//     and published versions are never touched). 2 minutes × 30 = the last hour of continuous editing (it was one copy
+//     per 10 minutes: ten edits in five minutes left a single restore point, finding WEB-03);
 //   - restore = the checkpoint becomes the draft (validated like a save; the current draft is checkpointed first).
 import { validateContent, withoutMissingAssets } from './website.js'
 
-export const KEEP = 20
-export const EVERY_MS = 10 * 60 * 1000
+export const KEEP = 30
+export const EVERY_MS = 2 * 60 * 1000
 const ID_RE = /^[a-f0-9]{32}$/
 const newId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('')
 
@@ -28,11 +31,23 @@ export async function saveCheckpoint(db, customerId, draft, reason, now = Date.n
   return id
 }
 
-// On a save: a checkpoint of what was saved, at most every EVERY_MS (so a long editing session leaves a trail).
-export async function maybeCheckpoint(db, customerId, draft, now = Date.now()) {
+// On a save: a checkpoint of the draft as it was before this save (`previous`), at most every EVERY_MS, so an editing
+// session leaves a trail of points to go back to. Nothing when the save changed nothing.
+// Same content whatever the key order; keys that are null (a default the loader adds) don't count as a difference.
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().filter((k) => v[k] != null).map((k) => [k, canon(v[k])])) : v)
+const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b))
+export async function maybeCheckpoint(db, customerId, previous, saved = null, now = Date.now()) {
+  if (!previous || (saved && same(previous, saved))) return null
   const last = await db.prepare("SELECT max(created_at) AS at FROM website_generations WHERE customer = ?1 AND json_extract(content, '$.kind') = 'checkpoint'").bind(customerId).first()
   if (last?.at && now - last.at < EVERY_MS) return null
-  return saveCheckpoint(db, customerId, draft, 'autosave', now)
+  return saveCheckpoint(db, customerId, previous, 'autosave', now)
+}
+
+// One checkpoint's stored draft, for the owner's private "View" before restoring (never served publicly).
+export async function checkpointDraft(db, customerId, id) {
+  if (!ID_RE.test(String(id))) return null
+  const row = await db.prepare("SELECT content FROM website_generations WHERE id = ?1 AND customer = ?2 AND json_extract(content, '$.kind') = 'checkpoint'").bind(id, customerId).first()
+  return row ? JSON.parse(row.content).draft || null : null
 }
 
 export async function listCheckpoints(db, customerId) {

@@ -57,5 +57,29 @@ for (const file of pages) {
       expect(m.call.gap, 'nothing between Book and Call (same row or wrapped directly below)').toBeLessThan(24)
       if (vw < 600) expect(m.call.height, 'phone Call button is thumb-sized').toBeGreaterThanOrEqual(40)
     }
+    // WEB-02: every page in the header menu is reachable at every width without a script. On a phone the links sit in
+    // one row under the business name (it scrolls sideways inside itself when they don't fit, never the page).
+    const links = page.locator('header.nav ul a')
+    const count = await links.count()
+    if (count) {
+      const nav = await page.evaluate(() => {
+        const ul = document.querySelector('header.nav ul')
+        const head = document.querySelector('header.nav').getBoundingClientRect()
+        return { display: getComputedStyle(ul).display, headerHeight: head.height, scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth }
+      })
+      expect(nav.display, 'the page links are shown').not.toBe('none')
+      expect(nav.scrollW, 'the menu never makes the page scroll sideways').toBeLessThanOrEqual(nav.clientW + 1)
+      if (vw < 600) expect(nav.headerHeight, 'the header stays compact on a phone (name + Book, then one row of links)').toBeLessThanOrEqual(132)
+      for (let i = 0; i < count; i++) {
+        const link = links.nth(i)
+        await link.scrollIntoViewIfNeeded()
+        await expect(link, `menu link ${i + 1} is visible`).toBeVisible()
+        const box = await link.boundingBox()
+        expect(box.x, 'inside the screen').toBeGreaterThanOrEqual(0)
+        expect(box.x + box.width, 'inside the screen').toBeLessThanOrEqual(vw + 1)
+        if (vw < 600) expect(box.height, 'thumb-sized on a phone').toBeGreaterThanOrEqual(40)
+        expect(await link.getAttribute('href'), 'a real link (no script needed)').toBeTruthy()
+      }
+    }
   })
 }

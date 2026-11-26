@@ -119,6 +119,17 @@ export default function WebsiteDesigner({ onChanged }) {
     return (
       <div className="form">
         <p>The AI designer creates an original website for your business (pages, layout, colours, type, images and words) and changes it whenever you ask. It uses your own Claude or OpenAI API account.</p>
+        <p className="fine" data-designer-cost>
+          What it costs: GetShowUps adds no charge. Your AI provider bills you for each request at its own prices (
+          <a href="https://www.anthropic.com/pricing" target="_blank" rel="noreferrer">
+            Claude prices
+          </a>
+          ,{' '}
+          <a href="https://openai.com/api/pricing" target="_blank" rel="noreferrer">
+            OpenAI prices
+          </a>
+          ), and you can set a monthly limit here. Editing by hand in the editor is always free.
+        </p>
         <AiKeySettings onChange={load} />
       </div>
     )
@@ -219,7 +230,7 @@ export default function WebsiteDesigner({ onChanged }) {
         </summary>
         <AiKeySettings onChange={load} />
       </details>
-      <p className="fine">Each request runs on your {data.key.label} account and is billed by them.</p>
+      <p className="fine" data-designer-cost>Each request runs on your {data.key.label} account and is billed by them at their prices; GetShowUps adds no charge. Your monthly limit is under “AI model and monthly limit”.</p>
     </div>
   )
 }

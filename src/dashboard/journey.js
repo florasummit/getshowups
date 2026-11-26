@@ -33,7 +33,8 @@ export function journeySteps({ website: w, domain: d, studio }, imp, { canPublis
       id: 'edit',
       title: 'Review, edit and preview',
       done: hasDraft && Boolean(w.published),
-      pill: hasDraft ? ['info', 'Draft ready'] : ['neutral', 'After content'],
+      // "Draft ready" only while it is a draft: once it is live the step says so (finding WEB-12).
+      pill: hasDraft ? (w.published ? (w.changed ? ['info', 'Edited since publishing'] : ['ok', 'Reviewed']) : ['info', 'Draft ready']) : ['neutral', 'After content'],
       detail: hasDraft ? 'Check every page on phone and desktop. Changes save as you go and stay private until you publish.' : 'Available once you have content.',
       action: hasDraft ? ['Edit my website', 'site-edit'] : null,
       preview: hasDraft,

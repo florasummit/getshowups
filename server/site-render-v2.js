@@ -12,6 +12,10 @@ import { compositionRoles } from './design-blocks.js'
 const EXTRA_CSS = {
   call: '.btn-call .tel{white-space:nowrap;font-variant-numeric:tabular-nums}',
   hours: '.hours{margin:20px 0 0}.hours strong{margin-right:10px}',
+  // Phones (finding WEB-02): the page links were hidden under 820px with nothing in their place, so a visitor on a
+  // phone could not reach Contact or Services. They now sit in one row under the name (it scrolls sideways when the
+  // links don't fit; no script). Only on websites with more than one page in the menu; wider screens are unchanged.
+  menu: '@media(max-width:820px){.nav .wrap{flex-wrap:wrap;row-gap:0;padding-top:8px}.nav ul{display:flex;order:3;flex:0 0 100%;gap:0 22px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;justify-content:flex-start}.nav ul::-webkit-scrollbar{display:none}.nav ul a{display:block;padding:11px 0}.nav-center .wrap{padding-top:8px}}',
 }
 // Confirmed booking hours → "Mon–Fri · 9:00 AM – 5:00 PM" (consecutive days joined; from records only).
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -369,6 +373,7 @@ export function renderV2(biz, spec, opts = {}) {
         .join('')
   // Legal pages (privacy policy, terms) live in the footer, not the main navigation.
   const navPages = spec.pages.filter((p) => !p.legal)
+  if (navPages.length > 1) extraCss.add(EXTRA_CSS.menu)
   const navLinks = navPages.length > 1 ? `<ul>${navPages.map((p) => `<li><a href="${esc(href(p.slug))}"${p.slug === pg.slug ? ' aria-current="page"' : ''}>${esc(p.navLabel)}</a></li>`).join('')}</ul>` : ''
   // Footer legal links: the business's own legal pages; GetShowUps' privacy page only when it has none of its own.
   const legalPages = spec.pages.filter((p) => p.legal)
