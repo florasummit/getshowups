@@ -2,7 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
-## Product Excellence: the 85 usability findings (2026-11-26, PR #185, NOT released; needs founder approval)
+## Product Excellence: the 85 usability findings (2026-11-26, PR #185, live; founder approved)
+**Release record (2026-11-26 UTC):** main 80c7d97, deployment f38a0904-74c5-4599-973a-c6f5533751a8, rollback
+9000a737-cc3a-460b-a1ce-d43aad1c0b12 (main fc2eea9). No migration. Backup
+~/getshowups-backups/prod-20261126T210822Z-pre-185.sql (integrity ok, 102 tables equal to production); Time Travel
+bookmark 000014ba-00000000-0000512f-49b3923a4d737d188d7260338f205424. Live-page diff: PoolThru pages gained exactly one CSS
+rule (phone page-link row, WEB-02); toys-for-us and bob-electrical byte-identical. Production checks (read-only, GET only):
+homepage without sign-up links, PoolThru site and www.poolthru.com with all page links visible at 390 px, PoolThru booking
+and chat pages titled with the business name, booking API offers PoolThru's website (no phone on record), sales booking
+offers only "Product demo", no page errors or sideways scroll on phone or desktop. Data equal to the backup except
+audit_log +1 and rate_limits. Not verified in production: signed-in owner and admin screens (no session; CI browser suite).
+**Backlog (documented, not in scope):** per-day booking hours; business address on the booking page; one list for website
+services and booking services; precedence of receptionist Personality vs Teach Tone; visits counted by booking or visit
+date; production-model behaviour of the Assistant, Teach Your AI and website change help (unmeasured).
 Founder mandate: resolve the findings of the 2026-11-25 zero-instruction evaluation through shared components, unify the
 UI, and make the standard permanent. No migrations, no new switches, no new dependencies, no feature work.
 - **Ledger:** docs/quality/USABILITY_FINDINGS.md has a disposition and a guarding test for each of the 85 findings.

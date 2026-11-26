@@ -752,8 +752,8 @@ Non-negotiables:
   QA_INGEST_TOKEN (unset: /api/qa/runs answers 503) + the CI qa-report job, MESSAGES_LIVE, SMS_LIVE,
   STRIPE_LIVE_ENABLED, ADS_LIVE_LAUNCH; enrollment closed ({"open":false}). Voice:
   RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical.
-- Current baseline (2026-11-26): PR #176 (Growth → Activities), main fc2eea9, deployment 9000a737, rollback 33f38d28
-  (PR #174, main 348dbe7); migrations through 0044
+- Current baseline (2026-11-26): PR #185 (Product Excellence), main 80c7d97, deployment f38a0904, rollback 9000a737
+  (PR #176, main fc2eea9); migrations through 0044
   applied EXCEPT 0040 (Google calls: applied nowhere, own approval; apply migrations one file at a time, never "all
   pending"). Production has 102 tables: D1 refuses a result with more than 100 columns, so the one-select count
   comparison must be split into two queries. Details: docs/STATUS.md.
