@@ -29,9 +29,10 @@ export function useEnrollmentOpen() {
   return useEnrollment()?.open ?? null
 }
 
-// While public sign-up is closed, people we have arranged a start with (testers, businesses set up by hand) still need
-// a way in that isn't hidden behind "Sign in". This address opens the sign-up screen worded for them. It grants
-// nothing: after Google sign-in the server decides who may create a business, exactly as for any other link.
+// While public sign-up is closed, people we have arranged a start with (testers, businesses set up by hand) get a
+// clear entry on the "Welcome back" sign-in page, never on the public homepage (founder decision: no sign-up entry of
+// any form there until enrollment opens). This address opens the sign-up screen worded for them. It grants nothing:
+// after Google sign-in the server decides who may create a business, exactly as for any other link.
 export const INVITED_HREF = '/dashboard?plan=founding&invited=1'
 export const CONTACT_EMAIL = 'hello@getshowups.com'
 

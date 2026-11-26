@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import Logo from './Logo.jsx'
 import GetStarted from './GetStarted.jsx'
-import { INVITED_HREF, useEnrollmentOpen } from '../lib/enrollment.js'
 import { navLinks } from '../content/site.js'
 import { track } from '../lib/analytics.js'
 
@@ -11,8 +10,6 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false)
 
   const [dark, setDark] = useState(false)
-  // Public sign-up closed: people we arranged a start with get their own way in, not hidden behind "Sign in".
-  const closed = useEnrollmentOpen() === false
 
   // Solid after a few pixels; dark while a dark section (or the footer) sits under the header line.
   useEffect(() => {
@@ -61,11 +58,6 @@ export default function Header() {
             ))}
           </ul>
         </nav>
-        {closed && (
-          <a href={INVITED_HREF} className="header-login header-invited" data-invited-entry>
-            Invited? Set up
-          </a>
-        )}
         <a href="/dashboard" className="header-login">
           Sign in
         </a>
@@ -91,11 +83,6 @@ export default function Header() {
             </li>
           ))}
         </ul>
-        {closed && (
-          <a href={INVITED_HREF} className="btn btn-ghost btn-block" data-invited-entry>
-            Invited? Set up your business
-          </a>
-        )}
         <a href="/dashboard" className="btn btn-ghost btn-block">
           Sign in
         </a>

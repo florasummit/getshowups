@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx'
 import { ghl } from '../config/ghl.js'
 import { enrollmentClosed } from '../content/site.js'
-import { CONTACT_EMAIL, INVITED_HREF, SALES_BUSINESS, salesBookingHref, useSalesChat, useStartAction } from '../lib/enrollment.js'
+import { CONTACT_EMAIL, SALES_BUSINESS, salesBookingHref, useSalesChat, useStartAction } from '../lib/enrollment.js'
 import { track } from '../lib/analytics.js'
 
 /**
@@ -99,9 +99,6 @@ export default function BookDemo() {
                   <li key={a}>{a}</li>
                 ))}
               </ol>
-              <p className="fine demo-invited">
-                Already arranged your start with us? <a href={INVITED_HREF} data-invited-entry>Set up your business</a>
-              </p>
             </>
           )}
         </div>

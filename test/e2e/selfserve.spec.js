@@ -10,31 +10,39 @@ import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 test.describe.configure({ mode: 'serial', timeout: 120_000 })
 
-// ONB-01. Enrollment is closed on this server exactly as in production. Someone we arranged a start with (this tester is
-// listed) must get from the homepage to their business name through a control that is not "Sign in", on a page that is
-// not titled as closed; and "book a call" must never be a dead end. Runs first: it creates nothing.
-test('enrollment closed: the invited way in from the homepage, a sign-up page that is not titled closed, and a working way to make contact @mobile', async ({ page }, testInfo) => {
+// ONB-01. Enrollment is closed on this server exactly as in production, and the public homepage offers no sign-up entry
+// in any form (founder decision). Someone we arranged a start with (this tester is listed) gets in from the sign-in
+// page through a control that is not "Sign in", on a page that is not titled as closed; and "book a call" is never a
+// dead end. Runs first: it creates nothing.
+test('enrollment closed: no sign-up entry on the homepage; the invited way in from the sign-in page; a working way to make contact @mobile', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile'
   const email = mobile ? 'founder-mobile@e2e-selfserve.example' : fixtures.E2E_SELF_SERVE_EMAIL
   await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
   await page.goto('/')
   expect((await (await page.request.get('/api/enrollment')).json()).open).toBe(false)
-  // The public sign-up link is still absent; the invited entry is its own control.
-  await expect(page.locator('a[href="/dashboard?plan=founding"]')).toHaveCount(0)
+  // Strict: no homepage link to the sign-up address in any form (with or without extra parameters), menu included.
   if (mobile) {
     await page.getByRole('button', { name: 'Open menu' }).click()
-    // ONB-14: the menu's main action is the same ink button as the header's and the hero's (it was orange here only).
+    // ONB-14: the menu's main action is the same ink button as the hero's (it was orange here only).
     const colour = (l) => l.evaluate((e) => getComputedStyle(e).backgroundColor)
     expect(await colour(page.locator('#mobile-nav [data-start-location="mobile_nav"]'))).toBe(await colour(page.locator('.hero').getByRole('link', { name: /Request early access/ })))
   }
-  const entry = page.locator(mobile ? '#mobile-nav [data-invited-entry]' : '.header-inner [data-invited-entry]')
-  await expect(entry).toBeVisible()
-  await expect(entry).not.toHaveText(/sign in/i)
-  await entry.click() // click 1
+  await expect(page.locator('a[href*="plan=founding"]')).toHaveCount(0)
+  await expect(page.locator('a[href*="invited"]')).toHaveCount(0)
+  // The call section always has a working way to reach us (no calendar is configured in this build).
+  const section = page.locator('#book-demo')
+  await expect(section.locator('[data-contact-email]')).toHaveAttribute('href', /^mailto:hello@getshowups\.com\?subject=/)
+  await expect(section.getByText('Check back soon')).toHaveCount(0)
+  // Sign in → the invited entry (not labelled "Sign in") → a page that is not titled closed → Google → business name.
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+  const entry = page.getByRole('link', { name: 'Set up your business' })
+  await expect(entry).toHaveAttribute('href', '/dashboard?plan=founding&invited=1')
+  await entry.click()
   await expect(page.getByRole('heading', { name: 'Set up your business' })).toBeVisible()
   await expect(page.getByRole('heading', { name: /isn’t open yet/ })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Book a short call' })).toHaveAttribute('href', '/#book-demo')
-  await page.getByRole('link', { name: 'Continue with Google' }).click() // click 2
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
   await expect(page.locator('main.center-page--top')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Online sign-up opens soon' })).toHaveCount(0)
   const me = await (await page.request.get('/api/dashboard/me')).json()
@@ -44,22 +52,10 @@ test('enrollment closed: the invited way in from the homepage, a sign-up page th
     // ONB-08: step 1 shows the whole path.
     await expect(page.getByRole('list', { name: 'Setup progress' }).getByRole('listitem')).toHaveCount(10)
   }
-  // Signed out again.
+  // Signed out again in the same browser: the page is still not titled closed for them.
   await page.request.post('/api/auth/logout', { headers: { Origin: `http://127.0.0.1:${fixtures.E2E_PORT}` } })
   await page.goto('/dashboard')
-  // This browser came in through the invited entry: coming back signed out, the page is still not titled closed.
   await expect(page.getByRole('heading', { name: me.customer ? 'Welcome back' : 'Set up your business' })).toBeVisible()
-  // A browser that never did (nothing remembered): "Welcome back" offers the same way in.
-  await page.evaluate(() => localStorage.clear())
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Set up your business' })).toHaveAttribute('href', '/dashboard?plan=founding&invited=1')
-  // The call section always has a working way to reach us (no calendar is configured in this build), and the entry.
-  await page.goto('/')
-  const section = page.locator('#book-demo')
-  await expect(section.locator('[data-contact-email]')).toHaveAttribute('href', /^mailto:hello@getshowups\.com\?subject=/)
-  await expect(section.getByText('Check back soon')).toHaveCount(0)
-  await expect(section.locator('[data-invited-entry]')).toHaveAttribute('href', '/dashboard?plan=founding&invited=1')
 })
 
 test('new customer: get started → pay → onboard → publish → book → manage billing @mobile', async ({ page }, testInfo) => {

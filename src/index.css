@@ -459,20 +459,6 @@ svg {
   color: var(--ink-900);
 }
 
-/* Sign-up closed: the way in for people we arranged a start with (ONB-01). Quieter than Sign in; wide screens only
-   (the phone menu and the early-access section carry it below that). */
-.header-invited {
-  font-weight: 500;
-  color: var(--gray-600);
-  white-space: nowrap;
-}
-
-@media (max-width: 1180px) {
-  .header-invited {
-    display: none;
-  }
-}
-
 .menu-toggle {
   display: none;
   margin-left: auto;
@@ -2583,19 +2569,6 @@ svg {
 /* ============ Early access: what happens next ============ */
 .demo-copy .section-intro {
   margin-inline: 0;
-}
-
-.demo-invited {
-  margin-top: 20px;
-  color: var(--gray-600);
-  font-size: 0.93rem;
-}
-
-.demo-invited a {
-  color: var(--ink-900);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .demo-next-title {

@@ -66,7 +66,7 @@ const clearPlan = () => {
 }
 
 // The entry for people who were told they may start (testers, businesses we set up by hand) while public sign-up is
-// closed: INVITED_HREF (src/lib/enrollment.js), linked from the homepage and from "Welcome back". It only changes the wording
+// closed: INVITED_HREF (src/lib/enrollment.js), linked from "Welcome back" only (never from the homepage). It only changes the wording
 // of this screen: who may create a business is decided by the server after sign-in, exactly as before.
 // Remembered with the plan (same browser, across the Google round trip and a later signed-out visit), and forgotten
 // with it once the account has a business.
@@ -134,7 +134,7 @@ function SignIn({ invite, plan }) {
               </>
             ) : enrollment === false ? (
               <>
-                Setting up a new business with us? <a href={INVITED_HREF}>Set up your business</a>
+                Have an invitation? <a href={INVITED_HREF}>Set up your business</a>
               </>
             ) : (
               <>
