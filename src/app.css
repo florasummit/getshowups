@@ -6002,15 +6002,11 @@ html.help-open .app {
     min-height: 44px;
     align-items: center;
   }
-  /* A row that wraps a checkbox or a radio is tapped as a whole: 44 px tall on phones and touch screens. */
+  /* A checkbox or radio row (the shared .check label) is tapped as a whole: 44 px tall on phones and touch screens.
+     Other labels keep their own layout (provider tiles, switches): only their height is raised, never their display. */
   .app label.check,
   .app label:has(> input:is([type='checkbox'], [type='radio'])) {
     min-height: 44px;
-  }
-  .app label:has(> input:is([type='checkbox'], [type='radio'])):not(.check, .switch, .field, .ui-switch) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
   .app summary {
     align-content: center;
