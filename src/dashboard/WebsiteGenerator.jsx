@@ -44,7 +44,7 @@ export function Allowance({ usage, kind, noun, ownKey = null }) {
     </>
   )
 }
-const DESIGNED_SITE = 'Your website is now designed with the AI designer, so this version wasn’t used (it would have replaced that design). Refresh the page to continue with the designer.'
+const DESIGNED_SITE = 'Your website changed while this version was being made, so it wasn’t used. Refresh the page and ask again.'
 // Specific, honest messages for the server's limits (manual editing is never limited).
 const failText = (status, data, noun) =>
   data?.error === 'daily_limit'
@@ -182,12 +182,16 @@ export default function WebsiteGenerator({ hasDraft, onApplied, intro, usage, on
   )
 }
 
+// For a multi-page website: only requests the change can carry out there (see data-revise-scope below).
+const PAGE_SUGGESTIONS = ['Make it more modern', 'Make it warmer and friendlier', 'Try a dark look', 'Make the introduction shorter']
 const SUGGESTIONS = ['Make it more modern', 'Make it warmer and friendlier', 'Use my photos', 'Make it simpler', 'Try a dark look']
 
 // "Describe a change": one AI revision of the private draft, shown before anything is saved.
 // The version waiting for an answer is announced to the rest of the page (setPendingRevision), so nothing claims
 // "All changes saved" or lets the owner walk past it meanwhile, and it is still offered after a reload (`storeKey`).
-export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null, storeKey = null }) {
+// `pages`: the draft is a multi-page website (full editor): the box says what a change can and cannot touch, and offers
+// only suggestions that work there. `hold`: a reason the box must wait (e.g. the editor is still saving).
+export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null, storeKey = null, pages = false, hold = null }) {
   const [text, setText] = useState('')
   const [rev, setRevState] = useState(null)
   const [state, setState] = useState({})
@@ -276,18 +280,24 @@ export function ReviseBox({ onApplied, onPreview, usage, onUsage, ownKey = null,
         <span>Describe a change</span>
         <div className="revise-row">
           <input value={text} onChange={(e) => setText(e.target.value)} maxLength={240} placeholder="e.g. Make it feel more premium" disabled={state.busy} />
-          <button className="btn btn-primary" disabled={state.busy || !text.trim()}>
+          <button className="btn btn-primary" disabled={state.busy || !text.trim() || Boolean(hold)}>
             {state.busy ? 'Working…' : 'Apply'}
           </button>
         </div>
       </label>
       <div className="suggestions" aria-label="Suggestions">
-        {SUGGESTIONS.map((s) => (
-          <button key={s} type="button" className="suggest" disabled={state.busy} onClick={() => send(s)}>
+        {(pages ? PAGE_SUGGESTIONS : SUGGESTIONS).map((s) => (
+          <button key={s} type="button" className="suggest" disabled={state.busy || Boolean(hold)} onClick={() => send(s)}>
             {s}
           </button>
         ))}
       </div>
+      {pages && (
+        <p className="fine" data-revise-scope>
+          It can reword your first screen’s headline and introduction, your About text and service descriptions, and change colours, lettering, corner shape and the first photo. It doesn’t add, remove or move pages and sections, and never touches your privacy or terms pages. You see the result before anything is saved.
+        </p>
+      )}
+      {hold && <p className="fine">{hold}</p>}
       {state.busy ? <p className="fine" role="status">Updating your website… about 10 seconds.</p> : <Allowance usage={usage} kind="revision" noun="AI changes" ownKey={ownKey} />}
       {state.error && (
         <p className="form-error" role="alert">

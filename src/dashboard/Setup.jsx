@@ -647,6 +647,8 @@ function WebsiteStep({ onDone, back }) {
         </div>
         {mode === 'new' && (
           <WebsiteGenerator
+            studio={Boolean(data.studio)}
+            storeKey={data.url}
             usage={data.aiUsage}
             onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
             intro="Nothing is public until you publish."
@@ -660,6 +662,7 @@ function WebsiteStep({ onDone, back }) {
         {mode === 'design' && (
           <WebsiteGenerator
             templates
+            studio={Boolean(data.studio)}
             usage={data.aiUsage}
             intro="Nothing is public until you publish."
             onApplied={(d) => {
@@ -681,6 +684,47 @@ function WebsiteStep({ onDone, back }) {
             {state.error}
           </p>
         )}
+        {back && (
+          <button type="button" className="link-btn" onClick={back}>
+            Back
+          </button>
+        )}
+      </div>
+    )
+  }
+  // A multi-page website (every website made here now is one, finding WEB-01): the step shows it and takes change
+  // requests in the owner's words; editing text, photos, sections and pages happens in the full editor (Website) after
+  // setup, so there is one editor, not a second smaller one here. Nothing is saved by Continue (the draft already is).
+  if (w.draft?.site) {
+    return (
+      <div className="form">
+        <h1 id="step-title" className="title">
+          Here’s your website
+        </h1>
+        <p className="lede">Check it on a computer and a phone. It stays private until you publish.</p>
+        <WebsitePreview stamp={stamp} query={pending ? `generation=${pending.id}&option=0&` : ''} unsaved={Boolean(pending)} />
+        <ReviseBox
+          pages
+          usage={data.aiUsage}
+          storeKey={data.url}
+          onUsage={(aiUsage) => setData((d) => ({ ...d, aiUsage }))}
+          onPreview={setPending}
+          onApplied={(d) => {
+            setData(d)
+            setStamp((n) => n + 1)
+          }}
+        />
+        <p className="notice-soft" data-edit-later>
+          You can edit everything after setup, under <strong>Website</strong>: every text and photo, sections, extra pages, colours, and earlier versions to go back to.
+        </p>
+        {pending && (
+          <p className="notice-soft" role="status" data-undecided>
+            Choose “Keep this” or “Go back” for the new version above before you continue.
+          </p>
+        )}
+        <button type="button" className="btn btn-primary btn-lg btn-block" disabled={Boolean(pending)} onClick={onDone}>
+          Continue
+        </button>
         {back && (
           <button type="button" className="link-btn" onClick={back}>
             Back

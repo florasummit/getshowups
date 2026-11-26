@@ -198,19 +198,21 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Phone' }).click()
   await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
   expect((await page.request.get(`/p/${id}`)).status()).toBe(404)
-  await page.getByText('Edit text and photos').click()
-  await expect(page.getByLabel('Headline')).toHaveValue(`${name}: dependable weekly pool cleaning near you`)
-  await page.getByLabel('Introduction').fill('Friendly, reliable pool care across Charleston.')
-  await expect(page.getByText('All changes saved')).toBeVisible()
-  await expect(frame.getByText('Friendly, reliable pool care across Charleston.')).toBeVisible()
-  if (!mobile) {
-    // Claims filter: an unconfirmed guarantee is refused with a plain explanation.
-    await page.getByText('About and service area').click()
-    await page.getByLabel(/Facts about your business/).fill('Satisfaction guaranteed')
-    await expect(page.getByRole('alert')).toContainText('guarantees')
-    await page.getByLabel(/Facts about your business/).fill('')
-    await expect(page.getByText('All changes saved')).toBeVisible()
-  }
+  // WEB-01: the website made here is the multi-page website of the full editor (no second, smaller editor in setup):
+  // the step shows it, takes a change request in the owner's words, and says where everything is edited afterwards.
+  expect((await (await page.request.get('/api/dashboard/website')).json()).website.draft.site.pages.map((p) => p.slug)).toEqual(['', 'contact', 'privacy'])
+  await expect(page.getByText('Edit text and photos')).toHaveCount(0)
+  await expect(page.locator('[data-edit-later]')).toContainText('You can edit everything after setup, under Website')
+  await expect(page.locator('[data-revise-scope]')).toContainText('never touches your privacy or terms pages')
+  // ONB-09: a requested change is shown first and must be answered before moving on; "Go back" leaves the draft as it was.
+  await page.getByRole('button', { name: 'Make it more modern' }).click()
+  await expect(page.getByText('Here’s the new version. Keep it?')).toBeVisible({ timeout: 30_000 })
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(/^Modern /)
+  await expect(page.locator('[data-undecided]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Go back' }).click()
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)
+  await expect(page.locator('[data-undecided]')).toHaveCount(0)
   await noOverflow()
   await page.getByRole('button', { name: 'Continue' }).click()
 
@@ -247,7 +249,10 @@ test('new customer: get started → pay → onboard → publish → book → man
   // Preview and publish, only with explicit consent.
   await expect(page.getByRole('heading', { name: 'Preview and publish' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Publish my website' })).toBeDisabled()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+  // The website's starter privacy page goes public only after the owner says they read it.
+  await expect(page.getByRole('button', { name: 'Publish my website' })).toBeDisabled()
+  await page.getByRole('checkbox', { name: /I’ve read my privacy policy page/ }).check()
   await page.getByRole('button', { name: 'Publish my website' }).click()
 
   // Done: honest checklist (what's live, what's coming) → dashboard.

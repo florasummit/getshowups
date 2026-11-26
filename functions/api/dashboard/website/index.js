@@ -28,6 +28,7 @@ import { listCheckpoints, maybeCheckpoint, restoreCheckpoint, saveCheckpoint } f
 import { renderSite } from '../../../../server/site-render.js'
 import { missingFor, starterSite, textLedStarter } from '../../../../server/site-starter.js'
 import { starterFacts } from '../../../../server/website-import.js'
+import { applyRevision, reviseView } from '../../../../server/website-revise.js'
 import { siteBusinessInfo } from '../../../../server/site-serve.js'
 
 // A business without Website Studio access (server/website-studio.js) can't introduce an AI-designed site or old-address
@@ -157,7 +158,9 @@ export async function onRequestPost({ request, env }) {
               // The owner's own (imported or edited) text informs a new design.
               draftText: loaded.generated ? null : [draft.headline, draft.intro, draft.about, ...(draft.services || []).map((x) => `${x.name} ${x.price} ${x.description}`)].join('\n'),
             })
-          : await reviseWebsite(env, customer, draft, body.instruction)
+          : // A multi-page website is shown to the writer as the flat website it knows (server/website-revise.js); the
+            // same single request, allowance and checks either way.
+            await reviseWebsite(env, customer, draft.site ? reviseView(draft) : draft, body.instruction)
       if (!r.ok) return json(r.httpStatus, { error: r.error, aiUsage: usage })
       // Only successful AI results count against the allowance (template fallbacks are free).
       if (r.generation.source === 'ai') await recordAiUse(db, customer.id, kind)
@@ -170,6 +173,17 @@ export async function onRequestPost({ request, env }) {
       const current = (await loadWebsite(db, customer)).draft
       // A template/AI-writer result carries no AI-designed site; applying it would silently drop the owner's AI design
       // (e.g. from a tab opened before the design). The AI designer's Undo and earlier versions remain the way back.
+      // …except a "Describe a change" result made for this multi-page website: only what the writer changed is written
+      // onto the owner's own pages (never a legal page, never pages or sections), validated like every save, and the
+      // draft from before is kept in History. Still only the private draft.
+      if (current.site && g.basis && (await studioAccess(env, customer))) {
+        const revised = applyRevision(current, g)
+        const [revErrors, next] = validateContent(revised.content, await approvedClaimsFor(db, customer.id), await assetIdsFor(db, customer.id), { prior: current.services })
+        if (revErrors.length) return json(400, { error: 'invalid_content', fields: revErrors })
+        await saveCheckpoint(db, customer.id, current, 'before_ai_change').catch((e) => console.error('checkpoint failed:', e?.name))
+        await saveDraft(db, customer.id, next)
+        return json(200, await state(env, customer, session.email))
+      }
       if (current.site) return json(409, { error: 'designed_site' })
       const option = Number.isInteger(body.option) ? body.option : 0
       if (g.designs.length && !g.designs[option]) return json(400, { error: 'invalid_request' })
