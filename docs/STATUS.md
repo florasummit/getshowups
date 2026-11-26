@@ -2,7 +2,7 @@
 
 _Update at the end of every task. Newest first._
 
-## Website chat panel (2026-11-25, branch feat/website-chat-panel, DRAFT for the founder's separate review; not released)
+## Website chat panel (2026-11-25, PR #175, live; founder approved the design, migration 0043 and the release)
 - **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link
   (Receptionist → On your website). Off by default; off = the link, byte for byte, so no live site changes at deploy.
 - **How:** the same chat page (/chat/<id>?embed=1, the one receptionist engine) in a frame inside a closed `<details>`:
@@ -17,7 +17,22 @@ _Update at the end of every task. Newest first._
   (site and chat on different sites, as on a customer's own domain): the conversation resumes after a page change.
 - **Not verified:** Safari's handling of framed storage (the chat then starts fresh after a page change, never an
   error) and the microphone inside the frame on real phones ("Open the chat in a new tab" is the fallback for both).
-- **Needs approval:** the design, migration 0043 (after 0042; 0040 stays unapplied), merge. The privacy policy wording is untouched.
+- **Released 2026-11-26 01:0x UTC:** main 9871609, deployment 5f7e636b, rollback a8505dca (main e0540fd). CI on head 8afada2 green.
+  - **Migration 0043 applied 2026-11-26 00:59 UTC, on its own** (0040 still applied nowhere). Before: export
+    ~/getshowups-backups/prod-20261126T005826Z-pre-0043.sql (100 tables, every count equal to production in two
+    queries, integrity ok), rehearsed twice on a copy (existing rows and schema unchanged). After: 101 tables,
+    website_chat_settings empty. Time Travel bookmark before 0043: `00001337-00000000-0000512f-727239663ae350e4588643d280e932fb`
+    (**restoring loses every later write**; approval). A code rollback needs no database change.
+  - **Release check:** healthy; all customer pages and APIs identical.
+  - **Verified in production (read-only):** the three published sites and www.poolthru.com are byte-identical in body and
+    in policy headers before and after (no panel, no frame-src: no owner has turned it on, 0 rows); the owner route
+    refuses signed-out (401) and cross-site (403) requests; the production chat page inside the released panel markup
+    with the site's real policy, desktop and phone, for poolthru-llc and getshowups: 0 chat requests before opening, it
+    opens, shows that business's greeting and quick replies from the one receptionist API, Book online opens a new tab,
+    no sideways scroll. No message was sent; no lead, appointment or conversation was created (counts equal the backup).
+  - **Not verified in production:** an owner flipping the switch signed in (no owner session; covered by the browser
+    tests against the local server), Safari's framed storage, the microphone inside the frame on real phones.
+- The privacy policy wording is untouched; nothing new is stored in a visitor's browser.
 
 ## Account lifecycle, platform controls, booking settings (2026-11-25, PR #169)
 - **Live:** main 1c96237, deployment 70991926, rollback 58ee24a0. CI: 1,042 unit and 306 browser tests. Release check healthy: 7 customer
@@ -54,7 +69,7 @@ _Update at the end of every task. Newest first._
   accounts can be chosen, and switching it on would also allow campaign changes. PoolThru is connected to a Google Ads test account.
 
 
-## Booking and chat experience (2026-11-25, branch booking/premium, awaiting the founder's approval of the previews)
+## Booking and chat experience (2026-11-25, PR #173, live)
 - **Booking page:**
   - **Flow:** service (owner's own cards, search above 6) → ZIP area check before any time → real times for that service's length → name, phone and email → booked.
   - Request services skip the time. A ZIP the owner must approve goes straight to details. No times (calendar down or full) → details are still taken.
@@ -70,10 +85,29 @@ _Update at the end of every task. Newest first._
 - **Measurement:** booking-page stages per visit (`booking_stage` events, codes only), shown to the owner as a last-30-days line. Ad click-through stays separate.
 - **Chat:** same public system, quick replies from the business's own services, `?embed=1` panel layout. AI, voice, test sessions and privacy notes are unchanged.
 - **Showing the panel on customer websites** changes every live site and needs a separate approval.
-- **Before release:**
-  - founder approval of the previews;
-  - migration 0042 applied (after 0041);
-  - then Admin → "GetShowUps sells itself" → Apply approved answers, so the GetShowUps page offers the demo.
+- **Released 2026-11-25 (founder approved the previews and migration 0042; accepted as the production baseline):**
+  - **Live:** main e0540fd, deployment a8505dca, live 23:01 UTC. Rollback: bc3450d9 (main 95d0522, PR #172; its own rollback was a4d2246d).
+    CI on the released head 736591e: 1,057 unit tests and the browser suite.
+  - **Migration 0042 applied 22:37 UTC, on its own** (0040 is applied nowhere and waits for its own approval: never run "all pending").
+    Before: export ~/getshowups-backups/prod-20261125T223452Z-pre-0042.sql, loaded and compared (98 tables, every count equal to
+    production, integrity ok), rehearsed twice on a copy (existing rows unchanged, no broken references). After: 100 tables,
+    lead_services and booking_options empty, existing counts unchanged.
+  - **Recovery:** the code works without the tables, so a code rollback needs no database change; leave the tables. Time Travel
+    bookmark before 0042: `0000130d-00000008-0000512e-72f8291322aa427469d6c163a9afaf0b` (**restoring loses every later write**; approval).
+  - **Added before release:** the owner's export carries the service each request was for and the "Other / Not sure" setting; the ZIP
+    area check has its own rate allowance (`bookArea`; sharing `bookView` used up a visitor's page views).
+  - **Release check:** customer pages unchanged; /api/receptionist/<id> gained `services` and `brand` (nothing removed or changed);
+    0 exceptions; records and secret names unchanged.
+  - **Verified in production (read-only, desktop and phone, 54 checks):** homepage navigation is the wordmark alone, footer keeps the icon;
+    favicon, app icon and manifest equal the repository; /book/getshowups and /book/poolthru-llc open, no sideways scroll; PoolThru
+    records identical before and after, Nov 26 not offered, first day Nov 27; test business gsu-stripe-test-pools shows exactly its four
+    services from Settings, then times, then the details form; its stages view → service → time → details were stored (8 rows, codes
+    only); both chat pages show the new design, quick replies and the text box.
+  - **Not verified in production:** a submitted booking or request, a chat message, and the owner's services editor signed in (no real
+    appointments or messages were allowed; these are covered by unit and browser tests with stand-ins only).
+  - **Open:** founder: Admin → "GetShowUps sells itself" → Apply approved answers (until then /book/getshowups offers "Founding plan
+    $499/month" instead of "Product demo"). PoolThru has no services in Settings, so its page asks the open question. A business
+    without a published logo shows a letter mark. The website chat panel is not released (separate review).
 
 ## Homepage navigation: wordmark alone (2026-11-25, founder decision)
 - The public homepage header shows the GetShowUps wordmark without the icon: `<Logo mark={false} />`, with the same type, colours and size.
