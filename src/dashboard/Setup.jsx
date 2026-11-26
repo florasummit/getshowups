@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import AiWrite from './AiWrite.jsx'
 import { LoadError } from './ui.jsx'
-import { api, browserTimeZone, timeZones } from '../lib/api.js'
-import { BusinessForm, HoursForm } from './forms.jsx'
+import { api, browserTimeZone } from '../lib/api.js'
+import { BusinessForm, HoursForm, TimeZoneSelect } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { SignOut } from './Home.jsx'
 import Readiness from './Readiness.jsx'
@@ -429,13 +429,7 @@ function DetailsStep({ customer, onDone, back, justPaid }) {
       <AiWrite field="description" draft />
       <label className="field">
         <span>Time zone</span>
-        <select name="timezone" defaultValue={customer.timezone || browserTimeZone()}>
-          {timeZones().map((z) => (
-            <option key={z} value={z}>
-              {z.replaceAll('_', ' ')}
-            </option>
-          ))}
-        </select>
+        <TimeZoneSelect name="timezone" defaultValue={customer.timezone || browserTimeZone()} />
       </label>
       {state.error && (
         <p className="form-error" role="alert">
