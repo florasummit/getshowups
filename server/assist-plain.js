@@ -3,8 +3,15 @@
 // answer; places (placeAnswer) are answered this way always. Same tools, same session business, nothing saved.
 import { insights } from './insights.js'
 import { HELP } from '../src/content/help.js'
+import { IDEAS } from '../src/content/assistant-ideas.js'
+import { plural } from '../src/lib/format.js'
 import { periodIn } from './assist.js'
 import { runTool, toolContext } from './operator-tools.js'
+import { attention, attentionCard } from './attention.js'
+import { setupCheck } from './setup-check.js'
+import { funnel } from './ads/funnel.js'
+import { adsAccess } from './ads/access.js'
+import { internalEmails } from './testdata.js'
 
 const words = (q) => ` ${q.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `
 const has = (w, re) => re.test(w)
@@ -20,13 +27,14 @@ export const PAGES = {
   ads: ['Ads', 'your ad accounts, campaign drafts, budget and results'],
   settings: ['Settings', 'your business details, services and prices, service area, booking hours, Google Calendar and notices'],
 }
-const SETTING = (what) => ({ text: `${what} is in Settings.`, go: 'settings' })
+// `go` may name a card on the page ("settings#booking-hours"): the panel's button opens the page and scrolls to it.
+const SETTING = (what, card = '') => ({ text: `${what} is in Settings.`, go: `settings${card}` })
 const PLACES = [
-  [/\b(help|assistant|chat) (button|icon|link|panel|menu)\b|\bthe help\b|\b(get|find) help\b/, { text: 'Help is at the top of every dashboard page: “Assistant” opens this panel, and “Help” next to it writes an email to our team. A small “?” beside a setting explains that setting.' }],
+  [/\b(help|assistant|chat) (button|icon|link|panel|menu)\b|\bthe help\b|\b(get|find) help\b/, { text: 'Help is at the top of every dashboard page: “Assistant” opens this panel, and “Help” next to it opens the help topics and our email address. A small “?” beside a setting explains that setting.' }],
   [/\bsign ?out\b|\blog ?out\b/, { text: '“Sign out” is at the top right of every dashboard page.' }],
-  [/\b(booking|business|working|opening)? ?hours\b/, SETTING('Booking hours')],
-  [/\b(google )?calendar\b/, SETTING('Google Calendar')],
-  [/\bservice area\b|\bzips?\b|\bzip codes?\b|\btowns\b/, SETTING('Your service area')],
+  [/\b(booking|business|working|opening)? ?hours\b/, SETTING('Booking hours', '#booking-hours')],
+  [/\b(google )?calendar\b/, SETTING('Google Calendar', '#google-calendar')],
+  [/\bservice area\b|\bzips?\b|\bzip codes?\b|\btowns\b/, SETTING('Your service area', '#business')],
   [/\bservices?\b|\bprices?\b|\bpricing\b|\bphone( number)?\b|\bbusiness (name|details)\b/, SETTING('That')],
   [/\bdomain\b/, { text: 'Your domain is on the Website page.', go: 'website' }],
   [/\bbudget\b|\bcampaigns?\b/, { text: 'Budget and campaigns are on the Ads page.', go: 'ads' }],
@@ -84,7 +92,7 @@ export function intentOf(q) {
   const w = words(q)
   // Another business's records: this is the only one there is. Never answered with this one's numbers.
   if (has(w, /\b(another|other|different|someone elses|competitors?) (\w+ )?(business(es|s)?|company?s?|companies|accounts?|owners?)\b|\bcompetitors?\b/)) return 'other'
-  if (has(w, /\bwhat (should|do|can) i (improve|fix|do|work on|focus on|look at)\b|\b(improve|fix) first\b|\bpriorit\w+\b/)) return 'priorities'
+  if (has(w, /\bwhat (should|do|can) i (improve|fix|do|work on|focus on|look at)\b|\b(improve|fix|change) first\b|\bpriorit\w+\b/)) return 'priorities'
   if (has(w, /\b(change|update|set|edit) (my|our|the)( \w+)? hours\b/)) return 'change_hours'
   if (has(w, /\b(revenue|paid|payments|earned|income)\b/) && !has(w, /\b(why|advert\w*|ads?|campaigns?|roi|return)\b/)) return 'money'
   if (has(w, /\b(why|draft|write|prepare|add|remove|change|mark|cancel|reschedule|should|improve|compare|revenue|advert\w*|ads?|campaigns?|roi)\b/)) return null
@@ -94,7 +102,7 @@ export function intentOf(q) {
   if (has(w, /\b(my|our|the) (services|prices|towns|service area|settings|zips?|zip codes?)\b|\b(what|which) (services|zips?|zip codes?|towns)\b/)) return 'settings'
   if (mentions(w, ['unanswered', 'answered', 'waiting'])) return 'unanswered'
   if (has(w, /\b(how many|how much|numbers|results|stats|statistics|how (is|are|am) (it|things|we|i|(my |the )?business) (going|doing|performing))\b/)) return 'numbers'
-  if (mentions(w, ['appointment', 'appointments', 'schedule', 'visits', 'calendar']) || has(w, /\bcoming up\b/)) return 'appointments'
+  if (mentions(w, ['appointment', 'appointments', 'schedule', 'visits', 'calendar']) || has(w, /\bcoming up\b|^ whats on /)) return 'appointments'
   if (mentions(w, ['leads', 'lead', 'inquiry', 'inquiries']) || has(w, /\bwho asked\b/)) return 'leads'
   return null
 }
@@ -123,10 +131,17 @@ export async function plainAnswer(env, customer, req) {
   if (!intent) return null
 
   if (intent === 'other') return { kind: 'help', answer: 'I only have this business’s records. Other businesses’ information isn’t available here.' }
-  if (intent === 'change_hours') return { kind: 'help', answer: 'You can change booking hours in Settings. Preparing the change for you in this chat needs AI, which isn’t available right now. Nothing was changed.', go: 'settings' }
+  if (intent === 'change_hours') return { kind: 'help', answer: 'You can change booking hours in Settings. Preparing the change for you in this chat needs AI, which isn’t available right now. Nothing was changed.', go: 'settings#booking-hours' }
   if (intent === 'priorities') {
-    const list = (await insights(env, customer)).slice(0, 3)
-    return { kind: 'records', answer: list.length ? `From your records, most important first:\n${list.map((x, i) => `${i + 1}. ${x.title}. ${x.evidence?.[0] ?? ''}`.trim()).join('\n')}` : 'Nothing in your records needs fixing right now.', ...(list[0]?.home ? { go: list[0].home } : {}) }
+    // The same three sources the dashboard shows, in the order Overview lists them: people waiting, then what the setup
+    // check found, then suggestions. A part that can't be read is left out, never guessed.
+    const [card, setup, found] = await Promise.all([attention(env, customer.id).then(attentionCard).catch(() => null), setupCheck(env, customer).catch(() => null), insights(env, customer).catch(() => [])])
+    const list = [
+      ...(card?.items || []).map((x) => ({ text: `${x.text}.`, go: x.page })),
+      ...(setup?.items || []).filter((x) => x.level !== 'optional').map((x) => ({ text: `${x.title}. ${x.why}`, go: x.where })),
+      ...found.map((x) => ({ text: `${x.title}. ${x.evidence?.[0] ?? ''}`.trim(), go: x.home })),
+    ].slice(0, 3)
+    return { kind: 'records', answer: list.length ? `From your records, most important first:\n${list.map((x, i) => `${i + 1}. ${x.text}`).join('\n')}` : 'Nothing in your records needs fixing right now.', ...(list[0]?.go ? { go: list[0].go } : {}) }
   }
   const c = toolContext(env, customer, req.refs)
   const run = async (name, args = {}) => {
@@ -145,19 +160,25 @@ export async function plainAnswer(env, customer, req) {
   if (intent === 'hours' || intent === 'settings') {
     const r = await run('business_settings')
     if (!r) return null
-    if (intent === 'hours') return { kind: 'records', answer: `Your booking hours: ${r.booking_hours}. ${r.appointment_minutes} minutes each, ${r.time_zone}.`, go: 'settings' }
+    if (intent === 'hours') return { kind: 'records', answer: `Your booking hours: ${r.booking_hours}. ${r.appointment_minutes} minutes each, ${zoneWords(r.time_zone)}.`, go: 'settings#booking-hours' }
     const z = r.service_area_zips
     return { kind: 'records', answer: `Services: ${r.services.map((s) => `${s.name} (${s.price})`).join(', ') || 'none added yet'}. Towns: ${r.towns.join(', ') || 'none added yet'}. Service area: ${Array.isArray(z) ? z.join(', ') : z}. Hours: ${r.booking_hours}.`, go: 'settings' }
   }
   if (intent === 'numbers' || intent === 'money') {
     const r = await run('business_numbers', { period: period ?? (days === 7 ? 'last_7_days' : days === 90 ? 'last_90_days' : 'last_30_days') })
     if (r && intent === 'money') return { kind: 'records', answer: `Payments you recorded (${r.period}): ${r.payments_recorded}. Money nobody recorded isn’t counted.` }
-    return r && { kind: 'records', answer: `${r.period}: ${r.new_inquiries} new inquiries, ${r.bookings_made} bookings made, ${r.visits_happened} visits marked as happened, payments recorded: ${r.payments_recorded}.` }
+    return r && { kind: 'records', answer: `${sentence(r.period)}: ${countsLine(r)}, payments recorded: ${r.payments_recorded}.` }
   }
   if (intent === 'appointments') {
+    // "Which visits need an outcome?": past ones nobody marked.
+    if (has(w, /\b(outcomes?|not marked|unmarked)\b/)) {
+      const r = await run('list_appointments', { state: 'needs_outcome' })
+      return r && shown(r.total ? `${plural(r.total, 'past visit')} still ${r.total === 1 ? 'needs' : 'need'} an outcome. Mark them on Appointments:` : 'No. Every past visit has an outcome.')
+    }
     const r = await run('list_appointments', period ? { period } : {})
     if (!r) return null
-    return shown((r.total ?? r.upcoming.total + r.outcome_not_recorded.total) ? 'Here’s what’s recorded:' : 'Nothing like that is recorded right now.')
+    if (r.total === undefined) return shown(r.upcoming.total + r.outcome_not_recorded.total ? `${plural(r.upcoming.total, 'upcoming visit')}${r.outcome_not_recorded.total ? `, and ${plural(r.outcome_not_recorded.total, 'past visit')} without an outcome` : ''}:` : 'Nothing is coming up, and no past visit is waiting for an outcome.')
+    return shown(r.total ? `${plural(r.total, 'appointment')} (${r.period}):` : `Nothing is booked (${r.period}).`)
   }
   if (intent === 'needs') {
     const span = days ?? 90
@@ -175,6 +196,69 @@ export async function plainAnswer(env, customer, req) {
   }
   const r = await run('list_leads', { which: intent === 'unanswered' ? 'unanswered' : 'recent', ...(days ? { days } : {}) })
   return r && shown(!r.total ? 'Nothing like that is recorded right now.' : intent === 'unanswered' ? 'Nothing has been sent to these people yet:' : 'Your latest inquiries:')
+}
+
+// "Eastern Time", never the zone's code ("America/New_York"); an unknown zone is shown as it is stored.
+const zoneWords = (tz) => {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longGeneric' }).formatToParts(0).find((p) => p.type === 'timeZoneName')?.value || tz
+  } catch {
+    return tz
+  }
+}
+const sentence = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+// One wording for the three counts, wherever the assistant gives them (the same counts Overview shows for 30 days).
+const countsLine = (r) => `${plural(r.new_inquiries, 'new inquiry', 'new inquiries')}, ${plural(r.bookings_made, 'booking')} made, ${plural(r.visits_happened, 'visit')} marked as happened`
+
+// The panel's own suggestions (src/content/assistant-ideas.js) and the countable follow-ups under a number
+// (src/content/help.js `ask`) are offered by the product, so each must return the fact it asks for. These are answered
+// from the records, always and without a model; the same words typed by hand get the same answer. A suggestion that asks
+// for writing or a judgement ("Draft a follow-up for me") is not here: that is the model's, and null is returned.
+const key = (q) => words(q).trim()
+const OFFERED = new Set([...Object.values(IDEAS).flat(), ...Object.values(HELP).flatMap((t) => t.ask || [])].map(key))
+export const isOffered = (question) => OFFERED.has(key(question))
+export async function offeredAnswer(env, customer, req) {
+  if (!isOffered(req.question)) return null
+  const w = words(req.question)
+  const c = toolContext(env, customer, req.refs)
+  const run = async (name, args = {}) => {
+    const r = await runTool(c, name, args)
+    return r.error ? null : r
+  }
+  const shown = (answer) => ({ kind: 'records', answer, records: [...c.shown.values()].slice(0, 8), refs: c.refs.book })
+  const span = req.days === 7 ? 'last_7_days' : req.days === 90 ? 'last_90_days' : 'last_30_days'
+  if (has(w, /\b(left to mark|need an outcome)\b/)) {
+    const r = await run('list_appointments', { state: 'needs_outcome' })
+    return r && shown(r.total ? `${plural(r.total, 'past visit')} still ${r.total === 1 ? 'needs' : 'need'} an outcome. Mark them on Appointments:` : 'No. Every past visit has an outcome.')
+  }
+  if (has(w, /\boutside my area\b/)) {
+    const r = await run('list_leads', { which: 'outside_area', days: 90 })
+    return r && shown(r.total ? `${plural(r.total, 'person', 'people')} asked from outside your service area in the last 90 days:` : 'Nobody asked from outside your service area in the last 90 days.')
+  }
+  if (has(w, /\bcompare the last 30 days\b/)) {
+    const r = await run('compare_periods', { first: 'last_30_days', second: 'previous_30_days' })
+    return r && { kind: 'records', answer: `Last 30 days: ${countsLine(r.first)}, payments recorded: ${r.first.payments_recorded}.\nThe 30 days before: ${countsLine(r.second)}, payments recorded: ${r.second.payments_recorded}.\nWith counts this small, a difference isn’t a trend.` }
+  }
+  if (has(w, /\b(ads bring in|leads came from ads|of these became bookings|get for this spend)\b/)) {
+    if (!(await adsAccess(env, customer))) return { kind: 'help', answer: 'Ads aren’t available for this business right now, so there is nothing from ads to show.' }
+    const f = await funnel(env.ONBOARDING_DB, customer.id, { days: req.days || 30, scope: 'ads', internal: internalEmails(env) })
+    const usd = (cents) => `$${(cents / 100).toFixed(2).replace(/\.00$/, '')}`
+    return { kind: 'records', answer: `From leads traced to your ads in the last ${f.range.days} days: ${plural(f.stages.leads, 'inquiry', 'inquiries')}, ${f.stages.booked} booked, ${f.stages.attended} marked as happened. Payments you recorded for those jobs: ${f.revenue.paidCents == null ? 'none recorded' : usd(f.revenue.paidCents)}. Ad spend Google reported: ${f.spend.cents == null ? 'none reported' : usd(f.spend.cents)}. How much of this the ads caused isn’t measured.`, go: 'ads' }
+  }
+  if (has(w, /\b(inquiries became bookings|no shows did i have)\b/)) {
+    const r = await run('business_numbers', { period: span })
+    if (!r) return null
+    return { kind: 'records', answer: has(w, /\bno shows\b/) ? `${sentence(r.period)}: ${plural(r.no_shows, 'no-show')}, ${plural(r.visits_happened, 'visit')} marked as happened${r.past_visits_without_outcome ? `, ${plural(r.past_visits_without_outcome, 'past visit')} not marked yet` : ''}.` : `${sentence(r.period)}: ${plural(r.new_inquiries, 'new inquiry', 'new inquiries')} and ${plural(r.bookings_made, 'booking')} made. A booking can come from an earlier inquiry, so this isn’t a rate.` }
+  }
+  if (has(w, /\bzip codes do i list\b/)) {
+    const r = await run('business_settings')
+    if (!r) return null
+    const z = r.service_area_zips
+    return { kind: 'records', answer: Array.isArray(z) && z.length ? `You list ${plural(z.length, 'ZIP code')}: ${z.join(', ')}.` : 'You list no ZIP codes, so anyone can book wherever they are.', go: 'settings#business' }
+  }
+  // The rest are ordinary record questions ("What are my hours?", "Who asked recently?"): asked on their own, not as a
+  // follow-up to whatever was said before.
+  return plainAnswer(env, customer, { ...req, history: [], topic: null })
 }
 
 // What to offer when the AI is out: these always work on this page without it.

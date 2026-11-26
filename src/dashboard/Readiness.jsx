@@ -2,6 +2,7 @@
 // onboarding and as the "next step" card on the dashboard.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
+import CopyLink from './CopyLink.jsx'
 
 const TEXT = {
   subscription: {
@@ -111,7 +112,8 @@ const NEXT = {
   share: ['Share your booking link to get your first booking', null],
 }
 // `skip`: items already shown elsewhere on the page (e.g. the website card), so they aren't repeated.
-export function NextStep({ onOpen, skip = [] }) {
+// "Share your booking link" carries the link itself and its copy control: the step can be done right here.
+export function NextStep({ onOpen, skip = [], bookingUrl = '' }) {
   const [r, setR] = useState(null)
   const [open, setOpen] = useState(false)
   const id = r && (r.items.find((i) => i.state === 'action' && !skip.includes(i.id))?.id ?? (r.next === 'share' ? 'share' : null))
@@ -121,7 +123,15 @@ export function NextStep({ onOpen, skip = [] }) {
     <section className="card next-step" aria-label="Next step">
       <p className="eyebrow-sm">Next step</p>
       {next ? <p className="next-step-title">{next[0]}</p> : <p className="fine">Checking your setup…</p>}
+      {id === 'share' && bookingUrl && (
+        <p className="next-step-link" data-booking-link>
+          <a href={bookingUrl} target="_blank" rel="noreferrer">
+            {bookingUrl.replace(/^https?:\/\//, '')}
+          </a>
+        </p>
+      )}
       <div className="card-actions">
+        {id === 'share' && bookingUrl && <CopyLink url={bookingUrl} label="Copy booking link" className="btn btn-primary btn-sm" />}
         {next?.[1] && (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpen(next[1])}>
             {next[1] === 'billing' ? 'Fix billing' : next[1] === 'website' ? 'Open website' : 'Fix this'}

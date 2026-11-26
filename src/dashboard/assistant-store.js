@@ -23,6 +23,15 @@ export function openAssistant(extra = {}) {
   set({ key: 'global', from: document.activeElement, ...extra })
 }
 
+// "Help" in the page header: the list of help topics and how to reach a person (Help.jsx HelpIndex). No request is made.
+export const openHelp = () => set({ key: 'help', from: document.activeElement })
+// Whether a panel is on the page to show it (not on the few sign-in problem screens): Help.jsx sets it.
+let panel = false
+export const setPanelReady = (on) => {
+  panel = on
+}
+export const panelReady = () => panel
+
 // Where the owner is (Home sets it), so questions carry the page without saying it.
 let view = 'overview'
 export const setAssistantView = (v) => {

@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import AiWrite from './AiWrite.jsx'
 import { HelpTip } from './Help.jsx'
 import { setSelected, takeDraft } from './assistant-store.js'
-import { LoadError } from './ui.jsx'
+import { ConfirmInline, LoadError } from './ui.jsx'
 import { api, phoneText } from '../lib/api.js'
+import { plural } from '../lib/format.js'
 
 const STAGE = { new: 'New', contacted: 'Contacted', replied: 'Replied', booked: 'Booked', closed: 'Closed', opted_out: 'Opted out' }
 const SOURCE = { website_form: 'Website form', booking_page: 'Booking page', sms: 'Text message', google_ads: 'Google Ads', gbp: 'Google Business Profile', call: 'Phone call', enterprise_inquiry: 'Enterprise inquiry', other: 'Other' }
@@ -60,7 +61,8 @@ const ago = (t) => {
 }
 const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-export default function FollowUps() {
+// `overview`: the dashboard's own records (Home.jsx), so "asked but haven't booked" here is the SAME count Overview shows.
+export default function FollowUps({ overview = null, go }) {
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(() => takeDraft()?.leadId ?? null)
   const [filter, setFilter] = useState('all')
@@ -96,6 +98,11 @@ export default function FollowUps() {
       </>
     )
   const threads = data.threads.filter((t) => (filter === 'needs' ? t.needsOwner : filter === 'booked' ? t.stage === 'booked' : true))
+  // People Overview counts as "asked but hasn't booked" (the one definition, server/attention.js). Those without a
+  // conversation here (they came in before follow-ups existed, or nothing was ever sent) are named, with where to find them.
+  const unbooked = overview?.attention?.items.find((i) => i.id === 'unbooked')?.total || 0
+  const here = new Set(data.threads.map((t) => t.id))
+  const elsewhere = (overview?.followUp || []).filter((l) => !l.test && l.status === 'new' && !here.has(l.id)).length
   return (
     <>
       <div className="fu-head">
@@ -103,9 +110,18 @@ export default function FollowUps() {
           <h1 className="title title--page">Follow-ups</h1>
           <HelpTip id="followups" />
         </div>
-        <Automation on={data.automations} onChange={load} />
+        <Automation on={data.automations} channels={data.channels} onChange={load} />
       </div>
       <Notices channels={data.channels} />
+      {unbooked > 0 && (
+        <p className="notice-info" role="status" data-unbooked-count>
+          {plural(unbooked, 'person', 'people')} asked in the last 30 days and {unbooked === 1 ? 'hasn’t' : 'haven’t'} booked yet (the same count as on Overview).{' '}
+          {elsewhere > 0 && `${elsewhere === unbooked ? (unbooked === 1 ? 'They have' : 'None of them has') : `${elsewhere} of them ${elsewhere === 1 ? 'has' : 'have'}`} no conversation here yet. `}
+          <button type="button" className="link-btn" onClick={() => go?.('appointments#not-booked')}>
+            See them with their phone and email
+          </button>
+        </p>
+      )}
       <dl className="fu-stats" aria-label="Last 30 days">
         {[
           ['New leads', data.counts.leads],
@@ -172,34 +188,61 @@ function Stage({ stage }) {
   return <span className={`fu-stage fu-stage--${stage}`}>{STAGE[stage] || stage}</span>
 }
 
-function Automation({ on, onChange }) {
+// ONE place says whether automatic messages are really going out: "on" is never shown above "email isn't available".
+function Automation({ on, channels: c, onChange }) {
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const [error, setError] = useState('')
   const toggle = async () => {
-    if (on && !window.confirm('Pause all automatic messages (replies, reminders to book, confirmations and reminders)? You can resume any time.')) return
     setBusy(true)
+    setError('')
     const { status } = await api('/api/dashboard/followups', { method: 'POST', body: { action: 'automations', enabled: !on } })
     setBusy(false)
-    if (status !== 200) return window.alert('Couldn’t change this. Please try again.')
+    setAsking(false)
+    if (status !== 200) return setError('Couldn’t change this. Please try again.')
     onChange()
   }
+  // Nothing can go out at all: paused by GetShowUps, or neither email nor texting works. (Email alone being out is a
+  // notice below: texts still go.)
+  const blocked = c.paused ? 'messaging is paused by GetShowUps' : !c.email && !c.sms ? 'email isn’t available right now and texting isn’t set up' : null
+  const [tone, text] = !on ? ['pending', 'Automatic follow-ups paused'] : blocked ? ['pending', `Automatic follow-ups on, but nothing is being sent: ${blocked}`] : ['ok', 'Automatic follow-ups on']
   return (
-    <div className="fu-auto">
-      <span className={`status status--${on ? 'ok' : 'pending'}`}>
+    <div className="fu-auto" data-automation={!on ? 'paused' : blocked ? 'blocked' : 'on'}>
+      <span className={`status status--${tone}${text.length > 30 ? ' fu-auto-long' : ''}`}>
         <span className="status-dot" aria-hidden="true" />
-        {on ? 'Automatic follow-ups on' : 'Automatic follow-ups paused'}
+        {text}
       </span>
-      <button type="button" className="btn btn-quiet btn-sm" onClick={toggle} disabled={busy}>
-        {on ? 'Pause' : 'Resume'}
-      </button>
+      {asking ? (
+        <ConfirmInline
+          question="Pause all automatic messages?"
+          detail="Replies, reminders to book, confirmations and reminders stop until you resume. You can resume any time."
+          confirmLabel="Pause messages"
+          cancelLabel="Keep them on"
+          busy={busy}
+          onConfirm={toggle}
+          onCancel={() => setAsking(false)}
+        />
+      ) : (
+        <button type="button" className="btn btn-quiet btn-sm" onClick={on ? () => setAsking(true) : toggle} disabled={busy}>
+          {on ? 'Pause' : 'Resume'}
+        </button>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
 
 function Notices({ channels: c }) {
   const items = []
-  if (c.paused) items.push('Messaging is temporarily paused by GetShowUps. Nothing is sent until it resumes; nothing will be sent late in a burst.')
-  if (!c.email) items.push('Email isn’t available right now, so automatic emails are not being sent.')
-  if (c.testMode) items.push('Test mode: messages go only to GetShowUps test recipients while we finish launch checks.')
+  // Whether messages go out at all is said once, in the status line above (Automation); here only what it means.
+  if (c.paused) items.push('Nothing is sent until messaging resumes, and nothing will be sent late in a burst.')
+  else if (!c.email && c.sms) items.push('Email isn’t available right now, so automatic emails are not being sent. Texts still go out.')
+  else if (!c.email) items.push('Each person’s phone number and email address are on their conversation, so you can reach them yourself meanwhile.')
+  if (c.testMode && !c.paused) items.push('Test mode: messages go only to GetShowUps test recipients while we finish launch checks.')
   if (!items.length) return null
   return (
     <div className="fu-notices" role="status">
@@ -216,6 +259,7 @@ function Conversation({ id, onBack, onChanged }) {
   const [text, setText] = useState(() => takeDraft(id)?.text || '')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [stopping, setStopping] = useState(false)
   useEffect(() => {
     const on = () => setText((now) => (now.trim() ? now : takeDraft(id)?.text || ''))
     window.addEventListener('gsu:draft', on)
@@ -278,12 +322,26 @@ function Conversation({ id, onBack, onChanged }) {
             </button>
           )}
           {!['closed', 'booked', 'opted_out'].includes(t.stage) && (
-            <button type="button" className="link-btn" onClick={() => window.confirm('Stop follow-ups for this lead? Confirmations and reminders for booked appointments still go out.') && act('close')} disabled={busy}>
-              Stop follow-ups
+            <button type="button" className="link-btn" onClick={() => setStopping(true)} disabled={busy || stopping}>
+              Stop follow-ups…
             </button>
           )}
         </div>
       </header>
+      {stopping && (
+        <ConfirmInline
+          question={`Stop follow-ups for ${t.name}?`}
+          detail="No more automatic messages go to this person. Confirmations and reminders for booked appointments still go out."
+          confirmLabel="Stop follow-ups"
+          cancelLabel="Keep them"
+          busy={busy}
+          onConfirm={async () => {
+            await act('close')
+            setStopping(false)
+          }}
+          onCancel={() => setStopping(false)}
+        />
+      )}
       {t.needsOwner && <p className="fu-attn">{NEEDS[t.needsOwner] || 'Please take a look.'}</p>}
       {t.takenOver && <p className="fu-hint">You’re handling this conversation. Automatic replies are paused for this person.</p>}
       <ol className="fu-msgs">

@@ -77,6 +77,9 @@ export function rangeOf({ period, from, to }, tz, now) {
   return P ? span(P[0], P[1], period.replace(/_/g, ' ')) : null
 }
 
+// Where "the last 30 days" begins for this business: its own calendar day 29 days ago. Overview counts from here too.
+export const last30Start = (tz, now = Date.now()) => rangeOf({ period: 'last_30_days' }, tz, now).from
+
 // ---------- records ----------
 // Cut text says so: a request that ends early must not read as one that asks for nothing.
 const tidy = (v) => {
