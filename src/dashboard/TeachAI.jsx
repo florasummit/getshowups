@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, whenFull } from '../lib/api.js'
 import { plural } from '../lib/format.js'
 import { PageHeader, Pill, Section } from './ui.jsx'
@@ -534,6 +534,12 @@ function Teach({ data, dirty, post }) {
     window.addEventListener('gsu:correct', on)
     return () => window.removeEventListener('gsu:correct', on)
   }, [])
+  // The suggestion closes when it is added, which moves the page under the owner's finger (a long suggestion on a
+  // phone leaves the box above the screen): bring the confirmation back into view, beside the box.
+  const doneRef = useRef(null)
+  useEffect(() => {
+    if (done) doneRef.current?.scrollIntoView({ block: 'center' })
+  }, [done])
   const apply = async () => {
     const r = await post({ action: 'apply', ops: proposal.ops, baseUpdatedAt: data.draftUpdatedAt })
     if (r) {
@@ -571,7 +577,7 @@ function Teach({ data, dirty, post }) {
           {dirty && <span className="fine">Save your draft first (below), so the suggestion builds on your latest edits.</span>}
         </div>
         {done && (
-          <p className="ui-save-status" role="status" data-teach-done>
+          <p className="ui-save-status" role="status" data-teach-done ref={doneRef}>
             {done}
           </p>
         )}
