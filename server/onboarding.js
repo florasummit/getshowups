@@ -146,9 +146,13 @@ export async function markSignup(db, customerId, field, now = Date.now()) {
 // Billing appears only for businesses that are billed: self-serve signups, or a business with a real
 // Stripe subscription. Pilot/invited businesses are never asked to pay; a checkout someone opened
 // and abandoned (an 'incomplete' placeholder without a subscription) is not a plan to fix.
-export async function readiness(env, customer, { calendarStatus } = {}) {
+// Rows that name a place carry its address (`url`): the published website and the booking page. `origin` is this
+// site's own origin (the route passes siteOrigin(env)); without it no address is given.
+// The receptionist row is the owner's own switch (off until they turn it on; never switched on here). When that
+// record can't be read the row is left out rather than guessed.
+export async function readiness(env, customer, { calendarStatus, origin = null } = {}) {
   const db = env.ONBOARDING_DB
-  const [sub, site, signup, appts, domain, keep] = await Promise.all([
+  const [sub, site, signup, appts, domain, keep, rec] = await Promise.all([
     billingSubscription(env, customer.id),
     websiteSummary(db, customer.id),
     getSignup(db, customer.id),
@@ -156,7 +160,9 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
     db.prepare(`SELECT count(*) AS n FROM appointments a JOIN leads l ON l.id = a.lead_id WHERE a.customer = ?1 AND NOT ${isTestLead('l', '?2')}`).bind(customer.id, internalEmails(env)).first(),
     domainFor(env, customer.id),
     db.prepare("SELECT 1 AS x FROM onboarding_marks WHERE customer = ?1 AND step = 'website' AND value IN ('existing', 'none')").bind(customer.id).first(),
+    db.prepare('SELECT enabled FROM receptionist_settings WHERE customer = ?1').bind(customer.id).first().then((r) => ({ on: r?.enabled === 1 }), () => null),
   ])
+  const siteUrl = origin && site.published ? (domain?.status === 'connected' && domain.url ? domain.url : `${origin}/p/${customer.id}`) : null
   const items = []
   if (signup || sub?.stripeSubscriptionId) {
     const s = sub?.status
@@ -171,12 +177,13 @@ export async function readiness(env, customer, { calendarStatus } = {}) {
   items.push(
     keep && !site.published
       ? { id: 'page', state: 'ok', detail: 'existing' }
-      : { id: 'page', state: site.published ? 'ok' : 'action', detail: site.published ? 'published' : site.exists ? 'draft' : 'none' },
+      : { id: 'page', state: site.published ? 'ok' : 'action', detail: site.published ? 'published' : site.exists ? 'draft' : 'none', ...(siteUrl ? { url: siteUrl } : {}) },
   )
   if (domain) {
     items.push({ id: 'domain', state: domain.status === 'connected' ? 'ok' : domain.status === 'needs_attention' || domain.step === 'verify' || domain.step === 'point' ? 'action' : 'pending', detail: domain.status, step: domain.step })
   }
-  items.push({ id: 'booking', state: (appts?.n ?? 0) > 0 ? 'ok' : 'pending', detail: (appts?.n ?? 0) > 0 ? 'has_bookings' : 'no_bookings_yet' })
+  items.push({ id: 'booking', state: (appts?.n ?? 0) > 0 ? 'ok' : 'pending', detail: (appts?.n ?? 0) > 0 ? 'has_bookings' : 'no_bookings_yet', ...(origin ? { url: `${origin}/book/${customer.id}` } : {}) })
+  if (rec) items.push({ id: 'receptionist', state: rec.on ? 'ok' : 'off', detail: rec.on ? 'on' : 'off' })
   items.push({ id: 'email', state: env.MESSAGES_LIVE === 'true' ? 'ok' : 'pending', detail: env.MESSAGES_LIVE === 'true' ? 'live' : 'activating' })
   items.push({ id: 'sms', state: 'off', detail: 'not_available_yet' })
   const ads = await adsAccess(env, customer)

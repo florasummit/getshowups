@@ -1,12 +1,12 @@
 // /api/dashboard/onboarding — guided-setup actions and the launch checklist.
-//   GET  → { readiness: { items, next } }   (live calendar check included)
+//   GET  → { readiness: { items, next } }   (live calendar check included; rows that name a place carry its `url`)
 //   POST { action: 'check_availability' } → { slots, status }   (the same data the booking page shows)
 //   POST { action: 'address', choice: 'getshowups' | 'own' | 'buy' } → records the website address choice
 //   POST { action: 'keep_website' } → keep the owner's current website (no GetShowUps website)
 //   POST { action: 'keep_private' } → finish without publishing yet (publish later from Website)
 //   POST { action: 'finish' }   → finishes onboarding (plan, details, services, calendar, hours, website)
 import { json } from '../../../server/google-oauth.js'
-import { requireSession } from '../../../server/auth.js'
+import { requireSession, siteOrigin } from '../../../server/auth.js'
 import { connect, freeBusy } from '../../../server/calendar.js'
 import { openSlots } from '../../../server/booking.js'
 import { progress } from '../../../server/customers.js'
@@ -25,7 +25,7 @@ export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
   if (response) return response
   try {
-    return json(200, { readiness: await readiness(env, session.customer, { calendarStatus: await calendarStatus(env, session.customer.id) }) })
+    return json(200, { readiness: await readiness(env, session.customer, { calendarStatus: await calendarStatus(env, session.customer.id), origin: siteOrigin(env) }) })
   } catch (err) {
     console.error('readiness failed:', err?.message)
     return json(503, { error: 'storage_error' })

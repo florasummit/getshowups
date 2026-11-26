@@ -18,19 +18,36 @@ const TEXT = {
   hours: { label: 'Booking hours', ok: 'Set', action: 'Not set' },
   page: { label: 'Website', published: 'Live', draft: 'Not published yet', none: 'Not created yet', existing: 'Using your own website. Add your booking link to it.' },
   domain: { label: 'Your domain', connected: 'Connected', pending: 'Waiting for your DNS record', verifying: 'Verifying', securing: 'Securing your website', needs_attention: 'Needs attention' },
-  booking: { label: 'Bookings', has_bookings: 'Receiving bookings', no_bookings_yet: 'No bookings yet. Share your page to get your first one.' },
+  booking: { label: 'Bookings', has_bookings: 'Receiving bookings', no_bookings_yet: 'No bookings yet. Share your booking link to get your first one.' },
+  receptionist: { label: 'AI receptionist', on: 'On. It answers chat on your website.', off: 'Off. It answers customers only after you turn it on.' },
   email: { label: 'Email confirmations & reminders', live: 'On', activating: 'Activating soon. We’ll tell you when they start sending.' },
   sms: { label: 'Text messages', not_available_yet: 'Not available yet' },
-  ads: { label: 'Google & Meta ads', not_available_yet: 'Not available yet', connect_in_ads: 'Connect in Ads' },
+  ads: { label: 'Google & Meta ads', not_available_yet: 'Not available yet', connect_in_ads: 'No ad account connected yet.' },
 }
 const ICON = { ok: '✓', action: '!', pending: '…', off: '–' }
+
+// Where a row sends the owner: [link text, dashboard tab] or, for a public page, [link text, null] (opens item.url).
+// A row that names a place is always a link (ONB-05); a row with nothing to do there has none.
+function place(item) {
+  if (item.id === 'subscription') return item.state === 'ok' ? null : ['Open billing', 'settings']
+  if (item.id === 'calendar') return item.state === 'ok' ? null : ['Reconnect in Settings', 'settings']
+  if (item.id === 'hours') return [item.state === 'ok' ? 'Change in Settings' : 'Set in Settings', 'settings']
+  if (item.id === 'page') return item.url ? ['Open my website', null] : [item.detail === 'none' || item.detail === 'existing' ? 'Create one in Website' : 'Publish in Website', 'website']
+  if (item.id === 'domain') return ['Open domain settings', 'website']
+  if (item.id === 'booking') return item.url ? ['Open my booking page', null] : null
+  if (item.id === 'receptionist') return [item.state === 'ok' ? 'Open Receptionist' : 'Set it up in Receptionist', 'receptionist']
+  if (item.id === 'ads' && item.detail === 'connect_in_ads') return ['Connect in Ads', 'ads']
+  return null
+}
 
 function describe(item) {
   const t = TEXT[item.id] || {}
   return { label: t.label || item.id, text: t[item.detail] ?? t[item.state] ?? t.default ?? '' }
 }
 
-export default function Readiness({ onLoad, compact = false }) {
+// One list, the same rows wherever it is shown (the finished setup screen and the dashboard's "Setup status").
+// onOpen(tab): in-page navigation on the dashboard; without it the links are ordinary /dashboard/<tab> addresses.
+export default function Readiness({ onLoad, onOpen }) {
   const [data, setData] = useState(null)
   useEffect(() => {
     api('/api/dashboard/onboarding').then(({ status, data: d }) => {
@@ -41,19 +58,41 @@ export default function Readiness({ onLoad, compact = false }) {
   }, [onLoad])
   if (!data) return <p className="fine">Checking your setup…</p>
   if (data.failed) return <p className="fine">Couldn’t check your setup right now.</p>
-  const items = compact ? data.items.filter((i) => i.state !== 'off') : data.items
   return (
     <ul className="checklist">
-      {items.map((item) => {
+      {data.items.map((item) => {
         const { label, text } = describe(item)
+        const to = place(item)
         return (
-          <li key={item.id} className={`checklist-item checklist-item--${item.state}`}>
+          <li key={item.id} className={`checklist-item checklist-item--${item.state}`} data-row={item.id}>
             <span className="checklist-icon" aria-hidden="true">
               {ICON[item.state]}
             </span>
             <span>
               <strong>{label}</strong>
               <span className="fine"> {text}</span>
+              {to && (
+                <>
+                  {' '}
+                  {to[1] ? (
+                    <a
+                      className="checklist-link"
+                      href={`/dashboard/${to[1]}`}
+                      onClick={(e) => {
+                        if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey) return
+                        e.preventDefault()
+                        onOpen(to[1])
+                      }}
+                    >
+                      {to[0]}
+                    </a>
+                  ) : (
+                    <a className="checklist-link" href={item.url} target="_blank" rel="noreferrer">
+                      {to[0]}
+                    </a>
+                  )}
+                </>
+              )}
             </span>
           </li>
         )
@@ -93,7 +132,7 @@ export function NextStep({ onOpen, skip = [] }) {
         </button>
       </div>
       <div hidden={!open}>
-        <Readiness onLoad={setR} />
+        <Readiness onLoad={setR} onOpen={onOpen} />
       </div>
     </section>
   )

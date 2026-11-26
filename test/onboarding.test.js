@@ -309,6 +309,34 @@ test('readiness is honest: messaging activating, SMS and ads not available, next
   assert.deepEqual(Object.fromEntries((await call(onboarding, 'GET', { cookie })).json.readiness.items.map((i) => [i.id, i.state])).email, 'ok')
 })
 
+// ONB-02 / ONB-05: the finished screen and the dashboard's Setup status read the same rows from here.
+test('readiness names the receptionist with its real state (off until the owner turns it on) and gives the website and booking addresses', async () => {
+  const { cookie, id } = await newSignup()
+  await activate(id)
+  const read = async () => (await call(onboarding, 'GET', { cookie })).json.readiness.items
+  const hasTable = Boolean(db.sql.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'receptionist_settings'").get())
+  assert.equal(hasTable, true, 'the receptionist settings table exists in the test schema')
+  let items = await read()
+  const rec = items.find((i) => i.id === 'receptionist')
+  assert.deepEqual([rec.state, rec.detail], ['off', 'off'], 'never on by default; reading the status changes nothing')
+  assert.equal(db.sql.prepare('SELECT count(*) n FROM receptionist_settings WHERE customer = ?').get(id).n, 0)
+  const origin = new URL(env.GOOGLE_REDIRECT_URI).origin
+  assert.equal(items.find((i) => i.id === 'booking').url, `${origin}/book/${id}`)
+  assert.equal(items.find((i) => i.id === 'page').url, undefined, 'no address for a website that is not published')
+  // Published → the row carries the public address.
+  await connectCalendar(id)
+  db.sql.prepare('UPDATE customers SET hours_confirmed_at = 1 WHERE id = ?').run(id)
+  const draft = (await call(website, 'GET', { cookie })).json.website
+  const pub = await call(website, 'POST', { cookie, body: { action: 'publish', content: draft.draft, confirm: true, baseUpdatedAt: draft.updatedAt } })
+  assert.equal(pub.status, 200, JSON.stringify(pub.json))
+  items = await read()
+  assert.deepEqual([items.find((i) => i.id === 'page').detail, items.find((i) => i.id === 'page').url], ['published', `${origin}/p/${id}`])
+  // The owner turned it on (their own switch): the row says so.
+  db.sql.prepare("INSERT INTO receptionist_settings (customer, enabled, updated_at) VALUES (?, 1, 1) ON CONFLICT(customer) DO UPDATE SET enabled = 1").run(id)
+  const on = (await read()).find((i) => i.id === 'receptionist')
+  assert.deepEqual([on.state, on.detail], ['ok', 'on'])
+})
+
 test('admin attention: abandoned checkout, scheduled cancellation and ended subscription are flagged', async () => {
   const { customerRows } = await import('../server/metrics.js')
   const a = await newSignup('a@x.example', 'Abandoned Co')

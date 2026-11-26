@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx'
 import { ghl } from '../config/ghl.js'
 import { enrollmentClosed } from '../content/site.js'
-import { SALES_BUSINESS, salesBookingHref, useSalesChat, useStartAction } from '../lib/enrollment.js'
+import { CONTACT_EMAIL, INVITED_HREF, SALES_BUSINESS, salesBookingHref, useSalesChat, useStartAction } from '../lib/enrollment.js'
 import { track } from '../lib/analytics.js'
 
 /**
@@ -37,15 +37,12 @@ function SchedulerSlot() {
       <p className="placeholder-title">Online booking isn’t connected yet</p>
       <p>
         Our scheduling calendar is being set up. No form is collecting information on this page, so nothing you enter
-        here would be sent.
+        here would be sent. Email us and a person replies with times for a call.
       </p>
-      {ghl.contactEmail ? (
-        <a className="btn btn-primary" href={`mailto:${ghl.contactEmail}?subject=GetShowUps%20demo%20request`}>
-          Email us to request a demo
-        </a>
-      ) : (
-        <p className="placeholder-soon">Check back soon to pick a time.</p>
-      )}
+      {/* Always a working way to reach us: the configured address, else the one the product uses everywhere. */}
+      <a className="btn btn-primary" href={`mailto:${ghl.contactEmail || CONTACT_EMAIL}?subject=GetShowUps%20call%20request`} data-contact-email onClick={() => track('early_access_open', { how: 'email' })}>
+        Email us to arrange a call
+      </a>
       {import.meta.env.DEV && (
         <p className="dev-hint">
           Dev note: set <code>VITE_GHL_BOOKING_URL</code> (or <code>VITE_GHL_FORM_URL</code>) to render the GHL embed
@@ -102,6 +99,9 @@ export default function BookDemo() {
                   <li key={a}>{a}</li>
                 ))}
               </ol>
+              <p className="fine demo-invited">
+                Already arranged your start with us? <a href={INVITED_HREF} data-invited-entry>Set up your business</a>
+              </p>
             </>
           )}
         </div>

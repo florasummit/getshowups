@@ -885,6 +885,39 @@
   color: var(--white);
 }
 
+/* A finished step is a button back to it (ONB-08); it looks like the step, with a hover and focus cue. */
+.steps-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.steps-bar-btn:hover .steps-bar-label {
+  color: var(--ink-900);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.steps-bar-btn:focus-visible {
+  outline: 2px solid var(--ink-900);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .steps-bar-btn {
+    justify-content: center;
+    min-width: 32px;
+    min-height: 44px;
+  }
+}
+
 /* ---------- dashboard ---------- */
 .stats {
   display: grid;
@@ -1602,6 +1635,72 @@
   margin-top: 16px;
   text-align: center;
 }
+/* A confirmed fact in setup ("Google Calendar connected (email)", "Payment received"): wraps, never clips (ONB-11). */
+.setup-ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  font-size: 0.93rem;
+  font-weight: 600;
+}
+.setup-ok .status-dot {
+  flex: none;
+  margin-top: 0.5em;
+}
+.setup-ok > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Finished screen: the decisions the dashboard would raise, and the booking address with its copy button. */
+.setup-decisions {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--ink-50);
+}
+.setup-decisions-title {
+  font-size: 1rem;
+  font-weight: 650;
+}
+.setup-decisions > * + * {
+  margin-top: 8px;
+}
+.setup-decisions .row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 0;
+}
+.setup-decisions .row-actions {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px 16px;
+}
+.share-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+.share-link-url {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-900);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-300);
+  text-underline-offset: 3px;
+  user-select: all;
+}
 .notice-soft {
   display: flex;
   flex-wrap: wrap;
@@ -1740,6 +1839,14 @@
 .checklist-item--action .checklist-icon {
   background: var(--orange-50);
   color: var(--orange-700);
+}
+.checklist-link {
+  color: var(--ink-900);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-300);
+  text-underline-offset: 3px;
 }
 .next-step-title {
   margin-top: 4px;
@@ -4030,6 +4137,11 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 
 .app .next-step .checklist-item strong {
   color: var(--white);
+}
+
+.app .next-step .checklist-link {
+  color: var(--white);
+  text-decoration-color: var(--on-dark-muted);
 }
 
 /* Results: each figure carries its stage colour (inquiries sky, booked lavender, showed/visits mint, rate ink). */
