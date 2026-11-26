@@ -25,6 +25,10 @@ UI, and make the standard permanent. No migrations, no new switches, no new depe
 - **Retained by decision (see ledger):** per-day booking hours (feature + schema), a business address on the booking page
   (no such record), website services vs booking catalog as one list, precedence between receptionist Personality and
   Teach Tone, a homepage sign-up entry while enrollment is closed, visits counted by booking date vs visit date.
+- **Verification:** an independent browser verifier checked all 26 S1/S2 findings on the integrated build: 23 passed,
+  3 partial (TEACH-03 combined sentences, BOOK-03 without a phone on record, WEB-01 through onboarding) plus phone
+  touch-target and title-size gaps; all were fixed and re-checked on the final build. The answer check of the Assistant
+  had missed a claimed no-show ("no-show" read as a negation): fixed and tested.
 - **Not measured:** behaviour of the Assistant and Teach Your AI with the production model (tests use a stand-in; the
   deterministic parts are unit-tested). Nothing was verified in production.
 
