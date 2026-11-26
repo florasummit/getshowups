@@ -4,6 +4,8 @@
 //   The stored need is "Service: answer", so every existing view, message and calendar event reads as before.
 // Returns { leadId, leadToken, qualified, coverage, flow }. The token lets only this browser book for this lead.
 // flow 'request': a quote / consultation request (no time is booked; no "pick a time" follow-ups).
+// Field rules: server/lead-fields.js (shared with the page; a phone number needs its area code here). A submission
+// refused for a missing or malformed field is answered before the attempt limits are counted (429 + Retry-After).
 // 400 invalid_zip (not a ZIP) / unknown_zip (not a known ZIP area; resend with zipConfirmed: true to keep it as typed).
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
@@ -17,18 +19,26 @@ import { bookingOptions, bookingServices, needText, recordLeadService, resolveCh
 export async function onRequestPost({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params, { write: true, request })
   if (response) return response
+  const body = await request.json().catch(() => null)
+  if (body?.website) return json(400, { error: 'invalid_request' })
+  // The cheap checks first (no storage): a submission refused for a missing or malformed field never uses up the
+  // visitor's attempts. A chosen service supplies the need itself, so only its presence stands in here; the full
+  // check with the real text runs again below.
+  const picked = typeof body?.serviceId === 'string' && body.serviceId !== ''
+  const [early] = validateLead({ ...body, need: picked ? 'service' : body?.need }, customer.appointmentMode, { fullNumber: true })
+  if (early) return json(400, { error: early })
+  if (customer.serviceZips.length && customer.appointmentMode !== 'at_customer' && !String(body?.zip ?? '').trim()) return json(400, { error: 'invalid_zip' })
+  // Only a well-formed submission counts toward the limits (per visitor and per business; values in server/ratelimit.js).
   for (const rl of [await hitByIp(env, 'bookLead', request), await hit(env, 'bookLeadPerBusiness', customer.id)]) {
     if (rl.limited) return tooManyJson(rl.retryAfter)
   }
-  const body = await request.json().catch(() => null)
-  if (body?.website) return json(400, { error: 'invalid_request' })
   const db = env.ONBOARDING_DB
   const [profile, options] = await Promise.all([getProfile(db, customer.id).catch(() => null), bookingOptions(db, customer.id).catch(() => ({ allowOther: true }))])
   const services = bookingServices(profile?.services, customer.slotMinutes)
   // A service removed or hidden since the page loaded → service_unavailable (the page reloads the list).
   const [choiceError, choice] = resolveChoice(body, services, options.allowOther)
   if (choiceError) return json(400, { error: choiceError })
-  const [error, lead] = validateLead({ ...body, need: needText(choice, body?.need) }, customer.appointmentMode)
+  const [error, lead] = validateLead({ ...body, need: needText(choice, body?.need) }, customer.appointmentMode, { fullNumber: true })
   if (error) return json(400, { error })
   const flow = choice.service?.flow === 'request' ? 'request' : 'book'
   if (flow === 'request') lead.request = true
