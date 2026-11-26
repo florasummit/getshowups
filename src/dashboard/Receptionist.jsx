@@ -61,7 +61,7 @@ const channelName = (c) => (c === 'voice' ? 'Browser voice' : 'Chat')
 // (functions/api/dashboard/receptionist/index.js: chat = model configured; voiceStatus = the business's ACTIVE voice
 // provider resolved server-side: 'available' | 'testing' (Retell not released for this business, RECEPTIONIST_VOICE_
 // BUSINESSES) | 'not_configured'; staffEmail = the MESSAGES_LIVE gate; no phone line exists). Never a hardcoded state.
-function channelTiles(cap, on, chatUrl, admin) {
+function channelTiles(cap, on, chatUrl, admin, panel) {
   const voice = !on
     ? ['neutral', 'Off', 'Turn the receptionist on below; voice follows the same switch as chat.']
     : cap.voiceStatus === 'available'
@@ -70,16 +70,16 @@ function channelTiles(cap, on, chatUrl, admin) {
         ? ['neutral', 'Not turned on yet', `GetShowUps turns browser voice on business by business; this business is not on the list yet. Chat works meanwhile.${admin ? ' Admin: add it to the Retell release list (RECEPTIONIST_VOICE_BUSINESSES) or switch its provider in the Admin Console.' : ''}`]
         : ['neutral', 'Not available', 'The voice provider is not configured on the platform; chat works meanwhile.']
   return [
-    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
+    ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chat ? ['ok', 'Active', panel ? `Customers chat in a panel on your website, or at ${chatUrl}.` : `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
     ['Browser voice', voice],
     ['Phone calls', ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']],
     ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team is emailed about callback requests and messages.'] : ['warn', 'Test mode', 'Emails go only to GetShowUps test recipients until messaging launch; requests still show on this page.']],
   ]
 }
-function Channels({ cap, on, chatUrl, admin }) {
+function Channels({ cap, on, chatUrl, admin, panel }) {
   return (
     <ul className="ui-tiles" aria-label="Channels">
-      {channelTiles(cap, on, chatUrl, admin).map(([label, [tone, text, hint]]) => (
+      {channelTiles(cap, on, chatUrl, admin, panel).map(([label, [tone, text, hint]]) => (
         <li key={label} className="ui-tile" data-channel={label}>
           <span className="ui-tile-label">{label}</span>
           <Pill tone={tone}>{text}</Pill>
@@ -221,6 +221,7 @@ export default function Receptionist() {
   const [form, setForm] = useState(null)
   const [saved, setSaved] = useState(null)
   const [msg, setMsg] = useState('')
+  const [panelMsg, setPanelMsg] = useState('')
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
   const [filter, setFilter] = useState('all')
@@ -288,6 +289,15 @@ export default function Receptionist() {
       load()
     }
   }
+  // Website chat panel: its own small save (not part of the settings form), so flipping it never saves a half-edited greeting.
+  const setPanel = async (value) => {
+    setPanelMsg('')
+    setBusy(true)
+    const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'website_panel', on: value } })
+    setBusy(false)
+    setPanelMsg(status === 200 ? (value ? 'Saved. Your website now opens the chat in a panel. It can take a minute to show.' : 'Saved. Your website shows the chat link. It can take a minute to show.') : 'Couldn’t save. Please try again.')
+    if (status === 200) load()
+  }
   const resolve = async (requestId) => {
     setBusy(true)
     const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'resolve', requestId } })
@@ -322,7 +332,7 @@ export default function Receptionist() {
       >
         {on ? 'Answers questions, books real appointments on your calendar, and takes callback requests when someone wants a person.' : 'Turn it on below to answer customers on your website.'}
       </PageHeader>
-      <Channels cap={cap} on={on} chatUrl={data.chatUrl} admin={Boolean(data.admin)} />
+      <Channels cap={cap} on={on} chatUrl={data.chatUrl} admin={Boolean(data.admin)} panel={Boolean(data.websitePanel?.on)} />
 
       <Section title={attention.length ? `Needs attention (${attention.length})` : 'Needs attention'} label="Needs attention" className={attention.length ? 'ui-section--attention' : ''}>
         {attention.length ? (
@@ -431,6 +441,29 @@ export default function Receptionist() {
           </>
         )}
       </Section>
+
+      {data.websitePanel && (
+        <Section title="On your website" label="Website chat panel">
+          <div className="ui-settings">
+            <fieldset className="ui-group">
+              <legend>How customers open the chat</legend>
+              <label className="ui-switch-row">
+                <input type="checkbox" role="switch" checked={data.websitePanel.on} disabled={busy} onChange={(e) => setPanel(e.target.checked)} />
+                <span>
+                  <strong>Open the chat in a panel on my website</strong>
+                  <span className="ui-hint">
+                    {data.websitePanel.on ? 'Visitors chat without leaving your site.' : 'Off: your website shows a “Chat or talk with us” button that opens the chat page.'} It’s the same receptionist either way, and it only appears while the receptionist is
+                    on.
+                  </span>
+                </span>
+              </label>
+              <p className="fine" role="status" aria-live="polite">
+                {panelMsg}
+              </p>
+            </fieldset>
+          </div>
+        </Section>
+      )}
 
       <Section title="Settings" label="Receptionist settings">
         <form className="ui-settings" onSubmit={save}>
