@@ -552,8 +552,8 @@ function Teach({ data, dirty, post }) {
         <label className="field">
           <span>Describe the change in your own words</span>
           <textarea rows={3} maxLength={1200} value={text} onChange={(e) => type(e.target.value)} placeholder={examples.length ? `e.g. ${examples[0]}` : 'e.g. Ask what the customer needs before asking where they live.'} />
-          <span className="ui-hint">A rule, a fact, a season, what a job is usually worth. You see exactly what would change before anything is saved.</span>
         </label>
+        <p className="ui-hint">A rule, a fact, a season, what a job is usually worth. You see exactly what would change before anything is saved.</p>
         {examples.length > 0 && (
           <p className="ta-examples" data-teach-examples>
             <span className="fine">Try:</span>
