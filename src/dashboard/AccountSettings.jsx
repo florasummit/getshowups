@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, whenFull } from '../lib/api.js'
 import { clearMemory } from './assistant-memory.js'
-import { LoadError, Pill } from './ui.jsx'
+import { LoadError, Pill, SaveStatus } from './ui.jsx'
+import { useSaveState } from './ui-hooks.js'
 import { plural } from '../lib/format.js'
 import { scrollToCard } from './owner-lib.js'
 
@@ -289,6 +290,7 @@ export function Notices() {
   const [d, load] = useLoad('/api/dashboard/people')
   const [code, setCode] = useState(null)
   const [now, setNow] = useState({}) // what was just chosen, until the server's answer is read back
+  const save = useSaveState() // each box saves when it is ticked: the same "Saved." as every other save (SET-05)
   if (d === undefined) return <div aria-busy="true" />
   if (d === null) return <LoadError what="your notifications" onRetry={load} />
   if (!d.notices) return <p className="fine">You get every notice. Choosing which ones isn’t available yet.</p>
@@ -300,18 +302,22 @@ export function Notices() {
           <input
             type="checkbox"
             checked={now[n.kind] ?? n.on}
-            onChange={async (e) => {
+            onChange={(e) => {
               const on = e.target.checked
               setNow((x) => ({ ...x, [n.kind]: on }))
-              const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on })
-              setCode(r.ok ? null : r.code)
-              await load()
-              setNow((x) => ({ ...x, [n.kind]: undefined }))
+              save.run(async () => {
+                const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on })
+                setCode(r.ok ? null : r.code)
+                await load()
+                setNow((x) => ({ ...x, [n.kind]: undefined }))
+                return r.ok ? undefined : false // the reason is shown below (ActionError), never a "Saved."
+              })
             }}
           />
           <span>{n.label}</span>
         </label>
       ))}
+      <SaveStatus save={save} />
       <ActionError code={code} />
     </div>
   )

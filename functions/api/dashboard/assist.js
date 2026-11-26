@@ -10,7 +10,7 @@ import { requireSession } from '../../../server/auth.js'
 import { hit, tooManyJson, unhit } from '../../../server/ratelimit.js'
 import { track } from '../../../server/events.js'
 import { chatAccess, evidenceFor, helpFor, isSensitive, ownStepInstead, SENSITIVE_NOTE, validateQuestion, withoutModel } from '../../../server/assist.js'
-import { offeredAnswer, placeAnswer, worksWithoutAi } from '../../../server/assist-plain.js'
+import { offeredAnswer, placeAnswer, typedFactAnswer, worksWithoutAi } from '../../../server/assist-plain.js'
 import { namesFor } from '../../../server/operator-tools.js'
 import { operate } from '../../../server/operator.js'
 import { answersUsedUp, MIN_CHARGE_MICROS, operatorModel, overBudget } from '../../../server/operator-model.js'
@@ -46,12 +46,20 @@ export async function onRequestPost({ request, env }) {
   // no model call and no AI allowance used. Unreadable records fall through to the usual path.
   const offered = await offeredAnswer(env, customer, req).catch(() => null)
   if (offered) return json(200, { ...offered, days: req.days })
+  // A typed question about one fact in the records (a listed service's price, minimum notice, closed dates), when the
+  // match is unambiguous: answered from the records, no model call (DASH-01).
+  const fact = req.history.length ? null : await typedFactAnswer(env, customer, req).catch(() => null)
+  if (fact) return json(200, { ...fact, days: req.days })
   // What the owner gets when the model can't answer: the records themselves, never a guess.
   // It says so (aiOut): a list of records must never pass for the assistant's analysis.
   const fallback = async (status, error, r = {}, limit = null) => {
     const out = { aiOut: error, ...(limit ? { limit } : {}), ...(error === 'quota' ? { resumesAt: (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 } : {}) }
     const [plain, evidence] = await Promise.all([withoutModel(env, customer, req).catch(() => null), evidenceFor(env, customer, req).catch(() => null)])
     if (plain) return json(200, { ...plain, days: req.days, limited: error === 'rate_limited', ...(plain.kind === 'records' ? out : {}), ...(evidence ? { evidence } : {}) })
+    // A request for a change the owner can make themselves (an outcome, hours, price, notice): where to do it, never a
+    // list of unrelated records. The assistant changed nothing, and says so.
+    const own = ownStepInstead(req.question, {})
+    if (own) return json(200, { kind: 'help', answer: own.answer, go: own.go, days: req.days })
     if (r.proposals?.length) return json(200, { kind: 'prepared', answer: 'Here’s what I prepared. Nothing is saved until you approve it.', proposals: r.proposals, records: r.records, refs: r.refs, days: req.days })
     if (r.looked && r.records?.length) return json(200, { kind: 'records', answer: 'Here’s what’s recorded:', records: r.records.slice(0, 8), refs: r.refs, days: req.days, ...out })
     return json(status, { error, ...(limit ? { limit } : {}), days: req.days, try: worksWithoutAi(req.view), ...(out.resumesAt ? { resumesAt: out.resumesAt } : {}), ...(evidence ? { evidence } : {}) })

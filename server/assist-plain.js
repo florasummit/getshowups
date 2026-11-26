@@ -4,7 +4,7 @@
 import { insights } from './insights.js'
 import { HELP } from '../src/content/help.js'
 import { IDEAS } from '../src/content/assistant-ideas.js'
-import { plural } from '../src/lib/format.js'
+import { humanDate, plural } from '../src/lib/format.js'
 import { periodIn } from './assist.js'
 import { runTool, toolContext } from './operator-tools.js'
 import { attention, attentionCard } from './attention.js'
@@ -259,6 +259,44 @@ export async function offeredAnswer(env, customer, req) {
   // The rest are ordinary record questions ("What are my hours?", "Who asked recently?"): asked on their own, not as a
   // follow-up to whatever was said before.
   return plainAnswer(env, customer, { ...req, history: [], topic: null })
+}
+
+// A typed QUESTION about one fact the records hold (DASH-01): a listed service's price, the minimum notice, the closed
+// dates. Answered from the records with no model call when the match is unambiguous; anything else (a request, a "why",
+// advice, a service that isn't listed or matches more than one) returns null and goes the usual way.
+const FACT_Q = /^ (what|whats|how much|how long|how far|when|which|do i|do we|is|are|am i|tell me) /
+const NOT_FACT = /\b(why|should|draft|write|change|set|update|edit|raise|lower|increase|decrease|add|remove|stop|mark|record|cancel|compare|improve|better|competitors?|average|typical|others)\b/
+const ASKS_PRICE = /\b(how much|price|prices|pricing|cost|costs|charge|charges|rate|fee)\b/
+const ASKS_NOTICE = /\b(minimum )?notice\b|\bhow (far|long) (in advance|ahead|before)\b|\bsame day\b|\blast minute\b/
+const ASKS_CLOSED = /\bclosed (dates?|days?)\b|\bholidays?\b|\bdays? off\b|\bwhen (am i|are we) closed\b/
+const significant = (s) => words(s).trim().split(' ').filter((x) => x.length > 2 && !['the', 'and', 'for', 'with', 'per', 'visit', 'service', 'services'].includes(x))
+export async function typedFactAnswer(env, customer, req) {
+  const w = words(req.question)
+  if (!has(w, FACT_Q) || has(w, NOT_FACT)) return null
+  const want = has(w, ASKS_NOTICE) ? 'notice' : has(w, ASKS_CLOSED) ? 'closed' : has(w, ASKS_PRICE) ? 'price' : null
+  if (!want) return null
+  const r = await runTool(toolContext(env, customer, req.refs), 'business_settings', {})
+  if (!r || r.error) return null
+  if (want === 'notice') {
+    if (r.minimum_booking_notice === 'could not be read') return null
+    const m = /^(\d+) minutes$/.exec(r.minimum_booking_notice)
+    const said = m ? (Number(m[1]) % 60 === 0 ? plural(Number(m[1]) / 60, 'hour') : plural(Number(m[1]), 'minute')) : null
+    return { kind: 'records', answer: said ? `Your minimum notice is ${said}: nobody can book a time that starts sooner than that.` : 'You have no minimum notice: a customer can book a time that starts in a few minutes.', go: 'settings#closed-dates' }
+  }
+  if (want === 'closed') {
+    if (!Array.isArray(r.closed_dates)) return r.closed_dates === 'none' ? { kind: 'records', answer: 'You have no closed dates. Customers can book any of your booking days.', go: 'settings#closed-dates' } : null
+    const list = r.closed_dates.map((x) => x.replace(/^(\d{4}-\d{2}-\d{2})/, (d) => humanDate(d)))
+    return { kind: 'records', answer: `Closed: ${list.join('; ')}.`, go: 'settings#closed-dates' }
+  }
+  // A price: exactly one listed service whose every significant word is in the question.
+  const asked = new Set(significant(req.question))
+  const hits = r.services.filter((s) => {
+    const name = significant(s.name)
+    return name.length && name.every((x) => asked.has(x) || asked.has(`${x}s`) || asked.has(x.replace(/s$/, '')))
+  })
+  if (hits.length !== 1) return null
+  const s = hits[0]
+  return { kind: 'records', answer: s.price === 'no price listed' ? `${s.name} has no price listed. Add one in Settings, in “Services and prices”.` : `${s.name}: ${s.price}, as listed in Settings.`, go: 'settings#services' }
 }
 
 // What to offer when the AI is out: these always work on this page without it.

@@ -128,6 +128,23 @@ for (const [shell, token, home, navLabel] of SHELLS) {
   })
 }
 
+test('phone: one page-title size on every dashboard tab and every admin section @mobile', async ({ page, context }, info) => {
+  if (info.project.name !== 'mobile') await page.setViewportSize({ width: 390, height: 844 })
+  const sizes = {}
+  for (const [, token, home, navLabel] of SHELLS) {
+    await context.clearCookies()
+    await useSession(context, token)
+    await page.goto(home)
+    for (const [label, path] of await tabsOf(page, navLabel)) {
+      await page.goto(path)
+      await settled(page, navLabel, label)
+      sizes[`${navLabel} → ${label}`] = await page.locator('main.app-main h1').first().evaluate((h) => getComputedStyle(h).fontSize)
+    }
+  }
+  const first = Object.values(sizes)[0]
+  expect(Object.entries(sizes).filter(([, v]) => v !== first), `every page title is ${first} on a phone`).toEqual([])
+})
+
 // The smallest phone (320 px): the top bar, the tab row and the shared controls must still fit the page.
 test('320 px: no sideways scrolling on Overview, Settings, Ads and the admin console', async ({ page, context }) => {
   await page.setViewportSize({ width: 320, height: 800 })
@@ -151,6 +168,9 @@ test('320 px: no sideways scrolling on Overview, Settings, Ads and the admin con
 const PAGES = [
   ['Overview', OWNER, '/dashboard', 'Dashboard'],
   ['Appointments', OWNER, '/dashboard/appointments', 'Dashboard'],
+  ['Receptionist', OWNER, '/dashboard/receptionist', 'Dashboard'],
+  ['Teach Your AI', OWNER, '/dashboard/teach', 'Dashboard'],
+  ['Website', OWNER, '/dashboard/website', 'Dashboard'],
   ['Settings', OWNER, '/dashboard/settings', 'Dashboard'],
   ['Growth', ADMIN, '/admin/growth', 'Admin'],
 ]
@@ -161,6 +181,8 @@ const SMALL_ON_PURPOSE = [
   ':is(p, span, label) > .link-btn', // a text link inside a sentence (WCAG 2.5.8 inline exception)
   ':is(p, span, label) > a', // same, for plain links
 ]
+// Narrower than 44 px on purpose (height is still 44): seven weekday buttons must fit one row on a 320 px phone.
+const NARROW_ON_PURPOSE = ['.day-toggle']
 
 for (const [label, token, path, navLabel] of PAGES) {
   test(`phone: every control on ${label} is at least 44 px tall @mobile`, async ({ page, context }, info) => {
@@ -169,17 +191,20 @@ for (const [label, token, path, navLabel] of PAGES) {
     await page.goto(path)
     await settled(page, navLabel, label)
     await page.waitForLoadState('networkidle')
-    const small = await page.evaluate((allowed) => {
+    const small = await page.evaluate(([allowed, narrow]) => {
       const out = []
-      for (const el of document.querySelectorAll('.app :is(button, a.btn, select, summary, [role="button"], [role="tab"])')) {
+      const name = (el) => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)}"`
+      // Buttons, button-like links, the header logo link, selects, disclosures, and every row that wraps a checkbox or radio.
+      for (const el of document.querySelectorAll('.app :is(button, a.btn, a.chip, a.booking-url, .app-header .logo, select, summary, [role="button"], [role="tab"], label:has(> input[type="checkbox"]), label:has(> input[type="radio"]))')) {
         if (allowed.some((sel) => el.matches(sel))) continue
         if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue
         const box = el.getBoundingClientRect()
         if (box.width < 2 || box.height < 2) continue // visually hidden (screen-reader only)
-        if (box.height < 43.5) out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)}" ${Math.round(box.height)}px`)
+        if (box.height < 43.5) out.push(`${name(el)} ${Math.round(box.height)}px tall`)
+        else if (el.matches('button, a.btn, a.chip, .link-btn') && box.width < 43.5 && !narrow.some((sel) => el.matches(sel))) out.push(`${name(el)} ${Math.round(box.width)}px wide`)
       }
       return [...new Set(out)]
-    }, SMALL_ON_PURPOSE)
+    }, [SMALL_ON_PURPOSE, NARROW_ON_PURPOSE])
     expect(small, `${label}: controls under 44 px on a phone (fix the control, or add it to SMALL_ON_PURPOSE with the reason)`).toEqual([])
   })
 }

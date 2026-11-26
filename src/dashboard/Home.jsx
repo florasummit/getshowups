@@ -305,7 +305,7 @@ function Attention({ attention, failed, go }) {
                   {r.label}
                 </button>
                 {r.dismiss && (
-                  <button type="button" className="link-btn" onClick={() => dismiss(r.check)} data-dismiss={r.check}>
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={() => dismiss(r.check)} data-dismiss={r.check}>
                     {r.dismiss}
                   </button>
                 )}

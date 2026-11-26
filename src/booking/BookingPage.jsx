@@ -458,9 +458,14 @@ export default function BookingPage({ id }) {
   }
 
   const zone = zoneName(tz, slot || booked?.start || Date.now())
+  // One real way to reach the business after a result: its phone on record, else its live website or chat page (BOOK-03).
   const call = biz.phone ? (
     <a className="pub-btn pub-btn--quiet" href={telHref(biz.phone)}>
       Call {phoneText(biz.phone)}
+    </a>
+  ) : biz.reach ? (
+    <a className="pub-btn pub-btn--quiet" href={biz.reach.url} target="_blank" rel="noopener" data-reach={biz.reach.kind}>
+      {biz.reach.kind === 'website' ? `Visit ${biz.name}’s website` : `Chat with ${biz.name}`}
     </a>
   ) : null
   const summary = (
@@ -733,7 +738,7 @@ export default function BookingPage({ id }) {
                   </li>
                 )}
                 {booked.invited !== false && <li>A calendar invitation is on its way to {lead?.email || 'your email'}.</li>}
-                <li>{biz.phone ? `To change or cancel, call ${biz.name}: ${phoneText(biz.phone)}.` : `To change or cancel, contact ${biz.name}${/[.!?]$/.test(biz.name) ? '' : '.'}`}</li>
+                <li>{biz.phone ? `To change or cancel, call ${biz.name}: ${phoneText(biz.phone)}.` : biz.reach ? `To change or cancel, reach ${biz.name} through its ${biz.reach.kind === 'website' ? 'website' : 'chat'}.` : `${biz.name} has your details and will be in touch if anything changes.`}</li>
               </ul>
               <ResultActions call={call} onAnother={bookAnother} label={`Book another ${visitWord}`} />
               <GoodToKnow policies={biz.policies} />

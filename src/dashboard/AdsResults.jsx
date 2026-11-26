@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { api, timeAgo } from '../lib/api.js'
 import { MetricCard, MetricHint, MetricRow } from './Help.jsx'
 import { Pill } from './ui.jsx'
+import { humanDate } from '../lib/format.js'
 
 const usd = (c) => (c == null ? '—' : `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: c % 100 ? 2 : 0, maximumFractionDigits: 2 })}`)
 const rate = (a, b, min) => (b >= min && b > 0 ? `${Math.round((a / b) * 100)}%` : null)
@@ -39,7 +40,7 @@ export default function AdsResults({ testAccount }) {
   ]
   // The explanation and its answers are about the numbers on screen; while another period loads, nothing can be asked.
   const loading = !!f && f.range.days !== days
-  const partial = f?.spend.firstDay && f.spend.firstDay > f.range.from.slice(0, 10) ? `Ad spend is recorded from ${f.spend.firstDay}; earlier days in this period have none.` : null
+  const partial = f?.spend.firstDay && f.spend.firstDay > f.range.from.slice(0, 10) ? `Ad spend is recorded from ${humanDate(f.spend.firstDay)}; earlier days in this period have none.` : null
   const note = [testAccount && 'Google Ads test account: not a business result', partial].filter(Boolean).join('. ') || undefined
   const about = f && { note, days: f.range.days, loading }
   const noCost = f?.spend.cents == null ? 'No ad spend reported for this period yet.' : null

@@ -123,6 +123,41 @@ test('DASH-01: a change request the model answers with an unrelated sentence get
   assert.equal((await ask('Should I raise my prices?')).body.answer, UNRELATED)
 })
 
+test('DASH-01: a typed question about one fact in the records is answered from them; a change the model can’t help with gets its place', async () => {
+  sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('alpha', '', 'Pool service', '', ?, '[]', 1)").run(JSON.stringify([{ name: 'Filter cleaning', price: '$95' }, { name: 'Green pool cleanup', price: 'From $325' }, { name: 'Pool opening', price: '' }]))
+  sql.prepare("INSERT INTO booking_rules (customer, min_notice_minutes, updated_at) VALUES ('alpha', 120, 1)").run()
+  sql.prepare("INSERT INTO business_closures (customer, date, label, created_at) VALUES ('alpha', '2026-12-25', 'Christmas Day', 1)").run()
+  sql.prepare("INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('beta', '', 'Pool service', '', ?, '[]', 1)").run(JSON.stringify([{ name: 'Filter cleaning', price: '$1' }]))
+  for (const [q, want, go] of [
+    ['How much do I charge for filter cleaning?', /^Filter cleaning: \$95, as listed in Settings\.$/, 'settings#services'],
+    ['What is the price of a green pool cleanup?', /^Green pool cleanup: From \$325/, 'settings#services'],
+    ['How much is pool opening?', /^Pool opening has no price listed\./, 'settings#services'],
+    ['What is my minimum notice?', /^Your minimum notice is 2 hours/, 'settings#closed-dates'],
+    ['When am I closed?', /^Closed: .*Dec 25.*Christmas Day/, 'settings#closed-dates'],
+  ]) {
+    const r = await ask(q)
+    assert.deepEqual([r.status, r.body.kind, r.body.go], [200, 'records', go], q)
+    assert.match(r.body.answer, want, q)
+    assert.doesNotMatch(r.body.answer, /\d{4}-\d{2}-\d{2}|\$1\b/, `${q}: no ISO date, this business only`)
+  }
+  assert.equal(calls, 0, 'no model call for a fact the records hold')
+  // Not one listed service, a request, or advice: the model's, as before.
+  for (const q of ['How much do I charge for a heater repair?', 'How much should I charge for filter cleaning?', 'Change the price of filter cleaning to $110']) {
+    calls = 0
+    await ask(q)
+    assert.ok(calls > 0, `${q}: goes to the model`)
+  }
+  // The model's answer fails its checks or can't be used, and the request is one the owner does themselves: the place.
+  say = 'Done: I marked Pat Lee as a no-show and saved it.' // claims an action it can't take: refused by the checks
+  const r = await ask('Mark Pat Lee as a no-show')
+  assert.deepEqual([r.body.kind, r.body.go], ['help', 'appointments'])
+  assert.match(r.body.answer, /^Outcomes are recorded on Appointments.*Nothing was changed\.$/)
+  assert.equal(r.body.records, undefined, 'no unrelated records')
+  // "no-show" is an outcome, not a negation: a claimed no-show is caught like any claimed action.
+  for (const a of ['I marked Pat Lee as a no-show.', 'Pat Lee is now marked as a no show.']) assert.match(problemWith(a, { facts: '', looked: false, refs: new Map() }) || '', /something was done/, a)
+  assert.equal(problemWith('I have not marked anyone as a no-show.', { facts: '', looked: false, refs: new Map() }), null)
+})
+
 test('DASH-01: the guard never replaces a prepared change, a shown record or a page the model offered', () => {
   const q = 'Change my hours to close at 4'
   assert.equal(ownStepInstead(q, { answer: 'Ready.', proposals: [{ type: 'hours' }], records: [] }), null)

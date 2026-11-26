@@ -56,7 +56,8 @@ ${pending.map((p, i) => `P${i + 1} ${JSON.stringify(p)}`).join('\n')}` : ''}`,
 
 // ---------- checks ----------
 const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(marked|recorded|updated|changed|set|sent|emailed|texted|messaged|booked|rescheduled|cancell?ed|saved|charged|refunded|paused|started|launched|published|deleted|opened)\b|\b(has|have) been (marked|updated|changed|sent|saved|cancell?ed|refunded) (as|to|for|successfully|now)\b|\b(is|are) now (marked|saved|updated)\b/i
-const NOT_DONE = /\b(not|never|no|hasn['’]?t|haven['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|nothing|none|once|if|until|when)\b/i
+// "no-show" is a kind of outcome, not a negation: "I marked Pat as a no-show" claims an action like any other.
+const NOT_DONE = /\b(not|never|no(?![-‐ ]?shows?\b)|hasn['’]?t|haven['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|nothing|none|once|if|until|when)\b/i
 const NOBODY = /\b(nobody|no one|no customers?|no-one) (else )?(is|are|seems?|appears?)( \w+)? (waiting|needing|in need)( (on|for) you)?\s*(right now|at the moment|today|currently)?[.!]?$|\b(all caught up|nothing needs (you|your attention))\b/i
 const PROMISE = /\b(guaranteed|we guarantee|i guarantee|will (increase|double|grow|get you|bring)|you(['’]ll| will) (get|see|earn) more|will (keep|continue to) grow\w*)\b/i
 // How it works is never part of an answer, nor is doubting an answer nobody questioned.

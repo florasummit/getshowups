@@ -166,8 +166,14 @@ test('BOOK-03 / CHAT-02: the booking API offers the business phone on record, an
   assert.equal(info.phone, '+18435550100')
   assert.equal(telHref('(843) 555-0100'), 'tel:8435550100')
   assert.ok(!JSON.stringify(info).includes('owner@pools.example') && !JSON.stringify(info).includes('staff@getshowups.com'))
+  assert.equal(info.reach, null, 'a phone on record is the way to reach the business')
   db.sql.prepare("UPDATE business_profiles SET phone = '' WHERE customer = 'getshowups'").run()
-  assert.equal((await call(bookInfo, 'GET', '/api/book/getshowups')).json().phone, '')
+  const none = (await call(bookInfo, 'GET', '/api/book/getshowups')).json()
+  assert.deepEqual([none.phone, none.reach], ['', null], 'no phone, no live website, chat not answering: nothing to offer, so nothing is offered')
+  // No phone, but the chat page would open: that public page is offered.
+  env.RECEPTIONIST_ANTHROPIC_API_KEY = 'sk-ant-test-not-real'
+  assert.deepEqual((await call(bookInfo, 'GET', '/api/book/getshowups')).json().reach, { kind: 'chat', url: 'https://getshowups.com/chat/getshowups' })
+  delete env.RECEPTIONIST_ANTHROPIC_API_KEY
 })
 
 test('BOOK-08: a time zone is named in plain words', () => {

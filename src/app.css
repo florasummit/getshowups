@@ -5897,7 +5897,8 @@ html.help-open .app {
 /* ONE page-title size for every top-level page (h1), whichever class the page used. */
 .app-main h1.title,
 .app-main h1.ui-page-title,
-.app-main h1.cc-title {
+.app-main h1.cc-title,
+.app .page-head h1.title {
   font-size: 1.55rem;
   font-weight: 650;
   letter-spacing: -0.03em;
@@ -5906,7 +5907,8 @@ html.help-open .app {
 @media (max-width: 640px) {
   .app-main h1.title,
   .app-main h1.ui-page-title,
-  .app-main h1.cc-title {
+  .app-main h1.cc-title,
+  .app .page-head h1.title {
     font-size: 1.35rem;
   }
 }
@@ -5977,8 +5979,32 @@ html.help-open .app {
   .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, .fchip, .metric-row-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden'])) {
     min-height: 44px;
   }
-  .app :is(.icon-btn, .ui-icon-btn) {
+  .app :is(.icon-btn, .ui-icon-btn, .btn, button.chip, a.chip, .fchip) {
     min-width: 44px;
+  }
+  /* A text button standing on its own ("Copy") is as wide as it is tall; an address shown as a link is a 44 px row. */
+  .app .link-btn:not(:is(p, span, label) > *) {
+    min-width: 44px;
+  }
+  .app a.booking-url {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  /* The logo link in the top bar: a 44 px tall hit area; the drawn logo keeps its size (Logo.jsx untouched). */
+  .app .app-header .logo {
+    min-height: 44px;
+    align-items: center;
+  }
+  /* A row that wraps a checkbox or a radio is tapped as a whole: 44 px tall on phones and touch screens. */
+  .app label.check,
+  .app label:has(> input:is([type='checkbox'], [type='radio'])) {
+    min-height: 44px;
+  }
+  .app label:has(> input:is([type='checkbox'], [type='radio'])):not(.check, .switch, .field, .ui-switch) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .app summary {
     align-content: center;

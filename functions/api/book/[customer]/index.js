@@ -12,6 +12,7 @@ import { policiesOrEmpty } from '../../../../server/policies.js'
 import { getProfile } from '../../../../server/onboarding.js'
 import { bookingOptions, bookingServices } from '../../../../server/services.js'
 import { publicBrand } from '../../../../server/public-brand.js'
+import { reachFor } from '../../../../server/site-serve.js'
 
 export async function onRequestGet({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params)
@@ -34,6 +35,9 @@ export async function onRequestGet({ request, env, params, waitUntil }) {
     timezone: customer.timezone,
     // The business's phone on record ('' when it has none): shown as a tel: link, never anything else about the owner.
     phone: typeof profile?.phone === 'string' ? profile.phone : '',
+    // No phone on record: the business's live website, else its chat page when that would open (both already public),
+    // so the confirmation still offers one real way to reach it. null when there is neither.
+    reach: typeof profile?.phone === 'string' && profile.phone ? null : await reachFor(env, customer).catch(() => null),
     slotMinutes: customer.slotMinutes,
     // 'at_customer': the business comes to the lead, so the page asks for a service address.
     appointmentMode: customer.appointmentMode,

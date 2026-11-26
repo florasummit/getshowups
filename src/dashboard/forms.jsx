@@ -144,7 +144,7 @@ export function BusinessForm({ customer, submitLabel, onSaved, inline = false })
         </span>
         <input ref={zipField} value={zips} onChange={(e) => setZips(e.target.value)} placeholder="Leave empty to accept everyone" inputMode="text" aria-describedby={odd.length ? 'zip-warning' : undefined} aria-invalid={odd.length && asked ? true : undefined} />
       </label>
-      {odd.length > 0 && (
+      {odd.length > 0 && accepted !== zips && (
         <div className="zip-warning" id="zip-warning" role={asked ? 'alert' : 'status'} data-zip-warning>
           <p>
             {odd.length === 1 ? 'This doesn’t look like a 5-digit ZIP code' : 'These don’t look like 5-digit ZIP codes'}: <strong>{odd.join(', ')}</strong>. Customers are matched on the exact ZIP they type, so a mistyped one never matches.
