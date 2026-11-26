@@ -10,7 +10,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { providerMock } from '../ai-credentials.js'
 import { PLATFORM } from './platform-rules.js'
-import { INTAKE, INTAKE_IDS, validateConfig, diffConfigs } from './schema.js'
+import { INTAKE, INTAKE_IDS, intakeLabel, validateConfig, diffConfigs } from './schema.js'
+import { tradeWords } from './industries.js'
 
 export const OP_KINDS = ['move_before', 'move_first', 'require', 'optional', 'before_times', 'not_before_times', 'exclude', 'include', 'city_wide', 'not_city_wide', 'add_urgent', 'remove_urgent', 'emergency_action', 'handoff', 'remove_handoff', 'after_hours', 'pricing', 'style', 'noop', 'refuse', 'know', 'forget', 'find_out', 'not_find_out', 'worth', 'season', 'objective']
 
@@ -44,10 +45,55 @@ const listOf = (s) =>
     .filter((x) => x.length >= 2 && x.length <= 60)
 const titled = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase())
 
+// Where a refused or unplaceable request really lives (owner-facing; the page renders `link` as a link).
+export const PLACES = {
+  services: { href: '/dashboard/settings#services', label: 'Settings → Services' },
+  business: { href: '/dashboard/settings#business', label: 'Settings → Business' },
+  booking: { href: '/dashboard/settings#booking-hours', label: 'Settings → Booking' },
+  receptionist: { href: '/dashboard/receptionist', label: 'Receptionist' },
+}
+const OUTSIDE_AREA = /\b(?:book|schedule|accept|take)\b[^.]*\boutside\b[^.]*\b(?:service area|area|zips?|zip codes?)\b/i
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+const MONTH = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+const monthNo = (w) => MONTH_NAMES.indexOf(String(w).toLowerCase().slice(0, 3)) + 1
+// "April through June" / "from October to March" (wraps over the new year) / "in July" → month numbers, or null.
+function monthsIn(s) {
+  const range = s.match(new RegExp(`\\b${MONTH}\\.? ?(?:to|through|thru|until|till|-|–) ?${MONTH}\\b`, 'i'))
+  if (range) {
+    const out = []
+    for (let m = monthNo(range[1]), n = 0; n < 12; m = (m % 12) + 1, n++) {
+      out.push(m)
+      if (m === monthNo(range[2])) break
+    }
+    return out
+  }
+  const one = s.match(new RegExp(`\\b(?:in|during) (january|february|march|april|may|june|july|august|september|october|november|december)\\b`, 'i'))
+  return one ? [monthNo(one[1])] : null
+}
+
 // One sentence → ops (or null when no fixed pattern applies).
 export function ruleOps(sentence) {
   const s = sentence
   for (const [re, reason] of PLATFORM) if (re.test(s)) return [{ kind: 'refuse', text: s, reason }]
+  // Booking people outside the service area: a platform rule either way (asked for → refused; ruled out → already so).
+  if (OUTSIDE_AREA.test(s))
+    return /\b(?:don'?t|do not|never|no)\b/i.test(s)
+      ? [{ kind: 'noop', text: s, reason: 'Already how it works: nobody outside your service area is offered times. They can leave their details, and you approve or decline.' }]
+      : [{ kind: 'refuse', text: s, reason: 'People outside your service area are never booked automatically: they leave their details and you approve or decline each one (platform rule). To serve more places, add their ZIP codes in your business details.', place: 'business' }]
+  // What a job is usually worth (the owner's own planning figure, never a price told to customers):
+  // "remember that a green pool cleanup is usually worth $450" (+ "we keep 30%", "about 2 times a year").
+  const worth = s.match(/^(?:please )?(?:(?:remember|know|note)(?: that)?:? )?(?:an? |the |our |each |every )?(.{2,80}?) (?:jobs? |visits? )?(?:is|are) (?:usually |typically |normally |generally |on average |about |around |roughly )*worth (?:about |around |roughly )?\$ ?(\d[\d,]*(?:\.\d{1,2})?)/i)
+  if (worth) {
+    const margin = s.match(/\b(?:keep|make|margin (?:is|of)(?: about)?) (?:about |around )?(\d{1,3}) ?(?:%|percent)/i)?.[1] || s.match(/\b(\d{1,3}) ?(?:%|percent) margin/i)?.[1] || ''
+    const repeats = s.match(/\b(\d{1,3}) (?:times|x) (?:a|per|each) year/i)?.[1] || ''
+    return [{ kind: 'worth', phrase: titled(worth[1].trim()), value: `${worth[2].replace(/,/g, '')},${margin},${repeats}` }]
+  }
+  // A season: months plus what happens then ("remember that April through June is our busiest season").
+  if (/\b(season|seasonal|busy|busiest|busier|slow|slowest|slower|peak|quiet)\b/i.test(s)) {
+    const months = monthsIn(s)
+    const note = s.replace(/^(?:please )?(?:remember|know|note)(?: that)?:? /i, '').replace(/[.!]+$/, '').replace(/^./, (x) => x.toUpperCase())
+    if (months && note.length >= 8) return [{ kind: 'season', phrase: months.join(','), value: `${note}.` }]
+  }
   if (/^(?:we(?:'re| are)|this is) an? [\w /&-]{2,40}(?:company|business|contractor|service)\b/i.test(s) && s.split(/\s+/).length <= 10)
     return [{ kind: 'noop', text: s, reason: 'Your business type and services come from your records (Settings), so nothing changes here.' }]
   const teach = s.match(/^(?:please )?(?:remember|know|note)(?: that)?:? (.{8,300})$/i)
@@ -144,7 +190,24 @@ export function ruleOps(sentence) {
   if (m && itemFor(m[1])) return [{ kind: 'require', item: itemFor(m[1]) }]
   m = s.match(/\b(?:don'?t|do not|no need to|never) (?:need to )?ask (?:for |about )?(?:the |their )?(.+?)[.!?]?$/i)
   if (m && itemFor(m[1])) return [{ kind: 'optional', item: itemFor(m[1]) }]
+  // One more thing to find out from customers, beyond the fixed questions: "always ask if there is a dog in the yard".
+  m = s.match(/^(?:please )?(?:always |also |and )*(?:ask|find out|check)(?: (?:them|the customer|customers|people|callers|every customer|everyone))? (if|whether|about|what|how|which|who) (.{4,100}?)[.!?]*$/i)
+  if (m) return [{ kind: 'find_out', value: `${{ if: 'whether ', about: '' }[m[1].toLowerCase()] ?? `${m[1].toLowerCase()} `}${m[2].trim()}` }]
   return null
+}
+
+// Why a sentence no pattern (and no model) could place was not turned into a rule, in plain words, with where it lives
+// when that is known and phrasings that DO work (the trade's examples; every one is a fixed pattern, see the unit test).
+const TOPICS = [
+  [/\$ ?\d|\b(prices?|pricing|costs?|charges?|discounts?|fees?|rates?|quotes?|estimates?)\b/i, 'Prices come from your services list, so they can’t be set here.', 'services'],
+  [/\b(?:mon|tues|wednes|thurs|fri|satur|sun)days?\b|\bweekends?\b|\bweekdays?\b|\bhours?\b|\bholidays?\b|\b\d{1,2}(?::\d\d)? ?(?:am|pm)\b|\bsame[- ]day\b|\bnotice\b|\bclosed\b/i, 'Which days and times can be booked comes from your booking hours, closed dates and minimum notice, and they apply to every service alike. A rule for one service or one day isn’t possible yet.', 'booking'],
+  [/\b(?:zips?|zip codes?|service area|miles?|county|counties|radius)\b/i, 'Where you work comes from the towns and ZIP codes in your business details.', 'business'],
+  [/\b(?:greeting|greet|voice|accent)\b/i, 'The greeting and the voice are set on the Receptionist page.', 'receptionist'],
+]
+export function explain(sentence, industry) {
+  const topic = TOPICS.find(([re]) => re.test(sentence))
+  const examples = tradeWords(industry).teach.slice(0, 2)
+  return topic ? { reason: topic[1], link: PLACES[topic[2]], examples } : { reason: 'I couldn’t turn this into a rule yet.', examples }
 }
 
 const clone = (c) => JSON.parse(JSON.stringify(c))
@@ -161,7 +224,7 @@ export function applyOps(config, ops) {
     const it = op.item && INTAKE[op.item] ? item(op.item) : null
     switch (op.kind) {
       case 'refuse':
-        refused.push({ text: op.text || '', reason: op.reason || 'That would switch off a platform rule.' })
+        refused.push({ text: op.text || '', reason: op.reason || 'That would switch off a platform rule.', ...(PLACES[op.place] ? { link: PLACES[op.place] } : {}) })
         break
       case 'noop':
         notes.push(op.reason || 'No change needed.')
@@ -170,7 +233,7 @@ export function applyOps(config, ops) {
         const a = idx(op.item)
         const b = idx(op.other)
         if (a < 0 || b < 0) break
-        if (a < b) notes.push(`${INTAKE[op.item].label} is already asked before ${INTAKE[op.other].label.toLowerCase()}.`)
+        if (a < b) notes.push(`${intakeLabel(op.item, c.industry)} is already asked before ${intakeLabel(op.other, c.industry).toLowerCase()}.`)
         else {
           const [x] = c.intake.splice(a, 1)
           c.intake.splice(idx(op.other), 0, x)
@@ -355,49 +418,114 @@ async function modelOps(env, text) {
 }
 
 // → { ok, source: 'rules' | 'ai' | 'partial', ops, proposed, changes[], notes[], refused[], conflicts[], warnings[],
-//     notUnderstood[], approvable }
+//     notUnderstood[], clauses[], approvable }
+// clauses: EVERY part of what the owner typed, accounted for, in their order:
+//   { text, outcome: 'changed' | 'already' | 'not_changed', changes[], notes[], reasons: [{ reason, link? }], examples? }
+// so a result is never a bare "nothing would change". Each operation is applied and validated on its own: one that
+// isn't allowed (a platform rule, an unknown town, a listed service, a price) is left out WITH its reason and the rest
+// stays approvable; `ops` holds only what would really be applied on approval.
 // allowModel(): asked only when the fixed patterns can't place something (the caller's daily limit on model use).
+const ALREADY = 'Already set this way, so there is nothing to change.'
+const NOTE_IS_REASON = { include: 'services', forget: null }
+const ERROR_PLACE = { excludes_listed_service: 'services', unknown_town: 'business', price: 'services' }
 export async function propose(env, text, draft, records, { allowModel } = {}) {
   const sentences = split(text)
   if (!sentences.length) return { ok: false, error: 'empty_request' }
-  let ops = []
-  const notUnderstood = []
   // A correction is read as a whole (the wrong answer is quoted in it, so its words are not the request).
   const correction = /^correction\b/i.test(String(text).trim())
-  for (const s of sentences) {
-    const o = correction ? null : ruleOps(s)
-    if (o) ops.push(...o.map((x) => ({ ...x, text: x.text || s })))
-    else notUnderstood.push(s)
-  }
-  let source = notUnderstood.length ? (ops.length ? 'partial' : 'none') : 'rules'
+  const listed = (records?.services || []).map((x) => String(x.name || ''))
+  const parts = sentences.map((s, at) => {
+    const ops = correction ? null : ruleOps(s)
+    // A job value names the service the way the owner listed it, when it is one of theirs.
+    return { at, text: s, ops: ops && ops.map((o) => ({ ...o, text: o.text || s, ...(o.kind === 'worth' ? { phrase: listed.find((n) => same(n, o.phrase)) || o.phrase } : {}) })) }
+  })
+  const open = parts.filter((x) => !x.ops)
+  const leftover = open.map((x) => x.text)
+  const ruleCount = parts.reduce((n, x) => n + (x.ops ? x.ops.length : 0), 0)
+  let source = leftover.length ? (ruleCount ? 'partial' : 'none') : 'rules'
   let costMicros = 0
   let modelError = null
-  if (notUnderstood.length) {
-    const m = !allowModel || (await allowModel()) ? await modelOps(env, notUnderstood.join(' ')) : { ok: false, error: 'model_limit' }
+  let fromModel = null
+  if (leftover.length) {
+    const m = !allowModel || (await allowModel()) ? await modelOps(env, leftover.join(' ')) : { ok: false, error: 'model_limit' }
     if (m.error) modelError = m.error
     if (m.ok) {
       // Fixed-pattern refusals stand; the model only fills in what the patterns couldn't place.
-      ops = [...ops, ...m.ops]
+      fromModel = m.ops
       costMicros = m.costMicros
-      source = ops.length ? (source === 'none' ? 'ai' : 'partial_ai') : source
-      notUnderstood.length = 0
+      source = ruleCount + m.ops.length ? (source === 'none' ? 'ai' : 'partial_ai') : source
     }
   }
-  const applied = applyOps(draft, ops)
-  const { config, errors, warnings } = validateConfig(applied.config, records)
-  const changes = diffConfigs(draft, config)
+
+  const base = validateConfig(draft, records)
+  const known = new Set(base.errors.map((e) => e.message))
+  const kept = []
+  const notes = []
+  const refused = []
+  const conflicts = base.errors.map((e) => e.message)
+  let running = base.config
+  // One part's operations, one at a time, on top of what the earlier parts already changed.
+  const run = (ops) => {
+    const from = running
+    const out = { notes: [], reasons: [] }
+    for (const op of ops) {
+      const a = applyOps(running, [op])
+      for (const r of a.refused) {
+        refused.push(r)
+        out.reasons.push({ reason: r.reason, ...(r.link ? { link: r.link } : {}) })
+      }
+      for (const n of a.notes) {
+        notes.push(n)
+        if (op.kind in NOTE_IS_REASON) out.reasons.push({ reason: n, ...(PLACES[NOTE_IS_REASON[op.kind]] ? { link: PLACES[NOTE_IS_REASON[op.kind]] } : {}) })
+        else out.notes.push(n)
+      }
+      if (op.kind === 'refuse' || op.kind === 'noop' || a.refused.length) continue
+      const v = validateConfig(a.config, records)
+      const fresh = v.errors.filter((e) => !known.has(e.message))
+      if (fresh.length) {
+        for (const e of fresh) {
+          if (!conflicts.includes(e.message)) conflicts.push(e.message)
+          out.reasons.push({ reason: e.message, ...(PLACES[ERROR_PLACE[e.code]] ? { link: PLACES[ERROR_PLACE[e.code]] } : {}) })
+        }
+        continue
+      }
+      running = v.config
+      kept.push(op)
+    }
+    const changes = diffConfigs(from, running)
+    return { outcome: changes.length ? 'changed' : out.reasons.length ? 'not_changed' : 'already', changes, notes: !changes.length && !out.reasons.length && !out.notes.length ? [ALREADY] : out.notes, reasons: out.reasons }
+  }
+  const clauses = []
+  for (const part of parts) if (part.ops) clauses[part.at] = { text: part.text, ...run(part.ops) }
+  // What the fixed patterns couldn't place: the model's operations (as one part), or the plain reason per sentence.
+  let unplaced = open
+  if (fromModel && leftover.length) {
+    const r = run(fromModel)
+    if (r.changes.length || r.reasons.length || r.notes[0] !== ALREADY) {
+      clauses[open[0].at] = { text: leftover.join(' '), ...r }
+      unplaced = []
+    }
+  }
+  const notUnderstood = unplaced.map((x) => x.text)
+  for (const { at, text: s } of unplaced) {
+    const why = explain(s, running.industry)
+    clauses[at] = { text: s, outcome: 'not_changed', changes: [], notes: [], reasons: [{ reason: why.reason, ...(why.link ? { link: why.link } : {}) }], examples: why.examples }
+  }
+  const changes = diffConfigs(base.config, running)
   return {
     ok: true,
     source,
-    ops: ops.filter((o) => o.kind !== 'refuse' && o.kind !== 'noop'),
-    proposed: config,
+    ops: kept,
+    proposed: running,
     changes,
-    notes: applied.notes,
-    refused: applied.refused,
-    conflicts: errors.map((e) => e.message),
-    warnings: warnings.map((w) => w.message),
+    notes,
+    refused,
+    conflicts,
+    warnings: validateConfig(running, records).warnings.map((w) => w.message),
     notUnderstood,
-    approvable: errors.length === 0 && changes.length > 0,
+    clauses: clauses.filter(Boolean),
+    // Nothing is approvable while the draft itself has a problem (saving would be refused): the page says which.
+    approvable: changes.length > 0 && base.errors.length === 0,
     costMicros,
     modelError,
   }
