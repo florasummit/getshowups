@@ -5556,7 +5556,7 @@ html:has(.app) {
    Kept visually small on purpose (listed in test/e2e/quality.spec.js): text links inside a sentence and the "?" help
    mark, whose tap area is extended instead. The website editor (.studio) has its own pass (finding WEB-13). ---- */
 @media (pointer: coarse), (max-width: 640px) {
-  .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, .field input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'])):not(.studio *) {
+  .app :is(.btn, .seg button, .segmented button, .day-toggle, .assist-btn, .fchip, .metric-row-btn, button.chip, a.chip, .icon-btn, .ui-icon-btn, summary, select, input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='hidden'])):not(.studio *) {
     min-height: 44px;
   }
   .app :is(.icon-btn, .ui-icon-btn):not(.studio *) {
