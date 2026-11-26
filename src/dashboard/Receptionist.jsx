@@ -295,7 +295,7 @@ export default function Receptionist() {
     setBusy(true)
     const { status } = await api('/api/dashboard/receptionist', { method: 'POST', body: { action: 'website_panel', on: value } })
     setBusy(false)
-    setPanelMsg(status === 200 ? (value ? 'Saved. Your website now opens the chat in a panel.' : 'Saved. Your website shows the chat link.') : 'Couldn’t save. Please try again.')
+    setPanelMsg(status === 200 ? (value ? 'Saved. Your website now opens the chat in a panel. It can take a minute to show.' : 'Saved. Your website shows the chat link. It can take a minute to show.') : 'Couldn’t save. Please try again.')
     if (status === 200) load()
   }
   const resolve = async (requestId) => {

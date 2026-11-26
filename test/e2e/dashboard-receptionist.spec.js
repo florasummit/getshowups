@@ -135,7 +135,8 @@ test('website chat panel: the owner turns it on; the published site opens the sa
   await panel.click()
   await expect(page.getByText('Saved. Your website shows the chat link.')).toBeVisible()
   await expect(panel).not.toBeChecked()
-  const off = await site.goto(`/p/${id}`)
+  // Sites are cached for a minute (the owner is told): a fresh address stands in for the minute passing.
+  const off = await site.goto(`/p/${id}?fresh=1`)
   expect(off.headers()['content-security-policy']).not.toContain('frame-src')
   await expect(site.locator('a[data-gsu-chat]')).toContainText('Chat or talk with us')
   await expect(site.locator('details[data-gsu-chat-panel]')).toHaveCount(0)
