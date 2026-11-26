@@ -1103,6 +1103,12 @@
   gap: 8px;
   max-width: 100%;
 }
+/* A long label ("Close Christmas Day") wraps inside its button instead of pushing a 320 px page sideways. */
+.row-actions > .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
 
 .tag {
   padding: 2px 9px;
@@ -5952,7 +5958,7 @@ html.help-open .app {
   bottom: 1px;
   display: none;
   place-items: center;
-  width: 36px;
+  width: 44px; /* a touch target, like every control (the row also scrolls by swiping) */
   padding: 0;
   border: 0;
   background: none;
