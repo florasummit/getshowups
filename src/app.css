@@ -344,11 +344,12 @@
 }
 .coverage-link {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
 .coverage-link input {
-  flex: 1;
+  flex: 1 1 160px;
   min-width: 0;
   font: inherit;
   font-size: 0.85rem;
@@ -483,8 +484,10 @@
 .row--wrap {
   flex-wrap: wrap;
 }
-.row--wrap > .row-main {
-  flex: 1 1 240px;
+@media (min-width: 641px) {
+  .row--wrap > .row-main {
+    flex: 1 1 240px;
+  }
 }
 .row-confirm {
   flex: 1 0 100%;
