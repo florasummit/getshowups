@@ -202,11 +202,13 @@ function Automation({ on, channels: c, onChange }) {
     if (status !== 200) return setError('Couldn’t change this. Please try again.')
     onChange()
   }
-  const blocked = c.paused ? 'messaging is paused by GetShowUps' : !c.email ? 'email isn’t available right now' : null
-  const [tone, text] = !on ? ['pending', 'Automatic follow-ups paused'] : blocked ? ['pending', `Automatic follow-ups are on, but nothing is being sent: ${blocked}`] : c.testMode ? ['pending', 'Automatic follow-ups on, in test mode'] : ['ok', 'Automatic follow-ups on']
+  // Nothing can go out at all: paused by GetShowUps, or neither email nor texting works. (Email alone being out is a
+  // notice below: texts still go.)
+  const blocked = c.paused ? 'messaging is paused by GetShowUps' : !c.email && !c.sms ? 'email isn’t available right now and texting isn’t set up' : null
+  const [tone, text] = !on ? ['pending', 'Automatic follow-ups paused'] : blocked ? ['pending', `Automatic follow-ups on, but nothing is being sent: ${blocked}`] : ['ok', 'Automatic follow-ups on']
   return (
-    <div className="fu-auto" data-automation={!on ? 'paused' : blocked ? 'blocked' : c.testMode ? 'test' : 'on'}>
-      <span className={`status status--${tone}`}>
+    <div className="fu-auto" data-automation={!on ? 'paused' : blocked ? 'blocked' : 'on'}>
+      <span className={`status status--${tone}${text.length > 30 ? ' fu-auto-long' : ''}`}>
         <span className="status-dot" aria-hidden="true" />
         {text}
       </span>
@@ -238,8 +240,9 @@ function Notices({ channels: c }) {
   const items = []
   // Whether messages go out at all is said once, in the status line above (Automation); here only what it means.
   if (c.paused) items.push('Nothing is sent until messaging resumes, and nothing will be sent late in a burst.')
-  else if (!c.email) items.push('Automatic emails are not being sent. You can still reply to people yourself below once email is back; phone numbers and email addresses are on each conversation.')
-  if (c.testMode && !c.paused && c.email) items.push('Test mode: messages go only to GetShowUps test recipients while we finish launch checks.')
+  else if (!c.email && c.sms) items.push('Email isn’t available right now, so automatic emails are not being sent. Texts still go out.')
+  else if (!c.email) items.push('Each person’s phone number and email address are on their conversation, so you can reach them yourself meanwhile.')
+  if (c.testMode && !c.paused) items.push('Test mode: messages go only to GetShowUps test recipients while we finish launch checks.')
   if (!items.length) return null
   return (
     <div className="fu-notices" role="status">

@@ -922,6 +922,11 @@
 .money-item:hover {
   background: var(--surface-sunken);
 }
+@media (max-width: 760px), (pointer: coarse) {
+  .money-item {
+    min-height: 44px;
+  }
+}
 .money-label {
   color: var(--text-muted);
   font-weight: 600;
@@ -3072,6 +3077,10 @@ body.studio-full-open { overflow: hidden; }
 .fu-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .fu-auto { display: flex; align-items: center; gap: 10px; }
 .fu-auto .status { margin: 0; }
+/* A status that is a whole sentence ("on, but nothing is being sent: …") reads as a sentence, not as a small-caps label. */
+.app .fu-auto .fu-auto-long { flex: 1 1 220px; min-width: 0; font-family: inherit; font-size: 0.9rem; font-weight: 600; letter-spacing: 0; text-transform: none; white-space: normal; }
+.fu-auto { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.fu-auto .ui-confirm { flex: 1 0 100%; }
 .fu-loading { padding: 32px 0; color: var(--ink-400); }
 .fu-notices { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: #fff8e6; font-size: 14px; }
 .fu-notices p { margin: 2px 0; }

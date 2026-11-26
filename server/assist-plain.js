@@ -160,7 +160,7 @@ export async function plainAnswer(env, customer, req) {
   if (intent === 'hours' || intent === 'settings') {
     const r = await run('business_settings')
     if (!r) return null
-    if (intent === 'hours') return { kind: 'records', answer: `Your booking hours: ${r.booking_hours}. ${r.appointment_minutes} minutes each, ${r.time_zone}.`, go: 'settings#booking-hours' }
+    if (intent === 'hours') return { kind: 'records', answer: `Your booking hours: ${r.booking_hours}. ${r.appointment_minutes} minutes each, ${zoneWords(r.time_zone)}.`, go: 'settings#booking-hours' }
     const z = r.service_area_zips
     return { kind: 'records', answer: `Services: ${r.services.map((s) => `${s.name} (${s.price})`).join(', ') || 'none added yet'}. Towns: ${r.towns.join(', ') || 'none added yet'}. Service area: ${Array.isArray(z) ? z.join(', ') : z}. Hours: ${r.booking_hours}.`, go: 'settings' }
   }
@@ -198,6 +198,14 @@ export async function plainAnswer(env, customer, req) {
   return r && shown(!r.total ? 'Nothing like that is recorded right now.' : intent === 'unanswered' ? 'Nothing has been sent to these people yet:' : 'Your latest inquiries:')
 }
 
+// "Eastern Time", never the zone's code ("America/New_York"); an unknown zone is shown as it is stored.
+const zoneWords = (tz) => {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longGeneric' }).formatToParts(0).find((p) => p.type === 'timeZoneName')?.value || tz
+  } catch {
+    return tz
+  }
+}
 const sentence = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 // One wording for the three counts, wherever the assistant gives them (the same counts Overview shows for 30 days).
 const countsLine = (r) => `${plural(r.new_inquiries, 'new inquiry', 'new inquiries')}, ${plural(r.bookings_made, 'booking')} made, ${plural(r.visits_happened, 'visit')} marked as happened`

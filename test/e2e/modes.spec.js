@@ -58,15 +58,21 @@ test('owner records visit outcome separately from job completion, then reports j
   await expect(row.getByRole('button', { name: 'Couldn’t visit' })).toBeVisible()
   await expect(row.getByRole('button', { name: 'Visited, not done' })).toBeVisible()
   await row.getByRole('button', { name: 'Job done' }).click()
+  // The amount is asked in the same step (DASH-02): optional, saved only by its button.
+  const worth = row.locator('[data-worth]')
+  await worth.getByLabel('Estimated value in dollars').fill('350')
+  await worth.getByRole('button', { name: 'Save amount' }).click()
+  await expect(worth.getByRole('status')).toHaveText('Estimate saved: $350.')
+  // Undo, then the same outcome again: the amount entered before is still there.
+  await row.getByRole('button', { name: 'Undo' }).click()
+  await row.getByRole('button', { name: 'Job done' }).click()
+  await expect(row.locator('[data-worth]').getByRole('status')).toHaveText('Estimate saved: $350.')
   await pending.locator('.row', { hasText: 'Val Visit' }).getByRole('button', { name: 'Done', exact: true }).click()
 
   const results = page.locator('.card', { has: page.getByRole('heading', { name: 'Past' }) })
   await expect(results.locator('.row', { hasText: 'Val Visit' }).locator('.tag--ok')).toHaveText('Job done')
   // Money for the visit, kept apart: estimate, invoiced, paid (never one number standing for all three).
   const money = results.getByRole('group', { name: 'Job money' })
-  await money.getByRole('button', { name: 'Estimated add' }).click()
-  await results.getByLabel('Estimated in dollars').fill('350')
-  await results.getByRole('button', { name: 'Save' }).click()
   await expect(money.getByRole('button', { name: 'Estimated $350' })).toBeVisible()
   await money.getByRole('button', { name: 'Invoiced add' }).click()
   await results.getByLabel('Invoiced in dollars').fill('340')
@@ -77,6 +83,20 @@ test('owner records visit outcome separately from job completion, then reports j
   await results.getByRole('button', { name: 'Save' }).click()
   await expect(money.getByRole('button', { name: 'Paid $300' })).toBeVisible()
   await expect(money.getByRole('button', { name: 'Estimated $350' })).toBeVisible()
+  // Changing the outcome keeps all three amounts; leaving the edit and cancelling an appointment are different words.
+  const past = results.locator('.row', { hasText: 'Val Visit' })
+  await past.getByRole('button', { name: 'Change' }).click()
+  await expect(past.getByRole('button', { name: 'Don’t change' })).toBeVisible()
+  await past.getByRole('button', { name: 'Visited, not done' }).click()
+  for (const name of ['Estimated $350', 'Invoiced $340', 'Paid $300']) await expect(money.getByRole('button', { name })).toBeVisible()
+  await past.getByRole('button', { name: 'Change' }).click()
+  await past.getByRole('button', { name: 'Job done' }).click()
+  await expect(money.getByRole('button', { name: 'Estimated $350' })).toBeVisible()
+  // "Mark as test" says what it does and asks first.
+  await past.getByRole('button', { name: 'Mark as test…' }).click()
+  await expect(past.locator('[data-confirm]')).toContainText('left out of your numbers')
+  await past.getByRole('button', { name: 'Don’t mark' }).click()
+  await expect(past.locator('.tag', { hasText: 'Test' })).toHaveCount(0)
 
   await page.getByRole('link', { name: 'Overview' }).click()
   await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat', { hasText: 'Visits' }).locator('.stat-value')).toHaveText('1')
