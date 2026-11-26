@@ -131,6 +131,10 @@ test('SET-03 validation: start before end, an appointment fits, only booking day
   assert.deepEqual(validateDayHours({ 9: FRIDAY[5] }, HOURS)[0], 'invalid_day_hours')
   assert.deepEqual(validateDayHours([], HOURS)[0], 'invalid_day_hours')
   assert.deepEqual(validateDayHours({ 0: { start: '10:00', end: '12:00' }, 2: { start: '09:00', end: '17:00' } }, HOURS), [null, {}], 'Sunday is not a booking day; Tuesday equals the default')
+  // Only start/end per day: the appointment length stays ONE global value (service lengths are slots × that length).
+  assert.deepEqual(validateDayHours({ 5: { start: '09:00', end: '16:00', slotMinutes: 15 } }, HOURS), [null, FRIDAY])
+  const grid = computeSlots({ busy: [], rules: { timezone: TZ, ...HOURS, slotMinutes: 30, dayHours: { 1: { start: '10:00', end: '12:00', slotMinutes: 15 } } }, now: zonedToUtc(2031, 1, 6, 6, 0, TZ), days: 1, span: 4 }).slots
+  assert.deepEqual(grid.map((x) => (x.end - x.start) / 60000), [120], 'a 4-slot service on a 30-minute grid is still 120 minutes on a day with its own hours')
 })
 
 test('SET-03 slots: a day of its own changes only that day; closed dates and minimum notice still apply on top', () => {
@@ -268,7 +272,7 @@ test('BOOK-08 exposure: public + at_business only; private never; a visiting bus
   r = await call(addressRoute, 'POST', '/api/dashboard/address', { address: ADDRESS, public: true })
   assert.deepEqual([r.status, r.body.shown], [200, true])
   assert.equal(await info(), '12 Harbor St, Suite 2, Charleston, SC 29401')
-  // The business switches to visiting its customers: the address is no longer sent, though still marked public.
+  // A business that visits its customers (like PoolThru, at_customer) never has its address sent, though marked public.
   db.sql.prepare("INSERT INTO service_settings (customer, appointment_mode, updated_at) VALUES ('tide', 'at_customer', 1)").run()
   assert.equal(await info(), null)
   assert.equal(await publicAddress(db, await customer()), null)
