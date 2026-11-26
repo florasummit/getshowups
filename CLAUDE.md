@@ -676,6 +676,11 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   deletion: billed accounts stay fully recoverable 90 days after the paid period ends (owner Billing card + admin attention).
   Day 90 is NOT authorization to delete: the expiry is recorded (lifecycle.recovery_expired); data is removed only by the
   separately approved retention schedule (RETENTION_SCHEDULE_ENABLED AND ACCOUNT_DELETION_ENABLED; never pilots/test).
+- Growth → Activities (server/acquisition.js, migration 0044 `acquisition_codes`, POST /api/platform/acquisition): the
+  acquisition plan as tracking codes (= the links' utm_campaign). Results are READ from server/sales-attribution.js by
+  code, never typed; status and cost are recorded by the founder AFTER acting (audited). Nothing here sends, publishes
+  or spends; code never sets "sent". Recorded cost is self-reported, kept apart from measured ad spend, and never feeds
+  server/ads/funnel.js. Labels are a company or place, never an email or phone; recipients are never committed (public repo).
 - Billing reconciliation (server/reconcile.js): daily cron + /admin "Run now": Stripe subscriptions + 35 days of paid
   invoices vs our records (status, amount, cancellation, mode, missing either side, payments, billing after deletion).
   Read-only toward Stripe; recorded in audit_log. Auto-applies ONE thing (owner decision 2026-11-18): a subscription we

@@ -330,6 +330,43 @@ test('Twilio setup per business: steps in its own subaccount, submitting off, a 
   expect((await page.request.get(`/api/platform/messaging?customer=${fixtures.E2E_TEXTS_CUSTOMER}`)).status()).toBe(403)
 })
 
+test('Growth → Activities: the acquisition plan by tracking code; the founder records status and cost; nothing is sent @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  const outside = []
+  page.on('request', (r) => /stripe|checkout|resend|twilio/i.test(r.url()) && outside.push(r.url()))
+  await page.goto('/admin/growth')
+  await page.locator('[data-growth-mode="activities"]').click()
+  const view = page.locator('[data-growth-activities]')
+  await expect(view.locator('[data-acq-activity]')).toHaveCount(10)
+  await expect(view).toContainText('Recording here never sends a message')
+  // A code of its own so the test never collides with another project's run.
+  const code = `e2e-${test.info().project.name.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 12)}-${Date.now() % 100000}`
+  const card = view.locator('[data-acq-activity="referral"]')
+  await card.getByLabel('New tracking code for Referral asks').fill(code)
+  await card.getByRole('button', { name: 'Add a tracking code' }).click()
+  const row = view.locator(`[data-acq-code="${code}"]`)
+  await expect(row).toHaveAttribute('data-status', 'prepared')
+  await row.getByLabel(`Status of ${code}`).selectOption('sent')
+  await expect(view.locator(`[data-acq-code="${code}"]`)).toHaveAttribute('data-status', 'sent')
+  await view.locator(`[data-acq-code="${code}"]`).getByText('Name and cost').click()
+  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).fill('pat@example.com')
+  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Label of ${code}`).blur()
+  await expect(view.getByRole('alert')).toContainText('without an email address')
+  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Cost of ${code}`).fill('42')
+  await view.locator(`[data-acq-code="${code}"]`).getByLabel(`Cost of ${code}`).blur()
+  await expect(view.locator('[data-acq-total="cost"]')).toContainText('Recorded by you: $')
+  // Saved: a reload shows the same status.
+  await page.reload()
+  await page.locator('[data-growth-mode="activities"]').click()
+  await expect(page.locator(`[data-acq-code="${code}"]`)).toHaveAttribute('data-status', 'sent')
+  expect(outside).toEqual([])
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 })
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow, `activities overflow at ${width}px`).toBeLessThanOrEqual(0)
+  }
+})
+
 test('Growth: Measure labels every figure; Simulate changes outputs without touching billing; Decide names an experiment with evidence @mobile', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   const billingCalls = []
@@ -364,7 +401,7 @@ test('Growth: Measure labels every figure; Simulate changes outputs without touc
   await expect(decide).toContainText('Nothing runs by itself')
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 800 })
-    for (const mode of ['measure', 'simulate', 'decide']) {
+    for (const mode of ['activities', 'measure', 'simulate', 'decide']) {
       await page.locator(`[data-growth-mode="${mode}"]`).click()
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow, `${mode} overflow at ${width}px`).toBeLessThanOrEqual(0)

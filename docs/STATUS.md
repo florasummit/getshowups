@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Growth → Activities: acquisition by tracking code (2026-11-25, PR open, NOT released; migration 0044 needs approval)
+Founder request: run customer acquisition from Admin → Growth, reusing what exists.
+- **What already existed and is reused:** tracked links (utm codes kept on booking-page and chat leads,
+  server/ads/attribution.js) and server/sales-attribution.js (prospect → demo booked → attended → business created →
+  paying, by source and campaign; CAC from GetShowUps' own measured ad spend).
+- **Added:** server/acquisition.js = the ten prepared activities as a catalog of tracking codes (codes only; who a code
+  was sent to stays in the founder's notes, never in this repository); `acquisition_codes` (migration 0044) = status
+  (prepared / approved / sent / followed up / replied / said no), first-reached times, self-reported cost and an optional
+  company-or-place label per code; POST /api/platform/acquisition (platform admin, same-origin, audited
+  `acquisition.code_updated`); GET /api/platform/growth gains `acquisition`; Growth gains an Activities tab (links to copy,
+  status, cost, measured results per code and per activity, "Follow-up due" 4 days after a sent code with no reply,
+  other sources listed apart). sales-attribution rows gain `qualified` and `revenueCents` (LIVE payments of the business
+  a prospect became, credited once to the first inquiry; null in test mode).
+- **Rules:** recording a status never sends, publishes or spends anything; "sent" is recorded by the founder after they
+  sent it themselves. Recorded cost is self-reported, shown apart from platform-measured ad spend, and never feeds
+  server/ads/funnel.js. Before 0044: links and results work, saving answers 409 not_ready.
+- **Verified:** unit tests walk the real routes (tracked link → public lead route → booked demo → attended → business →
+  live subscription and payment) on the in-memory database with Google as a stand-in: SIMULATED data. Production has
+  no outreach sent and no paying customer; nothing there was changed.
+- **Next:** founder approves the PR and migration 0044 (applied alone; 0040 stays unapplied), then the first batch.
+
 ## Website chat panel (2026-11-25, PR #175, live; founder approved the design, migration 0043 and the release)
 - **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link
   (Receptionist → On your website). Off by default; off = the link, byte for byte, so no live site changes at deploy.

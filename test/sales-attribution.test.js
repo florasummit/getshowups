@@ -88,7 +88,7 @@ test('test-mode billing: prospects, consultations and businesses by source; nobo
   assert.equal(r.cacCents, null)
   assert.equal(r.spendCents, 30000)
   const by = Object.fromEntries(r.bySource.map((s) => [`${s.source}|${s.campaign}`, s]))
-  assert.deepEqual(by['link:openai|gsu-chatgpt-1'], { source: 'link:openai', campaign: 'gsu-chatgpt-1', prospects: 2, consultationsBooked: 1, consultationsAttended: 1, businessesCreated: 1, paying: null })
+  assert.deepEqual(by['link:openai|gsu-chatgpt-1'], { source: 'link:openai', campaign: 'gsu-chatgpt-1', prospects: 2, qualified: 2, consultationsBooked: 1, consultationsAttended: 1, businessesCreated: 1, paying: null, revenueCents: null })
   assert.equal(by['google_ads|gsuCamp001'].businessesCreated, 1)
   assert.equal(by['direct|null'].prospects, 2)
   assert.ok(!JSON.stringify(r).includes('@'), 'counts only: no email ever leaves')
