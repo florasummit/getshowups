@@ -16,6 +16,7 @@ import { htmlResponse, renderNotice, renderSite } from '../../../../server/site-
 import { checkpointDraft } from '../../../../server/website-history.js'
 import { starterSite } from '../../../../server/site-starter.js'
 import { starterFacts } from '../../../../server/website-import.js'
+import { applyRevision } from '../../../../server/website-revise.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env)
@@ -45,6 +46,11 @@ export async function onRequestGet({ request, env }) {
       const draft = (await loadWebsite(db, session.customer)).draft
       const option = Number.parseInt(q.get('option') || '0', 10)
       content = { ...content, design: g.designs[option] ?? content.design ?? null, logo: draft.logo, hero: draft.hero, photos: draft.photos }
+      // A "Describe a change" version of a multi-page website: the draft with exactly what 'apply' would write.
+      if (draft.site && g.basis) {
+        const ids = await assetIdsFor(db, session.customer.id)
+        content = validateContent(applyRevision(draft, g).content, await approvedClaimsFor(db, session.customer.id), ids, { prior: draft.services })[1]
+      }
       // The same conversion 'apply' with studio: true performs (functions/api/dashboard/website/index.js); not stored.
       if (q.get('studio') === '1' && !draft.site && (await studioAccess(env, session.customer))) {
         const { site } = starterSite(content, await starterFacts(env, session.customer), { kinds: ['contact', 'privacy'], design: content.design })
@@ -56,7 +62,7 @@ export async function onRequestGet({ request, env }) {
     if (!content) return htmlResponse(404, renderNotice('Not published yet', 'Publish your website to see it here.'), { preview: true })
     const page = /^[a-z0-9-]{0,32}$/.test(q.get('page') || '') ? q.get('page') || '' : ''
     // Multi-page designs: nav links stay inside the private preview.
-    const pageBase = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}${generation && q.get('studio') === '1' ? `generation=${encodeURIComponent(generation)}&option=${Number.parseInt(q.get('option') || '0', 10) || 0}&studio=1&` : ''}page=`
+    const pageBase = `/api/dashboard/website/preview?${live ? 'live=1&' : ''}${generation ? `generation=${encodeURIComponent(generation)}&option=${Number.parseInt(q.get('option') || '0', 10) || 0}&${q.get('studio') === '1' ? 'studio=1&' : ''}` : ''}page=`
     return htmlResponse(200, renderSite(await siteBusinessInfo(db, session.customer), content, { preview: true, page, pageBase }), { preview: true })
   } catch (err) {
     console.error('preview failed:', err?.message)

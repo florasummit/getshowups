@@ -177,3 +177,63 @@ test('WEB-07 / WEB-09: the editor is offered its industry’s own licensed photo
   // The private preview page (new tab) still says what it is.
   assert.match((await call(preview, 'GET', { cookie: c, path: '/api/dashboard/website/preview' })).text, /Preview\. Only you can see this\./)
 })
+
+// ---- WEB-08: the included "Describe a change" on a multi-page website (server/website-revise.js) ----
+test('WEB-08: a change request on a multi-page website is ONE included-model request → a pending version; only what changed is written onto the owner’s pages; legal pages, sections and hand-made colours stay', async () => {
+  const { reviseView, applyRevision } = await import('../server/website-revise.js')
+  const c = await cookieFor('pools')
+  let draft = (await call(website, 'POST', { cookie: c, body: { action: 'starter' } })).json.website.draft
+  // The owner edits by hand first: a headline on the page and a brand colour.
+  draft.site.pages[0].sections[0].heading = 'Pool care, done right'
+  draft.site.theme.colors.accent = '#7c3aed'
+  draft = (await call(website, 'POST', { cookie: c, body: { action: 'save', content: draft } })).json.website.draft
+  const privacyBefore = JSON.stringify(draft.site.pages.find((p) => p.legal))
+  const structure = (d) => d.site.pages.map((p) => [p.slug, p.sections.map((s) => s.id)])
+  // The writer is shown the page as it is now (the hand-edited headline, not the stale flat field).
+  assert.equal(reviseView(draft).headline, 'Pool care, done right')
+  assert.equal(reviseView(draft).site, undefined)
+  let asked = 0
+  let shown = null
+  env.AI = {
+    run: async (_model, body) => {
+      asked++
+      shown = JSON.stringify(body.messages)
+      const current = JSON.parse(shown.match(/\{\\"headline\\".*?\\"design\\":\{.*?\}\}/)?.[0].replaceAll('\\"', '"') || 'null')
+      // Rewords the introduction, invents a rating (must be refused), keeps the design exactly as shown.
+      return { response: JSON.stringify({ headline: current?.headline || 'Pool care, done right', intro: 'Friendly weekly pool care for Charleston homes.', about: '', services: [{ name: 'Weekly pool care', description: 'Rated 5 stars by 300 customers.' }], seoTitle: '', seoDescription: '', design: current?.design || null }), usage: { prompt_tokens: 10, completion_tokens: 10 } }
+    },
+  }
+  const left = (await call(website, 'GET', { cookie: c })).json.aiUsage.revision.remaining
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'revise', instruction: 'Make the introduction friendlier' } })
+  assert.equal(r.status, 200)
+  assert.equal(asked, 1, 'one request to the included model')
+  assert.match(shown, /Pool care, done right/)
+  assert.equal(r.json.aiUsage.revision.remaining, left - 1, 'the same daily allowance')
+  // Pending: nothing saved yet; the private preview shows the draft with the change.
+  assert.equal((await call(website, 'GET', { cookie: c })).json.website.draft.site.pages[0].sections[0].text, draft.site.pages[0].sections[0].text)
+  const pv = await call(preview, 'GET', { cookie: c, path: `/api/dashboard/website/preview?generation=${r.json.generation.id}&option=0` })
+  assert.equal(pv.status, 200)
+  assert.match(pv.text, /Friendly weekly pool care for Charleston homes\./)
+  assert.match(pv.text, /<header class="nav /, 'still the multi-page website')
+  // Keep it: only the introduction changed.
+  const kept = await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: r.json.generation.id, option: 0 } })
+  assert.equal(kept.status, 200)
+  const after = kept.json.website.draft
+  assert.equal(after.site.pages[0].sections[0].text, 'Friendly weekly pool care for Charleston homes.')
+  assert.equal(after.site.pages[0].sections[0].heading, 'Pool care, done right', 'the hand-written headline stays')
+  assert.equal(after.site.theme.colors.accent, '#7c3aed', 'a colour the request did not change is not reset')
+  assert.deepEqual(structure(after), structure(draft), 'no page or section added, removed or moved')
+  assert.equal(JSON.stringify(after.site.pages.find((p) => p.legal)), privacyBefore, 'the legal page is untouched')
+  assert.ok(!JSON.stringify(after).includes('Rated 5 stars'), 'an invented claim never reaches the draft')
+  assert.equal(kept.json.website.published, false, 'nothing is published by keeping a change')
+  assert.ok(kept.json.checkpoints.some((x) => x.reason === 'before_ai_change'), 'the draft from before is kept in History')
+  // Pure rule: a changed palette changes the colours; an unchanged one never does; a result without a basis is not this.
+  const g = { basis: { headline: 'A', intro: 'B', about: '', services: [], design: { palette: 'lagoon', fonts: 'modern', shape: 'round', heroImage: null } }, content: { headline: 'A', intro: 'B', about: '', services: [] }, designs: [{ palette: 'midnight', fonts: 'modern', shape: 'round', heroImage: null }] }
+  const dark = applyRevision(after, g)
+  assert.deepEqual(dark.changed, ['colours'])
+  assert.equal(dark.content.site.theme.colors.bg, PALETTES.midnight.bg)
+  assert.deepEqual(applyRevision(after, { ...g, designs: [g.basis.design] }).changed, [])
+  // Three new designs can still never replace a multi-page website.
+  const gen = (await call(website, 'POST', { cookie: c, body: { action: 'template' } })).json.generation
+  assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: gen.id, option: 0 } })).json.error, 'designed_site')
+})

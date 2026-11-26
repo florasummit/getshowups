@@ -373,9 +373,34 @@ export default function WebsiteTab() {
       </section>
       )}
 
+      {/* The included "Describe a change" for the full editor too (finding WEB-08): a pending version the owner keeps or
+          discards; while one is waiting its preview stands in for the editor, so nothing is edited underneath it. */}
+      {studioMode && (
+        <details className="card site-fold site-ask" open={Boolean(pending) || undefined}>
+          <summary>Describe a change and let GetShowUps make it (included)</summary>
+          <ReviseBox
+            pages
+            usage={data.aiUsage}
+            storeKey={data.url}
+            ownKey={data.aiKey?.status === 'ok' ? data.aiKey.provider : null}
+            onUsage={setUsage}
+            onPreview={setPending}
+            hold={unsaved && !pending ? 'Saving your latest changes first…' : null}
+            onApplied={(d) => {
+              refresh(d)
+              setEditorKey((k) => k + 1)
+            }}
+          />
+        </details>
+      )}
+
       {!w.generated && (
         <div id="site-edit" className="site-edit-anchor">
-          {designed && data.studio ? (
+          {studioMode && pending ? (
+            <section className="site-preview-wrap" aria-label="Preview">
+              <WebsitePreview stamp={stamp} query={`generation=${pending.id}&option=0&`} unsaved />
+            </section>
+          ) : designed && data.studio ? (
             // The full editor: edit the multi-page website directly (no AI), with live preview and autosave.
             <SiteStudio
               key={editorKey}

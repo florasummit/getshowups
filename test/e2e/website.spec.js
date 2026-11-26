@@ -52,7 +52,24 @@ test('no website yet: one start decision → three designs → the full editor �
   await expect(studio.getByRole('button', { name: 'Undo' })).toBeVisible()
   await expect(studio.getByRole('combobox').first().locator('option[value="__add"]')).toHaveText('+ Add a page…')
   await expect(page.getByRole('heading', { name: 'Edit text and photos' })).toHaveCount(0)
-  await expect(page.getByLabel('Describe a change')).toHaveCount(0)
+  // WEB-08: the included "Describe a change" works here too. It says what it can touch, shows the result as a version
+  // that is not saved (its preview stands in for the editor, publishing waits), and only "Keep this" writes the draft.
+  const ask = page.locator('details.site-ask')
+  await ask.locator('summary').click()
+  await expect(ask.locator('[data-revise-scope]')).toContainText('never touches your privacy or terms pages')
+  await ask.getByRole('button', { name: 'Make it more modern' }).click()
+  await expect(page.getByText('Here’s the new version. Keep it?')).toBeVisible({ timeout: 30_000 })
+  await expect(page.frameLocator('iframe[title="Website preview"]').getByRole('heading', { level: 1 })).toHaveText(/^Modern /)
+  await expect(page.locator('.site-preview figcaption')).toHaveText('New version · not saved yet')
+  await expect(studio).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Publish/ })).toHaveCount(0)
+  expect((await site()).website.draft.site.pages[0].sections[0].heading).not.toMatch(/^Modern /)
+  await page.getByRole('button', { name: 'Keep this' }).click()
+  await expect(studio).toBeVisible({ timeout: 20_000 })
+  const kept = (await site()).website
+  expect(kept.draft.site.pages[0].sections[0].heading).toMatch(/^Modern /)
+  expect(kept.draft.site.pages.map((p) => p.slug)).toEqual(['', 'contact', 'privacy'])
+  expect(kept.published).toBe(false)
   const draft = (await site()).website.draft
   expect(draft.site.name).toBe(chosen)
   expect(draft.site.pages.map((p) => p.slug)).toEqual(['', 'contact', 'privacy'])
