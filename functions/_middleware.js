@@ -11,6 +11,7 @@ import { serveSite } from '../server/site-serve.js'
 import { liveContent } from '../server/website.js'
 import { testStatus } from '../server/testbusiness.js'
 import { htmlResponse, renderNotice } from '../server/site-render.js'
+import { withPublicHead } from '../server/public-head.js'
 
 export function isOwnHost(host, env) {
   if (!host) return true
@@ -64,7 +65,8 @@ export async function onRequest(context) {
   // A test session (server/acceptance.js) reaches its short list and nothing else, on our own address only.
   if (url.pathname.startsWith('/api/') && carriesTestSession(request) && !/^\/api\/acceptance\/(pair|session)$/.test(url.pathname)) return withAppHeaders(missingConfig(env).length || !isOwnHost(url.hostname, env) ? new Response(null, { status: 403 }) : await dispatch(request, env, ROUTES), url)
   // Preview deployments have no bindings: nothing to route.
-  if (missingConfig(env).length || isOwnHost(url.hostname, env)) return withAppHeaders(await next(), url)
+  // A business's booking and chat pages leave without GetShowUps' own marketing title and description (server/public-head.js).
+  if (missingConfig(env).length || isOwnHost(url.hostname, env)) return withAppHeaders(await withPublicHead(await next(), url, request), url)
   // Certificate validation and platform paths are left to the hosting platform.
   if (url.pathname.startsWith('/.well-known/acme-challenge/') || url.pathname.startsWith('/cdn-cgi/')) return next()
 
