@@ -248,6 +248,7 @@
   min-width: 0;
 }
 .pub-field > span,
+.pub-field > label,
 .pub-field > legend {
   font-size: 13.5px;
   font-weight: 600;
@@ -292,6 +293,7 @@ textarea.pub-input {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  align-items: start; /* a message under one field never stretches its neighbour */
 }
 .pub-row--zip {
   grid-template-columns: 1fr 120px;
@@ -314,6 +316,11 @@ textarea.pub-input {
   height: 18px;
   margin-top: 1px;
   accent-color: var(--pub-action);
+}
+/* A field's own problem, right under the field (one submit marks them all). */
+.pub-field-error {
+  font-size: 13.5px;
+  color: var(--pub-danger);
 }
 .pub-error {
   font-size: 14px;
@@ -419,6 +426,25 @@ textarea.pub-input {
 .pub-chip:hover {
   border-color: var(--pub-accent);
   background: color-mix(in srgb, var(--pub-accent) 5%, var(--pub-surface));
+}
+
+/* ---------- Touch targets: on a phone (or any touch screen) every control is at least 44 px tall ---------- */
+@media (max-width: 760px), (pointer: coarse) {
+  .pub-btn--link,
+  .pub-top-link,
+  .pub-foot a,
+  a.pub-brand {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .pub-chip {
+    min-height: 44px;
+  }
+  .pub-foot {
+    align-items: center;
+    padding-top: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

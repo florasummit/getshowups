@@ -104,6 +104,13 @@
   gap: 14px;
   margin-top: -4px;
 }
+/* The owner's notes inside the details form (phones; on desktop they are in the summary column). */
+.bk-form > .bk-good {
+  padding: 12px;
+  border: 1px solid var(--pub-line);
+  border-radius: var(--pub-radius-sm);
+  background: var(--pub-sunken);
+}
 .bk-good {
   display: grid;
   gap: 6px;
@@ -208,6 +215,26 @@
   }
 }
 
+.bk-zone,
+.bk-zone-note {
+  color: var(--pub-muted);
+  font-weight: 400;
+}
+.bk-zone {
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.bk-zone-note {
+  margin-top: -10px;
+}
+
+/* Address ZIP that is not the ZIP checked: the choice, before anything is sent */
+.bk-mismatch .pub-btn {
+  width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
 /* Address */
 .bk-address {
   border: 0;
@@ -266,6 +293,12 @@
 }
 .bk-done .bk-good {
   width: 100%;
+}
+.bk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
 }
 
 /* Phone */
