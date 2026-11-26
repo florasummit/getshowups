@@ -88,7 +88,7 @@ export default function Header() {
         </a>
         <GetStarted
           location="mobile_nav"
-          className="btn btn-primary btn-block"
+          className="btn btn-ink btn-block"
           onClick={() => {
             track('early_access_cta', { location: 'mobile_nav' })
             close()

@@ -5,18 +5,22 @@ import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
 import { AvailabilityForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
-import { CloseBusiness, Notices, People, Services, SetupCheck, SignInSecurity, YourAccount, YourData } from './AccountSettings.jsx'
+import { CalendarDisconnect, CloseBusiness, Notices, People, Services, SetupCheck, SignInSecurity, YourAccount, YourData } from './AccountSettings.jsx'
 import PlanDetails from './PlanCard.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { NextStep } from './Readiness.jsx'
 import Appointments, { Appointment, OutcomeList } from './Appointments.jsx'
-import { AssistantButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
+import { AssistantButton, HelpButton, MetricCard, MetricHint, TitleHelp } from './Help.jsx'
 import { clearMemory, setMemoryOwner } from './assistant-memory.js'
 import { setAssistantView } from './assistant-store.js'
 import Insight from './Insight.jsx'
 import Scorecard from './Scorecard.jsx'
 import { useInsights } from './insights-data.js'
-import { LoadError, Pill } from './ui.jsx'
+import { LoadError, Pill, TabBar } from './ui.jsx'
+import { plural } from '../lib/format.js'
+import CopyLink from './CopyLink.jsx'
+import { scrollToCard } from './owner-lib.js'
+import { usePageTitle } from './ui-hooks.js'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
 const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
@@ -35,12 +39,9 @@ export function SignOut({ email, label = 'Sign out', to = '/dashboard', extra = 
     <div className="header-user">
       {extra}
       {/* Owner pages only (not /admin): the plan promises direct help from the founding team, so it is reachable from
-          every owner screen, including onboarding, not just when an account has a problem. */}
-      {to === '/dashboard' && (
-        <a className="link-btn" href="mailto:hello@getshowups.com?subject=GetShowUps%20help">
-          Help
-        </a>
-      )}
+          every owner screen, including onboarding, not just when an account has a problem. It opens help in the page
+          (topics + our address as text): a bare mailto link does nothing in a browser without a mail program. */}
+      {to === '/dashboard' && <HelpButton />}
       <span className="header-email">{email}</span>
       <button type="button" className="link-btn" onClick={signOut}>
         {label}
@@ -137,14 +138,6 @@ function BillingCard({ billing, reload }) {
   )
 }
 
-function SetupCheckCard({ go }) {
-  return (
-    <div className="setup-check-card">
-      <SetupCheck go={go} compact />
-    </div>
-  )
-}
-
 function AccountNotice({ customer, billing, closing, go }) {
   const [state, setState] = useState({})
   const s = billing?.subscription?.status
@@ -171,24 +164,6 @@ function AccountNotice({ customer, billing, closing, go }) {
         </a>
       )}
     </div>
-  )
-}
-
-function CopyLink({ url, label = 'Copy link' }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    } catch {
-      window.prompt('Copy your link', url)
-    }
-  }
-  return (
-    <button type="button" className="btn btn-quiet" onClick={copy}>
-      {copied ? 'Copied' : label}
-    </button>
   )
 }
 
@@ -239,7 +214,7 @@ function WebsiteCard({ me, site, go }) {
             <a className="btn btn-quiet btn-sm" href={url} target="_blank" rel="noreferrer">
               View website
             </a>
-            <CopyLink url={url} />
+            <CopyLink url={url} label="Copy website link" />
           </div>
         </>
       ) : (
@@ -286,31 +261,74 @@ function Stats({ stats, visit, upcoming }) {
   )
 }
 
-// What needs the owner, most urgent first. Each item has one obvious action. Empty → "All caught up".
-function Attention({ data, go }) {
-  const { items, unread } = data.attention
+// What needs the owner: ONE list, most urgent first. People who are waiting come before setup notices (the same items
+// Settings → Setup check lists, here without the optional ones). One vocabulary for severity everywhere: Urgent, Important
+// (and Optional, in Settings only). Each row has one obvious action; a notice the owner may ignore can be dismissed.
+const SETUP_ROWS = 3
+const OPEN_LABEL = { settings: 'Fix in Settings', receptionist: 'Open receptionist', website: 'Open website', appointments: 'Open appointments' }
+function Attention({ attention, failed, go }) {
+  const [setup, setSetup] = useState(undefined)
+  const [error, setError] = useState('')
+  const load = useCallback(() => api('/api/dashboard/setup-check').then(({ status, data }) => setSetup(status === 200 ? data : null)), [])
+  useEffect(() => {
+    load()
+    window.addEventListener('gsu:settings-saved', load)
+    return () => window.removeEventListener('gsu:settings-saved', load)
+  }, [load])
+  const dismiss = async (id) => {
+    setError('')
+    const { status, data } = await api('/api/dashboard/setup-check', { method: 'POST', body: { id, action: 'dismiss' } })
+    if (status === 200) setSetup(data)
+    else setError('Couldn’t save that. Please try again.')
+  }
+  if (!attention && setup === undefined) return <div className="ui-skeleton-block" aria-busy="true" />
+  const fixes = (setup?.items || []).filter((x) => x.level !== 'optional')
+  const rows = [
+    // "Review" lands on the card where those people are listed, each with a way to reach them.
+    ...(attention?.items || []).map((i) => ({ key: i.id || i.text, urgent: i.urgent, text: i.text, label: i.label, where: ['unbooked', 'coverage'].includes(i.id) ? 'appointments#not-booked' : i.page })),
+    ...fixes.slice(0, SETUP_ROWS).map((x) => ({ key: `setup-${x.id}`, check: x.id, urgent: x.level === 'critical', text: x.title, sub: `${x.why} ${x.fix}`, label: OPEN_LABEL[x.where.split('#')[0]] || 'Open', where: x.where, dismiss: x.dismiss })),
+  ]
+  const unread = (attention?.unread.length || 0) + (setup?.unread.length || 0) + (setup === null ? 1 : 0) + (failed ? 1 : 0)
   return (
     <section className="card ui-attention" aria-label="Needs your attention">
       <h2 className="card-title">Needs your attention</h2>
-      {items.length ? (
+      {rows.length ? (
         <ul className="ui-attention-list">
-          {items.map((i) => (
-            <li key={i.text}>
+          {rows.map((r) => (
+            <li key={r.key} data-attention={r.urgent ? 'urgent' : 'important'} data-check={r.check}>
               <span className="ui-attention-text">
-                <Pill tone={i.urgent ? 'bad' : 'warn'}>{i.tag}</Pill> {i.text}
+                <Pill tone={r.urgent ? 'bad' : 'warn'}>{r.urgent ? 'Urgent' : 'Important'}</Pill> {r.text}
+                {r.sub && <span className="ui-attention-sub">{r.sub}</span>}
               </span>
-              <button type="button" className="btn btn-sm btn-quiet" onClick={() => go(i.page)}>
-                {i.label}
-              </button>
+              <span className="ui-attention-actions">
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => go(r.where)}>
+                  {r.label}
+                </button>
+                {r.dismiss && (
+                  <button type="button" className="btn btn-sm btn-quiet" onClick={() => dismiss(r.check)} data-dismiss={r.check}>
+                    {r.dismiss}
+                  </button>
+                )}
+              </span>
             </li>
           ))}
         </ul>
-      ) : unread.length ? null : (
+      ) : unread ? null : (
         <p className="ui-all-clear">
           <Pill tone="ok">All caught up</Pill> Nobody is waiting on you.
         </p>
       )}
-      {unread.length > 0 && <p className="fine">Some of this couldn’t be checked just now.</p>}
+      {fixes.length > SETUP_ROWS && (
+        <button type="button" className="link-btn" onClick={() => go('settings#setup-check')}>
+          {plural(fixes.length - SETUP_ROWS, 'more setup notice')} in Settings
+        </button>
+      )}
+      {unread > 0 && <p className="fine">Some of this couldn’t be checked just now.</p>}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   )
 }
@@ -356,20 +374,15 @@ function AdsResults({ ads }) {
 function Overview({ me, data, reload, go, site, insight }) {
   const tz = me.customer.timezone
   const visit = me.customer.appointmentMode === 'at_customer'
+  const ok = data && !data.failed
   return (
     <>
-      <NextStep onOpen={go} skip={site && !site.website?.published ? ['page'] : []} />
-      {!data && <div className="ui-skeleton-block" aria-busy="true" />}
-      {data?.failed && (
-        <LoadError what="your results" onRetry={reload} />
-      )}
-      {data && !data.failed && (
+      {/* First: who and what needs the owner (on a phone an urgent row is inside the first screen). Then the day's work
+          (outcomes to record, what is coming up), then the one setup step, then numbers. */}
+      <Attention attention={ok ? data.attention : null} failed={Boolean(data?.failed)} go={go} />
+      {data?.failed && <LoadError what="your results" onRetry={reload} />}
+      {ok && (
         <div className="enter ui-overview">
-          <Attention data={data} go={go} />
-          <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.filter((a) => !a.test).length} />
-          {insight}
-          <Scorecard />
-          {data.ads && <AdsResults ads={data.ads} />}
           {data.needsOutcome.length > 0 && (
             <section className="card">
               <h2 className="card-title">{visit ? 'How did these visits go?' : 'Did they show up?'}</h2>
@@ -398,6 +411,15 @@ function Overview({ me, data, reload, go, site, insight }) {
           </section>
         </div>
       )}
+      <NextStep onOpen={go} skip={site && !site.website?.published ? ['page'] : []} bookingUrl={me.bookingUrl} />
+      {ok && (
+        <div className="enter ui-overview">
+          <Stats stats={data.stats} visit={visit} upcoming={data.upcoming.filter((a) => !a.test).length} />
+          {insight}
+          <Scorecard />
+          {data.ads && <AdsResults ads={data.ads} />}
+        </div>
+      )}
       <WebsiteCard me={me} site={site} go={go} />
     </>
   )
@@ -410,7 +432,11 @@ function CalendarSettings() {
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    api('/api/dashboard/calendar').then(({ status: s, data }) => setStatus(s === 200 ? data : { status: 'error' }))
+    const load = () => api('/api/dashboard/calendar').then(({ status: s, data }) => setStatus(s === 200 ? data : { status: 'error' }))
+    load()
+    // Disconnected just below (CalendarDisconnect): the status line follows.
+    window.addEventListener('gsu:settings-saved', load)
+    return () => window.removeEventListener('gsu:settings-saved', load)
   }, [])
   const [label, tone] = CAL_STATUS[status?.status] || ['Couldn’t check right now', 'bad']
   const reconnect = async () => {
@@ -437,6 +463,8 @@ function CalendarSettings() {
           Use a different calendar
         </button>
       )}
+      {/* Shown once, here: what stops if it is disconnected, and the disconnect itself (not a second row further down). */}
+      {tone === 'ok' && <CalendarDisconnect />}
     </div>
   )
 }
@@ -481,36 +509,79 @@ function Reminders() {
   )
 }
 
-function Settings({ me, reload, billing, reloadBilling, go }) {
-  const c = me.customer
+// Every card of the page, in order: [id, the card's heading, short name for the menu]. The menu stays in reach while the
+// page scrolls (a row of links on a wide screen, one "Jump to" control on a phone), so no card is a long scroll away.
+const settingsSections = ({ plan, ghl }) =>
+  [
+    ['setup-check', 'Setup check'],
+    ['business', 'Business'],
+    ['services', 'Services and prices', 'Services'],
+    ['details', 'Details on your website (phone number)', 'Phone and details'],
+    ['policies', 'What customers should know'],
+    ['booking-hours', 'Booking hours'],
+    ['closed-dates', 'Closed dates and notice', 'Closed dates'],
+    ['google-calendar', 'Google Calendar'],
+    ['reminders', 'Reminders'],
+    plan && ['plan', 'Plan and billing', 'Plan'],
+    ghl && ['ghl', 'GoHighLevel'],
+    ['connected', 'Connected services', 'Connections'],
+    ['people', 'People'],
+    ['sign-in', 'Sign-in and security', 'Sign-in'],
+    ['notifications', 'Notifications to you', 'Notifications'],
+    ['data', 'Your data'],
+    ['close', 'Close the business', 'Close'],
+    ['account', 'Your own account', 'Your account'],
+  ].filter(Boolean)
+
+function SettingsMenu({ sections }) {
   return (
-    <div className="enter">
-      <h1 className="title title--page">Settings</h1>
+    <div className="settings-menu" data-settings-menu>
       <nav className="settings-nav" aria-label="Settings sections">
-        {[
-          ['business', 'Business'],
-          ['services', 'Services'],
-          ['booking-hours', 'Booking'],
-          ['connected', 'Connections'],
-          ['people', 'People'],
-          ...(billing ? [['plan', 'Plan']] : []),
-          ['notifications', 'Notifications'],
-          ['data', 'Your data'],
-          ['close', 'Close'],
-        ].map(([id, label]) => (
+        {sections.map(([id, title, short]) => (
           <a
             key={id}
             href={`#${id}`}
             onClick={(e) => {
               e.preventDefault()
-              document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              scrollToCard(id)
             }}
           >
-            {label}
+            {short || title}
           </a>
         ))}
       </nav>
-      <section className="card" aria-labelledby="setup-check-title">
+      <label className="settings-jump">
+        <span className="sr-only">Jump to a section</span>
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) scrollToCard(e.target.value)
+            e.target.blur()
+          }}
+        >
+          <option value="">Jump to a section…</option>
+          {sections.map(([id, title]) => (
+            <option key={id} value={id}>
+              {title}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function Settings({ me, reload, billing, reloadBilling, go }) {
+  const c = me.customer
+  // "Plan and billing" exists only for a business with a plan to manage: sentences that send the owner there are shown
+  // (as a link to the card) only then. A complimentary account has the card but nothing to cancel.
+  const planCard = Boolean(billing)
+  const hasPlan = planCard && !billing.complimentary
+  return (
+    <div className="enter">
+      <h1 className="title title--page">Settings</h1>
+      <SettingsMenu sections={settingsSections({ plan: planCard, ghl: me.features?.ghl })} />
+      <section className="card" id="setup-check" aria-labelledby="setup-check-title">
         <h2 className="card-title" id="setup-check-title">
           Setup check
         </h2>
@@ -518,7 +589,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       </section>
       <section className="card" id="business">
         <TitleHelp help="service_area">Business</TitleHelp>
-        <BusinessForm key={c.serviceZips.join()} customer={c} submitLabel="Save business" onSaved={reload} />
+        <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} inline />
       </section>
       <section className="card" id="services">
         <h2 className="card-title">Services and prices</h2>
@@ -534,7 +605,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       </section>
       <section className="card" id="booking-hours">
         <TitleHelp help="hours">Booking hours</TitleHelp>
-        <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} />
+        <HoursForm customer={c} submitLabel="Save hours" onSaved={reload} inline />
       </section>
       <section className="card" id="closed-dates">
         <h2 className="card-title">Closed dates and notice</h2>
@@ -544,13 +615,13 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
         <TitleHelp help="calendar">Google Calendar</TitleHelp>
         <CalendarSettings />
       </section>
-      <section className="card">
+      <section className="card" id="reminders">
         <TitleHelp help="reminders">Reminders</TitleHelp>
         <Reminders />
       </section>
       <div id="plan">{billing && <BillingCard billing={billing} reload={reloadBilling} />}</div>
       {me.features?.ghl && (
-        <section className="card">
+        <section className="card" id="ghl">
           <h2 className="card-title">GoHighLevel</h2>
           <Suspense fallback={<div aria-busy="true" />}>
             <GhlSettings />
@@ -559,13 +630,14 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       )}
       <section className="card" id="connected">
         <h2 className="card-title">Connected services</h2>
-        <Services go={go} />
+        {/* Google Calendar has its own card above (status, reconnect, disconnect): listed once, in one style. */}
+        <Services go={go} skip={['calendar']} />
       </section>
       <section className="card" id="people">
         <h2 className="card-title">People</h2>
-        <People />
+        <People hasPlan={hasPlan} />
       </section>
-      <section className="card">
+      <section className="card" id="sign-in">
         <h2 className="card-title">Sign-in and security</h2>
         <SignInSecurity />
         <p className="fine">
@@ -582,9 +654,9 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       </section>
       <section className="card" id="close">
         <h2 className="card-title">Close the business</h2>
-        <CloseBusiness />
+        <CloseBusiness hasPlan={hasPlan} />
       </section>
-      <section className="card">
+      <section className="card" id="account">
         <h2 className="card-title">Your own account</h2>
         <YourAccount />
       </section>
@@ -633,17 +705,21 @@ export default function Home({ me, reload }) {
     window.addEventListener('gsu:changed', on)
     return () => window.removeEventListener('gsu:changed', on)
   }, [reload, loadOverview])
-  // On narrow screens the tab bar scrolls: keep the current tab in view.
-  useEffect(() => {
-    document.querySelector('.tabs [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
-  }, [view])
+  // The browser tab names the page (the tab row itself keeps the current tab in view: TabBar).
+  usePageTitle(tabs.find(([id]) => id === view)?.[1])
+  // where: a tab ("website"), a card of a tab ("settings#booking-hours": the page opens and scrolls to it) or "billing".
   const go = (where) => {
-    const tab = where === 'billing' ? 'settings' : where
+    const [page, card] = String(where).split('#')
+    const tab = page === 'billing' ? 'settings' : page
     if (tab !== view && document.querySelector('.app-main form[data-dirty]') && !window.confirm('You have changes that aren’t saved. Leave this page and lose them?')) return
-    if (where === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable) return openBilling({ action: 'portal' }, () => {})
-    window.history.pushState(null, '', tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`)
-    setView(tab)
-    window.scrollTo(0, 0)
+    if (page === 'billing' && billing?.subscription?.status === 'past_due' && billing.subscription.manageable) return openBilling({ action: 'portal' }, () => {})
+    if (tab !== view || !card) {
+      window.history.pushState(null, '', tab === 'overview' ? '/dashboard' : `/dashboard/${tab}`)
+      setView(tab)
+      window.scrollTo(0, 0)
+    }
+    const id = card || (page === 'billing' ? 'plan' : null)
+    if (id) scrollToCard(id)
   }
   useEffect(() => {
     const on = (e) => go(e.detail)
@@ -656,21 +732,7 @@ export default function Home({ me, reload }) {
         <Logo href="/" />
         <SignOut email={me.email} extra={<AssistantButton />} />
       </header>
-      <nav className="tabs" aria-label="Dashboard">
-        {tabs.map(([id, label]) => (
-          <a
-            key={id}
-            href={id === 'overview' ? '/dashboard' : `/dashboard/${id}`}
-            aria-current={view === id ? 'page' : undefined}
-            onClick={(e) => {
-              e.preventDefault()
-              go(id)
-            }}
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
+      <TabBar label="Dashboard" tabs={tabs.map(([id, label]) => [id, label, id === 'overview' ? '/dashboard' : `/dashboard/${id}`])} current={view} onGo={go} />
       {/* A form someone typed in is marked until it is submitted, so changing tabs never silently drops the text. */}
       <main
         className="app-main"
@@ -682,14 +744,13 @@ export default function Home({ me, reload }) {
           <>
             <h1 className="ui-page-title ui-page-title--top">{me.customer.name}</h1>
             <AccountNotice customer={me.customer} billing={billing} closing={me.closing} go={go} />
-            <SetupCheckCard go={go} />
             <Overview me={me} data={data} reload={loadOverview} go={go} site={site} insight={<Insight view="overview" list={found} drop={dropInsight} go={go} covered={data?.followUp?.some((l) => !l.test && l.status === 'new') ? ['unanswered'] : []} />} />
           </>
         )}
-        {view === 'appointments' && <Appointments me={me} data={data} reload={loadOverview} />}
+        {view === 'appointments' && <Appointments me={me} data={data} reload={loadOverview} go={go} />}
         {view === 'followups' && (
           <Suspense fallback={<div aria-busy="true" />}>
-            <FollowUps />
+            <FollowUps overview={data && !data.failed ? data : null} go={go} />
           </Suspense>
         )}
         {view === 'receptionist' && (

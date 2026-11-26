@@ -8,12 +8,34 @@ import { dateIn, holidays, weekday } from './dates.js'
 import { getProfile } from './onboarding.js'
 import { getPolicies } from './policies.js'
 import { liveContent } from './website.js'
+import { track } from './events.js'
 
 const ORDER = { critical: 0, important: 1, optional: 2 }
+// A calendar date as people say it ("Thu, Nov 26"): owners never see 2026-11-26 (docs/DESIGN_SYSTEM.md "Copy").
+const dayText = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const plain = (s) => String(s ?? '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9$+]+/g, ' ').replace(/\b(llc|inc|co|corp|ltd)\b/g, '').replace(/\s+/g, ' ').trim()
 const RECURRING = /\b(weekly|biweekly|bi-weekly|monthly|maintenance plan|every (week|month|other week)|recurring|subscription|membership|plan)\b/i
 const UNIT = /\b(per|each|every|a)\s+(visit|month|week|year|season|hour|hr|job|service|stop|pool|unit|sq|square)|\/\s?(visit|mo|month|wk|week|yr|year|hr|hour|season)|\b(monthly|weekly|hourly|flat|fixed|one[- ]time)\b/i
 export const missingUnit = (s) => /\$?\d/.test(s.price || '') && RECURRING.test(s.name) && !UNIT.test(s.price)
+
+// A notice that says "or ignore this" can be dismissed (today: a holiday that is a booking day). The owner's answer is
+// kept per holiday date as an `events` row (codes and a date, like a dismissed suggestion), so next year's holiday asks again.
+const DAY = 86_400_000
+const dismissedDates = async (db, customerId, now) =>
+  new Set((await db.prepare("SELECT props FROM events WHERE customer = ?1 AND type = 'setup_check_dismissed' AND at >= ?2 LIMIT 100").bind(customerId, now - 120 * DAY).all()).results.map((r) => JSON.parse(r.props).date))
+const openHolidays = (customer, rules, now) => {
+  const closed = new Set(rules.closures.map((c) => c.date))
+  return holidays(dateIn(now, customer.timezone), 21).filter((h) => !closed.has(h.date) && customer.workdays.includes(weekday(h.date)))
+}
+// → true when something was dismissed. Only what is flagged right now can be dismissed; nothing comes from the browser but the id.
+export async function dismissCheck(env, customer, id, now = Date.now()) {
+  if (id !== 'holiday_open') return false
+  const rules = await bookingRules(env.ONBOARDING_DB, customer.id)
+  const ignored = await dismissedDates(env.ONBOARDING_DB, customer.id, now)
+  const open = (rules.ready ? openHolidays(customer, rules, now) : []).filter((h) => !ignored.has(h.date))
+  for (const h of open) await track(env, 'setup_check_dismissed', { id: `setup_check:${customer.id}:holiday_open:${h.date}`, customer: customer.id, props: { id, date: h.date }, at: now, replace: true })
+  return open.length > 0
+}
 
 export async function setupCheck(env, customer, now = Date.now()) {
   const db = env.ONBOARDING_DB
@@ -28,15 +50,15 @@ export async function setupCheck(env, customer, now = Date.now()) {
     soft(db.prepare('SELECT enabled, greeting FROM receptionist_settings WHERE customer = ?1').bind(customer.id).first()),
   ])
   const out = []
-  const add = (id, level, title, why, fix, where) => out.push({ id, level, title, why, fix, where })
+  const add = (id, level, title, why, fix, where, more = {}) => out.push({ id, level, title, why, fix, where, ...more })
   const visits = customer.appointmentMode === 'at_customer'
   if (cal === false) add('calendar', 'critical', 'Google Calendar isn’t connected', 'Customers can’t see any times.', 'Connect it in Settings.', 'settings#google-calendar')
   if (!customer.hoursConfirmed) add('hours', 'critical', 'Booking hours aren’t set', 'Customers can’t book.', 'Set your days and hours.', 'settings#booking-hours')
   if (rules !== UNREAD && rules.ready) {
-    const today = dateIn(now, customer.timezone)
-    const closed = new Set(rules.closures.map((c) => c.date))
-    const open = holidays(today, 21).filter((h) => !closed.has(h.date) && customer.workdays.includes(weekday(h.date)))
-    if (open.length) add('holiday_open', 'critical', `Customers can book ${open.map((h) => `${h.label} (${h.date})`).join(' and ')}`, 'It’s one of your booking days and isn’t marked closed.', 'Add it to Closed dates, or ignore this if you work that day.', 'settings#closed-dates')
+    // An unreadable answer never hides the notice.
+    const ignored = await dismissedDates(db, customer.id, now).catch(() => new Set())
+    const open = openHolidays(customer, rules, now).filter((h) => !ignored.has(h.date))
+    if (open.length) add('holiday_open', 'critical', `Customers can book ${open.map((h) => `${h.label} (${dayText(h.date)})`).join(' and ')}`, 'It’s one of your booking days and isn’t marked closed.', 'Add it to Closed dates, or dismiss this if you work that day.', 'settings#closed-dates', { dismiss: open.length === 1 ? 'I work that day' : 'I work those days' })
     if (rules.minNoticeMinutes === 0) add('no_notice', 'important', 'Customers can book a time that starts in minutes', 'No minimum notice is set.', 'Choose a minimum notice.', 'settings#closed-dates')
   }
   if (visits && !customer.serviceZips.length) add('no_area', 'important', 'Anyone, anywhere, can book a visit', 'You visit customers and no service ZIP codes are listed.', 'List the ZIP codes you serve. Others can still ask, and you decide.', 'settings#business')

@@ -263,13 +263,14 @@ async function context(env, customer) {
   return { db, base, profile, claims, assetIds, industry, allowedStock }
 }
 
-async function store(db, customer, { content, designs, source, usage, latencyMs, rejected, now, model = null }) {
+// basis: what a revision was asked to change (kept so only real changes are applied to a multi-page website).
+async function store(db, customer, { content, designs, source, usage, latencyMs, rejected, now, model = null, basis = null }) {
   const id = crypto.randomUUID().replaceAll('-', '')
   // Our cost only for the included model; a business's own key is billed to its own API account.
   const costMicros = usage && !model ? Math.round((usage.prompt_tokens || 0) * PRICE.inputPerM + (usage.completion_tokens || 0) * PRICE.outputPerM) : 0
   await db
     .prepare('INSERT INTO website_generations (id, customer, content, source, model, input_tokens, output_tokens, cost_micros, latency_ms, rejected, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)')
-    .bind(id, customer.id, JSON.stringify({ content, designs }), source, source === 'ai' ? model || WEBSITE_MODEL : null, usage?.prompt_tokens ?? null, usage?.completion_tokens ?? null, costMicros, latencyMs, rejected.length ? JSON.stringify(rejected) : null, now)
+    .bind(id, customer.id, JSON.stringify(basis ? { content, designs, basis } : { content, designs }), source, source === 'ai' ? model || WEBSITE_MODEL : null, usage?.prompt_tokens ?? null, usage?.completion_tokens ?? null, costMicros, latencyMs, rejected.length ? JSON.stringify(rejected) : null, now)
     .run()
   return id
 }
@@ -373,8 +374,9 @@ export async function reviseWebsite(env, customer, draft, instruction, { now = D
   if (!raw) return { ok: false, httpStatus: 502, error: 'ai_unavailable' }
   const merged = mergeGenerated(draft, raw, facts, claims, { allowZip })
   const design = repairDesign(raw.design, preset, assetIds, allowedStock)
-  const id = await store(db, customer, { content: merged.content, designs: [design], source: 'ai', usage: r?.usage || null, latencyMs, rejected: merged.rejected, now, model })
-  return { ok: true, generation: { id, content: merged.content, designs: [design], source: 'ai', revision: true } }
+  const basis = { headline: current.headline, intro: current.intro, about: current.about, services: current.services, design: preset }
+  const id = await store(db, customer, { content: merged.content, designs: [design], source: 'ai', usage: r?.usage || null, latencyMs, rejected: merged.rejected, now, model, basis })
+  return { ok: true, generation: { id, content: merged.content, designs: [design], source: 'ai', revision: true, basis } }
 }
 
 export async function getGeneration(db, customerId, id) {
@@ -385,5 +387,5 @@ export async function getGeneration(db, customerId, id) {
   // AI designer turns and draft checkpoints live in the same table; they are not generations to apply or preview.
   if (stored?.kind) return null
   // Generations from before designs existed stored the content directly.
-  return stored.content ? { content: stored.content, designs: stored.designs || [], source: r.source } : { content: stored, designs: [], source: r.source }
+  return stored.content ? { content: stored.content, designs: stored.designs || [], source: r.source, ...(stored.basis ? { basis: stored.basis } : {}) } : { content: stored, designs: [], source: r.source }
 }

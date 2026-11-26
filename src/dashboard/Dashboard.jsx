@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, noIndex } from '../lib/api.js'
-import { useEnrollmentOpen } from '../lib/enrollment.js'
+import { INVITED_HREF, useEnrollmentOpen } from '../lib/enrollment.js'
 import { HelpPanel } from './Help.jsx'
 import Setup from './Setup.jsx'
 import Home, { SignOut } from './Home.jsx'
@@ -59,8 +59,24 @@ const clearInvite = () => {
 const clearPlan = () => {
   try {
     localStorage.removeItem(PLAN_KEY)
+    localStorage.removeItem('gsu_invited')
   } catch {
     // ignore
+  }
+}
+
+// The entry for people who were told they may start (testers, businesses we set up by hand) while public sign-up is
+// closed: INVITED_HREF (src/lib/enrollment.js), linked from "Welcome back" only (never from the homepage). It only changes the wording
+// of this screen: who may create a business is decided by the server after sign-in, exactly as before.
+// Remembered with the plan (same browser, across the Google round trip and a later signed-out visit), and forgotten
+// with it once the account has a business.
+const INVITED_KEY = 'gsu_invited'
+function cameInvited() {
+  try {
+    if (new URLSearchParams(window.location.search).get('invited') === '1') localStorage.setItem(INVITED_KEY, '1')
+    return localStorage.getItem(INVITED_KEY) === '1'
+  } catch {
+    return new URLSearchParams(window.location.search).get('invited') === '1'
   }
 }
 
@@ -69,20 +85,27 @@ function SignIn({ invite, plan }) {
   const signup = plan && !invite
   // Sign-up link while enrollment is closed: say so BEFORE Google sign-in. Sign-in stays available for existing
   // accounts, invitations, admins and testers (the server decides what they may do after).
-  const closed = useEnrollmentOpen() === false && signup
+  const enrollment = useEnrollmentOpen()
+  const [invited] = useState(cameInvited)
+  const closedNow = enrollment === false && signup
+  // Someone who came through the invited entry is not shown a page titled "closed": they continue here.
+  const expected = closedNow && invited
+  const closed = closedNow && !invited
   return (
     <main className="center-page">
-      <div className="panel panel--narrow enter">
+      <div className="panel panel--narrow enter" data-signin={invite ? 'invite' : expected ? 'invited' : closed ? 'closed' : signup ? 'signup' : 'signin'}>
         <Logo href="/" />
-        <h1 className="title">{invite ? `Join ${invite.businessName}` : closed ? 'Online enrollment isn’t open yet' : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
+        <h1 className="title">{invite ? `Join ${invite.businessName}` : expected ? 'Set up your business' : closed ? 'Online enrollment isn’t open yet' : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
         <p className="lede">
           {invite
             ? `Sign in with the Google account for ${invite.email}.`
-            : closed
-              ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
-              : signup
-                ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
-                : 'Sign in to manage your booking page.'}
+            : expected
+              ? 'Sign in with the Google account we agreed with you, ideally the one with the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
+              : closed
+                ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
+                : signup
+                  ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
+                  : 'Sign in to manage your booking page.'}
         </p>
         {closed && (
           <a className="btn btn-primary btn-lg btn-block" href="/#book-demo">
@@ -97,12 +120,21 @@ function SignIn({ invite, plan }) {
         <a className={`btn ${closed ? 'btn-quiet' : 'btn-primary'} btn-lg btn-block`} href={`/api/auth/google/start${returnTo()}`}>
           Continue with Google
         </a>
+        {expected && (
+          <p className="fine">
+            Sign-up is by arrangement for now. Not set up with us yet? <a href="/#book-demo">Book a short call</a> and we’ll get you started.
+          </p>
+        )}
         <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage. <a href="/privacy">Privacy policy</a></p>
         {!invite && (
           <p className="fine">
             {signup ? (
               <>
                 Already have an account? <a href="/dashboard">Sign in</a>
+              </>
+            ) : enrollment === false ? (
+              <>
+                Have an invitation? <a href={INVITED_HREF}>Set up your business</a>
               </>
             ) : (
               <>

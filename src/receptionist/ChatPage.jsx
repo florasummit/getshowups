@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, noIndex } from '../lib/api.js'
+import { api, noIndex, phoneText } from '../lib/api.js'
+import { publicHead, telHref } from '../public/head.js'
 import { BrandMark } from '../public/PublicShell.jsx'
 import { accentVars } from '../public/color.js'
 import './chat.css'
@@ -82,7 +83,11 @@ const testVoice = () => {
   const v = new URLSearchParams(window.location.search).get('voice') || ''
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(v) ? v : ''
 }
-const tel = (p) => `tel:${p.replace(/[^\d+]/g, '')}`
+const tel = telHref
+// The longest message the server takes (functions/api/receptionist/[customer]/chat.js). The box never cuts text off:
+// it counts down near the limit and says by how much a message is too long (CHAT-01).
+const LIMIT = 1500
+const NEAR_LIMIT = 1300
 // The ad parameters this page was opened with (a website link from an ad carries them); validated on the server.
 const adParams = () => {
   const q = new URLSearchParams(window.location.search)
@@ -125,6 +130,7 @@ export default function ChatPage({ id }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
+  const [loadFailed, setLoadFailed] = useState(false) // the conversation so far could not be fetched (CHAT-04)
   const [voice, setVoice] = useState({ state: 'idle', live: [] })
   const [confirmEnd, setConfirmEnd] = useState(false)
   const listRef = useRef(null)
@@ -137,7 +143,11 @@ export default function ChatPage({ id }) {
   useEffect(() => noIndex(), [])
   useEffect(() => {
     // ?test=<provider>: the server decides whether this is an authorized admin test (signed-in platform admin, test business).
-    api(`/api/receptionist/${id}${test ? `?test=${encodeURIComponent(test)}` : ''}`).then(({ status, data }) => setInfo(status === 200 ? data : { missing: true }))
+    api(`/api/receptionist/${id}${test ? `?test=${encodeURIComponent(test)}` : ''}`).then(({ status, data }) => {
+      setInfo(status === 200 ? data : { missing: true })
+      // The tab names the business (never GetShowUps' marketing title or price on a customer's page).
+      if (status === 200 && data.name) publicHead(data.brand?.product ? 'Chat · GetShowUps' : `Chat with ${data.name}`, data.brand?.product ? 'Ask about GetShowUps, or book a demo.' : `Ask ${data.name} a question or book an appointment.`)
+    })
   }, [id, test])
   useEffect(() => save(id, conv), [id, conv])
   useEffect(() => {
@@ -147,6 +157,13 @@ export default function ChatPage({ id }) {
   useEffect(() => {
     if (outcome.ended) newRef.current?.focus()
   }, [outcome.ended])
+  // The message box grows with what is typed (one line when empty, up to about five; then it scrolls).
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`
+  }, [text, info])
 
   const applyState = (d) => setOutcome({ booked: d.booked || null, request: d.request || null, ended: Boolean(d.ended) })
   // The server's record of this conversation (what was typed AND said on calls).
@@ -154,6 +171,7 @@ export default function ChatPage({ id }) {
     async (c = conv) => {
       if (!c) return
       const { status, data } = await api(`/api/receptionist/${id}/conversation`, { method: 'POST', body: { action: 'view', conversationId: c.id, token: c.token } })
+      setLoadFailed(status !== 200 && status !== 404)
       if (status === 200) {
         setLines(data.transcript)
         applyState(data)
@@ -173,11 +191,12 @@ export default function ChatPage({ id }) {
 
   const send = async (value) => {
     const t = (value ?? text).trim()
-    if (!t || sending || outcome.ended) return
+    if (!t || t.length > LIMIT || sending || outcome.ended) return
     setError(null)
     setSending(true)
     if (value === undefined) setText('')
-    setLines((l) => [...l, { who: 'customer', text: t, channel: 'chat' }])
+    // A retry replaces the unsent copy of the same message; other unsent messages stay, marked "Not sent".
+    setLines((l) => [...l.filter((m) => !(m.failed && m.text === t)), { who: 'customer', text: t, channel: 'chat' }])
     const { status, data } = await api(`/api/receptionist/${id}/chat`, { method: 'POST', body: { text: t, ...(conv ? { conversationId: conv.id, token: conv.token } : { attribution: adParams() }) } })
     setSending(false)
     if (status === 200) {
@@ -187,8 +206,12 @@ export default function ChatPage({ id }) {
       inputRef.current?.focus()
       return
     }
-    setLines((l) => l.slice(0, -1))
-    if (status === 410) return refresh()
+    if (status === 410) {
+      setLines((l) => l.slice(0, -1))
+      return refresh()
+    }
+    // The message stays where the customer put it, marked "Not sent" (CHAT-04); nothing typed is lost.
+    setLines((l) => l.map((m, i) => (i === l.length - 1 ? { ...m, failed: true } : m)))
     if (status === 404 && data.error === 'conversation_not_found') setConv(null)
     setError({ text: t, message: ERRORS[status === 429 ? 'rate_limited' : data.error] || 'Something went wrong. Try again.' })
   }
@@ -320,6 +343,7 @@ export default function ChatPage({ id }) {
     setOutcome({ booked: null, request: null, ended: false })
     setVoice({ state: 'idle', live: [] })
     setError(null)
+    setLoadFailed(false)
     setText('')
     setTimeout(() => inputRef.current?.focus(), 0)
   }
@@ -342,13 +366,15 @@ export default function ChatPage({ id }) {
         <h1 className="chat-h1">
           <BrandMark name={info.name} brand={info.brand} />
         </h1>
-        <p className="chat-empty">
-          Chat isn’t available right now. <a href={`/book/${id}`} {...out}>Book online</a>
+        <p className="chat-empty">Chat isn’t available right now.</p>
+        <p className="chat-notice-actions">
+          <a className="pub-btn pub-btn--primary" href={`/book/${id}`} {...out}>
+            Book online
+          </a>
           {info.phone && (
-            <>
-              {' '}
-              or call <a href={tel(info.phone)}>{info.phone}</a>
-            </>
+            <a className="pub-btn pub-btn--quiet" href={tel(info.phone)}>
+              Call {phoneText(info.phone)}
+            </a>
           )}
         </p>
         {test && (
@@ -364,6 +390,8 @@ export default function ChatPage({ id }) {
   const onCall = voice.state === 'connecting' || voice.state === 'live'
   const started = Boolean(conv) || lines.length > 0
   const replies = !started && !testOnly && !outcome.ended ? quickReplies(info) : []
+  const length = text.trim().length
+  const tooLong = length > LIMIT
   return (
     <div className={`pub chat${embed ? ' chat--embed' : ''}`} style={accentVars(info.brand?.accent, { product: info.brand?.product })}>
       <header className="chat-head">
@@ -415,10 +443,19 @@ export default function ChatPage({ id }) {
               ))}
             </div>
           )}
+          {loadFailed && (
+            <p className="chat-error" role="alert">
+              We couldn’t load this conversation so far. Check your internet.{' '}
+              <button type="button" className="pub-btn pub-btn--link" onClick={() => refresh()}>
+                Try again
+              </button>
+            </p>
+          )}
           {lines.map((m, i) => (
-            <p key={i} className={`chat-msg chat-msg--${m.who}`}>
+            <p key={i} className={`chat-msg chat-msg--${m.who}${m.failed ? ' chat-msg--failed' : ''}`}>
               {m.channel === 'voice' && <span className="chat-tag">said</span>}
               {m.text}
+              {m.failed && <span className="chat-unsent">Not sent</span>}
             </p>
           ))}
           {voice.live.map((m, i) => (
@@ -535,33 +572,48 @@ export default function ChatPage({ id }) {
                 <label className="sr-only" htmlFor="rc-input">
                   Your message
                 </label>
-                <input
+                <textarea
                   id="rc-input"
                   ref={inputRef}
+                  rows={1}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter sends (Shift+Enter starts a new line), as the one-line box did.
+                    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                    e.preventDefault()
+                    send()
+                  }}
                   placeholder={testOnly ? 'Typed chat is off for this test business: talk instead' : onCall ? 'Type while you talk, e.g. your phone number' : 'Ask about services, prices or a time…'}
-                  maxLength={1500}
                   autoComplete="off"
                   enterKeyHint="send"
                   disabled={testOnly}
+                  aria-invalid={tooLong || undefined}
+                  aria-describedby={length >= NEAR_LIMIT ? 'rc-count' : undefined}
                 />
                 {(info.voice || test) && !onCall && (
                   <button type="button" className="chat-icon-btn" onClick={startVoice} aria-label={voice.state === 'ended' ? 'Talk again (uses your microphone)' : 'Talk instead (uses your microphone)'} title="Talk instead">
                     <Mic />
                   </button>
                 )}
-                <button type="submit" className="chat-icon-btn chat-send" aria-label="Send" disabled={!text.trim() || sending || testOnly}>
+                <button type="submit" className="chat-icon-btn chat-send" aria-label="Send" disabled={!length || tooLong || sending || testOnly}>
                   <Send />
                 </button>
               </form>
+              {length >= NEAR_LIMIT && (
+                <p id="rc-count" className={`chat-count${tooLong ? ' is-over' : ''}`} role={tooLong ? 'alert' : undefined}>
+                  {tooLong
+                    ? `Your message is ${(length - LIMIT).toLocaleString('en-US')} ${length - LIMIT === 1 ? 'character' : 'characters'} too long. Shorten it to send (nothing is cut off).`
+                    : `${length.toLocaleString('en-US')} of ${LIMIT.toLocaleString('en-US')} characters`}
+                </p>
+              )}
               <p className="chat-links">
                 {!testOnly && (
                   <button type="button" className="pub-btn pub-btn--link" onClick={() => send('I’d like to talk to a person, please.')} disabled={sending}>
                     Ask for a person
                   </button>
                 )}
-                {info.phone && <a href={tel(info.phone)}>Call {info.phone}</a>}
+                {info.phone && <a href={tel(info.phone)}>Call {phoneText(info.phone)}</a>}
                 <a href={`/book/${id}`} {...out}>Book online</a>
               </p>
               {testing ? (
@@ -579,8 +631,11 @@ export default function ChatPage({ id }) {
               )}
             </>
           )}
-          <p className="chat-legal">
-            AI assistant for {info.name}, powered by GetShowUps. It can’t transfer calls. <a href="/privacy" {...out}>Privacy</a>
+          <p className="chat-legal chat-legal--foot">
+            <span>AI assistant for {info.name}, powered by GetShowUps. It can’t transfer calls.</span>
+            <a href="/privacy" target="_blank" rel="noopener">
+              Privacy
+            </a>
           </p>
         </div>
       </footer>

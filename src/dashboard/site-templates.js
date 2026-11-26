@@ -12,7 +12,8 @@ export const LAYOUTS = {
   cta: [['band', 'Band'], ['card', 'Card'], ['split', 'With photo']],
 }
 export const BACKGROUNDS = [['bg', 'Page'], ['surface', 'Soft'], ['accent', 'Brand colour'], ['ink', 'Dark']]
-export const SECTION_LABEL = { hero: 'Hero', composition: 'Hero', text: 'Text', services: 'Services', features: 'Benefits', imageText: 'Photo and text', gallery: 'Gallery', steps: 'How it works', faq: 'FAQ', cta: 'Booking', area: 'Service areas', contact: 'Contact' }
+// "Top of page", not "Hero": plain words (finding WEB-12).
+export const SECTION_LABEL = { hero: 'Top of page', composition: 'Top of page', text: 'Text', services: 'Services', features: 'Benefits', imageText: 'Photo and text', gallery: 'Gallery', steps: 'How it works', faq: 'FAQ', cta: 'Booking', area: 'Service areas', contact: 'Contact' }
 
 export const newId = (type, taken) => {
   let id

@@ -87,7 +87,8 @@ export async function publishDraft(env, customerId, records, { expect, by, now =
   const prev = row.live_version ? await liveRules(db, customerId) : null
   const max = await db.prepare('SELECT coalesce(max(version), 0) AS v FROM ai_rule_versions WHERE customer = ?1').bind(customerId).first()
   const version = Number(max?.v || 0) + 1
-  const note = (prev ? diffConfigs(validateConfig(prev.config, records).config, config) : ['First version.']).join(' ').slice(0, 600) || 'No changes.'
+  // The history line says what the version contains: the changes, or (first version) the rules themselves.
+  const note = (prev ? diffConfigs(validateConfig(prev.config, records).config, config) : ['First version.', ...describeConfig(config, records)]).join(' ').slice(0, 600) || 'No changes.'
   const ref = await emailRef(by || 'owner')
   await db.batch([
     db

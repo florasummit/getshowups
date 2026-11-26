@@ -247,6 +247,30 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
 - Marketing copy: no testimonials, logos, or performance claims. Describe only what works today; label anything not live
   as coming soon. Growth $499/month (plan id founding), no trial, ad spend separate; Enterprise from $10,000/month, Contact sales only. Get started → /dashboard?plan=founding.
 
+## Product quality standards (docs/DESIGN_SYSTEM.md)
+
+Every UI change in the signed-in product (dashboard, onboarding, admin) follows docs/DESIGN_SYSTEM.md, uses the shared
+primitives and passes the quality spec (test/e2e/quality.spec.js + test/ui-standards.test.js + test/format.test.js).
+Primitives: src/dashboard/ui.jsx (Pill, PageHeader, Section, TabBar, SaveBar / SaveButton / SaveStatus, ConfirmInline,
+Loading, EmptyState, LoadError), src/dashboard/ui-hooks.js (useSaveState, usePageTitle), src/lib/format.js (plural,
+humanDate, humanDateTime, money); styles = the `.ui-*` rules and the "Product quality foundation" block ending src/app.css.
+Non-negotiables:
+- ONE save pattern: useSaveState + SaveBar/SaveStatus ("Saving…" → always enabled again → "Saved." role=status ~2.5 s, or
+  the error role=alert that stays); controls that save on change confirm the same way. Nothing saves or fails silently.
+- ONE page frame: header + TabBar at the same x on every tab/section (`--frame` 1400; pages read at `--content` 880 from
+  the logo's left edge; `app--wide` widens only the content); one h1 size; the shell sets the browser title
+  (usePageTitle), pages never assign document.title. Never hand-build a tab row.
+- Touch: every control ≥ 44 px tall on phones/touch (shared rule in app.css); exceptions only in SMALL_ON_PURPOSE with a reason.
+- Errors sit by their field, all at once, with a recovery action; a refused value is never stored; every data view has
+  loading, empty, error (Retry) and ready states.
+- Owner copy: no internal switch/table/code names, no vendor names (except where the owner acts in that vendor's
+  product), no "(s)" plurals, no ISO dates, sentence case. Status = `Pill` tones only.
+- No native confirm()/alert()/prompt(): ConfirmInline (test NATIVE_CONFIRMS may only shrink). No hover-only controls.
+- Progress preserved: reload, Back, tab switch and a failed request never lose what was typed or chosen; views have URLs.
+- AI: answer from records first; a non-answer says why and what to do next; propose → before/after → owner approves;
+  never change anything without approval; no model call the person did not ask for.
+- Phone 390 and desktop 1440 are both intentional: no page-level sideways scroll, primary action on the first screen.
+
 ## Security rules (non-negotiable)
 
 - **Never add a root `wrangler.toml`/`wrangler.json`**: Pages would switch to file-based config and override dashboard bindings.
@@ -681,6 +705,8 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   code, never typed; status and cost are recorded by the founder AFTER acting (audited). Nothing here sends, publishes
   or spends; code never sets "sent". Recorded cost is self-reported, kept apart from measured ad spend, and never feeds
   server/ads/funnel.js. Labels are a company or place, never an email or phone; recipients are never committed (public repo).
+  A NEW code needs the explicit `create: true` intent (existing or catalog code → 409 code_exists, nothing changes; a
+  change to an unknown code → 404 unknown_code); each save writes only its own columns.
 - Billing reconciliation (server/reconcile.js): daily cron + /admin "Run now": Stripe subscriptions + 35 days of paid
   invoices vs our records (status, amount, cancellation, mode, missing either side, payments, billing after deletion).
   Read-only toward Stripe; recorded in audit_log. Auto-applies ONE thing (owner decision 2026-11-18): a subscription we
@@ -726,10 +752,10 @@ Preview deployments have **no** bindings or secrets (backend routes return 503 t
   QA_INGEST_TOKEN (unset: /api/qa/runs answers 503) + the CI qa-report job, MESSAGES_LIVE, SMS_LIVE,
   STRIPE_LIVE_ENABLED, ADS_LIVE_LAUNCH; enrollment closed ({"open":false}). Voice:
   RECEPTIONIST_VOICE_BUSINESSES=poolthru-llc,bob-electrical.
-- Current baseline (2026-11-26): PR #175 (website chat panel), main 9871609, deployment 5f7e636b, rollback a8505dca
-  (PR #173, main e0540fd); migrations through 0043
+- Current baseline (2026-11-26): PR #176 (Growth → Activities), main fc2eea9, deployment 9000a737, rollback 33f38d28
+  (PR #174, main 348dbe7); migrations through 0044
   applied EXCEPT 0040 (Google calls: applied nowhere, own approval; apply migrations one file at a time, never "all
-  pending"). Production has 101 tables: D1 refuses a result with more than 100 columns, so the one-select count
+  pending"). Production has 102 tables: D1 refuses a result with more than 100 columns, so the one-select count
   comparison must be split into two queries. Details: docs/STATUS.md.
 - Releases: apply a PR's migration before merging it, never out of order; merge pinned to the reviewed head
   (--match-head-commit); after each deploy diff the live customer HTML against a pre-release capture.
@@ -776,7 +802,8 @@ new OAuth scopes · live requests that touch customer data (read-only health che
 
 1. Acceptance criteria in the task are met (see docs/WORKFLOW.md template).
 2. `npm run verify:all` passes locally with zero warnings.
-3. New behaviour has unit tests; new UI flows have Playwright coverage.
+3. New behaviour has unit tests; new UI flows have Playwright coverage; UI changes meet docs/DESIGN_SYSTEM.md (its
+   usability acceptance checklist, shared primitives, quality spec).
 4. No secrets/customer data in code, tests, logs, or output; `git status` shows only intended files.
 5. docs/STATUS.md updated (what changed, decisions, next action).
 6. Summary to the human: files changed, test results, **mocked vs live-verified** clearly separated, what needs approval.

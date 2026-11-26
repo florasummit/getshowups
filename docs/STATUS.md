@@ -2,7 +2,45 @@
 
 _Update at the end of every task. Newest first._
 
-## Growth → Activities: acquisition by tracking code (2026-11-25, PR open, NOT released; migration 0044 needs approval)
+## Product Excellence: the 85 usability findings (2026-11-26, PR #185, NOT released; needs founder approval)
+Founder mandate: resolve the findings of the 2026-11-25 zero-instruction evaluation through shared components, unify the
+UI, and make the standard permanent. No migrations, no new switches, no new dependencies, no feature work.
+- **Ledger:** docs/quality/USABILITY_FINDINGS.md has a disposition and a guarding test for each of the 85 findings.
+- **Standard:** docs/DESIGN_SYSTEM.md + the "Product quality standards" section in CLAUDE.md. Shared primitives in
+  src/dashboard/ui.jsx (TabBar, SaveBar, SaveButton, SaveStatus, ConfirmInline, Loading, EmptyState), ui-hooks.js
+  (useSaveState, usePageTitle) and src/lib/format.js. Safeguards: test/e2e/quality.spec.js (frame, phone tab row, 44 px
+  targets, owner-copy rules), test/ui-standards.test.js (native dialogs only shrink), test/format.test.js.
+- **Batches (each had its own green PR, merged into #185):** #178 foundation · #179 admin and Growth · #180 customer
+  booking and chat · #181 receptionist and Teach Your AI · #182 onboarding · #183 website builder · #184 dashboard and
+  settings.
+- **Changes customers of our customers see:** multi-page business sites get a row of page links under the name on
+  phones (WEB-02; goldens v2-pool-multipage and v2-starter-full regenerated; desktop and single-page sites
+  byte-identical); /book and /chat documents carry the business's own title and no GetShowUps marketing metadata
+  (CHAT-02, functions/_middleware.js; GetShowUps' own pages keep theirs); the booking page keeps progress on reload,
+  shows all field errors at once, names the time zone, and its confirmation offers the business phone.
+- **API notes:** POST /api/platform/acquisition needs `create: true` for a new code (409 code_exists, 404 unknown_code);
+  GET /api/book/<id> returns the business phone on record; dashboard receptionist route gains `reopen` and the
+  `chatClosed` fact; website `apply` takes `studio: true` (a generated design becomes a full-editor site); draft
+  checkpoints are taken before a save at most every 2 minutes, newest 30 kept; setup-check accepts a dismissal.
+- **Retained by decision (see ledger):** per-day booking hours (feature + schema), a business address on the booking page
+  (no such record), website services vs booking catalog as one list, precedence between receptionist Personality and
+  Teach Tone, a homepage sign-up entry while enrollment is closed, visits counted by booking date vs visit date.
+- **Verification:** an independent browser verifier checked all 26 S1/S2 findings on the integrated build: 23 passed,
+  3 partial (TEACH-03 combined sentences, BOOK-03 without a phone on record, WEB-01 through onboarding) plus phone
+  touch-target and title-size gaps; all were fixed and re-checked on the final build. The answer check of the Assistant
+  had missed a claimed no-show ("no-show" read as a negation): fixed and tested.
+- **Not measured:** behaviour of the Assistant and Teach Your AI with the production model (tests use a stand-in; the
+  deterministic parts are unit-tested). Nothing was verified in production.
+
+## Growth → Activities: acquisition by tracking code (2026-11-25, PR #176, live; founder approved the PR and migration 0044)
+**Release record (2026-11-26 UTC):** main fc2eea9, deployment 9000a737-cc3a-460b-a1ce-d43aad1c0b12, rollback 33f38d28-1e5e-4ade-baf5-805648196a26
+(main 348dbe7). Migration 0044 applied alone at 02:53 UTC after two rehearsals on a restored copy (102 tables,
+`acquisition_codes` 0 rows; 0040 still NOT applied). Backup ~/getshowups-backups/prod-20261126T025218Z-pre-0044.sql
+(integrity ok, 101 tables row-for-row equal to production); Time Travel bookmark before 0044
+00001357-00000028-0000512f-ba081ec2e97b6008038f4d71a80e2bb6. scripts/release.sh: HEALTHY (live pages unchanged,
+refusals ok, 0 exceptions). After release every table equals the backup except audit_log +1 (platform.release) and
+rate_limits. New route: 401 signed out, 403 cross-site. Not verified in production: saving a status as the signed-in
+admin (no admin session; covered by CI browser tests). Outreach and ad spend remain on hold (founder, 2026-11-25).
 Founder request: run customer acquisition from Admin → Growth, reusing what exists.
 - **What already existed and is reused:** tracked links (utm codes kept on booking-page and chat leads,
   server/ads/attribution.js) and server/sales-attribution.js (prospect → demo booked → attended → business created →
@@ -21,7 +59,7 @@ Founder request: run customer acquisition from Admin → Growth, reusing what ex
 - **Verified:** unit tests walk the real routes (tracked link → public lead route → booked demo → attended → business →
   live subscription and payment) on the in-memory database with Google as a stand-in: SIMULATED data. Production has
   no outreach sent and no paying customer; nothing there was changed.
-- **Next:** founder approves the PR and migration 0044 (applied alone; 0040 stays unapplied), then the first batch.
+- **Next:** founder decides on outreach batch 1 (held). Usability evaluation and quality plan in progress.
 
 ## Website chat panel (2026-11-25, PR #175, live; founder approved the design, migration 0043 and the release)
 - **What:** the owner may open the chat inside a panel on their website instead of the "Chat or talk with us" link

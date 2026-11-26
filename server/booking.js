@@ -3,7 +3,7 @@
 // slot atomically, (2) a fresh freeBusy check after reserving, and (3) rollback if Google fails.
 import { leadMinutes } from './services.js'
 import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
-import { EMAIL_RE } from './auth.js'
+import { addressProblems, clean, leadProblems } from './lead-fields.js'
 import { computeSlots, connect, createEvent, freeBusy, isOfferedSlot, removeEvent } from './calendar.js'
 import { recordEvent } from './auditlog.js'
 import { track } from './events.js'
@@ -25,17 +25,12 @@ const DAY = 24 * 60 * 60 * 1000
 // Every Google call times out well before it, so a live booking is never mistaken for stale.
 export const STALE_PENDING_MS = 2 * 60 * 1000
 const hexId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
-const PHONE_RE = /^[0-9+().\-\s]{7,25}$/
 // Version of the SMS consent checkbox text on the booking page (src/booking/BookingPage.jsx).
 export const SMS_CONSENT_WORDING = 'booking-sms-v1'
 const hasSmsConsent = async (db, leadId) => Boolean(await db.prepare('SELECT 1 AS y FROM sms_consents WHERE lead_id = ?1').bind(leadId).first())
 
-const clean = (v, max) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-
-const US_STATES = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR'.split(' '))
-const ZIP5_RE = /^\d{5}(-\d{4})?$/
-
-// Returns [error, value] for a US service address (required for 'at_customer' businesses).
+// Returns [error, value] for a US service address (required for 'at_customer' businesses). The field rules live in
+// server/lead-fields.js (shared with the booking page).
 export function validateAddress(raw) {
   const a = {
     street: clean(raw?.street, 100),
@@ -44,11 +39,8 @@ export function validateAddress(raw) {
     state: clean(raw?.state, 2).toUpperCase(),
     zip: clean(raw?.zip, 10),
   }
-  if (a.street.length < 5 || !/\d/.test(a.street) || !/[A-Za-z]/.test(a.street)) return ['invalid_street']
-  if (a.city.length < 2 || !/^[A-Za-z][A-Za-z .'-]*$/.test(a.city)) return ['invalid_city']
-  if (!US_STATES.has(a.state)) return ['invalid_state']
-  if (!ZIP5_RE.test(a.zip)) return ['invalid_zip']
-  return [null, a]
+  const problems = addressProblems(a)
+  return problems.length ? [problems[0]] : [null, a]
 }
 
 export const formatAddress = (a) => (a ? `${a.street}${a.unit ? `, ${a.unit}` : ''}, ${a.city}, ${a.state} ${a.zip}` : '')
@@ -61,7 +53,8 @@ export const formatAddress = (a) => (a ? `${a.street}${a.unit ? `, ${a.unit}` : 
 // known US ZIP area → 'unknown_zip' unless the visitor confirmed it (body.zipConfirmed === true), then it is kept as
 // uncertain. lenientZip (plain website forms, which can't ask again without losing what was typed): never an error,
 // the lead is kept and the ZIP's state goes to the owner's coverage review. lead.zipCheck records the result.
-export function validateLead(body, mode = 'at_business', { requireEmail = true, requirePhone = true, lenientZip = false } = {}) {
+// fullNumber (the public booking page): a phone number without a country code needs its area code (lead-fields.js phoneOk).
+export function validateLead(body, mode = 'at_business', { requireEmail = true, requirePhone = true, lenientZip = false, fullNumber = false } = {}) {
   const lead = {
     name: clean(body?.name, 80),
     email: clean(body?.email, 254).toLowerCase(),
@@ -70,14 +63,11 @@ export function validateLead(body, mode = 'at_business', { requireEmail = true, 
     zip: clean(body?.zip, 10).toUpperCase(),
     smsConsent: body?.smsConsent === true,
   }
-  if (lead.name.length < 2) return ['invalid_name']
-  if ((requireEmail || lead.email) && !EMAIL_RE.test(lead.email)) return ['invalid_email']
   // requirePhone false (enterprise inquiries: nothing to schedule): an empty phone stays empty, a typed one is still checked.
-  if ((requirePhone || lead.phone) && (!PHONE_RE.test(lead.phone) || lead.phone.replace(/\D/g, '').length < 7)) return ['invalid_phone']
-  if (lead.need.length < 2) return ['invalid_need']
+  const problems = leadProblems(body, mode, { requireEmail, requirePhone, fullNumber })
+  if (problems.length) return [problems[0]]
   if (mode === 'at_customer') {
-    const [error, address] = validateAddress(body?.address)
-    if (error) return [error]
+    const [, address] = validateAddress(body?.address)
     lead.address = address
     lead.zip = address.zip.slice(0, 5)
   }
@@ -475,8 +465,9 @@ async function withRevenue(db, customerId, list) {
   return list.map((a) => (a.status === 'showed' ? { ...a, invoicedCents: by.get(a.id)?.invoiced ?? null, paidCents: by.get(a.id)?.paid ?? null } : a))
 }
 
-export async function overview(db, customerId, now = Date.now(), internal = '[]') {
-  const since = now - 30 * DAY
+// `since`: where "the last 30 days" begins. The route passes the start of the business's own calendar day 29 days ago
+// (operator-tools.js last30Start), the same window the assistant counts with, so the two can never show different numbers.
+export async function overview(db, customerId, now = Date.now(), internal = '[]', since = now - 30 * DAY) {
   const one = (sql, ...args) => db.prepare(sql).bind(customerId, ...args).first()
   const leads = await one(`SELECT count(*) AS n FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`, since, internal)
   const counts = await one(
@@ -520,6 +511,13 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
   const recent = await list(
     `SELECT ${apptCols}, ${testCol('?2')} FROM ${apptFrom}
       WHERE a.customer = ?1 AND a.status IN ('showed','no_show') ORDER BY a.start_at DESC LIMIT 25`,
+    internal,
+  )
+  // Cancelled in the last 90 days (by you or the customer), newest change first: listed so a cancelled visit can be found.
+  const cancelled = await list(
+    `SELECT ${apptCols}, ${testCol('?3')} FROM ${apptFrom}
+      WHERE a.customer = ?1 AND a.status = 'cancelled' AND a.updated_at >= ?2 ORDER BY a.updated_at DESC LIMIT 25`,
+    now - 90 * DAY,
     internal,
   )
   const followUp = await list(
@@ -574,6 +572,7 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
     needsOutcome: needsOutcome.map(appt),
     // Visits that happened carry their current invoiced/paid amounts (server/revenue.js), once migration 0028 exists.
     recent: await withRevenue(db, customerId, recent.map(appt)),
+    cancelled: cancelled.map(appt),
     // Leads outside the listed ZIPs carry their service-area request (server/coverage.js) for the owner to answer.
     followUp: await withCoverage(
       db,

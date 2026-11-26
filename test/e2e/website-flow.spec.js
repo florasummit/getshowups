@@ -19,7 +19,7 @@ test('existing website → scan → review → import → editor shows services 
   // Start: two clear front doors.
   const start = page.getByRole('region', { name: 'How would you like to start?' })
   await expect(start.getByRole('button', { name: /I have a website/ })).toBeVisible()
-  await expect(start.getByRole('button', { name: /I’m starting fresh/ })).toBeVisible()
+  await expect(start.getByRole('button', { name: /Create my website/ })).toBeVisible()
   await shot(page, info, '1-start')
   await start.getByRole('button', { name: /I have a website/ }).click()
 
@@ -81,6 +81,8 @@ test('existing website → scan → review → import → editor shows services 
   await site.close()
 
   // Hosting: GetShowUps by default; own hosting offers the download of the published site.
+  // Address and hosting sit under one disclosure once a draft exists (WEB-05).
+  await page.locator('#site-address > summary').click()
   const hosting = page.getByRole('region', { name: 'Where your website lives' })
   await hosting.getByText('Use my own hosting').click()
   const link = hosting.getByRole('link', { name: 'Download my website (.zip)' })

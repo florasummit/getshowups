@@ -11,7 +11,8 @@ import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { createSalesBusiness } from '../server/sales.js'
 import { createCustomer } from '../server/customers.js'
 import { track } from '../server/events.js'
-import { ACTIVITIES, STATUSES, acquisitionOverview, cleanLabel, saveAcquisitionCode } from '../server/acquisition.js'
+import { ACTIVITIES, STATUSES, acquisitionOverview, cleanLabel, linkReadiness, saveAcquisitionCode } from '../server/acquisition.js'
+import { planStep } from '../server/growth.js'
 import * as growthRoute from '../functions/api/platform/growth.js'
 import * as acqRoute from '../functions/api/platform/acquisition.js'
 import * as bookInfo from '../functions/api/book/[customer]/index.js'
@@ -208,9 +209,11 @@ test('status: times follow the steps, stepping back clears later ones, a follow-
 })
 
 test('a new code joins an activity that takes codes; bad input is refused with a code', async () => {
-  assert.deepEqual(await saveAcquisitionCode(env, { code: 'out-06', status: 'prepared' }), { ok: false, httpStatus: 400, error: 'invalid_activity' })
-  assert.equal((await saveAcquisitionCode(env, { code: 'out-06', status: 'prepared', activity: 'follow-up' })).error, 'invalid_activity')
-  assert.equal((await saveAcquisitionCode(env, { code: 'out-06', status: 'prepared', activity: 'email-local' })).created, true)
+  // Adding is its own intent (create: true). A change to a code that does not exist is refused, never a silent add.
+  assert.deepEqual(await saveAcquisitionCode(env, { code: 'out-06', status: 'prepared', activity: 'email-local' }), { ok: false, httpStatus: 404, error: 'unknown_code' })
+  assert.equal((await saveAcquisitionCode(env, { code: 'out-06', create: true })).error, 'invalid_activity')
+  assert.equal((await saveAcquisitionCode(env, { code: 'out-06', create: true, activity: 'follow-up' })).error, 'invalid_activity')
+  assert.equal((await saveAcquisitionCode(env, { code: 'out-06', create: true, activity: 'email-local' })).created, true)
   const a = await acquisitionOverview(env, null)
   assert.ok(a.activities.find((x) => x.key === 'email-local').codes.some((c) => c.code === 'out-06' && c.links.book.endsWith('utm_campaign=out-06')))
   // A catalog code keeps its own activity whatever is sent.
@@ -225,6 +228,95 @@ test('a new code joins an activity that takes codes; bad input is refused with a
   ]) assert.equal((await saveAcquisitionCode(env, input)).error, error, JSON.stringify(input))
   assert.equal(cleanLabel('  Mount Pleasant\tsupply counter '), 'Mount Pleasant supply counter')
   assert.equal(cleanLabel('843 Pool Service'), '843 Pool Service')
+})
+
+test('GROW-01: adding a code that already exists is refused (code_exists) and leaves its status, dates, name and cost untouched', async () => {
+  const t0 = Date.now() - 2 * DAY
+  // A catalog code the founder already worked with, and one they added themselves.
+  await saveAcquisitionCode(env, { code: 'out-01', status: 'sent', label: 'Harbor Pools', costCents: 1500 }, t0)
+  assert.equal((await saveAcquisitionCode(env, { code: 'mine-01', create: true, activity: 'referral' }, t0)).created, true)
+  await saveAcquisitionCode(env, { code: 'mine-01', status: 'replied', label: 'Neighbor', costCents: 300 }, t0)
+  const rows = () => JSON.stringify(db.sql.prepare('SELECT * FROM acquisition_codes ORDER BY code').all())
+  const before = rows()
+  const audits = () => db.sql.prepare("SELECT count(*) n FROM admin_audit WHERE action LIKE 'acquisition.%'").get().n
+  const auditsBefore = audits()
+  for (const [code, activity] of [['out-01', 'email-local'], ['out-01', 'referral'], ['mine-01', 'referral'], ['out-02', 'email-local']]) {
+    // The released page's request (status: 'prepared' + activity) with the new intent, through the real route.
+    const r = await call(acqRoute, 'POST', '/api/platform/acquisition', { as: ADMIN, body: { code, activity, create: true, status: 'prepared' } })
+    assert.deepEqual([r.status, r.json().error], [409, 'code_exists'], code)
+  }
+  assert.equal(rows(), before, 'nothing stored changed')
+  assert.equal(audits(), auditsBefore, 'a refusal is not audited as a change')
+  const a = await view()
+  assert.deepEqual([codeOf(a, 'out-01').status, codeOf(a, 'out-01').sentAt, codeOf(a, 'out-01').label, codeOf(a, 'out-01').costCents], ['sent', t0, 'Harbor Pools', 1500])
+  assert.deepEqual([codeOf(a, 'mine-01').status, codeOf(a, 'mine-01').repliedAt, codeOf(a, 'mine-01').costCents], ['replied', t0, 300])
+  // The released page's old request (no create intent) for a brand-new code can no longer add or reset anything.
+  const old = await call(acqRoute, 'POST', '/api/platform/acquisition', { as: ADMIN, body: { code: 'brand-new', status: 'prepared', activity: 'referral' } })
+  assert.deepEqual([old.status, old.json().error], [404, 'unknown_code'])
+  // A real new code through the route.
+  const ok = await call(acqRoute, 'POST', '/api/platform/acquisition', { as: ADMIN, body: { code: 'ref-04', activity: 'referral', create: true } })
+  assert.deepEqual([ok.status, ok.json().status], [200, 'prepared'])
+})
+
+test('GROW-07: a name and a cost saved at the same moment both stay (each request writes only what it changes)', async () => {
+  await saveAcquisitionCode(env, { code: 'out-04', status: 'sent' })
+  await Promise.all([saveAcquisitionCode(env, { code: 'out-04', label: 'Harbor Pools' }), saveAcquisitionCode(env, { code: 'out-04', costCents: 2500 }), saveAcquisitionCode(env, { code: 'out-05', label: 'Tide Pools' }), saveAcquisitionCode(env, { code: 'out-05', costCents: 900 })])
+  const a = await view()
+  assert.deepEqual([codeOf(a, 'out-04').status, codeOf(a, 'out-04').label, codeOf(a, 'out-04').costCents], ['sent', 'Harbor Pools', 2500])
+  assert.deepEqual([codeOf(a, 'out-05').status, codeOf(a, 'out-05').label, codeOf(a, 'out-05').costCents], ['prepared', 'Tide Pools', 900])
+})
+
+test('GROW-03/08/02: codes come in order; each activity offers only the statuses that fit it; links say whether they will open', async () => {
+  await saveAcquisitionCode(env, { code: 'out-10', create: true, activity: 'email-regional' })
+  await saveAcquisitionCode(env, { code: 'out-9', create: true, activity: 'email-regional' })
+  let a = await view()
+  assert.deepEqual(a.activities.find((x) => x.key === 'email-regional').codes.map((c) => c.code), ['out-9', 'out-10', 'out-38', 'out-49', 'out-52', 'out-53', 'out-58'])
+  assert.deepEqual(a.activities.find((x) => x.key === 'email-local').statuses, STATUSES)
+  for (const key of ['counter-card', 'founder-post', 'listing', 'paid-test']) assert.deepEqual(a.activities.find((x) => x.key === key).statuses, ['prepared', 'approved', 'sent'], key)
+  // The sales business of this file exists with its calendar; the hours and the receptionist decide the rest.
+  const row = db.sql.prepare("SELECT hours_confirmed_at FROM customers WHERE id = 'getshowups'").get()
+  const on = Boolean(db.sql.prepare("SELECT enabled FROM receptionist_settings WHERE customer = 'getshowups'").get()?.enabled)
+  const bookable = Boolean(row.hours_confirmed_at)
+  assert.deepEqual(a.linkState, { book: bookable ? 'ready' : 'not_bookable', chat: !bookable ? 'not_bookable' : on ? 'ready' : 'off' })
+  assert.deepEqual(linkReadiness({ exists: false }), { book: 'missing', chat: 'missing' })
+  assert.deepEqual(linkReadiness({ exists: true, calendarConnected: true, hoursConfirmed: true, receptionistOn: false }), { book: 'ready', chat: 'off' })
+  assert.deepEqual(linkReadiness({ exists: true, calendarConnected: false, hoursConfirmed: true, receptionistOn: true }), { book: 'not_bookable', chat: 'not_bookable' })
+  assert.deepEqual(linkReadiness(null), { book: 'unknown', chat: 'unknown' })
+  db.sql.exec('PRAGMA foreign_keys = OFF') // only the business row goes: the page must cope with its records missing
+  db.sql.prepare("DELETE FROM customers WHERE id = 'getshowups'").run()
+  a = await view()
+  assert.deepEqual(a.linkState, { book: 'missing', chat: 'missing' })
+})
+
+test('GROW-05: Decide never states a count Measure shows as unavailable, names the prepared activities, follows what was recorded, never suggests the paid test', async () => {
+  const d = async () => (await call(growthRoute, 'GET', '/api/platform/growth', { as: ADMIN })).json()
+  // Nothing recorded: the first prepared activities by title.
+  let r = await d()
+  assert.equal(r.decide.bottleneck, 'volume')
+  assert.deepEqual(r.decide.activities, [ACTIVITIES[0].title, ACTIVITIES[1].title])
+  assert.match(r.decide.experiment, /Nothing has been sent yet\. Approve and send the first prepared activity, “Emails to Charleston owners” \(5 codes prepared\)/)
+  assert.match(r.decide.why, /^0 prospects in 30 days/, 'the sales business exists: 0 is a measured count')
+  // An approved batch that was never sent comes before anything new.
+  for (const code of ['ref-01', 'ref-02']) await saveAcquisitionCode(env, { code, status: 'approved' })
+  r = await d()
+  assert.match(r.decide.experiment, /^Send the approved batch: 2 approved codes in “Referral asks” have not been sent/)
+  assert.deepEqual(r.decide.activities, ['Referral asks'])
+  // Follow-ups that are due come first.
+  await saveAcquisitionCode(env, { code: 'out-02', status: 'sent' }, Date.now() - 5 * DAY)
+  r = await d()
+  assert.match(r.decide.experiment, /^Start with the 1 follow-up now due in “Emails to Charleston owners”/)
+  // Only a paid activity approved: still never suggested.
+  assert.deepEqual(planStep({ totals: { sent: 0 }, activities: [{ title: 'Capped paid test', paid: true, codes: [{}], status: { approved: 1, prepared: 0 }, followUpsDue: 0 }] }).activities, [])
+  for (const text of [r.decide.experiment, r.decide.title, r.decide.cost, r.decide.why]) assert.doesNotMatch(text, /Meta|Google|budget|spend more|homepage entry is live|[A-Z]{3,}_[A-Z_]{3,}/)
+  // No sales business: prospects are unavailable in Measure, so Decide states no count and says what to set up.
+  db.sql.exec('PRAGMA foreign_keys = OFF') // only the business row goes: the page must cope with its records missing
+  db.sql.prepare("DELETE FROM customers WHERE id = 'getshowups'").run()
+  r = await d()
+  assert.equal(r.measure.items.find((i) => i.key === 'salesLeads').kind, 'unavailable')
+  assert.deepEqual(r.decide.sample, {})
+  assert.doesNotMatch(`${r.decide.why} ${r.decide.experiment} ${r.decide.title}`, /\b0 prospect|\d+ prospects? in 30 days|is live/)
+  assert.match(r.decide.experiment, /^Create the GetShowUps sales assistant/)
+  assert.ok(r.decide.activities.length >= 1 && r.decide.experiment.includes(`“${r.decide.activities[0]}”`))
 })
 
 test('the route: platform admins only, same-origin, nothing saved or audited on a refusal; before migration 0044 the view still works', async () => {

@@ -1879,7 +1879,7 @@ export default function Ads() {
   const openGoogle = d.campaigns.filter((c) => c.platform === 'google' && !c.launched && ['draft', 'approved', 'error', 'launching'].includes(c.status))
   return (
     <div className="enter">
-      <h1 className="title">Ads</h1>
+      <h1 className="title title--page">Ads</h1>
       {returned?.ok && (
         <p className="notice-ok" role="status">
           <span aria-hidden="true">✓</span> {returned.ok}

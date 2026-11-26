@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, whenFull } from '../lib/api.js'
 import { clearMemory } from './assistant-memory.js'
-import { LoadError, Pill } from './ui.jsx'
+import { LoadError, Pill, SaveStatus } from './ui.jsx'
+import { useSaveState } from './ui-hooks.js'
+import { plural } from '../lib/format.js'
+import { scrollToCard } from './owner-lib.js'
 
 const day = (ms) => new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 const SIGN_IN_AGAIN = '/api/auth/google/start?next=/dashboard/settings'
@@ -58,55 +61,84 @@ const send = async (path, body) => {
 }
 
 // ---------- setup check ----------
-const LEVEL = { critical: ['bad', 'Fix now'], important: ['warn', 'Important'], optional: ['neutral', 'Optional'] }
-export function SetupCheck({ go, compact = false }) {
+// One vocabulary for severity in the whole dashboard (Overview's attention list uses the same words): Urgent, Important, Optional.
+const LEVEL = { critical: ['bad', 'Urgent'], important: ['warn', 'Important'], optional: ['neutral', 'Optional'] }
+export function SetupCheck({ go }) {
   const [d, load] = useLoad('/api/dashboard/setup-check')
+  const [error, setError] = useState('')
   useEffect(() => {
     window.addEventListener('gsu:settings-saved', load)
     return () => window.removeEventListener('gsu:settings-saved', load)
   }, [load])
   if (d === undefined) return <div aria-busy="true" />
   if (d === null) return <LoadError what="your setup check" onRetry={load} />
-  const items = compact ? d.items.filter((x) => x.level !== 'optional') : d.items
-  if (compact && !items.length) return null
-  const open = (e, x) => {
-    const [tab, id] = x.where.split('#')
-    e.preventDefault()
-    if (tab !== 'settings' || compact) go?.(tab)
-    if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), compact ? 250 : 0)
+  const dismiss = async (id) => {
+    const r = await send('/api/dashboard/setup-check', { id, action: 'dismiss' })
+    setError(r.ok ? '' : 'Couldn’t save that. Please try again.')
+    if (r.ok) load()
   }
   return (
     <div data-setup-check>
-      {items.length ? (
+      {d.items.length ? (
         <ul className="rows">
-          {(compact ? items.slice(0, 3) : items).map((x) => (
+          {d.items.map((x) => (
             <li key={x.id} className="row" data-check={x.id}>
               <div className="row-main">
                 <p className="row-title">
                   <Pill tone={LEVEL[x.level][0]}>{LEVEL[x.level][1]}</Pill> {x.title}
                 </p>
                 <p className="row-sub">
-                  {x.why} <a href={`/dashboard/${x.where}`} onClick={(e) => open(e, x)}>{x.fix}</a>
+                  {x.why}{' '}
+                  <a
+                    href={`/dashboard/${x.where}`}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      go?.(x.where)
+                    }}
+                  >
+                    {x.fix}
+                  </a>
                 </p>
               </div>
+              {x.dismiss && (
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => dismiss(x.id)} data-dismiss={x.id}>
+                  {x.dismiss}
+                </button>
+              )}
             </li>
           ))}
         </ul>
       ) : (
         <p className="fine">Nothing missing that we can check. Wording and photos are yours to judge.</p>
       )}
-      {compact && items.length > 3 && (
-        <a className="link-btn" href="/dashboard/settings" onClick={(e) => (e.preventDefault(), go?.('settings'))}>
-          {items.length - 3} more
-        </a>
-      )}
       {d.unread.length > 0 && <p className="fine">Couldn’t check: {d.unread.join(', ')}.</p>}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
 
+// "Plan and billing" as a link to that card. Rendered only where the business has the card (see Settings in Home.jsx).
+function PlanLink() {
+  return (
+    <a
+      href="#plan"
+      onClick={(e) => {
+        e.preventDefault()
+        scrollToCard('plan')
+      }}
+      data-plan-link
+    >
+      Plan and billing
+    </a>
+  )
+}
+
 // ---------- people ----------
-export function People() {
+export function People({ hasPlan = false }) {
   const [d, load] = useLoad('/api/dashboard/people')
   const [state, setState] = useState({})
   const [email, setEmail] = useState('')
@@ -130,7 +162,7 @@ export function People() {
   const others = d.members.length > 1
   return (
     <div className="stack">
-      <p className="fine">Everyone here sees the whole business. The owner also invites and removes people, changes the plan, downloads the data and closes the business.</p>
+      <p className="fine">Everyone here sees the whole business. The owner also invites and removes people, {hasPlan ? 'changes the plan, ' : ''}downloads the data and closes the business.</p>
       <ul className="rows">
         {d.members.map((m) => (
           <li key={m.email} className="row">
@@ -222,7 +254,7 @@ export function SignInSecurity() {
       clearMemory()
       return location.replace('/dashboard')
     }
-    setState({ done: r.data.ended ? `${r.data.ended} other ${r.data.ended === 1 ? 'session' : 'sessions'} ended.` : 'There were no others.' })
+    setState({ done: r.data.ended ? `${plural(r.data.ended, 'other session')} ended.` : 'There were no others.' })
     load()
   }
   return (
@@ -232,7 +264,7 @@ export function SignInSecurity() {
       </p>
       <p className="fine">GetShowUps has no password. Your name, password and two-step verification are managed in your Google Account. To use another email, invite it above, then leave with this one.</p>
       <p className="fine">
-        {d.sessions.length} signed-in {d.sessions.length === 1 ? 'session' : 'sessions'}; each ends within 7 days.
+        {plural(d.sessions.length, 'signed-in session')}; each ends within 7 days.
         {d.you.signedInAt ? ` This one started ${whenFull(d.you.signedInAt)}.` : ''}
       </p>
       <div className="row-actions">
@@ -258,6 +290,7 @@ export function Notices() {
   const [d, load] = useLoad('/api/dashboard/people')
   const [code, setCode] = useState(null)
   const [now, setNow] = useState({}) // what was just chosen, until the server's answer is read back
+  const save = useSaveState() // each box saves when it is ticked: the same "Saved." as every other save (SET-05)
   if (d === undefined) return <div aria-busy="true" />
   if (d === null) return <LoadError what="your notifications" onRetry={load} />
   if (!d.notices) return <p className="fine">You get every notice. Choosing which ones isn’t available yet.</p>
@@ -269,18 +302,22 @@ export function Notices() {
           <input
             type="checkbox"
             checked={now[n.kind] ?? n.on}
-            onChange={async (e) => {
+            onChange={(e) => {
               const on = e.target.checked
               setNow((x) => ({ ...x, [n.kind]: on }))
-              const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on })
-              setCode(r.ok ? null : r.code)
-              await load()
-              setNow((x) => ({ ...x, [n.kind]: undefined }))
+              save.run(async () => {
+                const r = await send('/api/dashboard/people', { action: 'notice', kind: n.kind, on })
+                setCode(r.ok ? null : r.code)
+                await load()
+                setNow((x) => ({ ...x, [n.kind]: undefined }))
+                return r.ok ? undefined : false // the reason is shown below (ActionError), never a "Saved."
+              })
             }}
           />
           <span>{n.label}</span>
         </label>
       ))}
+      <SaveStatus save={save} />
       <ActionError code={code} />
     </div>
   )
@@ -288,72 +325,120 @@ export function Notices() {
 
 // ---------- connected services ----------
 const STATE = { connected: ['ok', 'Connected'], attention: ['warn', 'Needs attention'], off: ['neutral', 'Not connected'], unavailable: ['neutral', 'Not available yet'], unknown: ['warn', 'Couldn’t check'] }
-export function Services({ go }) {
+// Where a service that isn't connected is set up: every "Not connected" row has its action.
+const SET_UP = { ads: 'Set up in Ads', website: 'Set up in Website', followups: 'Set up in Follow-ups', settings: 'Set up above' }
+function useServices() {
   const [d, load] = useLoad('/api/dashboard/integrations')
   const [open, setOpen] = useState(null)
   const [state, setState] = useState({})
-  if (d === undefined) return <div aria-busy="true" />
-  if (d === null) return <LoadError what="your connected services" onRetry={load} />
   const disconnect = async (id, pauseRunning) => {
     setState({ busy: true })
     const r = await send('/api/dashboard/integrations', { action: 'disconnect', id, confirm: true, pauseRunning })
     setState(r.ok ? { id, done: `Disconnected here.${r.data.revokeAsked ? ' We also asked Google to remove our access.' : ' The provider’s own permission may remain: see above to remove it there.'}` } : { id, code: r.code })
-    if (r.ok) load()
+    if (r.ok) {
+      load()
+      window.dispatchEvent(new Event('gsu:settings-saved'))
+    }
   }
+  return { d, load, open, setOpen, state, disconnect }
+}
+// What stops if it is disconnected, and the disconnect itself (or the page where it is managed).
+function ManagePanel({ x, s, go }) {
+  const running = ['campaigns_running', 'ads_on_hold_pause_first'].includes(s.state.code) && s.state.id === x.id
+  return (
+    <div className="stack">
+      <p className="fine">
+        <strong>If you disconnect:</strong> {x.stops}
+      </p>
+      {x.external && <p className="fine">{x.external}</p>}
+      <div className="row-actions">
+        <button type="button" className="btn btn-sm btn-quiet" onClick={() => s.setOpen(null)}>
+          Close
+        </button>
+        {x.here ? (
+          <button type="button" className="btn btn-sm btn-danger" disabled={s.state.busy} onClick={() => s.disconnect(x.id, running)}>
+            {running ? 'Pause running ads and disconnect' : `Disconnect ${x.name}`}
+          </button>
+        ) : (
+          x.page !== 'settings' && (
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => go(x.page)}>
+              Manage on its page
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+const Outcome = ({ x, s }) => (
+  <>
+    {s.state.id === x.id && <ActionError code={s.state.code} />}
+    {s.state.id === x.id && s.state.done && (
+      <p className="fine" role="status">
+        {s.state.done}
+      </p>
+    )}
+  </>
+)
+// `skip`: services that have their own card on the page (Google Calendar), so each is shown once.
+export function Services({ go, skip = [] }) {
+  const s = useServices()
+  const { d, load, open, setOpen } = s
+  if (d === undefined) return <div aria-busy="true" />
+  if (d === null) return <LoadError what="your connected services" onRetry={load} />
   return (
     <ul className="rows" data-services>
-      {d.items.map((x) => {
-        const on = ['connected', 'attention'].includes(x.state)
-        return (
-          <li key={x.id} className="row" data-service={x.id}>
-            <div className="row-main">
-              <p className="row-title">
-                {x.name} <Pill tone={STATE[x.state][0]}>{STATE[x.state][1]}</Pill>
-              </p>
-              <p className="row-sub">
-                {x.detail ? `${x.detail} · ` : ''}
-                {x.does}
-              </p>
-              {open === x.id && (
-                <div className="stack">
-                  <p className="fine">
-                    <strong>If you disconnect:</strong> {x.stops}
-                  </p>
-                  {x.external && <p className="fine">{x.external}</p>}
-                  <div className="row-actions">
-                    <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(null)}>
-                      Close
-                    </button>
-                    {x.here ? (
-                      <button type="button" className="btn btn-sm btn-danger" disabled={state.busy} onClick={() => disconnect(x.id, state.code === 'campaigns_running' || state.code === 'ads_on_hold_pause_first')}>
-                        {['campaigns_running', 'ads_on_hold_pause_first'].includes(state.code) && state.id === x.id ? 'Pause running ads and disconnect' : `Disconnect ${x.name}`}
-                      </button>
-                    ) : (
-                      x.page !== 'settings' && (
-                        <button type="button" className="btn btn-sm btn-primary" onClick={() => go(x.page)}>
-                          Manage on its page
-                        </button>
-                      )
-                    )}
-                  </div>
-                </div>
-              )}
-              {state.id === x.id && <ActionError code={state.code} />}
-              {state.id === x.id && state.done && (
-                <p className="fine" role="status">
-                  {state.done}
+      {d.items
+        .filter((x) => !skip.includes(x.id))
+        .map((x) => {
+          const on = ['connected', 'attention'].includes(x.state)
+          return (
+            <li key={x.id} className="row" data-service={x.id}>
+              <div className="row-main">
+                <p className="row-title">
+                  {x.name} <Pill tone={STATE[x.state][0]}>{STATE[x.state][1]}</Pill>
                 </p>
+                <p className="row-sub">
+                  {x.detail ? `${x.detail} · ` : ''}
+                  {x.does}
+                </p>
+                {open === x.id && <ManagePanel x={x} s={s} go={go} />}
+                <Outcome x={x} s={s} />
+              </div>
+              {on && open !== x.id && (
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(x.id)}>
+                  Manage<span className="sr-only"> {x.name}</span>
+                </button>
               )}
-            </div>
-            {on && open !== x.id && (
-              <button type="button" className="btn btn-sm btn-quiet" onClick={() => setOpen(x.id)}>
-                Manage<span className="sr-only"> {x.name}</span>
-              </button>
-            )}
-          </li>
-        )
-      })}
+              {x.state === 'off' && SET_UP[x.page] && (
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => (x.page === 'settings' ? scrollToCard(x.id) : go(x.page))} data-set-up={x.id}>
+                  {SET_UP[x.page]}
+                  <span className="sr-only">: {x.name}</span>
+                </button>
+              )}
+            </li>
+          )
+        })}
     </ul>
+  )
+}
+
+// Inside the Google Calendar card: the same disconnect the list offered, so the calendar appears once on the page.
+export function CalendarDisconnect() {
+  const s = useServices()
+  const x = s.d?.items.find((i) => i.id === 'calendar')
+  if (!x || x.state === 'off') return s.state.done ? <Outcome x={{ id: 'calendar' }} s={s} /> : null
+  return (
+    <div className="stack" data-service="calendar">
+      {s.open === x.id ? (
+        <ManagePanel x={x} s={s} go={() => {}} />
+      ) : (
+        <button type="button" className="link-btn" onClick={() => s.setOpen(x.id)}>
+          Disconnect Google Calendar…
+        </button>
+      )}
+      <Outcome x={x} s={s} />
+    </div>
   )
 }
 
@@ -398,13 +483,19 @@ export function YourData() {
 // ---------- closing the business ----------
 const PLATFORM = { google: 'Google Ads', meta: 'Meta', openai: 'ChatGPT ads' }
 const count = (n, one, many = `${one}s`) => (n === null ? `${many}: couldn’t be checked` : `${n} ${n === 1 ? one : many}`)
-function Impact({ i, deletes, recoveryDays }) {
+function Impact({ i, deletes, recoveryDays, hasPlan }) {
   const ads = i.ads === null ? 'Running ads couldn’t be checked' : i.ads.length ? `${i.ads.map((a) => `${a.n} running on ${PLATFORM[a.platform] || a.platform}`).join(', ')}: paused and checked first. They stay in your own ad account, paused.` : 'No ads started here are running. Ads you run yourself in Google, Meta or OpenAI are not touched and keep running.'
   return (
     <>
       {!deletes && (
         <p className="notice-info" data-request-only>
-          Sending this request changes nothing yet: your website, bookings, ads and plan continue, and charges with them, until a person closes the business with you. To stop renewing now, cancel under Plan and billing. What closing would mean:
+          Sending this request changes nothing yet: your website, bookings{hasPlan ? ', ads and plan continue, and charges with them,' : ' and ads continue'} until a person closes the business with you.{' '}
+          {hasPlan && (
+            <>
+              To stop renewing now, cancel under <PlanLink />.{' '}
+            </>
+          )}
+          What closing would mean:
         </p>
       )}
       <ul className="fine" data-impact>
@@ -419,14 +510,16 @@ function Impact({ i, deletes, recoveryDays }) {
         <li>
           Erased: {count(i.customers, 'customer record')}, {count(i.conversations, 'receptionist conversation')}, {count(i.images, 'photo')}, your website, settings and what you taught the AI.
         </li>
-        <li>{count(i.members, 'person', 'people')} lose access. Other businesses are not affected.</li>
+        <li>
+          {count(i.members, 'person', 'people')} {i.members === 1 ? 'loses' : 'lose'} access. Other businesses are not affected.
+        </li>
         <li>Kept: billing records and a log without your customers’ details. Copies in backups go away as the backups expire.</li>
       </ul>
     </>
   )
 }
 
-export function CloseBusiness() {
+export function CloseBusiness({ hasPlan = false }) {
   const [d, load] = useLoad('/api/dashboard/account')
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState('')
@@ -482,8 +575,15 @@ export function CloseBusiness() {
     <div className="stack">
       <p className="fine">
         {d.enabled
-          ? `Permanently deletes ${b.name}. ${d.recoveryDays ? `You have ${d.recoveryDays} days to change your mind; then there is no undo.` : 'There is no undo.'} To stop paying but keep everything, cancel your plan under Plan and billing instead.`
-          : 'Deleting a business online isn’t switched on yet. Ask here and a person at GetShowUps handles it and confirms when it’s done. To stop paying but keep everything, cancel your plan under Plan and billing instead.'}
+          ? `Permanently deletes ${b.name}. ${d.recoveryDays ? `You have ${d.recoveryDays} days to change your mind; then there is no undo.` : 'There is no undo.'}`
+          : 'Deleting a business online isn’t switched on yet. Ask here and a person at GetShowUps handles it and confirms when it’s done.'}
+        {/* Only a business that has a plan is pointed to it (never-billed and complimentary accounts have nothing to cancel). */}
+        {hasPlan && (
+          <>
+            {' '}
+            To stop paying but keep everything, cancel your plan under <PlanLink /> instead.
+          </>
+        )}
       </p>
       {b.request ? (
         <div className="stack" data-closure-requested>
@@ -510,7 +610,7 @@ export function CloseBusiness() {
           <p>
             <strong>What happens</strong>
           </p>
-          <Impact i={b.impact} deletes={d.enabled} recoveryDays={d.recoveryDays} />
+          <Impact i={b.impact} deletes={d.enabled} recoveryDays={d.recoveryDays} hasPlan={hasPlan} />
           <p className="fine">You may want to download your data first (above). You don’t have to.</p>
           {d.enabled && (
             <label className="field">

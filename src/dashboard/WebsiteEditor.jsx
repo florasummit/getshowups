@@ -1,7 +1,7 @@
 // Structured website editor (no page builder): a few clear fields, saved automatically, with a live
 // preview that is rendered by the same engine as the public site. Used in onboarding and the Website tab.
 import { useEffect, useRef, useState } from 'react'
-import { problemText } from './website-data.js'
+import { problemText, usePendingRevision } from './website-data.js'
 import { api } from '../lib/api.js'
 import { uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 
@@ -71,6 +71,8 @@ function useAutosave(content, onSaved, baseUpdatedAt) {
 }
 
 export function SaveStatus({ status }) {
+  // A "Describe a change" version waiting for Keep this / Go back is not saved: never say everything is (ONB-09).
+  const waiting = usePendingRevision()
   if (status?.error)
     return (
       <p className="form-error" role="alert">
@@ -79,7 +81,7 @@ export function SaveStatus({ status }) {
     )
   return (
     <p className="fine save-status" role="status" aria-live="polite">
-      {status === 'saved' ? 'All changes saved' : 'Saving…'}
+      {status !== 'saved' ? 'Saving…' : waiting ? 'The new version above isn’t saved yet: choose “Keep this” or “Go back”.' : 'All changes saved'}
     </p>
   )
 }
@@ -115,7 +117,7 @@ export function WebsitePreview({ stamp, live = false, title = 'Website preview',
         <div className="segmented" role="group" aria-label="Preview size">
           {['desktop', 'phone'].map((d) => (
             <button key={d} type="button" aria-pressed={device === d} onClick={() => setDevice(d)}>
-              {d === 'phone' ? 'Phone' : 'Computer'}
+              {d === 'phone' ? 'Phone' : 'Desktop'}
             </button>
           ))}
         </div>

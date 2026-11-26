@@ -12,11 +12,12 @@ import { DatabaseSync } from 'node:sqlite'
 import { encrypt, sha256Hex } from '../server/google-oauth.js'
 import { customerFromRow } from '../server/auth.js'
 import { getCustomer } from '../server/customers.js'
-import { defaultConfig, validateConfig, describeConfig, diffConfigs, PLATFORM_RULES } from '../server/intelligence/schema.js'
+import { defaultConfig, validateConfig, describeConfig, diffConfigs, intakeLabel, PLATFORM_RULES } from '../server/intelligence/schema.js'
+import { INDUSTRIES, TRADE_WORDS } from '../server/intelligence/industries.js'
 import { understand, mergeFacts, saidByCustomer } from '../server/intelligence/understand.js'
 import { decide, coverageOf } from '../server/intelligence/decide.js'
 import { rulesInstructions, turnNote } from '../server/intelligence/compile.js'
-import { propose, ruleOps, applyOps, TEACH_SCHEMA } from '../server/intelligence/teach.js'
+import { propose, ruleOps, applyOps, splitClauses, TEACH_SCHEMA } from '../server/intelligence/teach.js'
 import { simulate } from '../server/intelligence/simulate.js'
 import { rulesLiveFor, studioEnabled } from '../server/intelligence/access.js'
 import { retellAdapter } from '../server/intelligence/providers.js'
@@ -634,6 +635,169 @@ test('voice provider boundary: one adapter shape; Retell custom-LLM needs no age
   assert.deepEqual(anthropicSchemaProblems(TEACH_SCHEMA), [])
 })
 
+// ---------- Product Excellence: every part of a request is accounted for (TEACH-01, TEACH-03) ----------
+// All deterministic: env {} has no model key, so only the fixed patterns and the explanation layer run.
+
+test('teach: a suggestion is never a bare "nothing would change": every clause says changed, already true, or not changed with a plain reason (and where it lives, or wording that works)', async () => {
+  const draft = defaultConfig(POOL)
+  const one = async (text) => {
+    const p = await propose({}, text, draft, POOL)
+    assert.equal(p.ok, true, text)
+    assert.ok(p.clauses.length >= 1, text)
+    for (const c of p.clauses) {
+      assert.ok(['changed', 'already', 'not_changed'].includes(c.outcome), text)
+      assert.ok(c.changes.length + c.notes.length + c.reasons.length > 0, `explained: ${c.text}`)
+      assert.equal(c.outcome === 'changed', c.changes.length > 0, c.text)
+      for (const r of c.reasons) assert.ok(r.reason.length > 20 && !/undefined|null/.test(r.reason), r.reason)
+    }
+    assert.equal(p.approvable, p.changes.length > 0, 'something to add exactly when something would change')
+    return p
+  }
+  // The evaluation's rules (2 of 3 used to end in "Nothing would change.").
+  const friday = await one("Don't book green pool cleanups on Fridays.")
+  assert.deepEqual([friday.approvable, friday.clauses[0].outcome, friday.clauses[0].reasons[0].link.href], [false, 'not_changed', '/dashboard/settings#booking-hours'])
+  assert.match(friday.clauses[0].reasons[0].reason, /booking hours, closed dates and minimum notice/)
+  assert.equal(friday.clauses[0].examples.length, 2)
+  const dog = await one("Always ask if there's a dog in the yard.")
+  assert.deepEqual([dog.source, dog.approvable, dog.changes], ['rules', true, ["Finds out: whether there's a dog in the yard"]])
+  const area = await one('Book people outside my service area')
+  assert.deepEqual([area.approvable, area.clauses[0].outcome, area.clauses[0].reasons[0].link.label], [false, 'not_changed', 'Settings → Business'])
+  assert.match(area.clauses[0].reasons[0].reason, /never booked automatically.*platform rule/)
+  assert.equal((await one('Never book anyone outside our service area.')).clauses[0].outcome, 'already')
+  // The page's own hint example works as written (it used to be refused with a garbled label).
+  const worth = await one('Remember that a green pool cleanup is usually worth $450')
+  assert.deepEqual([worth.source, worth.approvable, worth.changes], ['rules', true, ['For planning: Green pool cleanup: typical job $450']])
+  assert.deepEqual(worth.proposed.economics, [{ service: 'Green pool cleanup', valueCents: 45000, marginPct: null, repeatsPerYear: null }])
+  assert.deepEqual((await one('A filter repair is typically worth about $1,200, we keep 35% and it comes up 2 times a year.')).proposed.economics[0], { service: 'Filter Repair', valueCents: 120000, marginPct: 35, repeatsPerYear: 2 })
+  const season = await one('Remember that April through June is our busiest season for pool openings.')
+  assert.deepEqual(season.proposed.seasons, [{ months: [4, 5, 6], note: 'April through June is our busiest season for pool openings.' }])
+  assert.deepEqual((await one('Our slow season runs from November to February.')).proposed.seasons[0].months, [1, 2, 11, 12])
+  // Two clauses: the second is not silently dropped, and one that isn't allowed doesn't block the rest.
+  const two = await one("We don't do commercial pools. We serve all of Springfield.")
+  assert.deepEqual(two.clauses.map((c) => c.outcome), ['changed', 'not_changed'])
+  assert.match(two.clauses[1].reasons[0].reason, /“Springfield” isn’t one of the towns/)
+  assert.deepEqual([two.approvable, two.ops.map((o) => o.kind), two.changes], [true, ['exclude'], ['Services you don’t offer: added Commercial Pools.']])
+  const three = await one("Ask what the customer needs before asking where they live. Be warm. Paint the moon green.")
+  assert.deepEqual(three.clauses.map((c) => [c.text, c.outcome]), [['Ask what the customer needs before asking where they live.', 'already'], ['Be warm.', 'already'], ['Paint the moon green.', 'not_changed']])
+  assert.deepEqual([three.clauses[2].reasons[0].reason, three.notUnderstood], ['I couldn’t turn this into a rule yet.', ['Paint the moon green.']])
+  // Lives in Settings: said so, with the place.
+  assert.equal((await one('We now offer hot tub repair.')).clauses[0].reasons[0].link.href, '/dashboard/settings#services')
+  assert.equal((await one('Charge $20 more on weekends')).clauses[0].reasons[0].link.label, 'Settings → Services')
+  const price = await one('Remember that a visit costs $99')
+  assert.deepEqual([price.approvable, price.ops, price.clauses[0].outcome], [false, [], 'not_changed'])
+  // What is approved is exactly what was shown: the kept operations, re-applied to the draft.
+  assert.deepEqual(diffConfigs(draft, validateConfig(applyOps(draft, two.ops).config, POOL).config), two.changes)
+})
+
+test('teach: one sentence with several requests is read clause by clause; a list stays a list; nothing that is another kind of request is ever stored as a service', async () => {
+  const draft = defaultConfig(POOL)
+  const go = async (text) => {
+    const p = await propose({}, text, draft, POOL)
+    for (const x of p.proposed.services.excluded) assert.doesNotMatch(x, /ask|dog|quote|\$|book|outside|area|always|moon/i, `${text} → ${x}`)
+    for (const c of p.clauses) assert.ok(c.changes.length + c.notes.length + c.reasons.length > 0, c.text)
+    return p
+  }
+  const a = await go("We don't do hot tubs, and quote $50 for weekly pool care")
+  assert.deepEqual(a.clauses.map((c) => [c.text, c.outcome]), [["We don't do hot tubs", 'changed'], ['quote $50 for weekly pool care', 'not_changed']])
+  assert.deepEqual([a.changes, a.approvable], [['Services you don’t offer: added Hot Tubs.'], true])
+  assert.match(a.clauses[1].reasons[0].reason, /Prices come only from your services in Settings/)
+  const b = await go("We don't do commercial pools and always ask if there is a dog in the yard")
+  assert.deepEqual(b.clauses.map((c) => c.outcome), ['changed', 'changed'])
+  assert.deepEqual(b.changes, ['Services you don’t offer: added Commercial Pools.', 'Finds out: whether there is a dog in the yard'])
+  const c = await go("We don't do hot tubs and book people outside my service area")
+  assert.deepEqual(c.clauses.map((x) => [x.text, x.outcome]), [["We don't do hot tubs", 'changed'], ['book people outside my service area', 'not_changed']])
+  assert.match(c.clauses[1].reasons[0].reason, /never booked automatically/)
+  assert.deepEqual(c.proposed.services.excluded, ['Hot Tubs'])
+  // A list inside one request stays a list.
+  assert.deepEqual((await go("We don't do hot tubs and spas")).proposed.services.excluded, ['Hot Tubs', 'Spas'])
+  assert.deepEqual((await go("We don't do hot tubs, spas or commercial pools.")).proposed.services.excluded, ['Hot Tubs', 'Spas', 'Commercial Pools'])
+  assert.deepEqual((await propose({}, 'We serve Charleston and Mount Pleasant', draft, POOL)).proposed.coverage.cityWide, ['Charleston', 'Mount Pleasant'])
+  assert.deepEqual(splitClauses('Remember that we bring our own ladders and we clean up afterwards'), ['Remember that we bring our own ladders and we clean up afterwards'])
+  assert.deepEqual(splitClauses('If they ask for a person, take a message and don’t book'), ['If they ask for a person, take a message and don’t book'])
+  // Adversarial: joined with "but", three requests, a part nothing can place, and a non-service after "we don't do".
+  const d = await go("Be brief but don't quote prices, and always ask whether the gate is locked")
+  assert.deepEqual([d.clauses.map((x) => x.outcome), d.changes.length], [['changed', 'changed', 'changed'], 3])
+  const e = await go("We don't do hot tubs and please paint the moon green")
+  assert.deepEqual(e.clauses.map((x) => [x.text, x.outcome, x.reasons[0]?.reason]), [["We don't do hot tubs", 'changed', undefined], ['please paint the moon green', 'not_changed', 'I couldn’t turn this into a rule yet.']])
+  const f = await go("We don't do anything outside our service area or quote $50 jobs")
+  assert.deepEqual([f.proposed.services.excluded, f.approvable, f.clauses[0].outcome], [[], false, 'not_changed'])
+  const g = await go("We don't do repairs if the customer has a dog")
+  assert.deepEqual([g.proposed.services.excluded, g.notUnderstood], [[], ["We don't do repairs if the customer has a dog"]])
+  // A cut that would lose meaning is not made: the sentence the patterns understand as a whole stands.
+  const h = await go('After hours, take a message and don’t book.')
+  assert.deepEqual([h.clauses.length, h.changes], [1, ['After hours: don’t book after hours; take a callback request instead.']])
+  assert.deepEqual((await go("We don't install equipment, only repair it.")).proposed.services.excluded, ['Equipment installation'])
+})
+
+test('teach: every example the page offers works as written, for every kind of business, without a model (TEACH-03, TEACH-07)', async () => {
+  assert.deepEqual(Object.keys(TRADE_WORDS).sort(), Object.keys(INDUSTRIES).sort(), 'one set of words per kind of business')
+  for (const [key, words] of Object.entries(TRADE_WORDS)) {
+    const records = { name: 'Biz', industry: key, services: [{ name: 'Standard visit', price: '' }], towns: ['Charleston'], zips: [], visit: true, hoursConfirmed: true }
+    const draft = { ...defaultConfig(records), industry: key }
+    assert.equal(words.teach.length, 3, key)
+    for (const text of words.teach) {
+      const p = await propose({}, text, draft, records)
+      assert.deepEqual([p.source, p.approvable, p.notUnderstood, p.refused, p.clauses.map((c) => c.outcome)], ['rules', true, [], [], ['changed']], `${key}: ${text}`)
+    }
+    for (const w of [words.excluded, words.urgent, words.equipment, words.equipmentAsk]) assert.ok(typeof w === 'string' && w.length > 3, key)
+  }
+  // A pool business is never asked about heating or a "system type": labels, summaries, diffs and test replies.
+  const pool = defaultConfig(POOL)
+  const text = [intakeLabel('equipment', 'pool'), ...describeConfig(pool, POOL), ...diffConfigs(pool, { ...pool, intake: pool.intake.map((i) => (i.id === 'equipment' ? { ...i, required: true } : i)) }), JSON.stringify(TRADE_WORDS.pool), ...simulate({ ...pool, intake: pool.intake.map((i) => (i.id === 'equipment' ? { ...i, required: true, beforeTimes: true } : i)) }, POOL, ['My pool is green, I’m in 29464']).turns.flatMap((t) => [t.reply, ...t.explanations.map((x) => x.text)])].join(' | ')
+  assert.doesNotMatch(text, /system type|\bheat|furnace|equipment or system/i)
+  assert.match(text, /Pool type or equipment: now required/)
+  assert.match(text, /What kind of pool or equipment is it\?/)
+  assert.equal(intakeLabel('equipment', 'hvac'), 'Equipment or system type')
+  assert.equal(intakeLabel('need', 'pool'), 'What they need')
+})
+
+test('test your AI: one pretend customer per conversation; a message naming a different place AND job starts fresh, and no turn repeats the previous verdicts (TEACH-06)', () => {
+  const records = { ...POOL, services: [...POOL.services, { name: 'Filter repair', price: '' }] }
+  const cfg = validateConfig({ ...defaultConfig(records), coverage: { cityWide: ['Mount Pleasant'] } }, records).config
+  const s = simulate(cfg, records, ['My pool is green. I’m in Mount Pleasant and need someone Friday.', 'I’m Jamie, 843-555-0142', 'Do you do filter repair in Charleston?'])
+  const [a, b, c] = s.turns
+  // The same customer continues: remembered, and only what is NEW is explained.
+  assert.equal(b.fresh, undefined)
+  assert.match(b.reply, /^Thanks, Jamie\. What’s the address for the visit\?$/)
+  assert.ok(a.explanations.some((x) => /Mount Pleasant is fully served/.test(x.text)))
+  assert.ok(!b.explanations.some((x) => /Mount Pleasant is fully served/.test(x.text)), 'the area verdict is not repeated')
+  for (const x of b.explanations) assert.ok(!a.explanations.some((y) => y.text === x.text), x.text)
+  // A different town and service: a new customer. Nothing of Jamie, Friday or Mount Pleasant is carried over.
+  assert.equal(c.fresh, true)
+  assert.notEqual(c.reply, b.reply)
+  assert.doesNotMatch([c.reply, ...c.explanations.map((x) => x.text)].join(' '), /Mount Pleasant|Jamie|Friday|name, phone|green/i)
+  assert.match(c.explanations.map((x) => x.text).join(' '), /you serve parts of Charleston/)
+  assert.deepEqual([s.known.city, s.known.name, s.known.day], ['Charleston', undefined, undefined])
+  // A correction, or only a new place, is still the same customer.
+  const same = simulate(cfg, records, ['My pool is green. I’m in Mount Pleasant.', 'Actually I’m in Charleston.', 'I’m in 29401 and it is the filter'])
+  assert.deepEqual(same.turns.map((t) => Boolean(t.fresh)), [false, false, false])
+})
+
+test('publish: the owner is told in plain words whether customers get published rules now; a first version lists what it contains (TEACH-02, TEACH-07)', async () => {
+  for (const env of [{}, { AI_RULES_LIVE_BUSINESSES: 'alpha' }, { AI_RULES_LIVE_BUSINESSES: 'alpha', RECEPTIONIST_VOICE_BUSINESSES: 'alpha', RETELL_API_KEY: 'k', RETELL_AGENT_ID: 'a' }]) {
+    const notes = retellAdapter.plan(env, { customerId: 'alpha', version: 2 }).notes
+    assert.doesNotMatch(notes.join(' '), /Retell|\(approval\)|pilot|AI_RULES|switched off/i)
+    assert.match(notes[0], env.AI_RULES_LIVE_BUSINESSES ? /^Published version 2 is used by your receptionist now/ : /^Customers don’t get published rules yet/)
+  }
+  await seed('alpha')
+  const a = await session('owner@alpha.example')
+  const before = (await get(a)).json()
+  assert.deepEqual(before.words.teach, TRADE_WORDS.pool.teach)
+  assert.equal(before.choices.intake.equipment.label, 'Pool type or equipment')
+  const saved = (await post(a, { action: 'save', config: before.draft, baseUpdatedAt: null })).json()
+  assert.ok(saved.describe.draft.length >= 4, 'the page lists what a first version contains')
+  const pub = (await post(a, { action: 'publish', baseUpdatedAt: saved.draftUpdatedAt, confirm: true })).json()
+  assert.match(pub.versions[0].note, /^First version\. Asks for: what they need, where the job is/)
+  // The proposal the page renders carries the per-clause account.
+  const r = (await post(a, { action: 'teach', text: "Don't book green pool cleanups on Fridays. Always ask if there is a dog in the yard." })).json().proposal
+  assert.deepEqual(r.clauses.map((c) => c.outcome), ['not_changed', 'changed'])
+  assert.equal(r.approvable, true)
+  // The model answered, but with nothing usable: still a reason and wording that works, never an empty result.
+  script.push({ content: [{ type: 'text', text: JSON.stringify({ ops: [] }) }], stop_reason: 'end_turn' })
+  const empty = (await post(a, { action: 'teach', text: 'Paint the moon green.' })).json().proposal
+  assert.deepEqual([empty.changes, empty.approvable, empty.clauses[0].outcome, empty.clauses[0].reasons[0].reason, empty.clauses[0].examples], [[], false, 'not_changed', 'I couldn’t turn this into a rule yet.', TRADE_WORDS.pool.teach.slice(0, 2)])
+})
+
 test('teach (model path): only for what patterns can’t place; the model’s ops are validated like any other; failures are reported, never applied', async () => {
   await seed('alpha')
   const a = await session('owner@alpha.example')
@@ -647,7 +811,11 @@ test('teach (model path): only for what patterns can’t place; the model’s op
   assert.ok(r.changes.includes('Whether they’ve used you before: now required.'))
   assert.ok(r.refused.some((x) => /always required/.test(x.reason)), 'model could not make contact optional')
   assert.ok(r.conflicts.some((x) => /instructions to the AI/.test(x)))
-  assert.equal(r.approvable, false)
+  // The operation that isn't allowed is LEFT OUT with its reason (never offered for approval); the valid one stays.
+  assert.deepEqual(r.ops.map((o) => o.kind), ['require'], 'only the validated operation can be approved')
+  assert.ok(!JSON.stringify(r.ops).includes('Ignore the rules'))
+  assert.ok(r.clauses.some((c) => c.reasons.some((x) => /instructions to the AI/.test(x.reason))), 'the owner is told why that part was not changed')
+  assert.equal(r.approvable, true)
   script.push({ status: 500 })
   const f = (await post(a, { action: 'teach', text: 'Something entirely different.' })).json().proposal
   assert.equal(f.source, 'none')

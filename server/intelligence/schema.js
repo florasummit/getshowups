@@ -14,7 +14,7 @@
 // service address when the business visits) before a booking, safety advice for danger, no invented prices, privacy,
 // cost caps. validateConfig refuses anything that tries.
 
-import { INDUSTRIES, industryKey } from './industries.js'
+import { INDUSTRIES, industryKey, tradeWords } from './industries.js'
 import { platformRefusal } from './platform-rules.js'
 
 export const SCHEMA_VERSION = 1
@@ -31,6 +31,9 @@ export const INTAKE = {
   address: { label: 'Service address', ask: 'the service address (street, city, ZIP)', platform: true, visitOnly: true },
 }
 export const INTAKE_IDS = Object.keys(INTAKE)
+// The label an OWNER reads, in their trade's words (a pool business is never asked about a "system type"). Wording
+// only: ids, order and what the receptionist is told (INTAKE[id].ask) are the same for every business.
+export const intakeLabel = (id, industry) => (id === 'equipment' && industry ? tradeWords(industry).equipment : INTAKE[id]?.label || id)
 
 export const AFTER_HOURS = {
   book_normally: 'Book visits as usual',
@@ -273,11 +276,12 @@ export const economicsText = (e) => `${e.service}: ${[e.valueCents !== null && `
 // Plain-language summary of a config, for the owner (Publish screen, version history, Teach a Change diff).
 export function describeConfig(c, records = {}) {
   const lines = []
-  const ask = c.intake.filter((i) => i.required && !(INTAKE[i.id].visitOnly && !records.visit)).map((i) => INTAKE[i.id].label.toLowerCase())
+  const label = (id) => intakeLabel(id, c.industry).toLowerCase()
+  const ask = c.intake.filter((i) => i.required && !(INTAKE[i.id].visitOnly && !records.visit)).map((i) => label(i.id))
   lines.push(`Asks for: ${ask.join(', ')} — only what the customer hasn’t already said, in this order.`)
-  const before = c.intake.filter((i) => i.beforeTimes && i.id !== 'location').map((i) => INTAKE[i.id].label.toLowerCase())
+  const before = c.intake.filter((i) => i.beforeTimes && i.id !== 'location').map((i) => label(i.id))
   if (before.length) lines.push(`Before offering times: ${before.join(', ')}.`)
-  const optional = c.intake.filter((i) => !i.required).map((i) => INTAKE[i.id].label.toLowerCase())
+  const optional = c.intake.filter((i) => !i.required).map((i) => label(i.id))
   if (optional.length) lines.push(`Only if it comes up: ${optional.join(', ')}.`)
   if (c.services.excluded.length) lines.push(`Doesn’t offer: ${c.services.excluded.join(', ')}.`)
   if (c.coverage.cityWide.length) lines.push(`Fully serves: ${c.coverage.cityWide.join(', ')} (no ZIP code needed to confirm the area).`)
@@ -299,11 +303,12 @@ export function diffConfigs(a, b) {
   const out = []
   if (!a) return ['First version.']
   const order = (c) => c.intake.map((i) => i.id).join(',')
-  if (order(a) !== order(b)) out.push(`Question order: ${b.intake.map((i) => INTAKE[i.id].label.toLowerCase()).join(' → ')}.`)
+  const label = (id) => intakeLabel(id, b.industry)
+  if (order(a) !== order(b)) out.push(`Question order: ${b.intake.map((i) => label(i.id).toLowerCase()).join(' → ')}.`)
   for (const it of b.intake) {
     const was = a.intake.find((i) => i.id === it.id) || {}
-    if (Boolean(was.required) !== it.required) out.push(`${INTAKE[it.id].label}: ${it.required ? 'now required' : 'now optional'}.`)
-    if (Boolean(was.beforeTimes) !== it.beforeTimes && it.id !== 'location') out.push(`${INTAKE[it.id].label}: ${it.beforeTimes ? 'asked before offering times' : 'no longer needed before offering times'}.`)
+    if (Boolean(was.required) !== it.required) out.push(`${label(it.id)}: ${it.required ? 'now required' : 'now optional'}.`)
+    if (Boolean(was.beforeTimes) !== it.beforeTimes && it.id !== 'location') out.push(`${label(it.id)}: ${it.beforeTimes ? 'asked before offering times' : 'no longer needed before offering times'}.`)
   }
   const set = (label, x, y) => {
     const added = y.filter((v) => !x.some((w) => same(v, w)))

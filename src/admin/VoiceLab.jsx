@@ -151,7 +151,6 @@ export default function VoiceLab() {
   const providerSessionRef = useRef(null) // the provider's own session id (ElevenLabs conversation id), sent with the end
 
   useEffect(() => {
-    document.title = 'Voice Lab · GetShowUps'
     // The former Voice providers tab lands here, keeping its deep link.
     if (window.location.pathname.startsWith('/admin/voice-providers')) window.history.replaceState(null, '', `/admin/voice-lab${window.location.search}`)
   }, [])

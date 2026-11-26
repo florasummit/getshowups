@@ -1,6 +1,8 @@
 // GET /api/book/:customer[?service=<id>] — public booking page data: business name, its bookable services (one catalog:
 // server/services.js), its published brand, and real open slots for the chosen service's length (no service = one slot).
-// Exposes no contact details, settings beyond what a visitor needs, or calendar contents.
+// Exposes no customer details, no settings beyond what a visitor needs and no calendar contents. The one contact detail
+// is the business's own phone on record (the number its chat page and website already show), so a customer who has
+// booked can reach the business.
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { openSlots, recordAvailability } from '../../../../server/booking.js'
@@ -10,6 +12,7 @@ import { policiesOrEmpty } from '../../../../server/policies.js'
 import { getProfile } from '../../../../server/onboarding.js'
 import { bookingOptions, bookingServices } from '../../../../server/services.js'
 import { publicBrand } from '../../../../server/public-brand.js'
+import { reachFor } from '../../../../server/site-serve.js'
 
 export async function onRequestGet({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params)
@@ -30,6 +33,11 @@ export async function onRequestGet({ request, env, params, waitUntil }) {
   return json(200, {
     name: customer.name,
     timezone: customer.timezone,
+    // The business's phone on record ('' when it has none): shown as a tel: link, never anything else about the owner.
+    phone: typeof profile?.phone === 'string' ? profile.phone : '',
+    // No phone on record: the business's live website, else its chat page when that would open (both already public),
+    // so the confirmation still offers one real way to reach it. null when there is neither.
+    reach: typeof profile?.phone === 'string' && profile.phone ? null : await reachFor(env, customer).catch(() => null),
     slotMinutes: customer.slotMinutes,
     // 'at_customer': the business comes to the lead, so the page asks for a service address.
     appointmentMode: customer.appointmentMode,

@@ -13,6 +13,9 @@ test('owner imports their current website into the draft (text, prices, photos);
   // A previous run (other viewport) may already have imported: the site is then AI-editable, the import sits in the
   // collapsed "Import your current website · AI designer" row, and its form is under "Import a different website".
   await expect(page.locator('details.site-more, details.site-tools').first()).toBeAttached()
+  // No website yet: the import opens from the start decision ("I have a website"), with the address field ready.
+  const fromStart = page.getByRole('region', { name: 'How would you like to start?' }).getByRole('button', { name: /I have a website/ })
+  if (await fromStart.isVisible()) await fromStart.click()
   if (await page.locator('details.site-more:not([open])').count()) await page.locator('details.site-more > summary').click()
   await expect(card.getByLabel('Your current website', { exact: true }).or(card.getByText('Import a different website')).first()).toBeVisible()
   // repeat: the other viewport already imported, so this business now HAS a website (different safe defaults below).

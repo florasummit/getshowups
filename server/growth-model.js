@@ -112,7 +112,7 @@ export const MIN_SAMPLE = { leads: 10, qualified: 8, booked: 5, attended: 5 }
 export function baselineFrom(measured = {}, { minSample = MIN_SAMPLE } = {}) {
   const src = {}
   const a = { ...DEFAULTS }
-  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
+  const n = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null) // null = not measured, never 0
   const leads = n(measured.leads30)
   if (leads != null && leads >= minSample.leads) {
     a.leadsPerMonth = leads

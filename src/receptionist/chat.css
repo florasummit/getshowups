@@ -126,6 +126,18 @@
 .chat-msg--live {
   opacity: 0.75;
 }
+/* A message that did not reach the server stays where it was typed, marked. */
+.chat-msg--failed {
+  background: #fef3f2;
+  outline: 1px dashed #fecdca;
+}
+.chat-unsent {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pub-danger);
+}
 .chat-tag {
   display: inline-block;
   margin-right: 6px;
@@ -220,6 +232,10 @@
 }
 .chat-error {
   align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
   font-size: 14px;
   color: var(--pub-danger);
 }
@@ -236,7 +252,7 @@
 }
 .chat-composer {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 6px;
   padding: 5px 5px 5px 14px;
   border: 1px solid var(--pub-line-strong);
@@ -248,31 +264,51 @@
   border-color: var(--pub-accent);
   box-shadow: var(--pub-focus);
 }
-.chat-composer input {
+.chat-composer textarea {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
+  max-height: 132px; /* about five lines, then it scrolls */
+  padding: 10px 0;
   border: 0;
   outline: 0;
+  resize: none;
   background: transparent;
   font-size: 16px;
+  line-height: 24px;
   color: var(--pub-ink);
 }
-.chat-composer input:focus,
-.chat-composer input:focus-visible {
+.chat-composer textarea:focus,
+.chat-composer textarea:focus-visible {
   box-shadow: none; /* the composer frame shows focus */
 }
-.chat-composer input::placeholder {
+.chat-composer textarea::placeholder {
   color: #95a2b4;
 }
-.chat-composer input:disabled {
+.chat-composer textarea:disabled {
   cursor: not-allowed;
+}
+.chat-count {
+  font-size: 12.5px;
+  color: var(--pub-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.chat-count.is-over {
+  color: var(--pub-danger);
+  text-align: left;
+}
+.chat-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
 }
 .chat-icon-btn {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   flex: none;
   border: 0;
   border-radius: 10px;
@@ -302,8 +338,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
+  gap: 0 18px;
   font-size: 13.5px;
+}
+.chat-links a,
+.chat-links .pub-btn--link,
+.chat-legal--foot a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  flex: none;
 }
 .chat-links a {
   color: var(--pub-text);
@@ -323,6 +369,13 @@
 }
 .chat-legal a {
   color: var(--pub-muted);
+}
+.chat-legal--foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -6px;
 }
 .chat-ended {
   display: grid;
@@ -363,6 +416,11 @@
   min-height: 32px;
   padding: 5px 12px;
   font-size: 13.5px;
+}
+@media (max-width: 760px), (pointer: coarse) {
+  .pub-btn.chat-small {
+    min-height: 44px;
+  }
 }
 .chat-hangup {
   background: #fef3f2;

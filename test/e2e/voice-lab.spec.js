@@ -122,6 +122,7 @@ test('one click creates the Voice Lab test business; the Lab offers it; the sale
   page.on('dialog', (d) => d.accept())
   await page.goto('/admin')
   const panel = page.locator('[data-sales-setup]')
+  await panel.locator('summary').first().click() // a setup form: closed until opened (ADM-01)
   // Desktop and phone runs share one server: whichever runs first creates the record; the other finds it created. Only the
   // Lab record here: the sales record makes the admin its owner, and other admin tests rely on this admin having no
   // business (its creation is covered in test/sales-business.test.js).

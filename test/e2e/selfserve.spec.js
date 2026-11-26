@@ -10,6 +10,54 @@ import { chooseService, chooseTime, fillDetails } from './booking-flow.js'
 const mock = `http://127.0.0.1:${fixtures.E2E_GOOGLE_MOCK_PORT}`
 test.describe.configure({ mode: 'serial', timeout: 120_000 })
 
+// ONB-01. Enrollment is closed on this server exactly as in production, and the public homepage offers no sign-up entry
+// in any form (founder decision). Someone we arranged a start with (this tester is listed) gets in from the sign-in
+// page through a control that is not "Sign in", on a page that is not titled as closed; and "book a call" is never a
+// dead end. Runs first: it creates nothing.
+test('enrollment closed: no sign-up entry on the homepage; the invited way in from the sign-in page; a working way to make contact @mobile', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile'
+  const email = mobile ? 'founder-mobile@e2e-selfserve.example' : fixtures.E2E_SELF_SERVE_EMAIL
+  await returnFromGoogle(page, '**/api/auth/google/start', 'GET', '/api/auth/google/callback', `login:${email}`)
+  await page.goto('/')
+  expect((await (await page.request.get('/api/enrollment')).json()).open).toBe(false)
+  // Strict: no homepage link to the sign-up address in any form (with or without extra parameters), menu included.
+  if (mobile) {
+    await page.getByRole('button', { name: 'Open menu' }).click()
+    // ONB-14: the menu's main action is the same ink button as the hero's (it was orange here only).
+    const colour = (l) => l.evaluate((e) => getComputedStyle(e).backgroundColor)
+    expect(await colour(page.locator('#mobile-nav [data-start-location="mobile_nav"]'))).toBe(await colour(page.locator('.hero').getByRole('link', { name: /Request early access/ })))
+  }
+  await expect(page.locator('a[href*="plan=founding"]')).toHaveCount(0)
+  await expect(page.locator('a[href*="invited"]')).toHaveCount(0)
+  // The call section always has a working way to reach us (no calendar is configured in this build).
+  const section = page.locator('#book-demo')
+  await expect(section.locator('[data-contact-email]')).toHaveAttribute('href', /^mailto:hello@getshowups\.com\?subject=/)
+  await expect(section.getByText('Check back soon')).toHaveCount(0)
+  // Sign in → the invited entry (not labelled "Sign in") → a page that is not titled closed → Google → business name.
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+  const entry = page.getByRole('link', { name: 'Set up your business' })
+  await expect(entry).toHaveAttribute('href', '/dashboard?plan=founding&invited=1')
+  await entry.click()
+  await expect(page.getByRole('heading', { name: 'Set up your business' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /isn’t open yet/ })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Book a short call' })).toHaveAttribute('href', '/#book-demo')
+  await page.getByRole('link', { name: 'Continue with Google' }).click()
+  await expect(page.locator('main.center-page--top')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Online sign-up opens soon' })).toHaveCount(0)
+  const me = await (await page.request.get('/api/dashboard/me')).json()
+  if (!me.customer) {
+    // (A retry of this file finds the business already created by the next test and resumes its setup instead.)
+    await expect(page.getByRole('heading', { name: 'What’s your business called?' })).toBeVisible()
+    // ONB-08: step 1 shows the whole path.
+    await expect(page.getByRole('list', { name: 'Setup progress' }).getByRole('listitem')).toHaveCount(10)
+  }
+  // Signed out again in the same browser: the page is still not titled closed for them.
+  await page.request.post('/api/auth/logout', { headers: { Origin: `http://127.0.0.1:${fixtures.E2E_PORT}` } })
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: me.customer ? 'Welcome back' : 'Set up your business' })).toBeVisible()
+})
+
 test('new customer: get started → pay → onboard → publish → book → manage billing @mobile', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile'
   const email = mobile ? 'founder-mobile@e2e-selfserve.example' : fixtures.E2E_SELF_SERVE_EMAIL
@@ -29,9 +77,12 @@ test('new customer: get started → pay → onboard → publish → book → man
 
   // Business name only, then the plan.
   await expect(page.getByRole('heading', { name: 'What’s your business called?' })).toBeVisible()
+  const bar = page.getByRole('list', { name: 'Setup progress' })
+  await expect(bar.getByRole('listitem')).toHaveCount(10) // ONB-08: the path is shown from step 1
   await page.getByLabel('Business name').fill(name)
   await page.getByRole('button', { name: 'Continue to plan' }).click()
   await expect(page.getByRole('heading', { name: 'Start your Growth plan' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible() // ONB-08: step 2 has Back
   await expect(page.getByText('$499/month')).toBeVisible()
   await expect(page.getByText('No free trial', { exact: false })).toBeVisible()
   await noOverflow()
@@ -62,8 +113,12 @@ test('new customer: get started → pay → onboard → publish → book → man
   const billing = await (await page.request.get('/api/dashboard/billing')).json()
   expect(billing.subscription).toMatchObject({ status: 'active', planId: 'founding', cancelAtPeriodEnd: false })
 
-  // Details → services.
+  // ONB-14: the payment is confirmed in words, not only by moving on.
+  await expect(page.locator('[data-paid-notice]')).toContainText('Payment received')
+  // Details → services. ONB-06: nothing typed yet → "At my location"; a pool service goes to the customer (still editable).
+  await expect(page.getByRole('radio', { name: 'At my location' })).toBeChecked()
   await page.getByLabel('What do you do?').fill('Pool service')
+  await expect(page.getByRole('radio', { name: 'At the customer’s home or site' })).toBeChecked()
   await page.getByLabel(/Business phone/).fill('843 555 0142')
   await page.getByLabel(/Towns you serve/).fill('Charleston')
   await page.getByLabel(/ZIP codes you serve/).fill('29403, 29407')
@@ -82,9 +137,37 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
   await page.getByRole('button', { name: 'Connect Google Calendar' }).click()
   await expect(page.getByRole('heading', { name: 'Google Calendar connected' })).toBeVisible()
+  // ONB-10: the page between the two steps carries the product's header and its ink button (it was a black page).
+  await expect(page.getByRole('link', { name: 'GetShowUps dashboard' })).toBeVisible()
+  expect(await page.getByRole('button', { name: 'Continue' }).evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(10, 11, 15)')
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(248, 250, 252)')
+  await noOverflow()
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByRole('heading', { name: 'When can customers book?' })).toBeVisible()
   await expect(page.getByText('Google Calendar connected')).toBeVisible()
+  // ONB-11: the connected line (with a 29-character address) stays inside its box at this width.
+  const badge = page.locator('[data-calendar-connected]')
+  await expect(badge).toContainText(email)
+  expect(await badge.evaluate((e) => { const box = e.getBoundingClientRect(); const text = e.lastElementChild.getBoundingClientRect(); return text.left >= box.left && text.right <= box.right + 0.5 && e.scrollWidth <= e.clientWidth })).toBe(true)
+  // ONB-08: Back twice, then Continue twice, returns through the same steps (it used to jump past Services); a finished
+  // step in the progress bar opens it; the plan step, revisited, says what is true and sells nothing again.
+  const back = page.getByRole('button', { name: 'Back', exact: true })
+  await back.click()
+  await expect(page.getByRole('heading', { name: 'Google Calendar', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect Google Calendar' })).toHaveCount(0)
+  await back.click()
+  await expect(page.getByRole('heading', { name: 'What can customers book?' })).toBeVisible()
+  await expect(page.getByLabel('Price for service 1', { exact: true })).toHaveValue('From $150/month')
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Google Calendar', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'When can customers book?' })).toBeVisible()
+  await bar.getByRole('button', { name: 'Step 2: Plan' }).click()
+  await expect(page.locator('[data-plan-paid]')).toContainText('Payment received. Your plan is active.')
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toHaveCount(0)
+  await bar.getByRole('button', { name: 'Step 6: Hours' }).click()
+  await expect(page.getByRole('heading', { name: 'When can customers book?' })).toBeVisible()
+  await noOverflow()
   await page.getByRole('button', { name: 'Sat' }).click()
   await page.getByRole('button', { name: 'Continue' }).click()
 
@@ -115,19 +198,21 @@ test('new customer: get started → pay → onboard → publish → book → man
   await page.getByRole('button', { name: 'Phone' }).click()
   await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
   expect((await page.request.get(`/p/${id}`)).status()).toBe(404)
-  await page.getByText('Edit text and photos').click()
-  await expect(page.getByLabel('Headline')).toHaveValue(`${name}: dependable weekly pool cleaning near you`)
-  await page.getByLabel('Introduction').fill('Friendly, reliable pool care across Charleston.')
-  await expect(page.getByText('All changes saved')).toBeVisible()
-  await expect(frame.getByText('Friendly, reliable pool care across Charleston.')).toBeVisible()
-  if (!mobile) {
-    // Claims filter: an unconfirmed guarantee is refused with a plain explanation.
-    await page.getByText('About and service area').click()
-    await page.getByLabel(/Facts about your business/).fill('Satisfaction guaranteed')
-    await expect(page.getByRole('alert')).toContainText('guarantees')
-    await page.getByLabel(/Facts about your business/).fill('')
-    await expect(page.getByText('All changes saved')).toBeVisible()
-  }
+  // WEB-01: the website made here is the multi-page website of the full editor (no second, smaller editor in setup):
+  // the step shows it, takes a change request in the owner's words, and says where everything is edited afterwards.
+  expect((await (await page.request.get('/api/dashboard/website')).json()).website.draft.site.pages.map((p) => p.slug)).toEqual(['', 'contact', 'privacy'])
+  await expect(page.getByText('Edit text and photos')).toHaveCount(0)
+  await expect(page.locator('[data-edit-later]')).toContainText('You can edit everything after setup, under Website')
+  await expect(page.locator('[data-revise-scope]')).toContainText('never touches your privacy or terms pages')
+  // ONB-09: a requested change is shown first and must be answered before moving on; "Go back" leaves the draft as it was.
+  await page.getByRole('button', { name: 'Make it more modern' }).click()
+  await expect(page.getByText('Here’s the new version. Keep it?')).toBeVisible({ timeout: 30_000 })
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(/^Modern /)
+  await expect(page.locator('[data-undecided]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Go back' }).click()
+  await expect(frame.getByRole('heading', { level: 1 })).toHaveText(`${name}: dependable weekly pool cleaning near you`)
+  await expect(page.locator('[data-undecided]')).toHaveCount(0)
   await noOverflow()
   await page.getByRole('button', { name: 'Continue' }).click()
 
@@ -164,7 +249,10 @@ test('new customer: get started → pay → onboard → publish → book → man
   // Preview and publish, only with explicit consent.
   await expect(page.getByRole('heading', { name: 'Preview and publish' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Publish my website' })).toBeDisabled()
-  await page.getByRole('checkbox').check()
+  await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+  // The website's starter privacy page goes public only after the owner says they read it.
+  await expect(page.getByRole('button', { name: 'Publish my website' })).toBeDisabled()
+  await page.getByRole('checkbox', { name: /I’ve read my privacy policy page/ }).check()
   await page.getByRole('button', { name: 'Publish my website' }).click()
 
   // Done: honest checklist (what's live, what's coming) → dashboard.
@@ -173,6 +261,40 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(list.locator('.checklist-item--ok', { hasText: 'Growth plan' })).toBeVisible()
   await expect(list.locator('.checklist-item--ok', { hasText: 'Website' })).toBeVisible()
   await expect(list.getByText('Activating soon', { exact: false })).toBeVisible()
+  // ONB-14: the last step is ticked on the finished screen.
+  await expect(bar.getByRole('listitem').last()).toContainText('✓')
+  // ONB-02: the receptionist is named with its real state (off: nobody turned it on) and a link to its page.
+  const rec = list.locator('[data-row="receptionist"]')
+  await expect(rec).toContainText('Off')
+  await expect(rec.getByRole('link', { name: 'Set it up in Receptionist' })).toHaveAttribute('href', '/dashboard/receptionist')
+  // ONB-05: every row that names a place is a link: the live website, the booking page, Ads, Settings.
+  await expect(list.locator('[data-row="page"]').getByRole('link', { name: 'Open my website' })).toHaveAttribute('href', new RegExp(`/p/${id}$`))
+  await expect(list.locator('[data-row="booking"]').getByRole('link', { name: 'Open my booking page' })).toHaveAttribute('href', new RegExp(`/book/${id}$`))
+  await expect(list.locator('[data-row="ads"]').getByRole('link', { name: 'Connect in Ads' })).toHaveAttribute('href', '/dashboard/ads')
+  await expect(list.locator('[data-row="hours"]').getByRole('link')).toHaveAttribute('href', '/dashboard/settings')
+  // The booking address is whole (not clipped in a field) and has a copy button.
+  const share = page.locator('[data-booking-link]')
+  const address = share.getByRole('link', { name: 'Your booking link' })
+  await expect(address).toHaveText(new RegExp(`/book/${id}$`))
+  expect(await address.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true)
+  await expect(share.getByRole('button', { name: 'Copy link' })).toBeVisible()
+  await expect(share).toContainText('The Book buttons on your website already use it')
+  // ONB-04: what the dashboard would raise on first load is asked here, with one tap; nothing was applied on its own.
+  const rules = async () => (await page.request.get('/api/dashboard/availability')).json()
+  expect((await rules()).minNoticeMinutes).toBe(0)
+  const raised = (await (await page.request.get('/api/dashboard/setup-check')).json()).items.filter((x) => x.level !== 'optional')
+  expect(raised.map((x) => x.id)).toContain('no_notice')
+  const decisions = page.locator('[data-decisions]')
+  // Everything the check raises is on this screen: the two with a one-tap answer, the rest with their link.
+  for (const x of raised) await expect(x.id === 'no_notice' ? decisions.locator('[data-decision="notice"]') : x.id === 'holiday_open' ? decisions.locator('[data-decision="holiday"]').first() : decisions.locator(`[data-check="${x.id}"]`)).toBeVisible()
+  await decisions.locator('[data-decision="notice"]').getByRole('button', { name: 'Require 2 hours’ notice' }).click()
+  await expect(decisions).toContainText('Customers now need to book at least 2 hours ahead.')
+  expect((await rules()).minNoticeMinutes).toBe(120)
+  for (const h of await decisions.locator('[data-decision="holiday"]').all()) await h.getByRole('button', { name: /^Not now/ }).click().catch(() => {})
+  expect((await rules()).closures).toEqual([]) // "Not now" changes nothing
+  await noOverflow()
+  const finishedRows = await list.locator('[data-row]').evaluateAll((els) => els.map((e) => e.dataset.row))
+  expect(finishedRows).toContain('receptionist')
   if (!mobile) {
     // Deep link with only the final screen left (found in the live audit): opens the page asked for.
     await page.goto('/dashboard/appointments')
@@ -184,13 +306,25 @@ test('new customer: get started → pay → onboard → publish → book → man
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
   await expect(page.getByText('Live and taking bookings')).toBeVisible()
   await expect(page.getByText(mobile ? 'Share your booking link to get your first booking' : 'Finish connecting your domain')).toBeVisible()
+  // ONB-04: the notice the owner chose on the finished screen is not raised again on the first dashboard load.
+  await expect(page.locator('[data-check="no_notice"]')).toHaveCount(0)
+  // ONB-14: "Setup status" lists the same rows as the finished screen (it used to show more).
+  await page.getByRole('button', { name: 'Setup status' }).click()
+  const status = page.locator('.next-step .checklist')
+  await expect(status.locator('[data-row="receptionist"]')).toContainText('Off')
+  expect(await status.locator('[data-row]').evaluateAll((els) => els.map((e) => e.dataset.row))).toEqual(finishedRows)
+  await status.locator('[data-row="receptionist"]').getByRole('link').click()
+  await expect(page).toHaveURL(/\/dashboard\/receptionist$/)
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
   await noOverflow()
 
   // A customer books through the published landing page; the event lands on the (mock) calendar.
   await page.goto(`/p/${id}`)
   await expect(page.getByRole('heading', { level: 1, name: `${name}: dependable weekly pool cleaning near you` })).toBeVisible()
   await noOverflow()
-  await page.getByRole('link', { name: 'Book a time' }).first().click()
+  // ONB-06: this pool service visits its customers (preselected from the trade), so the site's button says so.
+  await page.getByRole('link', { name: 'Book a visit' }).first().click()
   const lead = `lead-${mobile ? 'm' : 'd'}@example.net`
   await chooseService(page, { need: 'Weekly cleaning', zip: '29403' })
   await chooseTime(page, { slot: 'last' }) // any offered time; the first date may have only a few left late in the day
@@ -202,10 +336,13 @@ test('new customer: get started → pay → onboard → publish → book → man
   // The owner cancels it (found missing in the live audit): removed from the calendar, gone from Upcoming.
   await page.goto('/dashboard/appointments')
   const row = page.locator('li.row', { hasText: 'Casey Customer' })
-  await row.getByRole('button', { name: 'Cancel…' }).click()
+  await row.getByRole('button', { name: /^Cancel (visit|appointment)…$/ }).click()
   await expect(row).toContainText('Google lets the customer know')
-  await row.getByRole('button', { name: 'Confirm: cancel' }).click()
-  await expect(page.locator('li.row', { hasText: 'Casey Customer' })).toHaveCount(0)
+  await row.getByRole('button', { name: /^Yes, cancel this/ }).click()
+  // Said in words (DASH-03): who and when; gone from Upcoming, findable under Past → Cancelled.
+  await expect(page.locator('[data-cancelled-notice]')).toContainText('Cancelled: Casey Customer')
+  await expect(page.locator('.card', { has: page.getByRole('heading', { name: 'Upcoming' }) }).locator('li.row', { hasText: 'Casey Customer' })).toHaveCount(0)
+  await expect(page.locator('[data-cancelled-list] li.row', { hasText: 'Casey Customer' })).toHaveCount(1)
   const after = await (await page.request.get(`${mock}/__events`)).json()
   expect(after.some((e) => e.attendees?.[0]?.email === lead)).toBe(false)
 

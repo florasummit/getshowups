@@ -2,6 +2,7 @@
 // Every write asks for a reason and a confirmation; the server records both.
 import { useCallback, useEffect, useState } from 'react'
 import { api, whenFull } from '../lib/api.js'
+import { Pill } from '../dashboard/ui.jsx'
 
 const STEP = { lockout: 'turning services off', ads: 'pausing ads', billing: 'ending billing', integrations: 'disconnecting', data: 'erasing data', verify: 'verifying', done: 'done' }
 const STATE = { completed: ['ok', 'Completed'], failed: ['bad', 'Needs a look'], scheduled: ['', 'Scheduled'], running: ['', 'Running'] }
@@ -90,7 +91,7 @@ export function Closures({ onOpen }) {
                     <button type="button" className="link-btn" onClick={() => onOpen(r.customer)}>
                       {r.name || r.customer}
                     </button>{' '}
-                    <span className="tag tag--bad">Asked to close</span>
+                    <Pill tone="bad">Asked to close</Pill>
                   </p>
                   <p className="row-sub">{whenFull(r.at)}</p>
                   <ReasonAction label="Mark handled" confirm="Mark handled" text="Records that you dealt with the request. It doesn’t delete anything." onRun={run({ action: 'resolve_closure', customer: r.customer })} />
@@ -104,7 +105,7 @@ export function Closures({ onOpen }) {
                     <button type="button" className="link-btn" onClick={() => onOpen(x.customer)}>
                       {x.state === 'completed' ? x.customer : x.name || x.customer}
                     </button>{' '}
-                    <span className={`tag ${STATE[x.state][0] ? `tag--${STATE[x.state][0]}` : ''}`}>{STATE[x.state][1]}</span>
+                    <Pill tone={STATE[x.state][0] || 'neutral'}>{STATE[x.state][1]}</Pill>
                   </p>
                   <p className="row-sub">
                     {x.state === 'completed' && `Deleted ${whenFull(x.completedAt)}`}
@@ -165,7 +166,7 @@ export function BusinessControls({ id }) {
           <li key={f} className="row" data-feature={f}>
             <div className="row-main">
               <p className="row-title">
-                {label} <span className={`tag ${on.has(f) ? 'tag--bad' : ''}`}>{on.has(f) ? 'Off for this business' : 'Normal'}</span>
+                {label} <Pill tone={on.has(f) ? 'bad' : 'neutral'}>{on.has(f) ? 'Off for this business' : 'Normal'}</Pill>
               </p>
               {on.has(f) && <p className="row-sub">{on.get(f).reason}</p>}
               {d.restrictions.ready && (

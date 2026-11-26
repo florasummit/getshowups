@@ -43,12 +43,18 @@ export default function PublicShell({ name, brand, homeHref, aside, preview, foo
       <main className="pub-main">{children}</main>
       {footer && !embed && (
         <footer className="pub-foot">
+          {/* New tab: a customer part-way through booking never loses the page (and what they typed) to a footer link. */}
           {!brand?.product && (
             <span>
-              Booking by <a href="https://getshowups.com/">GetShowUps</a>
+              Booking by{' '}
+              <a href="https://getshowups.com/" target="_blank" rel="noopener">
+                GetShowUps
+              </a>
             </span>
           )}
-          <a href="/privacy">Privacy</a>
+          <a href="/privacy" target="_blank" rel="noopener">
+            Privacy
+          </a>
         </footer>
       )}
     </div>

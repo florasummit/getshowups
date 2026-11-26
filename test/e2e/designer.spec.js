@@ -9,7 +9,12 @@ test.describe.configure({ mode: 'serial', timeout: 90_000 })
 test('owner designs the website in conversation: first design, revision, undo @mobile', async ({ page, context }, info) => {
   // Each browser project designs its own business (the desktop and phone runs happen at the same time).
   await useSession(context, info.project.name === 'mobile' ? fixtures.E2E_DESIGN_M_SESSION_TOKEN : fixtures.E2E_DESIGN_SESSION_TOKEN)
+  // The AI designer is offered once a draft exists (WEB-05: nothing about AI accounts before that), under its
+  // disclosure below the editor. This business starts with the website built from its records.
+  const origin = new URL(page.url() === 'about:blank' ? (await page.goto('/dashboard/website'), page.url()) : page.url()).origin
+  if (!(await (await page.request.get('/api/dashboard/website')).json()).website.draft.site) expect((await page.request.post('/api/dashboard/website', { data: { action: 'starter' }, headers: { Origin: origin } })).status()).toBe(200)
   await page.goto('/dashboard/website')
+  await page.locator('details.site-more > summary').click()
   const card = page.locator('.card', { has: page.getByRole('heading', { name: 'AI designer' }) })
   // Without a key the designer explains itself and asks for one (a previous viewport's run may have connected it).
   await expect(card.getByLabel('API key').or(card.getByLabel(/Describe your website|Ask for a change/)).first()).toBeVisible()

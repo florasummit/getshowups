@@ -8,6 +8,10 @@
 // in this repository). A code is the utm_campaign of its links, so a result needs no manual entry.
 // Recorded cost is self-reported and kept apart from ad spend measured by the platforms; it never feeds server/ads/funnel.js.
 export const STATUSES = ['prepared', 'approved', 'sent', 'followed_up', 'replied', 'declined']
+// Something put somewhere (a printed card, a post, a listing, an ad) has no thread to follow up and nobody to answer:
+// it is prepared, approved by the founder, then live (stored as 'sent'). Outreach to a person takes every step.
+export const PLACEMENT_STATUSES = ['prepared', 'approved', 'sent']
+export const statusesFor = (activity) => (activity?.outreach ? STATUSES : PLACEMENT_STATUSES)
 export const ACTIVITIES = [
   { key: 'email-local', title: 'Emails to Charleston owners', channel: 'Email, sent by hand', source: 'outreach', medium: 'email', outreach: true, codes: ['out-01', 'out-02', 'out-03', 'out-04', 'out-05'] },
   { key: 'email-regional', title: 'Emails to owners outside Charleston', channel: 'Email or the company’s contact form, by hand', source: 'outreach', medium: 'email', outreach: true, codes: ['out-53', 'out-49', 'out-58', 'out-52', 'out-38'] },
@@ -28,6 +32,18 @@ const MAX_COST_CENTS = 10_000_000
 const byKey = new Map(ACTIVITIES.map((a) => [a.key, a]))
 const catalogActivity = (code) => ACTIVITIES.find((a) => a.codes.includes(code)) || null
 const missing = (err) => String(err?.message).includes('no such table')
+const inOrder = (a, b) => a.localeCompare(b, 'en', { numeric: true }) // out-02 before out-10, out-38 before out-49
+
+// Will a copied link open? From the sales business's own records (server/sales.js salesStatus), never assumed:
+// both pages need the calendar connected and the hours confirmed; the chat also needs the receptionist on.
+// `sales` undefined (a caller that did not ask) → null: unknown, the page then says nothing either way.
+export function linkReadiness(sales) {
+  if (sales === undefined) return null
+  if (sales === null) return { book: 'unknown', chat: 'unknown' } // the records could not be read: say so, never "ready"
+  if (!sales?.exists) return { book: 'missing', chat: 'missing' }
+  const bookable = Boolean(sales.calendarConnected && sales.hoursConfirmed) // the chat page needs a bookable business too
+  return { book: bookable ? 'ready' : 'not_bookable', chat: !bookable ? 'not_bookable' : sales.receptionistOn ? 'ready' : 'off' }
+}
 
 // A label names a company or a place for the founder's own reading ("Mount Pleasant supply counter"); never an email
 // address or a phone number.
@@ -56,7 +72,7 @@ const add = (t, r) => {
 }
 
 // → the Activities view. `attribution` = salesAttribution() (null/unavailable → results are null, never zeros).
-export async function acquisitionOverview(env, attribution, { origin = 'https://getshowups.com', now = Date.now() } = {}) {
+export async function acquisitionOverview(env, attribution, { origin = 'https://getshowups.com', now = Date.now(), sales } = {}) {
   const { available, rows } = await stored(env.ONBOARDING_DB)
   const saved = new Map(rows.map((r) => [r.code, r]))
   const measured = attribution && !attribution.unavailable ? attribution : null
@@ -83,7 +99,7 @@ export async function acquisitionOverview(env, attribution, { origin = 'https://
     }
   }
   const activities = ACTIVITIES.map((a, i) => {
-    const codes = a.derived ? [] : [...a.codes, ...rows.filter((r) => r.activity === a.key && !a.codes.includes(r.code)).map((r) => r.code)].map((c) => codeView(a, c))
+    const codes = a.derived ? [] : [...a.codes, ...rows.filter((r) => r.activity === a.key && !a.codes.includes(r.code)).map((r) => r.code)].sort(inOrder).map((c) => codeView(a, c))
     const count = (s) => codes.filter((c) => c.status === s).length
     return {
       n: i + 1,
@@ -93,6 +109,7 @@ export async function acquisitionOverview(env, attribution, { origin = 'https://
       derived: a.derived || null,
       outreach: Boolean(a.outreach),
       paid: Boolean(a.paid),
+      statuses: statusesFor(a),
       codes,
       status: Object.fromEntries(STATUSES.map((s) => [s, count(s)])),
       followUpsDue: codes.filter((c) => c.followUpDue).length,
@@ -111,6 +128,7 @@ export async function acquisitionOverview(env, attribution, { origin = 'https://
     live: measured ? measured.live : null,
     days: measured?.days ?? null,
     statuses: STATUSES,
+    linkState: linkReadiness(sales),
     activities,
     other,
     totals: {
@@ -131,6 +149,9 @@ export async function acquisitionOverview(env, attribution, { origin = 'https://
 }
 
 // One change to one tracking code, by a platform admin. → { ok, code, from, to } | { ok: false, httpStatus, error }
+// Two intents, never mixed: `create: true` ADDS a new code to an activity (refused with code_exists when the code is in
+// the catalog or already stored, so adding can never reset a code's status, dates, name or cost); anything else CHANGES
+// a code that exists (unknown_code otherwise).
 export async function saveAcquisitionCode(env, input, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const code = String(input?.code || '')
@@ -143,10 +164,19 @@ export async function saveAcquisitionCode(env, input, now = Date.now()) {
     if (!missing(err)) throw err
     return { ok: false, httpStatus: 409, error: 'not_ready' }
   }
-  // The activity comes from the catalog or the stored row; a NEW code names one that takes codes.
-  const activity = catalogActivity(code)?.key || existing?.activity || (byKey.get(input?.activity)?.derived ? null : byKey.get(input?.activity)?.key) || null
-  if (!activity) return { ok: false, httpStatus: 400, error: 'invalid_activity' }
-  if (!existing && total >= MAX_CODES) return { ok: false, httpStatus: 409, error: 'too_many' }
+  const catalog = catalogActivity(code)
+  if (input.create === true) {
+    if (existing || catalog) return { ok: false, httpStatus: 409, error: 'code_exists' }
+    const target = byKey.get(input?.activity)
+    if (!target || target.derived) return { ok: false, httpStatus: 400, error: 'invalid_activity' }
+    if (total >= MAX_CODES) return { ok: false, httpStatus: 409, error: 'too_many' }
+    // DO NOTHING: two people adding the same code at once → the second is told it exists; nothing is overwritten.
+    const r = await db.prepare("INSERT INTO acquisition_codes (code, activity, label, status, cost_cents, updated_at) VALUES (?1, ?2, '', 'prepared', 0, ?3) ON CONFLICT(code) DO NOTHING").bind(code, target.key, now).run()
+    if (!r.meta?.changes) return { ok: false, httpStatus: 409, error: 'code_exists' }
+    return { ok: true, code, activity: target.key, created: true, from: { status: 'prepared', costCents: 0 }, to: { status: 'prepared', costCents: 0 } }
+  }
+  const activity = catalog?.key || existing?.activity || null
+  if (!activity) return { ok: false, httpStatus: 404, error: 'unknown_code' }
   const next = { status: existing?.status || 'prepared', label: existing?.label || '', cost: Number(existing?.cost_cents || 0) }
   if (input.status !== undefined) {
     if (!STATUSES.includes(input.status)) return { ok: false, httpStatus: 400, error: 'invalid_status' }
@@ -165,12 +195,20 @@ export async function saveAcquisitionCode(env, input, now = Date.now()) {
   const rank = STATUSES.indexOf(next.status)
   const at = (col, from, also = true) => (rank >= from && also ? (existing?.[col] ?? now) : null)
   const times = [at('approved_at', 1, Boolean(existing?.approved_at) || next.status === 'approved'), at('sent_at', 2), at('followed_up_at', 3, Boolean(existing?.followed_up_at) || next.status === 'followed_up'), at('replied_at', 4)]
+  // Only what this request changes is written (a name saved while a cost save is still on its way must not be undone
+  // by it): the status with its times, the name, or the cost. A catalog code with no row yet is inserted whole.
+  const sets = [
+    ...(input.status !== undefined ? ['status = excluded.status', 'approved_at = excluded.approved_at', 'sent_at = excluded.sent_at', 'followed_up_at = excluded.followed_up_at', 'replied_at = excluded.replied_at'] : []),
+    ...(input.label !== undefined ? ['label = excluded.label'] : []),
+    ...(input.costCents !== undefined ? ['cost_cents = excluded.cost_cents'] : []),
+    'updated_at = excluded.updated_at',
+  ]
   await db
     .prepare(
       `INSERT INTO acquisition_codes (code, activity, label, status, cost_cents, approved_at, sent_at, followed_up_at, replied_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-       ON CONFLICT(code) DO UPDATE SET label = excluded.label, status = excluded.status, cost_cents = excluded.cost_cents, approved_at = excluded.approved_at, sent_at = excluded.sent_at, followed_up_at = excluded.followed_up_at, replied_at = excluded.replied_at, updated_at = excluded.updated_at`,
+       ON CONFLICT(code) DO UPDATE SET ${sets.join(', ')}`,
     )
     .bind(code, activity, next.label, next.status, next.cost, ...times, now)
     .run()
-  return { ok: true, code, activity, created: !existing, from: { status: existing?.status || 'prepared', costCents: Number(existing?.cost_cents || 0) }, to: { status: next.status, costCents: next.cost } }
+  return { ok: true, code, activity, created: false, from: { status: existing?.status || 'prepared', costCents: Number(existing?.cost_cents || 0) }, to: { status: next.status, costCents: next.cost } }
 }

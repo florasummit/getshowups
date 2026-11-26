@@ -41,6 +41,23 @@ export async function siteBusinessInfo(db, customer) {
   return { id: customer.id, name: customer.name, appointmentMode: customer.appointmentMode, phone: p?.phone || '', cities, hours }
 }
 
+// Where a customer can reach a business that has no phone on record (booking page, BOOK-03): its LIVE website, else its
+// chat page when that would open. Only addresses the business already shows the public; null when there is neither.
+export async function reachFor(env, customer) {
+  const db = env.ONBOARDING_DB
+  const origin = siteOrigin(env)
+  try {
+    if (isHosted(await hostingStatus(db, customer.id, Date.now(), env)) && (await liveContent(db, customer.id))) {
+      const host = await connectedHost(db, customer.id)
+      return { kind: 'website', url: host ? `https://${host}/` : `${origin}/p/${customer.id}` }
+    }
+  } catch {
+    // unreadable: try the chat
+  }
+  if (await receptionistOn(env, customer).catch(() => false)) return { kind: 'chat', url: `${origin}/chat/${customer.id}` }
+  return null
+}
+
 // page: a page slug of an AI-designed (multi-page) site; '' is the home page. Unknown pages are "not available".
 export async function serveSite(env, request, id, page = '') {
   const db = env.ONBOARDING_DB

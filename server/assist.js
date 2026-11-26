@@ -92,6 +92,31 @@ export async function withoutModel(env, customer, req) {
   return plainAnswer(env, customer, req)
 }
 
+// A request for a change we recognise by its subject, where the owner can do it themselves, and the words an answer
+// about it would use. Checked in this order ("mark Friday's visit as done" is an outcome, not hours). Deliberately
+// narrow: only requests ("change", "set", "stop", "mark" …), never questions about a number, so a good answer is never
+// replaced.
+const REQUEST = /\b(change|set|update|edit|make|raise|lower|increase|decrease|reduce|stop|close|open|add|remove|require|mark|record|move|switch|turn|block|allow)\b/i
+// A question about a number or for advice ("Should I raise my prices?", "What are my hours?") is not a request.
+const QUESTION = /^\W*(should|why|what|when|who|which|how (many|much|is|are|does|did)|is|are|does|did|do i)\b/i
+const OWN_STEP = [
+  ['outcome', /\bmark (\S+ ){0,5}(as|done|completed?|no[- ]show|showed|happened)\b|\b(set|record|change) (\S+ ){0,4}outcome\b/i, /\b(outcomes?|mark(ed)?|showed|no[- ]shows?|approve|completed|job done|happened)\b/i, 'Outcomes are recorded on Appointments, next to each visit that has started (under “Past” for one that is already marked).', 'appointments'],
+  ['notice', /\b(notice|same[- ]day|last[- ]minute)\b/i, /\b(notice|same[- ]day|advance|closed dates)\b/i, 'Minimum notice is in Settings, in the card “Closed dates and notice”.', 'settings#closed-dates'],
+  ['price', /\b(prices?|pricing)\b|\bcharge \$?\d/i, /\b(prices?|pricing|services?|charg\w+|costs?)\b|\$/i, 'Prices are in Settings, in the card “Services and prices”. Your booking page and receptionist use a new price as soon as you save it.', 'settings#services'],
+  ['hours', /\b(hours|open(s|ing)?|clos(e|es|ed|ing)|taking bookings|days? off|(mon|tues|wednes|thurs|fri|satur|sun)days?)\b/i, /\b(hours?|open\w*|clos\w+|days?|bookings?|approve)\b/i, 'Booking hours are in Settings, in the card “Booking hours”: your days, one From and To time for all of them, and the appointment length. For a single date off, use “Closed dates”.', 'settings#booking-hours'],
+]
+// The model answered, but not about what was asked: no change prepared, no record shown, no page offered, and none of the
+// subject's words in its text. The owner then gets the place where they can do it themselves instead of an unrelated
+// sentence. Says nothing was changed (true: the assistant can't save) and claims no fact about the business.
+export function ownStepInstead(question, r) {
+  if (!REQUEST.test(question) || QUESTION.test(question)) return null
+  const hit = OWN_STEP.find(([, asked]) => asked.test(question))
+  if (!hit) return null
+  const [type, , about, where, go] = hit
+  if (r.proposals?.length || r.records?.length || r.go || about.test(r.answer || '')) return null
+  return { type, answer: `${where} Nothing was changed.`, go }
+}
+
 export const wantsMoney = (q) => /\b(revenue|income|earn\w*|made|make|paid|payments?|money|profit\w*|roi|roas|return on)\b/i.test(q) && /\b(ads?|advertis\w*|campaigns?|google|revenue|paid|payments?)\b/i.test(q)
 // Recorded payments, the part from leads traced to ads, and why neither is what the ads earned. No model.
 async function moneyEvidence(env, customer, days) {

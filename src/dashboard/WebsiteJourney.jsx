@@ -57,7 +57,7 @@ export default function WebsiteJourney({ data, onPublish, canPublish = true }) {
                     )}
                     {s.preview && (
                       <a className="btn btn-sm btn-quiet" href="/api/dashboard/website/preview" target="_blank" rel="noreferrer">
-                        Preview
+                        Preview in a new tab
                       </a>
                     )}
                   </div>
