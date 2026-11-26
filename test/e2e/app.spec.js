@@ -120,7 +120,9 @@ test('partly set-up business resumes at the calendar step and sees only its own 
   await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
   await expect(page.locator('[aria-current="step"]')).toContainText('Calendar')
   // Help is reachable during onboarding too (where owners get stuck).
-  await expect(page.getByRole('link', { name: 'Help', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Help', exact: true }).click()
+  await expect(page.locator('[data-help-panel="help"]')).toContainText('hello@getshowups.com')
+  await page.keyboard.press('Escape')
   const overview = await (await page.request.get(`/api/dashboard/overview?customer=${fixtures.E2E_CUSTOMER}`)).json()
   expect(overview.stats.leads).toBe(0)
   expect(JSON.stringify(overview)).not.toContain('Jordan Lead')
@@ -185,7 +187,15 @@ test.describe('read-only pages @mobile', () => {
     await expect(page.getByRole('region', { name: 'Your website' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Last 30 days', exact: true }).locator('.stat')).toHaveCount(3)
     // The plan promises direct help: reachable from every owner screen, not only when an account has a problem.
-    await expect(page.getByRole('link', { name: 'Help', exact: true })).toHaveAttribute('href', /^mailto:hello@getshowups\.com/)
+    // It opens help in the page (topics + our address as text), so it works in a browser without a mail program (DASH-06).
+    await page.getByRole('button', { name: 'Help', exact: true }).click()
+    const help = page.locator('[data-help-panel="help"]')
+    await expect(help.locator('.help-email')).toHaveText('hello@getshowups.com')
+    await help.getByRole('button', { name: 'Booking hours' }).click()
+    await expect(page.locator('.help-panel')).toContainText('The days and times customers may book')
+    await page.getByRole('button', { name: '← All help topics' }).click()
+    await expect(help).toBeVisible()
+    await page.keyboard.press('Escape')
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   })
 })

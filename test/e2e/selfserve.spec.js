@@ -202,10 +202,13 @@ test('new customer: get started → pay → onboard → publish → book → man
   // The owner cancels it (found missing in the live audit): removed from the calendar, gone from Upcoming.
   await page.goto('/dashboard/appointments')
   const row = page.locator('li.row', { hasText: 'Casey Customer' })
-  await row.getByRole('button', { name: 'Cancel…' }).click()
+  await row.getByRole('button', { name: /^Cancel (visit|appointment)…$/ }).click()
   await expect(row).toContainText('Google lets the customer know')
-  await row.getByRole('button', { name: 'Confirm: cancel' }).click()
-  await expect(page.locator('li.row', { hasText: 'Casey Customer' })).toHaveCount(0)
+  await row.getByRole('button', { name: /^Yes, cancel this/ }).click()
+  // Said in words (DASH-03): who and when; gone from Upcoming, findable under Past → Cancelled.
+  await expect(page.locator('[data-cancelled-notice]')).toContainText('Cancelled: Casey Customer')
+  await expect(page.locator('.card', { has: page.getByRole('heading', { name: 'Upcoming' }) }).locator('li.row', { hasText: 'Casey Customer' })).toHaveCount(0)
+  await expect(page.locator('[data-cancelled-list] li.row', { hasText: 'Casey Customer' })).toHaveCount(1)
   const after = await (await page.request.get(`${mock}/__events`)).json()
   expect(after.some((e) => e.attendees?.[0]?.email === lead)).toBe(false)
 

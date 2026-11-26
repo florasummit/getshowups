@@ -44,10 +44,12 @@ test('a suggested question is one request; an account without answers is told so
   await page.getByRole('region', { name: 'Last 30 days', exact: true }).getByRole('button', { name: /New inquiries/ }).click()
   const panel = page.locator('.help-panel')
   await panel.getByRole('button', { name: 'How many inquiries became bookings?' }).click()
-  await expect(panel).toContainText('Start by checking')
+  // The product offered this question, so the records answer it (DASH-01): the counts, never an unrelated sentence.
+  await expect(panel).toContainText(/Last 30 days: \d+ new inquir(y|ies) and \d+ bookings? made/)
+  await expect(panel).not.toContainText('Start by checking')
   expect(asked).toEqual([{ topic: 'inquiries', view: 'overview', question: 'How many inquiries became bookings?', history: [], refs: {}, looked: [], pending: [] }])
   await page.waitForTimeout(700)
-  const [tag, sheet] = [await panel.getByText('Start by checking').boundingBox(), await panel.boundingBox()]
+  const [tag, sheet] = [await panel.getByText(/Last 30 days: \d+ new/).boundingBox(), await panel.boundingBox()]
   expect(tag.y).toBeGreaterThan(sheet.y)
   expect(tag.y + tag.height).toBeLessThanOrEqual(sheet.y + sheet.height)
   expect(await page.evaluate(() => document.activeElement.tagName)).not.toBe('TEXTAREA') // no phone keyboard
