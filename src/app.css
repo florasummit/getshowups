@@ -2978,10 +2978,10 @@ body.studio-full-open { overflow: hidden; }
 .site-status--bar .booking-url { font-size: 14px; margin: 0; }
 .site-status--bar .card-actions { margin: 0 0 0 auto; }
 .site-status--bar > .fine, .site-status--bar > .publish-box, .site-status--bar > .link-btn { flex-basis: 100%; }
-.site-more.card { padding: 12px 16px; margin-bottom: 12px; }
-.site-more > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink-700); }
-.site-more.card[open] > summary { margin-bottom: 12px; }
-.site-more.card > section.card { border: 0; box-shadow: none; padding: 12px 0 0; margin: 0; background: none; }
+:is(.site-more, .site-fold).card { padding: 12px 16px; margin-bottom: 12px; }
+:is(.site-more, .site-fold) > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink-700); }
+:is(.site-more, .site-fold).card[open] > summary { margin-bottom: 12px; }
+:is(.site-more, .site-fold).card > section.card { border: 0; box-shadow: none; padding: 12px 0 0; margin: 0; background: none; }
 .segmented--sm button { min-height: 30px; }
 
 /* Follow-ups (FollowUps.jsx): stats, a two-pane inbox (one pane at a time on phones), preferences, texting setup. */

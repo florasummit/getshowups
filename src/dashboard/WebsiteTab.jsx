@@ -429,7 +429,7 @@ export default function WebsiteTab() {
 
       {/* Address and hosting: after a draft exists, under one disclosure (open while a domain is being connected). */}
       {!starting && (
-        <details className="card site-more" id="site-address" open={Boolean(data.domain) || undefined}>
+        <details className="card site-fold" id="site-address" open={Boolean(data.domain) || undefined}>
           <summary>Website address and hosting · {address}</summary>
           <section id="site-domain" className="card" aria-label="Website address">
             <h2 className="card-title">Website address</h2>

@@ -172,8 +172,6 @@ test('the preview keeps its scroll position when it re-renders after an edit', a
 
 test('photos: "Used on" shows every place; replace everywhere in the draft; delete only what nothing uses (with a confirmation) @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
-  const dialogs = []
-  page.on('dialog', (d) => (dialogs.push(d.message()), d.accept()))
   await openWebsiteTab(page)
   const studio = studioOf(page)
   const frame = frameOf(page)
@@ -201,23 +199,25 @@ test('photos: "Used on" shows every place; replace everywhere in the draft; dele
 
   await studio.getByRole('tab', { name: 'Photos' }).click()
   const rowOf = (id) => studio.locator('.studio-photo-row', { has: page.locator(`img[src="/site-assets/${id}"]`) }).first()
-  await expect(rowOf(first).getByTestId('photo-usage')).toHaveText('Used on: Home · Hero')
+  await expect(rowOf(first).getByTestId('photo-usage')).toHaveText('Used on: Home · Top of page')
   await expect(rowOf(first).getByRole('button', { name: /^Delete/ })).toHaveCount(0)
   await expect(rowOf(second).getByTestId('photo-usage')).toHaveText('Not used anywhere')
 
   // Replace the first photo everywhere in the draft with the second (asks first; undoable; draft only).
   await rowOf(first).getByRole('button', { name: /^Replace photo/ }).click()
   await rowOf(first).getByRole('button', { name: /^Use photo \d+ instead/ }).click()
-  expect(dialogs.at(-1)).toMatch(/live website changes only when you publish/)
+  await expect(studio.locator('[data-confirm]')).toContainText(/live website changes only when you publish/)
+  await studio.locator('[data-confirm]').getByRole('button', { name: 'Replace photo' }).click()
   await expect(frame.locator('.hero-media img')).toHaveAttribute('src', `/site-assets/${second}`)
   await expect(studio.getByText(/Replaced in your draft \(1 place\)/)).toBeVisible()
   await expect(studio.locator('[data-save="saved"]')).toBeVisible({ timeout: 15_000 })
-  await expect(rowOf(second).getByTestId('photo-usage')).toHaveText('Used on: Home · Hero')
+  await expect(rowOf(second).getByTestId('photo-usage')).toHaveText('Used on: Home · Top of page')
   await expect(rowOf(first).getByTestId('photo-usage')).toHaveText('Not used anywhere')
 
   // Delete the now-unused one (asks first); its phone copy goes with it. Nothing went live.
   await rowOf(first).getByRole('button', { name: /^Delete photo/ }).click()
-  expect(dialogs.at(-1)).toMatch(/Delete this photo for good/)
+  await expect(studio.locator('[data-confirm]')).toContainText(/Delete this photo for good/)
+  await studio.locator('[data-confirm]').getByRole('button', { name: 'Delete photo' }).click()
   await expect(rowOf(first)).toHaveCount(0)
   await expect(studio.getByText('Photo deleted.')).toBeVisible()
   expect((await page.request.get(`/p/${info.project.name === 'mobile' ? fixtures.E2E_STUDIO_H_M_CUSTOMER : fixtures.E2E_STUDIO_H_CUSTOMER}`)).status()).toBe(404)

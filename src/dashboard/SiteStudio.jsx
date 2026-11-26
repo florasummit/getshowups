@@ -704,7 +704,7 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
       </div>
       {addingPage === 'bar' && (
         <div className="studio-notice studio-addpage">
-          <AddPage site={site} biz={biz} autoFocus onDone={(made) => (setAddingPage(null), made && (change((c) => c.site.pages.push(clone(made))), setSlug(made.slug), setSelected(null)))} />
+          <AddPage site={site} biz={biz} autoFocus onDone={(made) => (setAddingPage(null), made && (change((c) => c.site.pages.push(clone(made))), setSlug(made.slug), setSelected(null), setTab('page')))} />
         </div>
       )}
       {resumed && (

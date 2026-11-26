@@ -90,7 +90,7 @@ test('owner edits the website on the website itself: text in place, button panel
   const copyUp = studio.locator('.studio-sections li').nth(4).getByRole('button', { name: 'Move Booking up' })
   await copyUp.click()
   await studio.locator('.studio-sections li').nth(3).getByRole('button', { name: 'Move Booking up' }).click()
-  await expect.poll(order).toBe('Hero,Services,Booking,FAQ,Booking')
+  await expect.poll(order).toBe('Top of page,Services,Booking,FAQ,Booking')
 
   // Colours: the brand colour changes the website.
   await studio.getByRole('tab', { name: 'Style' }).click()
@@ -180,9 +180,12 @@ test('owner edits the website on the website itself: text in place, button panel
   await page.waitForTimeout(1300)
   await publishNow()
   await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, published twice')).toBe(true)
-  page.once('dialog', (d) => d.accept())
-  await page.getByText('Earlier versions and more').click()
-  await page.getByRole('button', { name: 'Restore' }).last().click()
+  // Published versions are listed in the editor's History tab (one place for every earlier version); restoring one
+  // replaces the live website, so the owner confirms it in the page.
+  await studio.getByRole('tab', { name: 'History' }).click()
+  await studio.getByRole('list', { name: 'Published versions' }).getByRole('button', { name: /^Restore/ }).last().click()
+  await expect(studio.locator('[data-confirm]')).toContainText('Visitors will see it right away')
+  await studio.locator('[data-confirm]').getByRole('button', { name: 'Restore this version' }).click()
   await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, handled with care')).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })
@@ -243,7 +246,6 @@ test('two tabs: a save from an older tab is refused with a clear choice, never s
 
 test('photos: upload makes a phone version; frame a photo (shape + focus); draft history restores; unused photos can be cleaned up @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
-  page.on('dialog', (d) => d.accept())
   await page.goto('/dashboard/website')
   const studio = page.locator('section[aria-label="Website Studio editor"]')
   const frame = page.frameLocator('iframe[title="Editable website preview"]')
@@ -273,17 +275,25 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
 
   // History: earlier server copies of the draft; restoring one changes only the draft and can itself be undone.
   await studio.getByRole('tab', { name: 'History' }).click()
-  const versions = studio.locator('.studio-history-panel li')
+  // Each can be looked at first (its own private preview), and the question says what restoring reverts (WEB-03).
+  const versions = studio.getByRole('list', { name: 'Earlier drafts' }).locator('li')
+  const confirm = studio.locator('[data-confirm]')
   await expect(versions.first()).toBeVisible()
-  await versions.last().getByRole('button', { name: 'Restore' }).click()
+  await expect(versions.last().getByRole('link', { name: /^View/ })).toHaveAttribute('href', /\/api\/dashboard\/website\/preview\?checkpoint=[a-f0-9]{32}$/)
+  await versions.last().getByRole('button', { name: /^Restore/ }).click()
+  await expect(confirm).toContainText('Everything in your draft goes back to how it was then')
+  await expect(confirm).toContainText('Your live website doesn’t change')
+  await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(studio.locator('[data-save="saved"]')).toBeVisible()
-  await expect(studio.locator('.studio-history-panel li', { hasText: 'Before a restore' })).toHaveCount(1)
-  await studio.locator('.studio-history-panel li', { hasText: 'Before a restore' }).getByRole('button', { name: 'Restore' }).click()
+  await expect(versions.filter({ hasText: 'Before a restore' })).toHaveCount(1)
+  await versions.filter({ hasText: 'Before a restore' }).getByRole('button', { name: /^Restore/ }).click()
+  await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
 
   // Cleanup keeps everything in use (the photo is in the draft and in history).
   await studio.getByRole('tab', { name: 'Photos' }).click()
   await studio.getByRole('button', { name: 'Remove unused photos' }).click()
+  await confirm.getByRole('button', { name: 'Remove unused photos' }).click()
   await expect(studio.getByText(/Every photo is in use|Removed \d+ unused file/)).toBeVisible()
   await expect(studio.getByText('Phone version ready')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
@@ -344,8 +354,6 @@ test('full screen + tablet view; "No photo" really removes an unwanted picture a
 test('logo: upload → replace → remove from website (stays removed after a reload and when published; letter-mark icon) → an old version brings it back → remove again → delete the file for good only once nothing live or in the draft shows it; the deleted file never comes back @mobile', async ({ page, context }, info) => {
   test.setTimeout(240_000)
   await useSession(context, tokenFor(info))
-  const dialogs = []
-  page.on('dialog', (d) => (dialogs.push(d.message()), d.accept()))
   await page.goto('/dashboard/website')
   const studio = page.locator('section[aria-label="Website Studio editor"]')
   const frame = page.frameLocator('iframe[title="Editable website preview"]')
@@ -368,12 +376,13 @@ test('logo: upload → replace → remove from website (stays removed after a re
     await expect(status.getByText('aren’t published yet')).toHaveCount(0, { timeout: 15_000 })
     return (await draft()).liveVersion
   }
-  // "Earlier versions and more" lists versions newest first, the live one without a Restore button.
+  // History → "Published versions" lists versions newest first, the live one without a Restore button.
   const restoreVersion = async (v) => {
     const live = (await draft()).liveVersion
-    const details = page.locator('details', { has: page.locator('summary', { hasText: 'Earlier versions and more' }) })
-    if (!(await details.evaluate((d) => d.open))) await details.locator('summary').click()
-    await page.getByRole('button', { name: 'Restore' }).nth(live - v - 1).click()
+    await saved()
+    await studio.getByRole('tab', { name: 'History' }).click()
+    await studio.getByRole('list', { name: 'Published versions' }).getByRole('button', { name: /^Restore/ }).nth(live - v - 1).click()
+    await studio.locator('[data-confirm]').getByRole('button', { name: 'Restore this version' }).click()
     await expect.poll(async () => (await draft()).liveVersion, { timeout: 15_000 }).toBe(v)
   }
   await expect(frame.getByRole('heading', { level: 1 })).toBeVisible()
@@ -448,7 +457,8 @@ test('logo: upload → replace → remove from website (stays removed after a re
   // the version that showed it can no longer bring it back; the other file is untouched.
   await studio.getByRole('tab', { name: 'Photos' }).click()
   await rowOf(second).getByRole('button', { name: /for good$/ }).click()
-  expect(dialogs.at(-1)).toMatch(/Delete this photo for good\?.*saved version/)
+  await expect(studio.locator('[data-confirm]')).toContainText(/Delete this photo for good\?.*saved version/)
+  await studio.locator('[data-confirm]').getByRole('button', { name: 'Delete photo' }).click()
   await expect(rowOf(second)).toHaveCount(0)
   await expect(studio.getByText(/^Photo deleted\./)).toBeVisible()
   expect((await (await page.request.get('/api/dashboard/website')).json()).assets.map((a) => a.id)).not.toContain(second)
