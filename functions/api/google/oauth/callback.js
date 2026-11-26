@@ -19,7 +19,7 @@ import {
   encrypt,
   idTokenClaims,
   missingConfig,
-  page,
+  productPage as page, // the owner is mid-setup or in Settings: the product's own header, card and button (ONB-10)
   readCookie,
   revokeUnlessInUse,
   stateCookie,

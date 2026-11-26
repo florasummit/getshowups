@@ -263,22 +263,42 @@ export function idTokenClaims(idToken) {
 export const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
+const PAGE_HEADERS = {
+  'Content-Type': 'text/html; charset=utf-8',
+  ...NO_STORE,
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  // form-action must allow Google because Chrome applies it to the redirect after the POST.
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'",
+}
+
 // extraHtml must be trusted, already-escaped markup.
 export function page(status, title, message, extraHeaders = {}, extraHtml = '', backLink = true) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title><link rel="icon" href="${FAVICON_HREF}">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0c;color:#e4e4e9;font:16px/1.6 system-ui,sans-serif;padding:24px}main{max-width:460px;text-align:center}h1{color:#fff;font-size:1.5rem;margin:0 0 12px}a{color:#ff8a47}button{font:inherit;font-weight:600;padding:12px 24px;border:0;border-radius:999px;background:#ff6a1a;color:#0b0b0c;cursor:pointer}</style></head>
 <body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}${backLink ? '<p><a href="/dashboard">Back to your dashboard</a></p>' : ''}</main></body></html>`
-  return new Response(html, {
-    status,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      ...NO_STORE,
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'DENY',
-      // form-action must allow Google because Chrome applies it to the redirect after the POST.
-      'Content-Security-Policy':
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'",
-      ...extraHeaders,
-    },
-  })
+  return new Response(html, { status, headers: { ...PAGE_HEADERS, ...extraHeaders } })
+}
+
+// The same page for a signed-in owner in the middle of the product (the calendar connection returns here between two
+// setup steps): the dashboard's header, card and button instead of the plain dark page. Same arguments, same response
+// headers (no script, no outside resource; the logo is inline, identical to brand/icon/getshowups-icon.svg, which
+// test/brand.test.js checks). Colours are the product tokens of src/index.css written out, because this page loads no
+// stylesheet.
+export const LOGO_SVG =
+  '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b0b0c"/><path d="M19.3 9.5H9a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h11a3 3 0 0 0 3-3V13.2" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 7v4M15 7v4" fill="none" stroke="#FF6A1A" stroke-width="2.2" stroke-linecap="round"/><path d="M9.5 16L13 19.5L23.21 9.29" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M27.1 5.4L21.09 6.74L25.76 11.41Z" fill="#fff"/></svg>'
+const PRODUCT_CSS =
+  'body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#f8fafc;color:#111216;font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}' +
+  'header{background:#fff;border-bottom:1px solid #e3e2de}header div{max-width:1400px;margin:0 auto;padding:18px clamp(20px,4vw,32px)}' +
+  '.logo{display:inline-flex;align-items:center;gap:10px;color:#111216;font-weight:750;font-size:1.15rem;letter-spacing:-.02em;text-decoration:none}.logo span span{color:#c2410c}' +
+  'main{flex:1;display:grid;place-items:start center;padding:48px 20px}' +
+  '.panel{box-sizing:border-box;width:100%;max-width:460px;padding:clamp(24px,5vw,36px);border:1px solid #fff;border-radius:22px;background:#fff;box-shadow:0 2px 4px rgb(10 11 15/.05),0 24px 60px rgb(10 11 15/.12)}' +
+  'h1{margin:0 0 12px;font-size:1.55rem;font-weight:650;letter-spacing:-.03em;line-height:1.15}p{margin:0 0 18px;color:#5f626f;overflow-wrap:anywhere}p:last-child{margin-bottom:0}' +
+  'a{color:#111216;font-weight:600}form{margin:0}' +
+  'button{display:block;width:100%;min-height:52px;padding:14px 26px;border:0;border-radius:10px;background:#0a0b0f;color:#fff;font:inherit;font-weight:600;font-size:1.025rem;cursor:pointer}button:hover{background:#262935}button:focus-visible,a:focus-visible{outline:2px solid #0a0b0f;outline-offset:3px}'
+export function productPage(status, title, message, extraHeaders = {}, extraHtml = '', backLink = true) {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · GetShowUps</title><link rel="icon" href="${FAVICON_HREF}">
+<style>${PRODUCT_CSS}</style></head>
+<body><header><div><a class="logo" href="/dashboard" aria-label="GetShowUps dashboard">${LOGO_SVG}<span>GetShow<span>Ups</span></span></a></div></header><main><div class="panel"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${extraHtml}${backLink ? '<p><a href="/dashboard">Back to your dashboard</a></p>' : ''}</div></main></body></html>`
+  return new Response(html, { status, headers: { ...PAGE_HEADERS, ...extraHeaders } })
 }

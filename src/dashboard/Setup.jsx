@@ -18,6 +18,7 @@ import { PublishBox } from './WebsiteTab.jsx'
 import WebsiteImport from './WebsiteImport.jsx'
 import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 import { SUGGESTED } from '../content/service-suggestions.js'
+import { INDUSTRIES, SELF_SERVE_STEPS, acceptDecision, setupDecisions, stepPosition, visitsCustomers } from './setup-rules.js'
 
 const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
 const PLAN_KEY = 'gsu_plan'
@@ -31,10 +32,25 @@ const storedPlan = () => {
 
 export default function Setup({ me, reload }) {
   const { progress, email } = me
-  const steps = progress.steps
+  // Before the business exists the server lists one step. Someone starting a plan sees the whole path from step 1.
+  const preview = progress.steps.length === 1 && Boolean(me.signupPlan) && me.checkoutOpen !== false
+  const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : progress.steps
   const [editing, setEditing] = useState(null)
-  const current = editing || steps.find((s) => !s.done)?.id || steps.at(-1).id
-  const index = steps.findIndex((s) => s.id === current)
+  // Back from checkout: Stripe's confirmation can arrive before this page loads, so the plan step is already behind
+  // the owner and never gets to say so. The next step says it once (only when the server reports the plan paid).
+  const [justPaid, setJustPaid] = useState(() => new URLSearchParams(window.location.search).get('billing') === 'success')
+  const paid = steps.find((x) => x.id === 'payment')?.done === true
+  useEffect(() => {
+    if (paid && new URLSearchParams(window.location.search).get('billing')) window.history.replaceState(null, '', '/dashboard')
+  }, [paid])
+  const pos = stepPosition(steps, editing)
+  const { index, current } = pos
+  const done = (info) => {
+    setJustPaid(info?.paid === true)
+    // Continue on a step the owner went back to → the next step in order (never a jump to the first unfinished one).
+    setEditing(pos.next)
+    reload()
+  }
 
   return (
     <div className="app">
@@ -45,24 +61,31 @@ export default function Setup({ me, reload }) {
       <main className="center-page center-page--top">
         {steps.length > 1 && (
           <ol className="steps-bar steps-bar--wrap" aria-label="Setup progress">
-            {steps.map((s, i) => (
-              <li key={s.id} className={s.done && i !== index ? 'is-done' : i === index ? 'is-current' : ''} aria-current={i === index ? 'step' : undefined}>
-                <span className="steps-bar-dot">{s.done && i !== index ? '✓' : i + 1}</span>
-                <span className="steps-bar-label">{LABELS[s.id]}</span>
-              </li>
-            ))}
+            {steps.map((s, i) => {
+              // The last screen is the finish itself: it shows a tick, not a number still to do.
+              const ticked = (s.done && i !== index) || (s.id === 'launch' && i === index)
+              const inner = (
+                <>
+                  <span className="steps-bar-dot">{ticked ? '✓' : i + 1}</span>
+                  <span className="steps-bar-label">{LABELS[s.id]}</span>
+                </>
+              )
+              return (
+                <li key={s.id} className={s.done && i !== index ? 'is-done' : i === index ? 'is-current' : ''} aria-current={i === index ? 'step' : undefined}>
+                  {!preview && pos.canOpen(i) ? (
+                    <button type="button" className="steps-bar-btn" aria-label={`Step ${i + 1}: ${LABELS[s.id]}`} onClick={() => setEditing(pos.target(i))}>
+                      {inner}
+                    </button>
+                  ) : (
+                    inner
+                  )}
+                </li>
+              )
+            })}
           </ol>
         )}
         <section key={current} className={`panel enter ${current === 'website' || current === 'publish' ? 'panel--wide panel--site' : current === 'address' ? 'panel--medium' : 'panel--narrow'}`} aria-labelledby="step-title">
-          <Step
-            id={current}
-            me={me}
-            done={() => {
-              setEditing(null)
-              reload()
-            }}
-            back={index > 1 && steps[index - 1].id !== 'payment' ? () => setEditing(steps[index - 1].id) : null}
-          />
+          <Step id={current} me={me} done={done} back={!preview && pos.back !== undefined ? () => setEditing(pos.back) : null} revisit={index < pos.frontier} justPaid={justPaid && paid} />
         </section>
         {!me.customer && (
           <details className="panel panel--narrow" data-own-account>
@@ -76,17 +99,24 @@ export default function Setup({ me, reload }) {
   )
 }
 
-function Step({ id, me, done, back }) {
+const Back = ({ onClick }) =>
+  onClick ? (
+    <button type="button" className="link-btn" onClick={onClick}>
+      Back
+    </button>
+  ) : null
+
+function Step({ id, me, done, back, revisit, justPaid }) {
   const { progress, customer } = me
   if (id === 'business') {
     if (me.signupPlan && !customer && me.checkoutOpen === false) return <SignupClosed />
-    return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} /> : <LegacyBusiness customer={customer} onDone={done} />
+    return me.signupPlan || progress.selfServe ? <NameStep onDone={done} plan={me.signupPlan} customer={customer} /> : <LegacyBusiness customer={customer} onDone={done} />
   }
-  if (id === 'payment') return <PaymentStep me={me} onDone={done} />
-  if (id === 'details') return <DetailsStep customer={customer} onDone={done} />
+  if (id === 'payment') return revisit ? <PaidStep billing={progress.billing} onDone={done} back={back} /> : <PaymentStep me={me} onDone={done} back={back} />
+  if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid} />
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
-  if (id === 'calendar') return <CalendarStep onBack={back} />
-  if (id === 'hours') return <HoursStep customer={customer} onDone={done} />
+  if (id === 'calendar') return <CalendarStep onBack={back} connected={revisit} onDone={done} />
+  if (id === 'hours') return <HoursStep customer={customer} onDone={done} back={back} />
   if (id === 'website') return <WebsiteStep onDone={done} back={back} />
   if (id === 'address') return <AddressStep onDone={done} back={back} />
   if (id === 'publish') return <PublishStep onDone={done} back={back} />
@@ -120,12 +150,18 @@ function SignupClosed() {
 }
 
 // ---------- 1. Business name (creates the account's business on the chosen plan) ----------
-function NameStep({ onDone, plan }) {
-  const [name, setName] = useState('')
+function NameStep({ onDone, plan, customer }) {
+  const [name, setName] = useState(customer?.name || '')
   const [state, setState] = useState({})
   const submit = async (e) => {
     e.preventDefault()
     setState({ busy: true })
+    if (customer) {
+      // Back to step 1 after the business exists: only the name changes; everything else is sent back as it is.
+      const r = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone: customer.timezone, serviceZips: customer.serviceZips || [] } })
+      if (r.status === 200) return onDone()
+      return setState({ error: r.data.error === 'invalid_name' ? 'Enter your business name.' : 'Something went wrong. Please try again.' })
+    }
     let source
     try {
       source = localStorage.getItem('gsu_source') || undefined
@@ -153,14 +189,14 @@ function NameStep({ onDone, plan }) {
         </p>
       )}
       <button className="btn btn-primary btn-lg btn-block" disabled={state.busy}>
-        {plan ? 'Continue to plan' : 'Continue'}
+        {plan && !customer ? 'Continue to plan' : 'Continue'}
       </button>
     </form>
   )
 }
 
 // ---------- 2. Growth plan checkout (Stripe-hosted; plan id `founding`, unchanged) ----------
-function PaymentStep({ me, onDone }) {
+function PaymentStep({ me, onDone, back }) {
   const params = new URLSearchParams(window.location.search)
   const returned = params.get('billing')
   const [state, setState] = useState(returned === 'success' ? { confirming: true } : me.checkoutOpen === false ? { notOpen: true } : {})
@@ -180,7 +216,7 @@ function PaymentStep({ me, onDone }) {
       if (data?.progress?.steps?.find((s) => s.id === 'payment')?.done) {
         clearInterval(t)
         window.history.replaceState(null, '', '/dashboard')
-        doneRef.current()
+        doneRef.current({ paid: true })
       } else if (tries >= 20) {
         clearInterval(t)
         setState({ slow: true })
@@ -248,12 +284,39 @@ function PaymentStep({ me, onDone }) {
       <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || state.notOpen} onClick={checkout}>
         {state.busy ? 'Opening checkout…' : 'Continue to secure checkout'}
       </button>
+      <Back onClick={back} />
+    </div>
+  )
+}
+
+// The plan step when the owner comes back to it after paying: what is true now, nothing to buy again.
+function PaidStep({ billing, onDone, back }) {
+  const active = billing === 'active' || billing === 'trialing'
+  return (
+    <div className="form" data-plan-paid>
+      <h1 id="step-title" className="title">
+        Your Growth plan
+      </h1>
+      {active ? (
+        <p className="setup-ok" role="status">
+          <span className="status-dot" aria-hidden="true" />
+          <span>Payment received. Your plan is active.</span>
+        </p>
+      ) : (
+        <p className="notice-soft" role="status">
+          Your plan needs attention. You can fix it from Settings once setup is finished.
+        </p>
+      )}
+      <p className="fine">$499/month, billed monthly. Change your card or cancel any time from Settings once setup is finished.</p>
+      <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => onDone()}>
+        Continue
+      </button>
+      <Back onClick={back} />
     </div>
   )
 }
 
 // ---------- 3. Business details ----------
-const INDUSTRIES = ['Pool service', 'Lawn care', 'House cleaning', 'Pest control', 'HVAC', 'Plumbing', 'Electrical', 'Pressure washing', 'Handyman', 'Window cleaning', 'Roofing', 'Landscaping']
 const PROFILE_ERRORS = {
   phone: 'Enter a 10-digit US phone number, or leave it empty.',
   industry: 'Tell us what kind of business this is.',
@@ -273,12 +336,17 @@ function useProfile() {
   return profile
 }
 
-function DetailsStep({ customer, onDone }) {
+function DetailsStep({ customer, onDone, back, justPaid }) {
   const profile = useProfile()
   const [state, setState] = useState({})
+  const [typed, setTyped] = useState(null) // what the owner typed under "What do you do?" (null = untouched)
+  const [picked, setPicked] = useState(null) // the place the owner chose by hand (null = not chosen)
   if (profile === undefined) return <div aria-busy="true" />
   if (profile === 'failed') return <LoadError what="your details" onRetry={() => location.reload()} />
   const p = profile || {}
+  // Where appointments happen: the owner's own choice once made (now, or saved earlier with these details). Until then
+  // it follows the trade they type: a pool service goes to the customer. Always editable.
+  const mode = picked ?? (p.industry ? customer.appointmentMode || 'at_business' : visitsCustomers(typed ?? '') ? 'at_customer' : 'at_business')
   const submit = async (e) => {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
@@ -300,6 +368,12 @@ function DetailsStep({ customer, onDone }) {
       <h1 id="step-title" className="title">
         Let’s get your website ready
       </h1>
+      {justPaid && (
+        <p className="setup-ok" role="status" data-paid-notice>
+          <span className="status-dot" aria-hidden="true" />
+          <span>Payment received. Your Growth plan is active.</span>
+        </p>
+      )}
       <p className="lede">A few quick questions. We’ll build your website from your answers.</p>
       <label className="field">
         <span>Business name</span>
@@ -307,7 +381,7 @@ function DetailsStep({ customer, onDone }) {
       </label>
       <label className="field">
         <span>What do you do?</span>
-        <input name="industry" defaultValue={p.industry || ''} list="industries" maxLength={60} required placeholder="Pool service" />
+        <input name="industry" defaultValue={p.industry || ''} list="industries" maxLength={60} required placeholder="Pool service" onChange={(e) => setTyped(e.target.value)} />
         <datalist id="industries">
           {INDUSTRIES.map((i) => (
             <option key={i} value={i} />
@@ -328,7 +402,7 @@ function DetailsStep({ customer, onDone }) {
             ['at_business', 'At my location'],
           ].map(([value, label]) => (
             <label key={value} className="choice-option">
-              <input type="radio" name="mode" value={value} defaultChecked={(customer.appointmentMode || 'at_business') === value} />
+              <input type="radio" name="mode" value={value} checked={mode === value} onChange={() => setPicked(value)} />
               <span>{label}</span>
             </label>
           ))}
@@ -371,6 +445,7 @@ function DetailsStep({ customer, onDone }) {
       <button className="btn btn-primary btn-lg btn-block" disabled={state.busy}>
         Continue
       </button>
+      <Back onClick={back} />
     </form>
   )
 }
@@ -438,13 +513,28 @@ function ServicesStep({ onDone, back }) {
 }
 
 // ---------- 5. Calendar ----------
-function CalendarStep({ onBack }) {
+function CalendarStep({ onBack, connected, onDone }) {
   const [state, setState] = useState({})
   const failed = new URLSearchParams(window.location.search).get('calendar_error')
   const start = async () => {
     setState({ busy: true })
     if (!(await connectCalendar())) setState({ failed: true })
   }
+  // Back on this step after connecting: say what is connected; nothing to do again.
+  if (connected)
+    return (
+      <>
+        <h1 id="step-title" className="title">
+          Google Calendar
+        </h1>
+        <CalendarHealth />
+        <p className="lede">We check when you’re free and add booked appointments to your calendar. We never read event details.</p>
+        <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => onDone()}>
+          Continue
+        </button>
+        <Back onClick={onBack} />
+      </>
+    )
   return (
     <>
       <h1 id="step-title" className="title">
@@ -459,11 +549,7 @@ function CalendarStep({ onBack }) {
       <button type="button" className="btn btn-primary btn-lg btn-block" onClick={start} disabled={state.busy}>
         {state.busy ? 'Opening Google…' : 'Connect Google Calendar'}
       </button>
-      {onBack && (
-        <button type="button" className="link-btn" onClick={onBack}>
-          Back
-        </button>
-      )}
+      <Back onClick={onBack} />
     </>
   )
 }
@@ -477,9 +563,11 @@ function CalendarHealth() {
   if (!cal) return <p className="fine">Checking your calendar connection…</p>
   if (cal.status === 'healthy')
     return (
-      <p className="status status--ok">
+      <p className="setup-ok" data-calendar-connected>
         <span className="status-dot" aria-hidden="true" />
-        Google Calendar connected{cal.account?.email ? ` (${cal.account.email})` : ''}
+        <span>
+          Google Calendar connected{cal.account?.email ? ` (${cal.account.email})` : ''}
+        </span>
       </p>
     )
   return (
@@ -491,7 +579,7 @@ function CalendarHealth() {
     </div>
   )
 }
-function HoursStep({ customer, onDone }) {
+function HoursStep({ customer, onDone, back }) {
   return (
     <>
       <h1 id="step-title" className="title">
@@ -499,7 +587,8 @@ function HoursStep({ customer, onDone }) {
       </h1>
       <CalendarHealth />
       <p className="lede">Times already busy on your Google Calendar are hidden automatically.</p>
-      <HoursForm customer={customer} submitLabel="Continue" onSaved={onDone} />
+      <HoursForm customer={customer} submitLabel="Continue" onSaved={() => onDone()} />
+      <Back onClick={back} />
     </>
   )
 }
@@ -545,9 +634,9 @@ function WebsiteStep({ onDone, back }) {
         </h1>
         <div className="choice-list" role="radiogroup" aria-label="How do you want to start?">
           {[
-            ['new', 'Create a new website', 'Pick a design. We write it from your details; you can edit everything.'],
-            ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you redesign it here.'],
-            ['design', 'Start from a design', 'Choose one of our professional designs, filled in with your details. No AI needed.'],
+            ['new', 'Create a new website', 'We write it from your details and show you three looks to choose from. You can edit everything.'],
+            ['import', 'Bring my current website', 'We read your existing site so you don’t retype anything, then you restyle it here.'],
+            ['design', 'Start from a design', 'Choose one of our professional layouts, filled in with your details. No AI needed.'],
             ['skip', 'Skip for now', 'Just use your booking link. You can create a website any time.'],
           ]
             // Bringing the current website is part of Website Studio (internal pilot).
@@ -647,7 +736,13 @@ function WebsiteStep({ onDone, back }) {
           {state.error}
         </p>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy} onClick={next}>
+      {/* ONB-09: a requested change still waiting for "Keep this" / "Go back" is never dropped silently by moving on. */}
+      {pending && (
+        <p className="notice-soft" role="status" data-undecided>
+          Choose “Keep this” or “Go back” for the new version above before you continue.
+        </p>
+      )}
+      <button type="button" className="btn btn-primary btn-lg btn-block" disabled={state.busy || Boolean(pending)} onClick={next}>
         Continue
       </button>
       {back && (
@@ -728,8 +823,117 @@ function PublishStep({ onDone, back }) {
 }
 
 // ---------- 10. Done ----------
+// A calendar date as people say it ("Thu, Nov 26"), the same wording the dashboard's setup check uses.
+const dayText = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+
+// What the dashboard raises right after setup, shown here first (ONB-04): the setup check's "Fix now" and "Important"
+// items (GET /api/dashboard/setup-check, the same list the Overview and Settings read). The two that have one sensible
+// answer (a public holiday on a booking day in the next weeks; no minimum notice) get a one-tap choice, saved through
+// the same closed-dates and minimum-notice route Settings uses. Nothing is applied until the owner taps it; "Not now"
+// leaves booking exactly as it is, and the item stays in Settings → Setup check. The others link to where they are fixed.
+const ONE_TAP = ['holiday_open', 'no_notice']
+function Decisions() {
+  const [d, setD] = useState(null)
+  const [check, setCheck] = useState([])
+  const [skipped, setSkipped] = useState([])
+  const [applied, setApplied] = useState([])
+  const [state, setState] = useState({})
+  useEffect(() => {
+    api('/api/dashboard/availability').then(({ status, data }) => setD(status === 200 ? data : null))
+    api('/api/dashboard/setup-check').then(({ status, data }) => setCheck(status === 200 ? data.items.filter((x) => x.level !== 'optional' && !ONE_TAP.includes(x.id)) : []))
+  }, [])
+  const open = setupDecisions(d).filter((x) => !skipped.includes(x.id))
+  if (!open.length && !applied.length && !check.length) return null
+  const accept = async (x) => {
+    setState({ busy: x.id })
+    const { status, data } = await api('/api/dashboard/availability', { method: 'POST', body: acceptDecision(d, x) })
+    if (status !== 200) return setState({ error: 'Couldn’t save that. Please try again, or set it later in Settings.' })
+    setD(data)
+    setApplied((a) => [...a, x.kind === 'holiday' ? `Closed on ${x.label} (${dayText(x.date)}).` : 'Customers now need to book at least 2 hours ahead.'])
+    setState({})
+  }
+  return (
+    <section className="setup-decisions" aria-labelledby="decisions-title" data-decisions>
+      <h2 id="decisions-title" className="setup-decisions-title">
+        {open.length || check.length ? 'Before customers book' : 'Saved'}
+      </h2>
+      {open.length > 0 && <p className="fine">Nothing changes unless you choose it. You can change these any time in Settings.</p>}
+      <ul className="rows">
+        {open.map((x) => (
+          <li key={x.id} className="row" data-decision={x.kind}>
+            <div className="row-main">
+              <p className="row-title">{x.kind === 'holiday' ? `Customers can book ${x.label} (${dayText(x.date)})` : 'Customers can book a time that starts in minutes'}</p>
+              <p className="row-sub">{x.kind === 'holiday' ? 'It’s one of your booking days and isn’t marked closed.' : 'No minimum notice is set.'}</p>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="btn btn-sm btn-quiet" disabled={Boolean(state.busy)} onClick={() => accept(x)}>
+                {x.kind === 'holiday' ? `Close ${x.label}` : 'Require 2 hours’ notice'}
+              </button>
+              <button type="button" className="link-btn" disabled={Boolean(state.busy)} onClick={() => setSkipped((k) => [...k, x.id])}>
+                Not now<span className="sr-only">: {x.kind === 'holiday' ? x.label : 'minimum notice'}</span>
+              </button>
+            </div>
+          </li>
+        ))}
+        {check.map((x) => (
+          <li key={x.id} className="row" data-decision="check" data-check={x.id}>
+            <div className="row-main">
+              <p className="row-title">{x.title}</p>
+              <p className="row-sub">
+                {x.why} <a href={`/dashboard/${x.where}`}>{x.fix}</a>
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {applied.map((t) => (
+        <p key={t} className="setup-ok" role="status">
+          <span className="status-dot" aria-hidden="true" />
+          <span>{t}</span>
+        </p>
+      ))}
+      {state.error && (
+        <p className="form-error" role="alert">
+          {state.error}
+        </p>
+      )}
+    </section>
+  )
+}
+
+// The booking address, whole and selectable, with a copy button (the address itself opens the page).
+function BookingLink({ url, onSite }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      setCopied(false) // no clipboard permission: the address is on screen and can be selected
+    }
+  }
+  return (
+    <div className="field share-link" data-booking-link>
+      <span id="booking-link-label">Your booking link</span>
+      <div className="share-link-row">
+        <a className="share-link-url" href={url} target="_blank" rel="noreferrer" aria-labelledby="booking-link-label">
+          {url}
+        </a>
+        <button type="button" className="btn btn-sm btn-quiet" onClick={copy}>
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+      <p className="fine" aria-live="polite">
+        {onSite ? 'The Book buttons on your website already use it. Add it to your Google profile and social pages too.' : 'Add it to your website, Google profile and social pages.'}
+      </p>
+    </div>
+  )
+}
+
 function LaunchStep({ me, onDone }) {
   const [state, setState] = useState({})
+  const [ready, setReady] = useState(null)
   const finish = async () => {
     setState({ busy: true })
     const { status, data } = await api('/api/dashboard/onboarding', { method: 'POST', body: { action: 'finish' } })
@@ -741,14 +945,9 @@ function LaunchStep({ me, onDone }) {
       <h1 id="step-title" className="title">
         You’re all set
       </h1>
-      <Readiness compact />
-      <div className="field">
-        <span>Your booking link (add it to your website, Google profile or social pages)</span>
-        <input readOnly value={me.bookingUrl} onFocus={(e) => e.target.select()} aria-label="Your booking link" />
-      </div>
-      <a className="btn btn-quiet btn-block" href={me.bookingUrl} target="_blank" rel="noreferrer">
-        See my booking page
-      </a>
+      <Readiness onLoad={setReady} />
+      <Decisions />
+      <BookingLink url={me.bookingUrl} onSite={ready?.items.some((i) => i.id === 'page' && i.detail === 'published') === true} />
       <p className="fine">A booking you make there goes on your Google Calendar like a real one. We mark bookings from your own email as tests, so they don’t count in your results.</p>
       {state.error && (
         <p className="form-error" role="alert">

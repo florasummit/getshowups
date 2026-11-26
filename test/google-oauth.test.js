@@ -295,6 +295,36 @@ test('happy path stores an encrypted token under the invite customer only', asyn
   assert.match(r.headers.get('Set-Cookie'), /Max-Age=0/)
 })
 
+// ONB-10: the page between "Connect Google Calendar" and the Hours step looks like the product, and stays as locked down.
+test('the calendar-connected page uses the product header, card and button; same security headers; errors too', async () => {
+  const env = makeEnv()
+  mockGoogle()
+  const r = await finish(env, await begin(env, await issue(env, 'acme-dental')))
+  const html = await r.text()
+  assert.match(html, /<h1>Google Calendar connected<\/h1>/)
+  assert.match(html, /<header><div><a class="logo" href="\/dashboard"/, 'the product header with the logo')
+  assert.match(html, /<div class="panel"><h1>/, 'the card')
+  assert.match(html, /<form method="get" action="\/dashboard"><button type="submit">Continue<\/button><\/form>/)
+  assert.match(html, /button\{[^}]*background:#0a0b0f;color:#fff/, 'the product primary button (ink), not the orange pill')
+  assert.doesNotMatch(html, /background:#0b0b0c;color:#e4e4e9|background:#ff6a1a/, 'not the plain dark page')
+  assert.doesNotMatch(html, /<script|<img|<link rel="stylesheet"|url\(/, 'no script and nothing fetched from outside')
+  // The inline logo is the canonical icon artwork.
+  const paths = (x) => [...x.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1])
+  assert.deepEqual(paths(oauth.LOGO_SVG), paths(readFileSync(new URL('../brand/icon/getshowups-icon.svg', import.meta.url), 'utf8')))
+  // Exactly the headers of every other page of this flow.
+  const plain = oauth.page(200, 'x', 'y')
+  for (const h of ['Content-Security-Policy', 'X-Frame-Options', 'X-Content-Type-Options', 'Cache-Control', 'Content-Type']) assert.equal(r.headers.get(h), plain.headers.get(h), h)
+  assert.match(r.headers.get('Content-Security-Policy'), /default-src 'none'/)
+  // A failure in the same flow is the same kind of page, with the way back.
+  const bad = await callback.onRequestGet({ request: new Request(`${REDIRECT}?code=x&state=y`), env })
+  const badHtml = await bad.text()
+  assert.equal(bad.status, 400)
+  assert.match(badHtml, /<div class="panel"><h1>Connection expired<\/h1>/)
+  assert.match(badHtml, /<a href="\/dashboard">Back to your dashboard<\/a>/)
+  // Titles and messages stay escaped.
+  assert.match(await oauth.productPage(200, '<b>', '"x" & <i>').text(), /<h1>&lt;b&gt;<\/h1><p>&quot;x&quot; &amp; &lt;i&gt;<\/p>/)
+})
+
 test('replayed callback is rejected; the new grant is revoked unless it would end the stored connection', async () => {
   const env = makeEnv()
   mockGoogle({ refresh: 'rt-first' })
