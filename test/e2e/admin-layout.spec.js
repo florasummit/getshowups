@@ -7,7 +7,7 @@ import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
 
 test.describe.configure({ timeout: 90_000 })
-const TABS = ['Control Center', 'Business Review', 'Voice Lab', 'Growth', 'Overview']
+const TABS = ['Control Center', 'Business Review', 'Voice Lab', 'Growth', 'Sales', 'Overview']
 const ROOTS = { 'Voice Lab': '[data-voice-lab]' }
 
 // The width the section's content actually occupies versus the width the main column offers it, plus overflow.

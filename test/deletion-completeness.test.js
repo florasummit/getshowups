@@ -7,7 +7,7 @@ import { ERASED_TABLES } from '../server/deletion.js'
 
 // Kept on purpose (docs/DATA_RETENTION.md): billing, costs, flags, the logs and the deletion record itself; events are
 // erased apart from financial ones. No names or contact details in any of them.
-const KEPT = ['subscriptions', 'subscription_modes', 'ai_usage', 'test_businesses', 'audit_log', 'admin_audit', 'account_deletions', 'events']
+const KEPT = ['subscriptions', 'subscription_modes', 'ai_usage', 'test_businesses', 'audit_log', 'admin_audit', 'account_deletions', 'events', 'commission_ledger']
 test('no table with a business id is left out of the deletion', () => {
   const db = new DatabaseSync(':memory:')
   for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))

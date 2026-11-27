@@ -311,7 +311,7 @@ test('platform admin: typed confirmation, audited, retry now; customer detail sh
 })
 
 test('new business tables must be classified: every table with a customer column is erased or explicitly retained', async () => {
-  const retained = new Set(['customers', 'subscriptions', 'subscription_modes', 'events', 'ai_usage', 'test_businesses', 'audit_log', 'admin_audit', 'account_deletions'])
+  const retained = new Set(['customers', 'subscriptions', 'subscription_modes', 'events', 'ai_usage', 'test_businesses', 'audit_log', 'admin_audit', 'account_deletions', 'commission_ledger'])
   const withCustomer = db.sql
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
     .all()

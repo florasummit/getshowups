@@ -6,6 +6,12 @@ import { json, page, sha256Hex } from './google-oauth.js'
 export const RULES = {
   login: { limit: 20, windowSec: 600 }, //           /api/auth/google/start  (per IP)
   loginCallback: { limit: 30, windowSec: 600 }, //   /api/auth/google/callback (per IP)
+  authEmailStatus: { limit: 120, windowSec: 600 }, // GET /api/auth/email (per IP; is email sign-in offered)
+  authEmailStart: { limit: 10, windowSec: 600 }, //  POST /api/auth/email/start (per IP)
+  authEmailPerAddress: { limit: 5, windowSec: 3600 }, // POST /api/auth/email/start (per address hash, known or not: no inbox flooding)
+  authEmailSendAll: { limit: 300, windowSec: 3600 }, // sign-in emails actually sent (everyone together: cost and abuse ceiling)
+  authEmailVerify: { limit: 30, windowSec: 600 }, // POST /api/auth/email/verify (per IP)
+  authEmailCode: { limit: 5, windowSec: 900 }, //    code guesses per address hash (reset by a new request, which ends the old code)
   connect: { limit: 30, windowSec: 600 }, //         /api/google/oauth/start (per IP)
   bookView: { limit: 60, windowSec: 600 }, //        GET /api/book/:id (per IP; each view calls Google)
   bookLead: { limit: 10, windowSec: 600 }, //        POST lead (per IP)
@@ -21,7 +27,12 @@ export const RULES = {
   bookAppointment: { limit: 15, windowSec: 600 }, // POST appointment (per IP)
   pageView: { limit: 120, windowSec: 600 }, //       GET /api/page/:id (per IP; public landing page)
   enrollment: { limit: 120, windowSec: 600 }, //     GET /api/enrollment (per IP; public homepage + sign-in page)
+  referralLink: { limit: 60, windowSec: 600 }, //   GET /r/<code> (per IP; a redirect, no lookup)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
+  claimPeek: { limit: 30, windowSec: 600 }, //       GET /api/claim (per IP; ownership invitation preview)
+  claimAccept: { limit: 10, windowSec: 600 }, //     POST /api/claim (per IP; claiming an assisted business)
+  enrollmentWrite: { limit: 120, windowSec: 600 }, // POST /api/enrollments (per staff email)
+  enrollmentPayment: { limit: 20, windowSec: 3600 }, // payment links created or emailed (per enrollment; each reads Stripe)
   confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
   unsubscribe: { limit: 30, windowSec: 600 }, //     GET/POST /api/messages/unsubscribe (per IP)
   adsConnect: { limit: 20, windowSec: 600 }, //     GET /api/ads/{google,meta}/start (per IP)
@@ -119,6 +130,11 @@ export async function hit(env, rule, subject, now = Date.now()) {
 export async function unhit(env, rule, subject, now = Date.now()) {
   const win = Math.floor(now / (RULES[rule].windowSec * 1000))
   await env.ONBOARDING_DB.prepare('UPDATE rate_limits SET count = count - 1 WHERE key = ?1 AND win = ?2 AND count > 0').bind(`${rule}:${await sha256Hex(subject)}`, win).run().catch(() => null)
+}
+
+// Starts a rule's count for this subject over (a new sign-in code replaces the old one, so its guesses start again).
+export async function resetHit(env, rule, subject) {
+  await env.ONBOARDING_DB.prepare('DELETE FROM rate_limits WHERE key = ?1').bind(`${rule}:${await sha256Hex(subject)}`).run().catch(() => null)
 }
 
 export const hitByIp = (env, rule, request) => hit(env, rule, clientIp(request))

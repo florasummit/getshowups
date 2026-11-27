@@ -2,7 +2,7 @@
 // preview that is rendered by the same engine as the public site. Used in onboarding and the Website tab.
 import { useEffect, useRef, useState } from 'react'
 import { problemText, usePendingRevision } from './website-data.js'
-import { api } from '../lib/api.js'
+import { api, staffHeaders } from '../lib/api.js'
 import { uploadImage, uploadPhotoWithCopy } from '../lib/images.js'
 
 // Phone-sized copies made on upload ({ photoId: smallId }) plus the opt-in that lets the design renderer offer them
@@ -35,7 +35,7 @@ function useAutosave(content, onSaved, baseUpdatedAt) {
       clearTimeout(p.timer)
       pending.current = null
       const body = { action: 'save', content: p.content, ...(Number.isFinite(base.current) ? { baseUpdatedAt: base.current } : {}) }
-      fetch('/api/dashboard/website', { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
+      fetch('/api/dashboard/website', { method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json', ...staffHeaders() }, body: JSON.stringify(body) }).catch(() => {})
     }
     window.addEventListener('pagehide', flush)
     return () => {

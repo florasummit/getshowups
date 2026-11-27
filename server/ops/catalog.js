@@ -7,7 +7,7 @@ import { callsOn } from '../ads/calls.js'
 import { feedbackConfigured } from '../email-feedback.js'
 import { registerCapability } from './registry.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
-import { emailConfigured, messagesLive } from '../email.js'
+import { authEmailLive, emailConfigured, messagesLive } from '../email.js'
 import { smsConfigured } from '../sms.js'
 import { modelConfigured } from '../receptionist/engine.js'
 import { voiceBusinesses, voiceConfigured, voiceStatus } from '../receptionist/voice.js'
@@ -25,6 +25,7 @@ import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
 import { customerRows } from '../metrics.js'
 import { alertsEnabled } from '../alerts.js'
+import { referralsEnabled } from '../commissions.js'
 import { registerReady } from './incidents.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
 import './../followups/ops.js' // follow-up engine, texts, assistant, texting registration
@@ -157,6 +158,22 @@ registerCapability({
   verify: seen('sign-in by a real business member', 30, `SELECT max(s.created_at) AS at FROM sessions s JOIN customer_users u ON u.email = s.email WHERE ${NOT_TEST_BIZ('u.customer', 's.created_at')}`),
 })
 registerCapability({
+  id: 'auth.email_signin',
+  tier: 'operate',
+  name: 'Sign in with an emailed code or link',
+  journey: 'signup',
+  external: 'Resend',
+  dependsOn: ['platform.database'],
+  state: (env) =>
+    !emailConfigured(env)
+      ? { mode: 'disabled', note: 'Resend not configured' }
+      : authEmailLive(env)
+        ? { mode: 'live' }
+        : { mode: 'sandbox', note: 'Sign-in emails go to test recipients only', approval: 'AUTH_EMAIL_LIVE=true (and migration 0046)' },
+  // No verify(): sign-in requests carry no business id, so a test recipient's sign-in could not be told apart from a
+  // real member's and must never make this look live-verified.
+})
+registerCapability({
   id: 'billing.stripe',
   tier: 'payments',
   action: { label: 'Billing reconciliation in the admin console', href: '/admin' },
@@ -210,6 +227,27 @@ registerCapability({
     const attention = ['payment_problem', 'recovery_ended', 'deleting'].includes(l.stage)
     return { status: attention ? 'attention' : 'ok', summary: l.stage.replace(/_/g, ' ') + (l.recovery && !l.recovery.expired ? ` (recoverable ${l.recovery.daysLeft} more days)` : '') }
   },
+})
+registerCapability({
+  id: 'commercial.attribution',
+  tier: 'optional',
+  action: { label: 'Admin → Growth → Pipeline', href: '/admin/growth#pipeline' },
+  name: 'Commercial attribution (source, partner, closing rep)',
+  journey: 'signup',
+  dependsOn: ['platform.database'],
+  state: () => ({ mode: 'live', note: 'Recorded once per new business; records only' }),
+  verify: seen('Business attributed', 30, 'SELECT max(created_at) AS at FROM commercial_attribution'),
+})
+registerCapability({
+  id: 'commercial.commissions',
+  tier: 'later',
+  action: { label: 'Admin → Growth → Partners', href: '/admin/growth#partners' },
+  name: 'Referral commissions (ledger from collected revenue; no payouts)',
+  journey: 'billing',
+  dependsOn: ['billing.stripe', 'commercial.attribution'],
+  external: 'Stripe',
+  state: (env) => (referralsEnabled(env) ? { mode: stripeLiveEnabled(env) ? 'live' : 'sandbox', note: 'Commissions accrue from paid invoices; nothing is paid out' } : { mode: 'disabled', note: 'Referral program inactive', approval: 'REFERRALS_ENABLED=true after the founder approves partner economics, terms and eligibility' }),
+  verify: seen('Commission recorded', 60, 'SELECT max(created_at) AS at FROM commission_ledger'),
 })
 registerCapability({
   id: 'onboarding.selfserve',

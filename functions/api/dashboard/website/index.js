@@ -136,6 +136,8 @@ export async function onRequestPost({ request, env }) {
   const db = env.ONBOARDING_DB
   const customer = session.customer
   try {
+    // Staff preparing an assisted workspace before payment: no AI model call (no provider cost for an unpaid business).
+    if (session.staff && (action === 'generate' || action === 'revise') && !isHosted(await hostingStatus(db, customer.id, Date.now(), env))) return json(402, { error: 'plan_required' })
     if (action === 'regenerate') return json(200, { content: await generateContent(db, customer) })
     // Start from a design: the three professional layouts filled with the business details. No AI, no allowance used.
     if (action === 'template') {

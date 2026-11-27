@@ -21,12 +21,11 @@ import {
   SESSION_TTL_SECONDS,
   cookie,
   createSession,
+  landingFor,
   loginRedirectUri,
-  safeNext,
 } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { track } from '../../../../server/events.js'
-import { adminEmails } from '../../../../server/platform.js'
 
 function redirect(location, cookies = []) {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
@@ -120,20 +119,5 @@ export async function onRequestGet({ request, env }) {
     return fail('failed')
   }
   await track(env, 'signup', { id: `signup:${await sha256Hex(email)}` }) // first sign-in only (deduped)
-  return redirect(await landing(env, email, saved.next), [cookie(SESSION_COOKIE, token, SESSION_TTL_SECONDS)])
-}
-
-// Where a new session lands. A platform admin with no business membership goes to the console even if
-// sign-in started from /dashboard, instead of being shown "create your business". This only changes
-// the landing page: /admin still authorizes every request via PLATFORM_ADMIN_EMAILS. On a lookup error
-// the ordinary landing is kept.
-async function landing(env, email, next) {
-  const want = safeNext(next)
-  if (want === '/admin' || !adminEmails(env).includes(email)) return want
-  try {
-    const member = await env.ONBOARDING_DB.prepare('SELECT 1 FROM customer_users WHERE email = ?1').bind(email).first()
-    return member ? want : '/admin' // admin without a business: the console, never customer onboarding
-  } catch {
-    return want
-  }
+  return redirect(await landingFor(env, email, saved.next), [cookie(SESSION_COOKIE, token, SESSION_TTL_SECONDS)])
 }

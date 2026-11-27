@@ -439,6 +439,7 @@ function metaRoute(method, path, params) {
   return [false, { error: { code: 803, message: 'mock: unknown edge' } }]
 }
 
+const signInMail = []
 createServer(async (req, res) => {
   let raw = ''
   for await (const chunk of req) raw += chunk
@@ -446,6 +447,13 @@ createServer(async (req, res) => {
 
   if (url.pathname === '/__health') return send(res, 200, { ok: true })
   if (url.pathname === '/__events') return send(res, 200, events)
+  // Email provider stand-in for sign-in mail only (AUTH_EMAIL_MOCK_ORIGIN): kept in memory; /__mail?to= reads it back.
+  if (url.pathname === '/resend/emails' && req.method === 'POST') {
+    const m = JSON.parse(raw || '{}')
+    signInMail.push({ to: m.to?.[0], subject: m.subject, text: m.text, at: Date.now() })
+    return send(res, 200, { id: `mock_mail_${signInMail.length}` })
+  }
+  if (url.pathname === '/__mail') return send(res, 200, signInMail.filter((m) => m.to === url.searchParams.get('to')))
   // OpenAI Ads API stand-in (OPENAI_ADS_API_MOCK_ORIGIN): one ad account for the fixture key; campaign → ad group → ad
   // keep the status they were created with (paused); Idempotency-Key returns the existing object; read-back by id.
   if (url.pathname.startsWith('/openai-ads/v1/')) {
