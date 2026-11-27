@@ -505,11 +505,11 @@ test('before migration 0048 the pipeline still renders (attribution unavailable)
 })
 
 test('assisted enrollments (stream B, 0047 shape): rep or founder channel, stage per business, stage counts without test businesses', async () => {
-  db.sql.exec(`CREATE TABLE IF NOT EXISTS assisted_enrollments (id TEXT PRIMARY KEY, customer TEXT, business_name TEXT, owner_email TEXT, assigned_rep_email TEXT, stage TEXT NOT NULL, created_at INTEGER NOT NULL)`)
+  db.sql.exec(`CREATE TABLE IF NOT EXISTS assisted_enrollments (id TEXT PRIMARY KEY, customer TEXT, business_name TEXT, owner_email TEXT, assigned_rep_email TEXT, stage TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`) // the 0047 shape (columns this view reads)
   db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, created_via, created_at, updated_at) VALUES ('rep1', 'Rep Sold', 'UTC', '', 'admin_invite', 1, 1), ('fdr1', 'Founder Sold', 'UTC', '', 'admin_invite', 1, 1), ('tst1', 'Test Sold', 'UTC', '', 'admin_invite', 1, 1)").run()
   markTest('tst1')
   for (const [id, c, rep, stage] of [['enr_a', 'rep1', 'rep@getshowups.com', 'invited'], ['enr_b', 'fdr1', null, 'paid'], ['enr_c', null, 'rep@getshowups.com', 'prospect'], ['enr_d', 'tst1', null, 'claimed']])
-    db.sql.prepare("INSERT INTO assisted_enrollments (id, customer, business_name, owner_email, assigned_rep_email, stage, created_at) VALUES (?, ?, 'P', 'o@p.example', ?, ?, 1)").run(id, c, rep, stage)
+    db.sql.prepare("INSERT INTO assisted_enrollments (id, customer, business_name, owner_email, assigned_rep_email, stage, created_by, created_at, updated_at) VALUES (?, ?, 'P', 'o@p.example', ?, ?, 'founder@getshowups.com', 1, 1)").run(id, c, rep, stage)
   const v = await commercialPipeline(env)
   const row = (id) => v.rows.find((r) => r.id === id)
   assert.deepEqual([row('rep1').channel, row('rep1').rep, row('rep1').enrollmentStage], ['sales_rep', 'rep@getshowups.com', 'invited'])
