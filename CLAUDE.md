@@ -41,6 +41,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/admin/         Bearer ADMIN_API_TOKEN routes: google-invites (POST), google-health (GET), customers (POST: link existing business)
   api/google/oauth/  Customer Google Calendar connection: start (GET/POST), callback (GET)
   api/auth/          Dashboard sign-in: google/start, google/callback (openid+email), logout (POST)
+  api/auth/email/    Passwordless email sign-in (server/email-auth.js, 0046): index (GET offered), start (POST), verify (POST code|token)
   api/dashboard/     Session routes: me, calendar, overview (GET); business, hours, connect-link, outcome (POST)
   api/book/[customer]/  Public: index (GET services, brand, slots[?service=]), area (GET ZIP check before times), lead (POST,
                      serviceId + answer), appointment (POST books on Google Calendar), event (POST funnel stage, codes only)
@@ -298,6 +299,15 @@ Non-negotiables:
 - Test sessions (server/acceptance.js, docs/INTELLIGENCE.md §8): acceptance runner only, one admin-marked test business, own
   cookie, exact route list, stripped environment + write-guarded database; ACCEPTANCE_SESSIONS_ENABLED=true needs approval.
   Never add a route that calls out, queues or changes accounts to server/acceptance-routes.js.
+- Email sign-in (server/email-auth.js, migration 0046; docs/DESIGN_SYSTEM.md §16; UI src/dashboard/SignIn.jsx, the ONE
+  sign-in panel): start answers identically for every well-formed address (lookup + send run in waitUntil); an email
+  (code + link, one request, 15 min, single use, ≤5 wrong codes, hashes only, code HMAC-keyed) goes only to who may sign in
+  today (signInAllowed: admin, member, open account invite, B's roles/ownership invites fail-soft, open sign-up/tester).
+  Sent directly (never the outbox). Link = /dashboard/email-sign-in#t= (fragment), POST to consume, only in the browser
+  that asked (HttpOnly sealed cookie); the code works anywhere. Success = createSession + landingFor, same as Google.
+  Gate: AUTH_EMAIL_LIVE (or MESSAGES_LIVE) exactly 'true' or only MESSAGE_TEST_RECIPIENTS (approval); the screens offer
+  email only then (?email=1 = testers' entry). AUTH_EMAIL_MOCK_ORIGIN is a loopback-only test var. Same verified address
+  = same person; nothing else is ever linked.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`.
 - Permanent audit log (server/auditlog.js, migration 0015 `audit_log`): append-only (SQLite triggers refuse UPDATE/DELETE),

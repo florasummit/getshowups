@@ -6124,3 +6124,60 @@ html.help-open .app {
 /* Settings → Booking hours → "Different hours on some days": one row per booking day. */
 .day-hours-row { margin-top: 10px; display: grid; gap: 6px; justify-items: start; }
 .day-hours-row > .field-row { width: 100%; }
+
+/* ---------- Sign-in (src/dashboard/SignIn.jsx, docs/DESIGN_SYSTEM.md "Authentication") ----------
+   Google first (primary), a quiet "or" rule, then the email form (secondary); "Check your email" with one code field. */
+.signin > * + *,
+.signin-email > * + *,
+.signin-code > * + * {
+  margin-top: 16px;
+}
+.panel > .signin {
+  margin-top: 0;
+}
+.signin-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.signin-or::before,
+.signin-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.signin .signin-code-input {
+  font-family: var(--font-label);
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+.signin .signin-code-input::placeholder {
+  color: var(--ink-300);
+  letter-spacing: 0.3em;
+}
+.signin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.panel .signin-actions .link-btn {
+  display: inline-block;
+  margin-inline: 0;
+}
+.signin-actions .fine {
+  font-variant-numeric: tabular-nums;
+}
+.signin-compact-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+.notice-info .signin {
+  margin-top: 12px;
+}

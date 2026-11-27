@@ -234,7 +234,40 @@ money(cents)                          // "$1,234" · "−$10,266" · "—" when 
 Reference usages: the six Settings saves and the "Other / Not sure" checkbox in `src/dashboard/forms.jsx`; the shells
 in `src/dashboard/Home.jsx` and `src/admin/Admin.jsx`.
 
-## 16. Usability acceptance checklist (every PR that changes UI)
+## 16. Authentication
+
+One sign-in experience for every entry: dashboard sign-in and sign-up, an invitation ("Join <business>"), the invited
+"Set up your business" page, the admin console, an ownership claim, and "sign in again" before a consequential action.
+Build it with `src/dashboard/SignIn.jsx` (props: `title`, `lede`, `before`, `after`, `next`, `googleHref`, `notice`,
+`compact`, `google`); never hand-build a sign-in panel. Server: `server/auth.js` (sessions) and `server/email-auth.js`.
+
+- Hierarchy: the screen's context first (title + one sentence: who it is for and what comes next), then **Continue
+  with Google** (the primary button), then a quiet "or" rule, then one Email field and **Continue with email**
+  (secondary). The only exception: a screen whose job is something else (e.g. "Book a call" while sign-up is closed)
+  makes Google secondary (`googleQuiet`). Fine print (privacy, "Already have an account?") goes last.
+- Minimal typing and steps: one field per step, the browser's own autofill (`autocomplete="email"`,
+  `autocomplete="one-time-code"`, `inputmode="numeric"`), no password, no name, no confirm-your-email field.
+- "Check your email" step: the title says it, the address is shown, one code field (paste-friendly: spaces and dashes
+  are ignored; six digits submit by themselves), **Sign in**, then **Resend email** with a visible countdown
+  ("Resend in 24 s", never a silently disabled button) and **Use a different email**. A reload keeps this step (per
+  tab, 15 minutes).
+- States, each with its recovery action: sending ("Sending…"), signing in ("Signing in…"), malformed address (next to
+  the field, the text stays), wrong or old code ("That code didn't work. Check the newest email from us, or send a new
+  code."), too many tries (the button becomes **Send a new code**), link opened in another browser ("Use the code
+  instead" + email and code fields), link expired / already used / incomplete (what happened + **Sign in again**),
+  too many requests (wait a few minutes), not available (use Google).
+- Wording: "Sign in", "Continue with Google", "Continue with email", "code", "link". Never "magic link", "OTP",
+  "token", "authenticate", "verify your identity", provider names other than Google, or which accounts exist.
+- Security the person can see, and must keep seeing: the same "Check your email" screen whether or not an address may
+  sign in (no "no account found"); codes and links work once and for 15 minutes (said on the screen and in the email);
+  a link opened elsewhere asks for the code instead; opening a link never signs in until **Sign in** is clicked;
+  "Didn't ask? Ignore this email" in every email. The same address is the same account whichever way the person
+  signs in, and Settings says so.
+- Google-only features (Google Calendar, Google Ads, Business Profile) are connected separately and say so where they
+  are offered ("It doesn't have to be the one you sign in with"); signing in never requires Google.
+- Phone and desktop: the panel is `panel--narrow` (460 px), full-width buttons, 44 px targets; nothing else on the page.
+
+## 17. Usability acceptance checklist (every PR that changes UI)
 
 1. Follows the frame: header and tab row untouched; one `h1`; title set by the shell.
 2. One primary action per view; buttons say what they do; no disabled control without a visible reason.

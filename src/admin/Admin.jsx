@@ -1,4 +1,4 @@
-// /admin — platform console for GetShowUps staff. Access requires a Google sign-in whose email is in
+// /admin — platform console for GetShowUps staff. Access requires a sign-in (Google or an emailed code) whose email is in
 // PLATFORM_ADMIN_EMAILS (checked server-side on every request). Customer lead details are never shown.
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
@@ -6,6 +6,7 @@ import Logo from '../components/Logo.jsx'
 import { BusinessControls, Closures, ReasonAction } from './Controls.jsx'
 import { api, browserTimeZone, fmt, noIndex, timeZones } from '../lib/api.js'
 import { SignOut } from '../dashboard/Home.jsx'
+import SignInPanel from '../dashboard/SignIn.jsx'
 import { Pill, TabBar } from '../dashboard/ui.jsx'
 import { usePageTitle } from '../dashboard/ui-hooks.js'
 import { sharedFigures } from './figures.js'
@@ -1522,16 +1523,11 @@ export default function Admin() {
   if (me.loading) return <main className="center-page" aria-busy="true" />
   if (me.status === 401) {
     return (
-      <Gate title="Platform sign-in">
-        {LOGIN_ERRORS[loginError] && (
-          <p className="form-error" role="alert">
-            {LOGIN_ERRORS[loginError]}
-          </p>
-        )}
-        <a className="btn btn-primary btn-lg btn-block" href="/api/auth/google/start?next=/admin">
-          Continue with Google
-        </a>
-      </Gate>
+      <main className="center-page">
+        <div className="panel panel--narrow enter">
+          <SignInPanel title="Platform sign-in" next="/admin" googleHref="/api/auth/google/start?next=/admin" notice={LOGIN_ERRORS[loginError] || ''} />
+        </div>
+      </main>
     )
   }
   if (me.status === 403) {

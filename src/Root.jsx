@@ -4,6 +4,7 @@ import App from './App.jsx'
 
 // App pages are separate lazy chunks so the marketing page stays small.
 const Dashboard = lazyPage(() => import('./dashboard/Dashboard.jsx'))
+const EmailLink = lazyPage(() => import('./dashboard/EmailLink.jsx'))
 const BookingPage = lazyPage(() => import('./booking/BookingPage.jsx'))
 const Admin = lazyPage(() => import('./admin/Admin.jsx'))
 const Privacy = lazyPage(() => import('./legal/Privacy.jsx'))
@@ -47,6 +48,14 @@ export default function Root() {
     return (
       <Suspense fallback={null}>
         <Admin />
+      </Suspense>
+    )
+  }
+  // The link in a sign-in email (before the dashboard: it must not first ask "who is signed in?").
+  if (path === '/dashboard/email-sign-in') {
+    return (
+      <Suspense fallback={null}>
+        <EmailLink />
       </Suspense>
     )
   }

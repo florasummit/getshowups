@@ -318,6 +318,15 @@ INSERT INTO business_addresses (customer, street, unit, city, state, zip, public
 npx wrangler kv key put "google:$E2E_DETAILS_CUSTOMER" "$(record "$E2E_DETAILS_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
+# Email sign-in (email-signin.spec.js): a member's business, and one sign-in link that expired a minute ago.
+d1 "
+INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+  ('$E2E_EMAILAUTH_CUSTOMER', 'Lantern Window Cleaning', 'America/New_York', '', '08:00', '17:00', '1,2,3,4,5', $NOW, $NOW, $NOW);
+INSERT INTO customer_users (email, customer, created_at) VALUES ('$E2E_EMAILAUTH_OWNER', '$E2E_EMAILAUTH_CUSTOMER', $NOW);
+INSERT INTO email_login_tokens (id, email_hash, link_hash, code_hash, browser_hash, next, attempts, created_at, expires_at) VALUES
+  ('e2e-expired', '$(hash "email-login:$E2E_EMAILAUTH_LINK")', '$(hash "$E2E_EMAILAUTH_EXPIRED_LINK")', 'none', 'none', '/dashboard', 0, $((NOW - 960000)), $((NOW - 60000)));
+"
+
 # Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
 # kept (changed since). So every seeded business is a ROLLOUT PIN on Retell (same behaviour as before for every other
@@ -362,7 +371,8 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000 \
   --binding TWILIO_AUTH_TOKEN="$E2E_TWILIO_AUTH_TOKEN" \
   --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
-  --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example,$E2E_JOURNEY_EMAIL,$E2E_JOURNEY_M_EMAIL" \
+  --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example,$E2E_JOURNEY_EMAIL,$E2E_JOURNEY_M_EMAIL,$E2E_EMAILAUTH_OWNER,$E2E_EMAILAUTH_NEW,$E2E_EMAILAUTH_LINK,$E2E_EMAILAUTH_PHONE,$E2E_EMAILAUTH_PHONE_M" \
+  --binding AUTH_EMAIL_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding FOLLOWUP_AI=true \
   --binding CRON_SECRET="$E2E_CRON_SECRET" \
   --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN" \

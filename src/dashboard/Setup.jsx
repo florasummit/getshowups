@@ -543,6 +543,10 @@ function CalendarStep({ onBack, connected, onDone }) {
       <button type="button" className="btn btn-primary btn-lg btn-block" onClick={start} disabled={state.busy}>
         {state.busy ? 'Opening Google…' : 'Connect Google Calendar'}
       </button>
+      {/* The calendar is its own connection: it never depends on how the owner signed in (Google or email). */}
+      <p className="fine" data-calendar-any-account>
+        Choose the Google account whose calendar you book on. It doesn’t have to be the one you sign in with.
+      </p>
       <Back onClick={onBack} />
     </>
   )

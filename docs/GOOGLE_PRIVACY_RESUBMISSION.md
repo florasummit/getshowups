@@ -12,6 +12,7 @@ Policy: https://getshowups.com/privacy (public, no sign-in, readable without Jav
 | Access tokens not stored | VERIFIED (code) | calendar.js, ads/google.js fetch per use |
 | Least-privilege calendar scopes, state + PKCE | VERIFIED | server/google-oauth.js |
 | Session tokens hashed, 7 days | VERIFIED | server/auth.js |
+| Email sign-in (2026-11-26): address used only to send the code + link; single use, 15 minutes, stored as hashes (code: keyed HMAC) | VERIFIED (code, tests) | server/email-auth.js, migration 0046; test/email-auth.test.js. Sign-in emails reach only test recipients until AUTH_EMAIL_LIVE |
 | Server-side separation between businesses | VERIFIED (tests) | requireSession; isolation tests. Application-level in one database |
 | Named administrators, tamper-evident log | VERIFIED | server/platform.js, auditlog.js |
 | Logs hold codes, not contents | VERIFIED by code review | no central redaction filter |

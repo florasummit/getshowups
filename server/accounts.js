@@ -1,9 +1,9 @@
 // Account invitations (admin invite and admin-assisted setup) and onboarding follow-ups.
 // All onboarding paths share one model: customers + customer_users. An invitation binds one email
-// to one business; only that Google-verified email can accept it, and only once, before expiry.
+// to one business; only that verified email (Google sign-in or email sign-in) can accept it, and only once, before expiry.
 import { randomToken, sha256Hex, timingSafeEqual } from './google-oauth.js'
 import { siteOrigin } from './auth.js'
-import { enqueue } from './email.js'
+import { authEmailLive, enqueue } from './email.js'
 import { track } from './events.js'
 import { progress } from './customers.js'
 import { customerFromRow } from './auth.js'
@@ -17,7 +17,8 @@ const inviteUrl = (env, token) => `${siteOrigin(env)}/dashboard?invite=${token}`
 function inviteEmail(env, { token, businessName }) {
   return {
     subject: `Set up ${businessName} on GetShowUps`,
-    body: `You've been invited to set up ${businessName} on GetShowUps.\n\nOpen this link and sign in with this email address's Google account:\n${inviteUrl(env, token)}\n\nThe link expires in 7 days.`,
+    // Email sign-in (server/email-auth.js) is mentioned only once sign-in emails can reach every address.
+    body: `You've been invited to set up ${businessName} on GetShowUps.\n\nOpen this link and sign in ${authEmailLive(env) ? 'with Google or with a code sent to this email address' : "with this email address's Google account"}:\n${inviteUrl(env, token)}\n\nThe link expires in 7 days.`,
   }
 }
 

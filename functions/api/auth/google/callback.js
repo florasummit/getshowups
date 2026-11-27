@@ -23,7 +23,6 @@ import {
   createSession,
   landingFor,
   loginRedirectUri,
-  safeNext,
 } from '../../../../server/auth.js'
 import { hitByIp } from '../../../../server/ratelimit.js'
 import { track } from '../../../../server/events.js'
