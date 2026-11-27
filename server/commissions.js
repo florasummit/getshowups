@@ -1,7 +1,8 @@
 // Commission ledger (migration 0048, append-only: triggers refuse UPDATE/DELETE). Commissions come ONLY from revenue
 // Stripe reports as collected, through the verified webhook (server/stripe.js handleEvent):
 //   invoice.paid → accrueCommission: when REFERRALS_ENABLED is exactly 'true', the business has a partner attribution,
-//     the partner is active with terms, the referral touch was inside the terms' window, the payment is inside the
+//     the partner is active with an accepted agreement and a terms version in effect at the attribution (that version's
+//     window/recurring/amount apply; snapshot + terms_version_id on the row), the referral touch was inside the terms' window, the payment is inside the
 //     recurring rule ('once' = the first commissioned payment only; 'months:N' = payments within N calendar months of
 //     the first commissioned one; 'lifetime'), the subscription has not ended, the business is not a test business and
 //     the partner is still not one of the business's people: ONE accrual per invoice (unique (kind, stripe_object_id)),
@@ -14,7 +15,8 @@
 // livemode is recorded on every row: only live rows can ever be a liability, and only while live billing is on; test-mode
 // rows are shown apart as test. Nothing here pays anyone: there is no payout code.
 import { recordEvent } from './auditlog.js'
-import { parseTerms, inWindow, selfReferral } from './commercial-attribution.js'
+import { inWindow, selfReferral } from './commercial-attribution.js'
+import { termsVersions, versionForAttribution } from './partner-terms.js'
 import { testStatus } from './testbusiness.js'
 
 export const referralsEnabled = (env) => env.REFERRALS_ENABLED === 'true'
@@ -78,11 +80,15 @@ export async function accrueCommission(env, customer, event, inv, now = Date.now
   const paidAt = Number.isFinite(inv.status_transitions?.paid_at) ? inv.status_transitions.paid_at * 1000 : event.created * 1000
   if (a.commission_ended_at && paidAt > a.commission_ended_at) return skip('subscription_ended')
   if ((await testStatus(env, customer)).test) return skip('test_business')
-  const p = await db.prepare('SELECT id, contact_email, status, terms, updated_at FROM referral_partners WHERE id = ?1').bind(a.partner_id).first()
+  const p = await db.prepare('SELECT id, contact_email, status FROM referral_partners WHERE id = ?1').bind(a.partner_id).first()
   if (!p) return skip('no_partner')
-  if (p.status !== 'active') return skip('partner_paused')
-  const terms = parseTerms(p.terms)
-  if (!terms) return skip('no_terms')
+  // A partner earns only while ACTIVE, with terms, and with an agreement accepted (activation requires the current one).
+  if (p.status !== 'active') return skip('partner_not_active')
+  if (!(await db.prepare('SELECT 1 FROM partner_acceptances WHERE partner_id = ?1 LIMIT 1').bind(p.id).first())) return skip('no_agreement')
+  // The terms version in effect when the business was attributed (server/partner-terms.js), for its whole life.
+  const version = versionForAttribution(await termsVersions(db, p.id), a)
+  if (!version) return skip('no_terms')
+  const terms = version.terms
   if (!inWindow(terms, a.partner_touched_at, a.created_at)) return skip('outside_window')
   const members = (await db.prepare('SELECT email FROM customer_users WHERE customer = ?1').bind(customer).all()).results.map((r) => r.email)
   if (selfReferral(p.contact_email, [...members, a.closing_rep_email].filter(Boolean))) return skip('self_referral')
@@ -92,16 +98,16 @@ export async function accrueCommission(env, customer, event, inv, now = Date.now
   const amount = commissionAmount(terms, basis, inv.currency)
   if (amount <= 0) return skip(terms.type === 'fixed' && terms.currency !== String(inv.currency || '').toLowerCase() ? 'currency_mismatch' : 'nothing_due')
   const refs = paymentRefs(inv)
-  const rule = { partnerId: p.id, ...terms, termsUpdatedAt: p.updated_at }
+  const rule = { partnerId: p.id, termsVersionId: version.id, version: version.version, effectiveFrom: version.effectiveFrom, ...terms }
   const r = await db
     .prepare(
-      `INSERT INTO commission_ledger (partner_id, customer, kind, stripe_object_id, stripe_invoice_id, stripe_charge_id, stripe_payment_intent, amount_cents, currency, basis_cents, paid_cents, livemode, rule, created_at)
-       VALUES (?1, ?2, 'accrual', ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT(kind, stripe_object_id) DO NOTHING`,
+      `INSERT INTO commission_ledger (partner_id, customer, kind, stripe_object_id, stripe_invoice_id, stripe_charge_id, stripe_payment_intent, amount_cents, currency, basis_cents, paid_cents, livemode, rule, terms_version_id, created_at)
+       VALUES (?1, ?2, 'accrual', ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?13, ?12) ON CONFLICT(kind, stripe_object_id) DO NOTHING`,
     )
-    .bind(p.id, customer, inv.id, refs.charge, refs.paymentIntent, amount, String(inv.currency || '').toLowerCase(), basis, Number(inv.amount_paid), event.livemode === true ? 1 : 0, JSON.stringify(rule), paidAt)
+    .bind(p.id, customer, inv.id, refs.charge, refs.paymentIntent, amount, String(inv.currency || '').toLowerCase(), basis, Number(inv.amount_paid), event.livemode === true ? 1 : 0, JSON.stringify(rule), paidAt, version.id)
     .run()
   if ((r?.meta?.changes ?? 0) === 0) return skip('duplicate')
-  await recordEvent(db, { type: 'commission.accrued', actor: 'stripe', customer, capability: 'commercial.commissions', resource: { type: 'invoice', id: inv.id }, correlationId: `stripe:${event.id}`, details: { partner: p.id, amountCents: amount, basisCents: basis, currency: inv.currency ?? null, livemode: event.livemode === true }, at: now })
+  await recordEvent(db, { type: 'commission.accrued', actor: 'stripe', customer, capability: 'commercial.commissions', resource: { type: 'invoice', id: inv.id }, correlationId: `stripe:${event.id}`, details: { partner: p.id, termsVersion: version.version, amountCents: amount, basisCents: basis, currency: inv.currency ?? null, livemode: event.livemode === true }, at: now })
   return { accrued: true, amountCents: amount }
 }
 
@@ -159,10 +165,10 @@ export async function reverseCommission(env, event, { lookupInvoice = null, now 
   if (!(delta > 0)) return { reversed: false, reason: 'nothing_left' }
   const r = await db
     .prepare(
-      `INSERT INTO commission_ledger (partner_id, customer, kind, stripe_object_id, stripe_invoice_id, stripe_charge_id, stripe_payment_intent, amount_cents, currency, basis_cents, paid_cents, livemode, rule, reverses, created_at)
-       VALUES (?1, ?2, 'reversal', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) ON CONFLICT(kind, stripe_object_id) DO NOTHING`,
+      `INSERT INTO commission_ledger (partner_id, customer, kind, stripe_object_id, stripe_invoice_id, stripe_charge_id, stripe_payment_intent, amount_cents, currency, basis_cents, paid_cents, livemode, rule, reverses, created_at, terms_version_id)
+       VALUES (?1, ?2, 'reversal', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) ON CONFLICT(kind, stripe_object_id) DO NOTHING`,
     )
-    .bind(acc.partner_id, acc.customer, key, acc.stripe_invoice_id, ref.charge, ref.paymentIntent, -delta, acc.currency, acc.basis_cents, paid, acc.livemode, acc.rule, acc.id, now)
+    .bind(acc.partner_id, acc.customer, key, acc.stripe_invoice_id, ref.charge, ref.paymentIntent, -delta, acc.currency, acc.basis_cents, paid, acc.livemode, acc.rule, acc.id, now, acc.terms_version_id ?? null)
     .run()
   if ((r?.meta?.changes ?? 0) === 0) return { reversed: false, reason: 'duplicate' }
   await recordEvent(db, { type: 'commission.reversed', actor: 'stripe', customer: acc.customer, capability: 'commercial.commissions', resource: { type: dispute ? 'dispute' : 'charge', id: dispute ? obj.id : ref.charge }, correlationId: `stripe:${event.id}`, details: { partner: acc.partner_id, amountCents: delta, reason: dispute ? 'dispute' : 'refund', livemode: acc.livemode === 1 }, at: now })

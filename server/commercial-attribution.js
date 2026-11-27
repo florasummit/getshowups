@@ -8,10 +8,11 @@
 // 'true' (server/commissions.js). Partners have no login and no access to anything.
 // Manipulation guards: codes are validated (format, existing, active partner); a presented code that fails is recorded as
 // a refusal code, never as the partner; self-referral (the partner's address is the owner's, a member's or the closing
-// rep's, or shares a non-public email domain with them) is refused; the first VALID touch among the browser's first-touch
+// rep's, or shares a non-public email domain with them) is refused; only an active partner with terms in effect counts; the first VALID touch among the browser's first-touch
 // candidates wins; the row is written once (INSERT … ON CONFLICT DO NOTHING).
 import { recordEvent } from './auditlog.js'
 import { cleanSource } from './customers.js'
+import { termsAt } from './partner-terms.js'
 
 export const CHANNELS = ['self_serve', 'founder', 'sales_rep', 'partner']
 export const CODE_RE = /^[a-z0-9]{6,32}$/
@@ -45,7 +46,7 @@ async function partnerRow(db, code) {
   const c = normCode(code)
   if (!c) return null
   try {
-    return (await db.prepare('SELECT id, name, contact_email, status, terms FROM referral_partners WHERE code = ?1').bind(c).first()) || null
+    return (await db.prepare('SELECT id, name, contact_email, status FROM referral_partners WHERE code = ?1').bind(c).first()) || null
   } catch (err) {
     if (!missing(err)) console.error('partner lookup failed:', 'storage_error')
     return null
@@ -92,7 +93,10 @@ async function choosePartner(db, customerId, candidates, { ownerEmail, repEmail 
   let firstRefusal = null
   for (const c of candidates) {
     const p = await partnerRow(db, c.code)
-    const refusal = !p ? 'unknown_code' : p.status !== 'active' ? 'paused' : selfReferral(p.contact_email, people) ? 'self_referral' : !inWindow(parseTerms(p.terms), c.at, now) ? 'outside_window' : null
+    // Only an ACTIVE partner (terms set and the agreement accepted at activation) gains referrals; the window is the one of
+    // the terms version in effect now, the version the business will earn under (server/partner-terms.js).
+    const version = p && p.status === 'active' ? await termsAt(db, p.id, now) : null
+    const refusal = !p ? 'unknown_code' : p.status !== 'active' ? 'not_active' : !version ? 'no_terms' : selfReferral(p.contact_email, people) ? 'self_referral' : !inWindow(version.terms, c.at, now) ? 'outside_window' : null
     if (!refusal) return { partner: p, touchedAt: c.at, refusal: null }
     firstRefusal ??= refusal
   }

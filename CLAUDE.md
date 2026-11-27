@@ -216,7 +216,15 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      codes (src/lib/referral.js, /r/<code> → /?partner=, or ?ref=); first VALID one wins; refusals recorded as codes
                      (unknown_code, paused, self_referral: partner = owner/member/rep or same non-public domain, outside_window)
   partners.js        Referral partners (admin only, POST /api/platform/partners, audited; NO login/access for partners). Random
-                     10-char codes; terms typed field by field, NO defaults anywhere; no terms = nothing accrues
+                     10-char codes; status invited → onboarding → active ⇄ paused → ended (final); activate/resume needs a terms
+                     version + recorded acceptance of the CURRENT agreement version (partner_agreements/partner_acceptances,
+                     method recorded_by_admin); only active partners gain referrals or earn. Payout details = words only (13–19
+                     digit runs, 8+ digit runs, IBANs refused). Terms: partner-terms.js, append-only versions, NO defaults; a
+                     business earns under the version in effect when it was attributed; a version never starts before the
+                     previous one or the latest accrual; ledger rows keep rule snapshot + terms_version_id (never recalculated)
+  partner-payouts.js Payouts made OUTSIDE GetShowUps, recorded only (no payment code). Live ledger rows only; itemized (settles
+                     accruals at their net) or on account; INSERT guarded by the owed balance; payout_settlements unique
+                     (ledger_id, cycle) = never settled twice; mistakes → one audited reversal row (append-only, never edited)
   commissions.js     Append-only commission_ledger (triggers; unique (kind, stripe_object_id)). REFERRALS_ENABLED exactly 'true'
                      or nothing accrues. invoice.paid → accrual from amount_paid − tax (window, recurring once|months:N|lifetime,
                      partner active, not test business, subscription not ended, re-checked self-referral); charge.refunded
