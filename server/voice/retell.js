@@ -8,6 +8,7 @@
 // here). A session starts only on the admin's explicit Start, one Lab call at a time, ≤ 15 minutes, within the daily budget.
 import { CUSTOMER_RE } from '../invites.js'
 import { getVoiceSettings, sessionVoiceFor } from './style.js'
+import { RETELL_MAX_CALL_MS } from '../receptionist/voice.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const retellBase = (env) => (typeof env.RETELL_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.RETELL_API_MOCK_ORIGIN) ? env.RETELL_API_MOCK_ORIGIN : 'https://api.retellai.com')
@@ -28,7 +29,7 @@ export async function connectRetellLab(env, { customer, conv }, now = Date.now()
     res = await fetch(`${retellBase(env)}/v3/create-web-call`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id, lab: true }, ...(override ? { agent_override: { agent: override } } : {}) }),
+      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id, lab: true }, agent_override: { agent: { ...(override || {}), max_call_duration_ms: RETELL_MAX_CALL_MS } } }),
       signal: AbortSignal.timeout(10_000),
     })
   } catch {

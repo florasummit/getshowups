@@ -171,6 +171,32 @@ export async function reserveAi(env, { entry, customerId, micros, now = Date.now
   }
 }
 
+// Bounded, fully accounted retries for a paid provider call. SDK clients are built with maxRetries: 0 (an SDK retry is a
+// second billable attempt nobody reports); this makes at most `attempts` attempts, EACH with its own reservation:
+//   success            → settled to the reported cost
+//   provider refused   → an HTTP status (4xx/5xx/429) means nothing was generated: settled to 0
+//   timeout / network  → no status: the provider may have billed it, so it KEEPS its worst-case reservation
+// A retry happens only for transient failures and only while the budget still has room; a refused reservation ends the
+// call. run(i) → { value, costMicros }. → { ok: true, value, attempts } | { ok: false, reason, error }.
+export const transient = (err) => !err?.status || [408, 409, 429].includes(err.status) || err.status >= 500
+export async function paidCall(env, { entry, customerId, micros, attempts = 2, retryable = transient, now }, run) {
+  let last = null
+  for (let i = 0; i < Math.max(1, Math.min(3, attempts)); i++) {
+    const budget = await reserveAi(env, { entry, customerId, micros, now: now ?? Date.now() })
+    if (!budget.ok) return { ok: false, reason: `budget_${budget.reason}`, error: last }
+    try {
+      const { value, costMicros } = await run(i)
+      await budget.settle(costMicros)
+      return { ok: true, value, attempts: i + 1 }
+    } catch (err) {
+      last = err
+      if (err?.status) await budget.settle(0)
+      if (!retryable(err)) break
+    }
+  }
+  return { ok: false, reason: 'provider', error: last }
+}
+
 // Claude-style worst case: input tokens estimated from the request size (≈ 3.5 characters a token, rounded up) plus every
 // output token allowed. Prices in micro-dollars per token.
 export function worstCase({ chars, maxOutput, inPerToken, outPerToken }) {
@@ -202,6 +228,37 @@ export async function voiceRoom(env, provider, now = Date.now()) {
 }
 export const retellRoom = (env, now = Date.now()) => voiceRoom(env, 'retell', now)
 
+// Provider usage reconciliation: what the providers' OWN records say today's voice sessions cost (recorded by
+// server/voice/charges.js recordCharges, hourly by cron and on an admin's request), next to our per-minute estimate
+// for the same priced sessions. OpenAI has no per-session charge record (only an organization-admin costs API).
+export const PER_MINUTE_ESTIMATE = { retell: 70_000, openai: 80_000, elevenlabs: 80_000 }
+export async function voiceReconciliation(env, now = Date.now()) {
+  const day = now - (now % DAY)
+  try {
+    const { results } = await env.ONBOARDING_DB.prepare(
+      `SELECT coalesce(json_extract(state, '$.voice.provider'), json_extract(state, '$.lab.provider')) AS provider,
+              count(*) AS sessions,
+              sum(CASE WHEN coalesce(json_extract(state, '$.voice.charge.micros'), json_extract(state, '$.lab.charge.micros')) IS NOT NULL THEN 1 ELSE 0 END) AS priced,
+              coalesce(sum(coalesce(json_extract(state, '$.voice.charge.micros'), json_extract(state, '$.lab.charge.micros'))), 0) AS verified,
+              coalesce(sum(CASE WHEN coalesce(json_extract(state, '$.voice.charge.micros'), json_extract(state, '$.lab.charge.micros')) IS NOT NULL
+                           THEN coalesce(json_extract(state, '$.voice.charge.durationSeconds'), json_extract(state, '$.lab.charge.durationSeconds'), 0) END), 0) AS priced_seconds
+         FROM receptionist_conversations WHERE created_at >= ?1 AND channel = 'voice'
+        GROUP BY 1`,
+    )
+      .bind(day)
+      .all()
+    const out = {}
+    for (const r of results) {
+      if (!PER_MINUTE_ESTIMATE[r.provider]) continue
+      const estimated = Math.ceil(Number(r.priced_seconds) / 60) * PER_MINUTE_ESTIMATE[r.provider]
+      out[r.provider] = { sessions: Number(r.sessions), priced: Number(r.priced), verifiedMicros: Number(r.verified), estimatedMicros: estimated, drift: Number(r.priced) > 0 && Number(r.verified) > estimated * 1.25 }
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 // Today's spend for the platform admin (business ids and micro-dollars only), with near-limit warnings.
 export async function spendToday(env, now = Date.now()) {
   const d = dayKey(now)
@@ -217,7 +274,7 @@ export async function spendToday(env, now = Date.now()) {
     const e = r.key.split(':')[2]
     entries[e] = (entries[e] || 0) + Number(r.count)
   }
-  const [c, s, retell, openai, elevenlabs] = await Promise.all([ceilings(env, now), budgetSettings(env, now), voiceRoom(env, 'retell', now), voiceRoom(env, 'openai', now), voiceRoom(env, 'elevenlabs', now)])
+  const [c, s, retell, openai, elevenlabs, reconciled] = await Promise.all([ceilings(env, now), budgetSettings(env, now), voiceRoom(env, 'retell', now), voiceRoom(env, 'openai', now), voiceRoom(env, 'elevenlabs', now), voiceReconciliation(env, now)])
   const voice = { retell, openai, elevenlabs }
   const platform = get(`aib:platform:${d}`)
   const pub = get(`aib:public:${d}`)
@@ -228,6 +285,9 @@ export async function spendToday(env, now = Date.now()) {
     near(pub, c.public) && { scope: 'public', state: near(pub, c.public) },
     ...businesses.filter((b) => near(b.micros, c.business)).map((b) => ({ scope: 'business', customer: b.customer, state: near(b.micros, c.business) })),
     ...Object.entries(voice).map(([p, v]) => minutesWarning(p, v)),
+    ...Object.entries(reconciled || {})
+      .filter(([, r]) => r.drift)
+      .map(([p]) => ({ scope: 'drift', provider: p, state: 'reached' })),
   ].filter(Boolean)
   return {
     day: d,
@@ -238,6 +298,7 @@ export async function spendToday(env, now = Date.now()) {
     ceilings: c,
     retell,
     voice,
+    reconciled,
     settings: Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, s[k]])),
     changed: s.set,
     max: MAX,

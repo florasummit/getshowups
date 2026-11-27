@@ -331,7 +331,7 @@ test('how the preference reaches each provider: a business with no row makes the
   const r0 = await startVoiceCall(env, alpha)
   assert.equal(r0.ok, true)
   const body0 = JSON.parse(fetches.find((f) => f.url.endsWith('/v3/create-web-call')).init.body)
-  assert.deepEqual(Object.keys(body0).sort(), ['agent_id', 'agent_version', 'metadata'], 'no override for a business that changed nothing')
+  assert.deepEqual(body0.agent_override, { agent: { max_call_duration_ms: 900_000 } }, 'no voice override for a business that changed nothing; only Retell’s 15-minute end')
   await saveVoicePreferences(env, alpha, { voiceId: 'retell-Cimo', pace: 'slower', personality: 'calm', version: 0 }, 'owner@alpha.example')
   const prefs = await getVoiceSettings(db, 'alpha')
   assert.deepEqual(sessionVoiceFor('retell', prefs), { voice_id: 'retell-Cimo', voice_speed: 0.9 })
@@ -340,7 +340,7 @@ test('how the preference reaches each provider: a business with no row makes the
   const r1 = await startVoiceCall(env, alpha, Date.now(), null, null, sessionVoiceFor('retell', prefs))
   assert.equal(r1.ok, true)
   const body1 = JSON.parse(fetches.filter((f) => f.url.endsWith('/v3/create-web-call')).at(-1).init.body)
-  assert.deepEqual(body1.agent_override, { agent: { voice_id: 'retell-Cimo', voice_speed: 0.9 } })
+  assert.deepEqual(body1.agent_override, { agent: { voice_id: 'retell-Cimo', voice_speed: 0.9, max_call_duration_ms: 900_000 } })
   assert.equal(body1.agent_id, 'agent_abc123def', 'still the one shared agent')
   // Lab (Retell): the admin's candidate voice wins; without one, the business's own voice applies.
   db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('alpha', 1, 'staff', 1)").run()
@@ -349,10 +349,10 @@ test('how the preference reaches each provider: a business with no row makes the
   assert.equal(lab.ok, true, lab.error)
   const conv = { id: lab.session.id, state: { lab: { provider: 'retell', settings: lab.session.settings } } }
   assert.equal((await connectRetellLab(env, { customer: alpha, conv })).ok, true)
-  assert.deepEqual(JSON.parse(fetches.filter((f) => f.url.endsWith('/v3/create-web-call')).at(-1).init.body).agent_override, { agent: { voice_id: '11labs-Adrian' } })
+  assert.deepEqual(JSON.parse(fetches.filter((f) => f.url.endsWith('/v3/create-web-call')).at(-1).init.body).agent_override, { agent: { voice_id: '11labs-Adrian', max_call_duration_ms: 900_000 } })
   const conv2 = { id: lab.session.id, state: { lab: { provider: 'retell', settings: {} } } }
   assert.equal((await connectRetellLab(env, { customer: alpha, conv: conv2 })).ok, true)
-  assert.deepEqual(JSON.parse(fetches.filter((f) => f.url.endsWith('/v3/create-web-call')).at(-1).init.body).agent_override, { agent: { voice_id: 'retell-Cimo', voice_speed: 0.9 } })
+  assert.deepEqual(JSON.parse(fetches.filter((f) => f.url.endsWith('/v3/create-web-call')).at(-1).init.body).agent_override, { agent: { voice_id: 'retell-Cimo', voice_speed: 0.9, max_call_duration_ms: 900_000 } })
   // ElevenLabs: candidate tts override; a Retell-only preference → the agent's own voice.
   const el = await startConversation(env, alpha, 'voice')
   const elConv = { id: el.id, state: { lab: { provider: 'elevenlabs', dryRun: true, settings: { voice: 'cjVigY5qzO86Huf0OWal' } } } }

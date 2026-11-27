@@ -9,6 +9,7 @@ import { processReplies, sendQueued, purgeOldMessages } from '../../../server/fo
 import { syncPendingRegistrations } from '../../../server/followups/provisioning.js'
 import { purgeOldConversations } from '../../../server/receptionist/engine.js'
 import { purgeOldCalls } from '../../../server/telephony/calls.js'
+import { recordCharges } from '../../../server/voice/charges.js'
 import { phoneReady } from '../../../server/telephony/lines.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
@@ -60,6 +61,9 @@ export async function onRequestPost({ request, env }) {
       registrations: await adsStep('texting registrations', () => syncPendingRegistrations(env)),
       receptionistPurged: await adsStep('receptionist retention', () => purgeOldConversations(env)),
       phonePurged: await adsStep('phone retention', async () => ((await phoneReady(env.ONBOARDING_DB)) ? purgeOldCalls(env) : 0)),
+      // Provider usage reconciliation (server/voice/charges.js): once an hour, the providers' own charge records for up to 10
+      // finished voice sessions (read-only GETs), shown next to our estimate in Admin → "AI spending today".
+      voiceCharges: await adsStep('voice charges', async () => (new Date().getUTCMinutes() < 5 ? recordCharges(env, { limit: 10 }) : { skipped: 'not_this_run' })),
       // Calendar events left behind by a failed booking whose cleanup failed (open calendar.google failures).
       eventCleanups: await adsStep('event cleanups', () => retryEventCleanups(env)),
     }

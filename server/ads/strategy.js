@@ -228,7 +228,8 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
     return { ok: false, error: 'ai_limit' }
   }
   const taught = await taughtFor(env, customer, 'ads', now)
-  const anthropic = client || new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 120000 })
+  // One attempt, no SDK retry (an SDK retry is an unreported billable attempt); the owner can ask again.
+  const anthropic = client || new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 120000 })
   let response
   try {
     response = await anthropic.beta.messages.create({

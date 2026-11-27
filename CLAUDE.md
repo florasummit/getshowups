@@ -770,6 +770,10 @@ Non-negotiables:
   variables can only lower them. Emergency off: all_off, restriction 'ai' per business, AI_ALL_OFF / AI_OFF_BUSINESSES
   (also stop voice starts). Every Retell start checks retellRoom() (open calls at their full 15 min). Own-key and
   Workers AI calls don't go through it. Never enable Cloudflare Bot Fight Mode: it can't exempt webhooks.
+  Paid SDK clients use maxRetries: 0 (an SDK retry is an unreported billable attempt); retry with paidCall() (≤ 2
+  attempts, each reserved; no status = keeps its worst case; status = settled 0). Every Retell call sets
+  agent_override.agent.max_call_duration_ms = RETELL_MAX_CALL_MS (15 min, provider-enforced). Provider charges are
+  reconciled hourly (cron voiceCharges → Admin "Provider records today", >25% drift warns).
 - Founder alerts (server/alerts.js): OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Platform admins only,
   through the outbox and launch gate (queued only for admins recipientAllowed() delivers to now); one email per incident
   (deterministic outbox id), ≤ 1 per business + kind per 6 h (flapping), ≤ 10 per run + digest; test/deleted businesses never alert; codes and counts only.

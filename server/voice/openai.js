@@ -28,9 +28,11 @@ export const OPENAI_CALLS_URL = `${OPENAI_API_BASE}/v1/realtime/calls`
 export const OPENAI_DATA_CHANNEL = 'oai-events'
 
 // A client secret only has to outlive the microphone prompt and the SDP exchange; a reconnect mints a new one.
-// Documented range 10..7200 s (default 600). We keep it well under the default.
-export const CLIENT_SECRET_TTL_SECONDS = 180
-export const CLIENT_SECRET_MAX_TTL_SECONDS = 300
+// Documented range 10..7200 s (default 600). OpenAI: a secret "can be used to create multiple sessions until it
+// expires", and expiry does NOT end a session already started, so the window is kept short (each extra session from
+// one secret would bypass our per-start limits).
+export const CLIENT_SECRET_TTL_SECONDS = 60
+export const CLIENT_SECRET_MAX_TTL_SECONDS = 120
 
 // Built-in voices from the client-secret reference (2026-11-21). OPENAI_REALTIME_VOICE picks one; default 'marin'
 // (the docs' current example voice). Anything else falls back to the default, never to a free string.

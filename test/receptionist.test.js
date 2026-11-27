@@ -152,7 +152,9 @@ beforeEach(() => {
       modelRequests.push(body)
       const step = script.shift()
       if (!step) return json(500, { type: 'error', error: { type: 'api_error', message: 'no scripted step' } })
-      if (step.status) return json(step.status, { type: 'error', error: { type: 'overloaded_error', message: 'x' } })
+      // A connection lost after sending (like a timeout): no status, the provider may have billed it.
+      if (step.network) throw new TypeError('fetch failed')
+      if (step.status) return json(step.status, { type: 'error', error: { type: step.status === 400 ? 'invalid_request_error' : 'overloaded_error', message: 'x' } })
       const out = typeof step === 'function' ? await step(body) : step
       if (body.stream) return sse(out, body.model)
       return json(200, { id: `msg_${modelRequests.length}`, type: 'message', role: 'assistant', model: body.model, content: out.content, stop_reason: out.stop_reason, stop_sequence: null, usage: { input_tokens: 1000, output_tokens: 50, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0 } })
@@ -615,6 +617,42 @@ test('shared AI spending guard (server/ai-budget.js): emergency off or a reached
   assert.equal(modelRequests.length, before + 1)
   const biz = db.sql.prepare("SELECT count FROM rate_limits WHERE key LIKE 'aib:biz:alpha:%'").get().count
   assert.ok(biz > 0 && biz < 20_000, `settled to the reported cost, got ${biz}`)
+})
+
+test('retries and timeouts are bounded and fully accounted: no SDK retries, at most two attempts each with its own reservation, a lost connection keeps its worst case, a refusal costs nothing', async () => {
+  await seed('alpha')
+  enable('alpha')
+  const bizKey = () => db.sql.prepare("SELECT count FROM rate_limits WHERE key LIKE 'aib:biz:alpha:%'").get()?.count ?? 0
+  const answer = { content: [{ type: 'text', text: 'Weekly pool care is $280.' }], stop_reason: 'end_turn' }
+  // Lost connection (no status), then success: two requests; the lost attempt keeps its full worst case (it may have been billed).
+  script.push({ network: true }, answer)
+  const before = modelRequests.length
+  const r1 = await chat('alpha', 'how much is weekly care?')
+  assert.match(r1.json().reply, /\$280/)
+  assert.equal(modelRequests.length, before + 2)
+  const afterLost = bizKey()
+  assert.ok(afterLost > 50_000, `the lost attempt keeps its worst case, got ${afterLost}`)
+  // Overloaded (529) twice: exactly two requests (no hidden SDK retry), both settled to 0, then the booking fallback.
+  script.push({ status: 529 }, { status: 529 })
+  const n2 = modelRequests.length
+  const r2 = await chat('alpha', 'still there?', r1.json())
+  assert.match(r2.json().reply, /book\/alpha/)
+  assert.equal(modelRequests.length, n2 + 2)
+  assert.equal(bizKey(), afterLost, 'refused attempts cost nothing')
+  // A request the provider rejects as invalid (400) is never retried.
+  script.push({ status: 400 })
+  const n3 = modelRequests.length
+  await chat('alpha', 'hello again', r1.json())
+  assert.equal(modelRequests.length, n3 + 1)
+  // The budget runs out between attempts: the retry is refused, no second request, the customer gets the fallback.
+  env.AI_BUSINESS_DAILY_MICROS = String(bizKey() + 140_000)
+  script.push({ network: true }, answer)
+  const n4 = modelRequests.length
+  const r4 = await chat('alpha', 'one more question', r1.json())
+  assert.equal(modelRequests.length, n4 + 1)
+  assert.match(r4.json().reply, /book\/alpha/)
+  delete env.AI_BUSINESS_DAILY_MICROS
+  script.length = 0
 })
 
 test('prompt injection and tenant isolation: customer text never enters the system prompt; conversations, tools and data stay inside one business', async () => {
