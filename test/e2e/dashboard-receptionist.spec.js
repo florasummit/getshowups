@@ -41,7 +41,7 @@ test('owner (voice not released for this business): chat Active, browser voice "
   expect(settingsY).toBeLessThan(voiceY)
   // The statuses, traced to the API's capability facts.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
-  expect(me.capabilities).toMatchObject({ chat: true, voice: false, voiceStatus: 'testing', staffEmail: 'test_mode', phoneLine: false })
+  expect(me.capabilities).toMatchObject({ chat: true, voice: false, voiceStatus: 'testing', staffEmail: 'test_mode', phoneLine: { state: 'not_started', href: '/dashboard/settings#phone' } })
   expect(me.admin).toBeUndefined()
   await expect(page.locator('.ui-page-head')).toContainText('Answering on website chat')
   await expect(page.locator('.ui-page-head')).not.toContainText('Working')

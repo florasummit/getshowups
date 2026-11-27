@@ -332,6 +332,9 @@ INSERT INTO receptionist_requests (id, customer, conversation_id, kind, phone, n
 INSERT INTO phone_calls (call_sid, customer, line_id, caller, caller_state, source, route, outcome, duration_seconds, request_id, started_at, ended_at, updated_at) VALUES
   ('CA00000000000000000000000000000e2e', '$E2E_PHONE_CUSTOMER', 'pl_e2e', '+18435550162', 'known', 'website', 'team', 'callback', 31, 'rq_e2e_call', $((NOW - 600000)), $((NOW - 569000)), $NOW);
 "
+# A connected calendar, so the dashboard opens on its tabs (Settings) instead of onboarding.
+npx wrangler kv key put "google:$E2E_PHONE_CUSTOMER" "$(record "$E2E_PHONE_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
 
 # Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
