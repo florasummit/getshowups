@@ -1,70 +1,100 @@
 # AI spending and abuse protection
 
-Verified 2026-11-27 against the code and with mocked providers (`test/ai-budget.test.js`,
-`test/receptionist.test.js`). No real model calls were made. Production settings were not changed.
+Verified 2026-11-27 against the code and with mocked providers (`test/ai-budget.test.js`, `test/receptionist.test.js`,
+`test/e2e/admin.spec.js`). No real model calls were made. Production settings were not changed.
 
-## One spending guard: `server/ai-budget.js`
+## Limits (defaults; change them in Admin → "AI spending today")
 
-Every model call **GetShowUps pays for** reserves its **worst case** first, before the provider is called. The worst case is
-the input estimate plus every output token allowed. One SQL statement charges four daily counters at once, and only if all
-of them stay under their ceilings:
-
-| Ceiling (UTC day) | Default | Variable |
+| Limit (UTC day) | Default | Setting |
 | --- | --- | --- |
-| Whole platform | $25 | `AI_PLATFORM_DAILY_MICROS` |
-| Public entry points together (receptionist) | $15 | `AI_PUBLIC_DAILY_MICROS` |
-| One business, every entry point | $6 | `AI_BUSINESS_DAILY_MICROS` |
-| One business, one entry point | receptionist $5 (`RECEPTIONIST_DAILY_MICROS`); teach, assistant, ads plan, ads images $1 each | `ENTRIES` |
+| All GetShowUps-paid AI on the platform | **$5** | `platform_micros` |
+| Public chat and voice AI (receptionist), all businesses together | **$3** | `public_micros` |
+| One business, every AI feature | **$1** | `business_micros` |
+| Retell voice minutes, platform-wide (browser voice and, later, phone AI) | **60 min** | `retell_minutes` |
+| Everything off | off | `all_off` |
 
-- **Atomic**: requests that arrive at the same moment can't pass a ceiling together. A refusal charges nothing. Tested with
-  40 simultaneous requests against a $1 ceiling: exactly 10 passed.
-- **Settled**: after the call, the reservation is replaced by the provider's reported cost. An aborted stream or a timeout
-  keeps its worst case, because it may have been billed.
-- **Fails closed**: if the counters can't be read or written, no call is made. Request rate limits, by contrast, fail open.
-- **Tenants**: one business's abuse stops at its own ceiling. The public ceiling stops the receptionist using up the
-  platform allowance that owner tools need.
-- **Fallback**: when refused, the receptionist gives its fixed reply with the booking link and contact details. The
-  Assistant answers from records. Teach Your AI keeps its fixed patterns. Ads calls return the code `ai_limit`.
-- **Emergency off** (Cloudflare variable, effective on the next request, no deploy): `AI_ALL_OFF=true`, or
-  `AI_OFF_BUSINESSES=a,b` for listed businesses only. These also stop browser voice sessions from starting.
-- **Visibility**: Admin → "AI spending today" shows platform and public totals against their ceilings, the top businesses,
-  each entry point and the switch states.
+- **Changing a limit**: Admin → "AI spending today" → change the number → "Change …" → type a reason → "Save the new
+  limit". Only platform admins can do this, from the same origin, at most 30 changes per 10 minutes. Each change is
+  audited with who, from, to and the reason (`admin_audit` action `ai_budget.set`). It applies within 30 seconds with no
+  deploy. Ceilings can be set up to $100 a day, and Retell up to 1,000 minutes.
+- **Stricter limits that stay in force** (the effective limit is always the lowest one):
+  - receptionist: $1 per conversation, 60 turns, and its own `RECEPTIONIST_DAILY_MICROS`
+  - Teach, Assistant, ads plan, ad images: $1 per business each
+  - the Assistant's own `OPERATOR_*` dollar limits and its 20 answers a day
+  - every request rate limit
+  - voice minute limits: 120 per business, 600 per provider for OpenAI and ElevenLabs
+  - The `AI_*_DAILY_MICROS` variables can only **lower** the admin settings.
+- **Warnings**: the card shows "over 80% of its limit" and "limit reached (AI refused, fallbacks shown)" for the platform,
+  the public share, each business and Retell minutes.
+- **Emergency off**:
+  - "Turn all AI off now" on the card (audited, takes effect within 30 seconds).
+  - For one business: the admin restriction **"All AI paid by GetShowUps"** (business → Controls, reason required, audited).
+  - Without the database: the Cloudflare variables `AI_ALL_OFF=true` and `AI_OFF_BUSINESSES=a,b`.
+  - All of them stop model calls and voice starts. Customers get the booking and contact fallback.
 
-Counters live in `rate_limits` (keys `aib:<scope>:<day>`), so no migration is needed.
+## How a model call is capped (`server/ai-budget.js`)
 
-## Entry points
+1. **Before** the provider is called, the call's worst case (input estimate plus every output token allowed) is charged
+   against the platform, public (public entry points only), business and entry counters in **one conditional SQL
+   statement**. Either all are charged or none, and only if every counter stays under its limit. Requests that arrive at
+   the same moment can't pass a limit together: in the test, 40 simultaneous requests against $1 gave exactly 10.
+2. **After** the call, the charge is replaced by the provider's reported cost.
+3. **Fails closed**: unreadable counters, settings or restrictions mean no call. Request rate limits, by contrast, fail
+   open; spending doesn't rely on them.
 
-| Entry point | Who can reach it | Paid by | Guards |
-| --- | --- | --- | --- |
-| Receptionist: standalone chat, website panel, homepage sales chat, Retell voice turns, (future) phone AI turns | Public | GetShowUps (Claude) | Shared guard on every model call. 40 turns per IP per 10 min, 600 per business per hour. 60 turns and $1 per conversation. 6 model calls per turn, 4,096 output tokens, 1,500 input characters, 25 s / 10 s timeouts, 1 retry. Tools run server-side, bound to the business. |
-| Browser voice minutes (OpenAI, ElevenLabs, Retell) | Public | GetShowUps (per minute) | Emergency switches. 6 starts per IP per 10 min, 60 per business per hour, 3 at once, 15 min per session, 120 min per business per day. OpenAI and ElevenLabs: 600 min per provider per day. **Retell: no platform cap unless set** (below). |
-| Owner Assistant | Owner (session) | GetShowUps (Claude Haiku) or free Workers AI | Shared guard (Claude). Existing $2 per day and $0.10 per business. 5 per minute, 60 attempts per day, 25 per day across the platform, 20 answers per day. |
-| Teach Your AI | Owner | GetShowUps (Claude) | Shared guard. 60 model requests per business per day, 30 per hour. |
-| Ads plan / ad images | Owner | GetShowUps (Claude / OpenAI) | Shared guard plus their monthly allowance. 6 plans and 12 images per hour. |
-| Website writing, AI website copy, follow-up texts | Owner / system | Workers AI (free daily quota) | Per-business daily limits. The free quota cannot bill: the account is on Workers Free. If it moves to Workers Paid, these need the shared guard too. |
-| Website designer, own key | Owner | The owner's own key | Monthly limit. Never GetShowUps money. |
+Entry points:
+- **Receptionist** (public, every model call): standalone chat, website panel, homepage sales chat, Retell voice turns,
+  and future phone AI turns.
+- **Owner tools**: Teach Your AI, the owner Assistant on Claude, the ads plan, ad images.
+- **Not covered**: Workers AI features (free daily quota; the account is on Workers Free, so they can't bill) and calls on
+  an owner's own key (the owner pays).
 
-Other protections already in place: dashboard routes take the business from the session and check same origin. Public
-routes check signed tokens and offered slots. Customer text never enters the system prompt, and tools are bound to the
-business (`test/receptionist.test.js` prompt-injection and tenant-isolation tests). Errors are allowlisted codes.
+## What each cost is, and how strictly it is capped
 
-## Ceilings verified (defaults)
+| Cost | Paid to | In the dollar guard? | How it is capped | Strict? |
+| --- | --- | --- | --- | --- |
+| Receptionist, Teach, Assistant, ads plan: Claude tokens | Anthropic | Yes | Reserved before the call, settled after | **Yes**, except the timeout row below |
+| Ad images | OpenAI | Yes | Image price reserved before the call | **Yes** |
+| A first attempt the SDK retries after a timeout (`maxRetries: 1`) | Anthropic | Only if reported | The SDK reports usage only for the attempt that succeeds | **No**: at most one extra call per request, only on provider timeouts (visible as `model_timeout` events) |
+| Concurrent requests | — | Yes | One atomic statement | **Yes** |
+| Failed requests | — | Yes | A provider refusal (HTTP status) is settled at $0; a timeout or abort keeps its worst case | **Yes** (conservative) |
+| **Retell voice minutes** | Retell (about $0.07/min) | **No**: separate, counted in minutes | `retell_minutes` (default 60/day). A start is allowed only if finished calls, plus every open call at its full 15-minute ceiling, plus this call fit. Unreadable means refused. | **Nearly**: starts that land in the same instant can each pass before the other is recorded. Bounded by 3 calls at once per business and 6 starts per IP per 10 min. Retell also bills hold time and short calls as 10 s, so its bill can exceed our measured minutes slightly. |
+| The model inside a Retell call | Anthropic (our engine) | Yes | Each turn is reserved like chat | **Yes** |
+| OpenAI and ElevenLabs browser voice minutes | OpenAI, ElevenLabs | No (minutes) | 600 min per provider per day, 120 per business, 3 at once, 15 min per session | **No**: a running session counts only elapsed time, so calls already running can exceed the day's minutes by up to 15 min each |
+| Phone lines (PR #192, off) | Twilio | No | `PHONE_DAILY_MINUTES`, `PHONE_CONCURRENT`; AI turns go through the guard; the AI leg's Retell minutes count toward `retell_minutes` | Off until approved |
+| Sign-in emails (Claude 2, PR #198) | Resend | No | 300 per hour platform-wide, 5 per address per hour, 10 per IP per 10 min; test recipients only until `AUTH_EMAIL_LIVE` | Yes, by count |
 
-- **GetShowUps-paid model spend**: at most $25 a day in total, $15 of it from the public receptionist, $6 per business.
-- **Voice minutes**: at most 600 min a day each for OpenAI and ElevenLabs, and 120 min per business. Retell has no
-  platform-wide minute cap yet.
+## Cloudflare (dashboard, Free plan): what to enable and what not to
 
-## Gaps and what needs approval
+Checked against Cloudflare's docs on 2026-11-27. From outside I could only confirm that traffic goes through Cloudflare
+(`server: cloudflare`, HSTS). The zone's security settings can't be read from here, so the list below is what's
+**available**, not what's enabled.
 
-1. **Set `VOICE_PROVIDER_DAILY_MINUTES_RETELL`** (Cloudflare variable). Without it, Retell minutes are capped only per
-   business. 600 is suggested: about $42 a day at $0.07 per minute, before model cost, which the shared guard bounds.
-2. **Cloudflare**: what can be confirmed from outside is that traffic goes through Cloudflare (`server: cloudflare`,
-   HSTS). WAF custom rules, Bot Fight Mode, Cloudflare rate-limiting rules and Turnstile **could not be read** with the
-   tools available here. Only the founder's dashboard shows them, so treat them as "available, not known to be enabled."
-   Recommended (free plan):
-   - Bot Fight Mode on.
-   - One rate-limiting rule on `POST /api/receptionist/*`, 60 requests per minute per IP, as an edge backstop.
-3. **Turnstile**: not built and not needed yet. Spend is now hard-capped server-side. If bots exhaust the public ceiling
-   (visible in Admin), add a Turnstile check when a conversation starts. That needs a Cloudflare widget, the founder's
-   approval and a privacy-policy line.
-4. Request rate limits fail open when D1 is unavailable. Money no longer depends on them, because the guard fails closed.
+**Do not turn on Bot Fight Mode.** Cloudflare: "You cannot bypass or skip Bot Fight Mode using WAF custom rules or Page
+Rules", and it "may challenge API or mobile app traffic". It would apply to:
+- Stripe, Twilio, Resend and Meta webhooks
+- the scheduler Worker's `/api/cron/run`
+- Retell's connection to `/api/receptionist/llm/…`
+
+None of these can be exempted, so a challenged webhook means a missed payment event or call. Super Bot Fight Mode supports
+exemptions but is a paid plan: deferred.
+
+**Add one rate-limiting rule** (Free allows one: counted per IP, 10-second period, 10-second block, matched by path only):
+1. Cloudflare dashboard → the getshowups.com zone → **Security → Security rules** → **Create rule** → **Rate limiting
+   rules**.
+2. Rule name: `Receptionist burst guard`.
+3. "When incoming requests match…": **Edit expression** and paste:
+   `(starts_with(http.request.uri.path, "/api/receptionist/") and not starts_with(http.request.uri.path, "/api/receptionist/llm/"))`
+   - If the editor refuses `starts_with`, use the builder: *URI Path* **contains** `/api/receptionist/` **and** *URI Path*
+     **does not contain** `/api/receptionist/llm/`.
+4. Counting: **IP**. Rate: **30 requests per 10 seconds**. Action: **Block** for **10 seconds**.
+5. **Deploy**. Afterwards, Security → Analytics → Events, filtered by the rule, should show no blocks of normal use.
+
+Why this is safe: it covers only customer chat and voice requests. Our own limit for those is 40 turns per 10 minutes,
+so 30 in 10 seconds is never reached by a person. It never matches sign-in (`/api/auth/*`), booking (`/api/book/*`),
+Stripe (`/api/stripe/webhook`), Twilio (`/api/sms/*`, `/api/phone/*`), Resend, Meta, the scheduler or Retell's socket.
+
+**Turnstile: deferred.** Spending is hard-capped server-side, and per-IP and per-business limits stop single sources.
+What remains is many IPs together. That ends at the $3 public limit and is visible on the card ("limit reached"). Add
+Turnstile at the start of a conversation if the card shows the public limit reached by traffic that isn't customers.
+That needs a Cloudflare widget, approval and a privacy-policy line.

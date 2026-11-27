@@ -829,14 +829,34 @@ const SWITCHES = [
   ['assistant', 'Assistant'],
   ['twilioConfigured', 'Twilio'],
 ]
-// Today's GetShowUps-paid AI spending against its ceilings (server/ai-budget.js). Read-only; the switches are Cloudflare
-// variables (AI_ALL_OFF, AI_OFF_BUSINESSES), changed there with approval.
+// GetShowUps-paid AI spending today and its limits (server/ai-budget.js). Limits and the all-off switch are changed here
+// (reason + confirm, audited, applied within 30 s); per business: Controls → restriction "All AI". AI_ALL_OFF and
+// AI_OFF_BUSINESSES (Cloudflare variables) also turn AI off and can't be undone from here.
+const AI_LIMITS = [
+  ['platform_micros', 'Platform per day ($)', true],
+  ['public_micros', 'Public chat + voice per day ($)', true],
+  ['business_micros', 'Each business per day ($)', true],
+  ['retell_minutes', 'Retell minutes per day', false],
+]
 function AiSpend() {
   const [d, setD] = useState(null)
+  const [edit, setEdit] = useState({})
+  const [note, setNote] = useState('')
+  const load = () => api('/api/platform/ai-spend').then(({ status, data }) => setD(status === 200 ? data : { error: true }))
   useEffect(() => {
-    api('/api/platform/ai-spend').then(({ status, data }) => setD(status === 200 ? data : { error: true }))
+    load()
   }, [])
   const usd = (micros) => `$${(micros / 1e6).toFixed(2)}`
+  // → null when saved, else the error code (ReasonAction shows it).
+  const save = async (key, value, reason) => {
+    const { status, data } = await api('/api/platform/ai-spend', { method: 'POST', body: { action: 'set', key, value, reason, confirm: true } })
+    if (status !== 200) return data.error || `http_${status}`
+    setD(data)
+    setEdit({})
+    setNote('Saved and audited. Applies to every business within 30 seconds.')
+    return null
+  }
+  const WARN = { platform: 'Platform', public: 'Public chat + voice', business: 'Business', retell: 'Retell minutes' }
   return (
     <section className="card" aria-labelledby="ai-spend-title" data-ai-spend>
       <h2 className="card-title" id="ai-spend-title">
@@ -852,9 +872,44 @@ function AiSpend() {
             <Pill tone={d.off.all ? 'bad' : 'neutral'}>All AI: {d.off.all ? 'off' : 'on'}</Pill>
             {d.off.businesses.length > 0 && <Pill tone="bad">Off for: {d.off.businesses.join(', ')}</Pill>}
           </p>
+          {d.warnings.length > 0 && (
+            <p className="form-error" data-ai-warnings>
+              {d.warnings.map((w) => `${WARN[w.scope]}${w.customer ? ` ${w.customer}` : ''}: ${w.state === 'reached' ? 'limit reached (AI refused, fallbacks shown)' : 'over 80% of its limit'}`).join(' · ')}
+            </p>
+          )}
           <p className="fine">
             Platform {usd(d.platform)} of {usd(d.ceilings.platform)} · public (receptionist) {usd(d.public)} of {usd(d.ceilings.public)} · each business up to {usd(d.ceilings.business)}. Reserved before each call, settled to what the provider reported.
           </p>
+          <p className="fine">
+            Retell voice: {d.retell.used == null ? 'unreadable (new calls refused)' : `${d.retell.used} min`} of {d.retell.cap} min (open calls count their full 15 minutes). Retell bills these minutes itself; they are not in the dollar figures.
+          </p>
+          <div className="form" data-ai-limits>
+            {AI_LIMITS.map(([key, label, money]) => {
+              const current = money ? d.settings[key] / 1e6 : d.settings[key]
+              const v = edit[key] ?? String(current)
+              return (
+                <div key={key} data-ai-limit={key}>
+                  <label className="field">
+                    <span>
+                      {label} {d.changed[key] ? <em>(set {new Date(d.changed[key].at).toLocaleDateString()})</em> : <em>(default)</em>}
+                    </span>
+                    <input value={v} inputMode="decimal" onChange={(e) => setEdit({ ...edit, [key]: e.target.value })} />
+                  </label>
+                  {v !== String(current) && Number(v) >= 0 && (
+                    <ReasonAction label={`Change ${label}`} confirm="Save the new limit" text={`Set to ${v}. Applies to every business within 30 seconds.`} onRun={(reason) => save(key, money ? Math.round(Number(v) * 1e6) : Math.round(Number(v)), reason)} />
+                  )}
+                </div>
+              )
+            })}
+            <ReasonAction
+              label={d.settings.all_off ? 'Turn AI back on' : 'Turn all AI off now'}
+              confirm={d.settings.all_off ? 'Turn AI back on' : 'Turn all AI off'}
+              danger={!d.settings.all_off}
+              text={d.settings.all_off ? 'Model calls and voice starts resume within 30 seconds.' : 'Every GetShowUps-paid model call and voice start is refused within 30 seconds; customers get booking and contact options.'}
+              onRun={(reason) => save('all_off', d.settings.all_off ? 0 : 1, reason)}
+            />
+            {note && <p className="fine">{note}</p>}
+          </div>
           {Object.keys(d.entries).length > 0 && (
             <p className="fine">
               By entry point:{' '}

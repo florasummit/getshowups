@@ -6,7 +6,8 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { reserveAi, spendToday, worstCase, aiOff } from '../server/ai-budget.js'
+import { reserveAi, spendToday, worstCase, aiOff, resetSettingsCache, retellRoom, setBudgetSetting, DEFAULTS } from '../server/ai-budget.js'
+import { setRestriction } from '../server/restrictions.js'
 import { sha256Hex } from '../server/google-oauth.js'
 import * as spendApi from '../functions/api/platform/ai-spend.js'
 
@@ -28,6 +29,7 @@ const count = (key) => db.sql.prepare('SELECT count FROM rate_limits WHERE key =
 beforeEach(() => {
   db = d1()
   env = { ONBOARDING_DB: db }
+  resetSettingsCache()
 })
 
 test('a reservation charges every ceiling once; settle replaces it with the real cost', async () => {
@@ -80,7 +82,7 @@ test('emergency switches refuse before anything is charged; unknown entries and 
   assert.equal((await reserveAi(env, { entry: 'receptionist', customerId: 'gamma', micros: 1, now: NOW })).ok, true)
   env.AI_ALL_OFF = 'true'
   assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'gamma', micros: 1, now: NOW })).reason, 'ai_off')
-  assert.equal(aiOff(env, 'anyone'), true)
+  assert.equal(await aiOff(env, 'anyone'), true)
   delete env.AI_ALL_OFF
   assert.equal((await reserveAi(env, { entry: 'websites', customerId: 'gamma', micros: 1, now: NOW })).reason, 'unavailable')
   assert.equal((await reserveAi(env, { entry: 'teach', customerId: '../x', micros: 1, now: NOW })).reason, 'unavailable')
@@ -93,7 +95,10 @@ test('fails closed: when the counters cannot be written, nothing is spent', asyn
   console.error = (...a) => errors.push(a.join(' '))
   try {
     env.ONBOARDING_DB = { prepare: () => ({ bind: () => ({ run: async () => { throw new Error('D1_ERROR') }, all: async () => { throw new Error('D1_ERROR') }, first: async () => { throw new Error('D1_ERROR') } }) }) }
-    assert.deepEqual(await reserveAi(env, { entry: 'receptionist', customerId: 'fresh-biz', micros: 1, now: NOW }), { ok: false, reason: 'unavailable' })
+    // Refused either way: an unreadable restriction counts as off, unreadable counters as unavailable.
+    const r = await reserveAi(env, { entry: 'receptionist', customerId: 'fresh-biz', micros: 1, now: NOW })
+    assert.equal(r.ok, false)
+    assert.ok(['ai_off', 'unavailable'].includes(r.reason))
   } finally {
     console.error = orig
   }
@@ -128,7 +133,77 @@ test('admin view: platform admins only; today’s totals, top businesses and ent
   const owner = await get(await session('owner@alpha.example'))
   assert.notEqual(owner.status, 200)
   assert.equal((await owner.json()).platform, undefined)
-  const admin = await get(await session('staff@getshowups.com'))
+  const cookie = await session('staff@getshowups.com')
+  const admin = await get(cookie)
   assert.equal(admin.status, 200)
   assert.equal((await admin.json()).platform, 150_000)
+  // An admin change: reason + confirm required, audited from → to, applied at once, within the allowed range only.
+  const post = (body, origin = 'https://getshowups.com') => spendApi.onRequestPost({ request: new Request('https://getshowups.com/api/platform/ai-spend', { method: 'POST', headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env })
+  assert.equal((await post({ action: 'set', key: 'business_micros', value: 500_000, reason: 'pilot week' })).status, 400) // no confirm
+  assert.equal((await post({ action: 'set', key: 'business_micros', value: 500_000, confirm: true })).status, 400) // no reason
+  assert.equal((await post({ action: 'set', key: 'business_micros', value: 500_000_000, reason: 'typo', confirm: true })).status, 400) // over $100
+  assert.equal((await post({ action: 'set', key: 'business_micros', value: 500_000, reason: 'pilot week', confirm: true }, 'https://evil.example')).status, 403)
+  const ok = await post({ action: 'set', key: 'business_micros', value: 500_000, reason: 'pilot week', confirm: true })
+  assert.equal(ok.status, 200)
+  assert.equal((await ok.json()).ceilings.business, 500_000)
+  const row = db.sql.prepare("SELECT actor, details FROM admin_audit WHERE action = 'ai_budget.set'").get()
+  assert.deepEqual([row.actor, JSON.parse(row.details)], ['staff@getshowups.com', { key: 'business_micros', from: 1_000_000, to: 500_000, reason: 'pilot week' }])
+})
+
+test('conservative defaults: $5 platform, $3 public, $1 per business, 60 Retell minutes; stricter entry limits still apply', async () => {
+  assert.deepEqual(DEFAULTS, { platform_micros: 5_000_000, public_micros: 3_000_000, business_micros: 1_000_000, retell_minutes: 60, all_off: 0 })
+  // $1 per business stops a business long before the receptionist's own $5.
+  const r = await Promise.all(Array.from({ length: 12 }, () => reserveAi(env, { entry: 'receptionist', customerId: 'alpha', micros: 100_000, now: NOW })))
+  assert.equal(r.filter((x) => x.ok).length, 10)
+  // A stricter entry limit stays the effective one.
+  env.RECEPTIONIST_DAILY_MICROS = '150000'
+  assert.equal((await reserveAi(env, { entry: 'receptionist', customerId: 'beta', micros: 100_000, now: NOW })).ok, true)
+  assert.equal((await reserveAi(env, { entry: 'receptionist', customerId: 'beta', micros: 100_000, now: NOW })).reason, 'entry')
+  // Public $3 across tenants.
+  delete env.RECEPTIONIST_DAILY_MICROS
+  for (const b of ['c1', 'c2', 'c3']) await Promise.all(Array.from({ length: 10 }, () => reserveAi(env, { entry: 'receptionist', customerId: b, micros: 100_000, now: NOW })))
+  assert.equal(count('aib:public:20261127'), 3_000_000)
+  assert.equal((await reserveAi(env, { entry: 'receptionist', customerId: 'c4', micros: 1, now: NOW })).reason, 'public')
+})
+
+test('admin settings: applied without a deploy; a variable can only lower them; all_off and the per-business restriction stop everything', async () => {
+  assert.equal((await setBudgetSetting(env, 'platform_micros', 200_000, 'staff@getshowups.com')).ok, true)
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'alpha', micros: 150_000, now: NOW })).ok, true)
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'beta', micros: 100_000, now: NOW })).reason, 'platform')
+  // A variable never raises what the admin set.
+  env.AI_PLATFORM_DAILY_MICROS = '90000000'
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'beta', micros: 100_000, now: NOW })).reason, 'platform')
+  delete env.AI_PLATFORM_DAILY_MICROS
+  assert.equal((await setBudgetSetting(env, 'all_off', 1, 'staff@getshowups.com')).ok, true)
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'gamma', micros: 1, now: NOW })).reason, 'ai_off')
+  assert.equal((await setBudgetSetting(env, 'all_off', 2, 'x')).error, 'invalid_value')
+  await setBudgetSetting(env, 'all_off', 0, 'staff@getshowups.com')
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, created_at, updated_at) VALUES ('gamma', 'G', 'UTC', 1, 1)").run()
+  await setRestriction(db, 'gamma', 'ai', true, 'abuse', 'staff@getshowups.com')
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'gamma', micros: 1, now: NOW })).reason, 'ai_off')
+  assert.equal((await reserveAi(env, { entry: 'teach', customerId: 'delta', micros: 1, now: NOW })).ok, true)
+})
+
+test('Retell minutes: open calls count their full 15 minutes; a start is allowed only if it still fits; unreadable refuses', async () => {
+  const day = NOW - (NOW % 86_400_000)
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, created_at, updated_at) VALUES ('alpha', 'A', 'UTC', 1, 1)").run()
+  const call = (id, start, end) => db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES (?, 'alpha', 'c', 'retell', ?, ?)").run(id, start, end)
+  call('done1', day + 1000, day + 1000 + 20 * 60_000) // 20 min, counted at most 15
+  call('done2', day + 2000, day + 2000 + 10 * 60_000) // 10 min
+  assert.deepEqual(await retellRoom(env, NOW), { ok: true, used: 25, cap: 60 })
+  call('open1', NOW - 60_000, null) // running: counts 15
+  assert.deepEqual(await retellRoom(env, NOW), { ok: true, used: 40, cap: 60 })
+  call('open2', NOW - 30_000, null)
+  assert.deepEqual(await retellRoom(env, NOW), { ok: false, used: 55, cap: 60 })
+  await setBudgetSetting(env, 'retell_minutes', 120, 'staff@getshowups.com')
+  assert.equal((await retellRoom(env, NOW)).ok, true)
+  const broken = { ONBOARDING_DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error('D1') }, all: async () => { throw new Error('D1') } }), all: async () => { throw new Error('D1') } }) } }
+  resetSettingsCache()
+  const errs = console.error
+  console.error = () => {}
+  try {
+    assert.equal((await retellRoom(broken, NOW)).ok, false)
+  } finally {
+    console.error = errs
+  }
 })
