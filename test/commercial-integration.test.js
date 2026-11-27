@@ -56,3 +56,12 @@ test('the telephone hook says "not available yet" until that module is released'
   const r = await phoneHook(env(d1()), 'assisted1')
   assert.equal(r.state, 'unavailable')
 })
+
+test('with phone lines switched on, the checklist reads the real phone setup state (no duplicate configuration)', async () => {
+  const db = d1()
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, created_at, updated_at) VALUES ('assisted3', 'C', 'UTC', '', 1, 1)").run()
+  const r = await phoneHook({ ...env(db), PHONE_ENABLED: 'true' }, 'assisted3')
+  assert.equal(r.state, 'not_started')
+  assert.equal(r.href, '/dashboard/settings#phone')
+  assert.equal((await phoneHook(env(db), 'assisted3')).state, 'unavailable', 'switched off: not available yet')
+})
