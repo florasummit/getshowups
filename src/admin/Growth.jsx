@@ -7,13 +7,15 @@
 // Simulate is a scenario model over editable assumptions (prefilled from measured data when the sample is big enough,
 // otherwise labelled assumptions; "Acquisition spend" only ever from GetShowUps' own ad spend); its price field is for
 // modeling only and never touches billing. Decide is the server's deterministic recommendation. Nothing here spends or
-// changes anything; nothing here is a forecast.
+// changes anything; nothing here is a forecast. Pipeline and Partners (src/admin/Commercial.jsx): the commercial pipeline
+// by channel/rep/business and the referral partners with their commission ledger (records only; nothing is paid out).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { LoadError, Loading, Pill, SaveStatus } from '../dashboard/ui.jsx'
 import { useSaveState } from '../dashboard/ui-hooks.js'
 import { humanDate, money, plural } from '../lib/format.js'
 import { sharedFigures } from './figures.js'
+import { Partners, Pipeline } from './Commercial.jsx'
 import { FIELDS, DEFAULTS, normalizeAssumptions, compare, sensitivity } from '../../server/growth-model.js'
 
 const MODES = [
@@ -21,6 +23,8 @@ const MODES = [
   ['measure', 'Measure'],
   ['simulate', 'Simulate'],
   ['decide', 'Decide'],
+  ['pipeline', 'Pipeline'],
+  ['partners', 'Partners'],
 ]
 const modeOf = () => (MODES.some(([v]) => v === window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'activities')
 const KIND = { live: ['Measured', 'ok'], test: ['Test mode', 'warn'], estimated: ['Estimate', 'info'], unavailable: ['Unavailable', 'neutral'] }
@@ -654,7 +658,7 @@ export default function Growth() {
               </button>
             ))}
           </div>
-          {mode === 'activities' ? <Activities a={r.acquisition} reload={load} ui={ui} setUi={setUi} /> : mode === 'measure' ? <Measure m={r.measure} /> : mode === 'simulate' ? <Simulate baseline={r.baseline} typed={typed} setTyped={setTyped} /> : <Decide d={r.decide} go={go} />}
+          {mode === 'pipeline' ? <Pipeline /> : mode === 'partners' ? <Partners /> : mode === 'activities' ? <Activities a={r.acquisition} reload={load} ui={ui} setUi={setUi} /> : mode === 'measure' ? <Measure m={r.measure} /> : mode === 'simulate' ? <Simulate baseline={r.baseline} typed={typed} setTyped={setTyped} /> : <Decide d={r.decide} go={go} />}
         </>
       )}
     </div>

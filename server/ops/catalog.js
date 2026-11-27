@@ -25,6 +25,7 @@ import { retentionScheduleEnabled, lifecycle } from '../lifecycle.js'
 import { adsHold, runningOnHold } from '../ads/holds.js'
 import { customerRows } from '../metrics.js'
 import { alertsEnabled } from '../alerts.js'
+import { referralsEnabled } from '../commissions.js'
 import { registerReady } from './incidents.js'
 import './../conversations/providers.js' // AI / conversation providers register their own capabilities
 import './../followups/ops.js' // follow-up engine, texts, assistant, texting registration
@@ -226,6 +227,27 @@ registerCapability({
     const attention = ['payment_problem', 'recovery_ended', 'deleting'].includes(l.stage)
     return { status: attention ? 'attention' : 'ok', summary: l.stage.replace(/_/g, ' ') + (l.recovery && !l.recovery.expired ? ` (recoverable ${l.recovery.daysLeft} more days)` : '') }
   },
+})
+registerCapability({
+  id: 'commercial.attribution',
+  tier: 'optional',
+  action: { label: 'Admin → Growth → Pipeline', href: '/admin/growth#pipeline' },
+  name: 'Commercial attribution (source, partner, closing rep)',
+  journey: 'signup',
+  dependsOn: ['platform.database'],
+  state: () => ({ mode: 'live', note: 'Recorded once per new business; records only' }),
+  verify: seen('Business attributed', 30, 'SELECT max(created_at) AS at FROM commercial_attribution'),
+})
+registerCapability({
+  id: 'commercial.commissions',
+  tier: 'later',
+  action: { label: 'Admin → Growth → Partners', href: '/admin/growth#partners' },
+  name: 'Referral commissions (ledger from collected revenue; no payouts)',
+  journey: 'billing',
+  dependsOn: ['billing.stripe', 'commercial.attribution'],
+  external: 'Stripe',
+  state: (env) => (referralsEnabled(env) ? { mode: stripeLiveEnabled(env) ? 'live' : 'sandbox', note: 'Commissions accrue from paid invoices; nothing is paid out' } : { mode: 'disabled', note: 'Referral program inactive', approval: 'REFERRALS_ENABLED=true after the founder approves partner economics, terms and eligibility' }),
+  verify: seen('Commission recorded', 60, 'SELECT max(created_at) AS at FROM commission_ledger'),
 })
 registerCapability({
   id: 'onboarding.selfserve',

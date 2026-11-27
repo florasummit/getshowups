@@ -57,7 +57,7 @@ export const ERASED_TABLES = [
   'onboarding_invites', 'customer_users', 'email_outbox', 'conversation_control', 'business_policies', 'email_suppressions', 'website_imports', 'ai_credentials', 'ai_key_usage', 'website_design_turns',
   'booking_rules', 'business_closures', 'owner_notice_off', 'business_restrictions', 'booking_options', 'website_chat_settings',
   'acceptance_sessions', 'acceptance_grants', 'website_asset_hidden', 'ops_incidents', 'qa_runs', 'business_accounts',
-  'booking_day_hours', 'business_addresses', 'assisted_enrollments',
+  'booking_day_hours', 'business_addresses', 'assisted_enrollments', 'commercial_attribution',
 ]
 // Kept (no personal data, or needed for tax/accounting, disputes, security): see docs/DATA_RETENTION.md.
 export const FINANCIAL_EVENTS = ['revenue', 'payment_failed', 'payment_succeeded', 'subscription_started', 'subscription_status_changed', 'subscription_canceled']
@@ -68,6 +68,7 @@ export const RETAINED = [
   'test_businesses (flag only)',
   'audit_log (no personal data) and admin_audit (emails replaced by refs)',
   'account_deletions (this record)',
+  'commission_ledger (append-only referral commission records: ids and amounts, no personal data)',
 ]
 
 export async function deletionStatus(db, customerId) {

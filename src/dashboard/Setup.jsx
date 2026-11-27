@@ -6,6 +6,7 @@ import Logo from '../components/Logo.jsx'
 import AiWrite from './AiWrite.jsx'
 import { LoadError } from './ui.jsx'
 import { api, browserTimeZone } from '../lib/api.js'
+import { referralCandidates } from '../lib/referral.js'
 import { BusinessForm, HoursForm, TimeZoneSelect } from './forms.jsx'
 import { connectCalendar } from '../lib/connect.js'
 import { SignOut } from './Home.jsx'
@@ -174,7 +175,7 @@ function NameStep({ onDone, plan, customer }) {
     } catch {
       source = undefined
     }
-    const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone: browserTimeZone(), serviceZips: '', plan: plan?.id || storedPlan(), source } })
+    const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone: browserTimeZone(), serviceZips: '', plan: plan?.id || storedPlan(), source, partner: referralCandidates() } })
     if (status === 200 || status === 201 || data.error === 'already_exists') return onDone()
     if (data.error === 'signup_not_open') return setState({ error: `${NOT_OPEN} book a call with us from our home page.` })
     setState({ error: data.error === 'invalid_name' ? 'Enter your business name.' : 'Something went wrong. Please try again.' })

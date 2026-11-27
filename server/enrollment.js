@@ -331,7 +331,7 @@ export async function createWorkspace(env, staff, id, now = Date.now()) {
   await db.prepare('UPDATE assisted_enrollments SET customer = ?2, updated_at = ?3 WHERE id = ?1').bind(row.id, customerId, now).run()
   // What the owner already said on the call is not asked again: the phone number goes into the business details.
   if (row.phone) await saveProfile(db, customerId, { phone: row.phone, industry: '', description: '', services: [], cities: [] }, now)
-  await attributeAssisted(env, customerId, { channel: row.assigned_rep_email ? 'sales_rep' : 'founder', repEmail: row.assigned_rep_email || staff.email }, now).catch(() => null)
+  await attributeAssisted(env, customerId, { channel: row.assigned_rep_email ? 'sales_rep' : 'founder', repEmail: row.assigned_rep_email || staff.email, ownerEmail: row.owner_email }, now).catch(() => null)
   await audit(env, staff.email, 'enrollment.workspace_created', customerId, { enrollment: row.id, plan: plan.id })
   return { ok: true, customer: customerId }
 }

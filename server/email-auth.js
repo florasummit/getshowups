@@ -66,7 +66,7 @@ export async function emailSignInOffered(env) {
 const EXTRA_CHECKS = [
   // Staff roles and ownership invitations from the commercial enrollment stream (migration 0047). No-op before it.
   (db, email) => db.prepare('SELECT 1 FROM commercial_roles WHERE lower(email) = ?1 AND revoked_at IS NULL LIMIT 1').bind(email).first(),
-  (db, email, now) => db.prepare('SELECT 1 FROM ownership_invites WHERE lower(email) = ?1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2 LIMIT 1').bind(email, now).first(),
+  // Ownership invitations for assisted businesses are ordinary account_invites rows (checked above).
 ]
 export async function signInAllowed(env, email, now = Date.now(), { extraChecks = EXTRA_CHECKS } = {}) {
   if (adminEmails(env).includes(email)) return true

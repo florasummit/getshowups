@@ -210,6 +210,20 @@ server/              Shared backend modules imported by functions/ (bundled by P
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)
+  commercial-attribution.js  One row per business (0048 commercial_attribution, first touch, written once; changed only by
+                     audited admin correction): marketing_source / partner_id / closing_rep_email / channel. recordAttribution
+                     (never throws, no-op before 0048; self-serve route + stream B) + partnerFromCode. Browser keeps ≤3 first-touch
+                     codes (src/lib/referral.js, /r/<code> → /?partner=, or ?ref=); first VALID one wins; refusals recorded as codes
+                     (unknown_code, paused, self_referral: partner = owner/member/rep or same non-public domain, outside_window)
+  partners.js        Referral partners (admin only, POST /api/platform/partners, audited; NO login/access for partners). Random
+                     10-char codes; terms typed field by field, NO defaults anywhere; no terms = nothing accrues
+  commissions.js     Append-only commission_ledger (triggers; unique (kind, stripe_object_id)). REFERRALS_ENABLED exactly 'true'
+                     or nothing accrues. invoice.paid → accrual from amount_paid − tax (window, recurring once|months:N|lifetime,
+                     partner active, not test business, subscription not ended, re-checked self-referral); charge.refunded
+                     (cumulative, proportional) and charge.dispute.* (once) → reversals, applied even when off, never > accrued.
+                     livemode per row: only live rows (with live billing on) are a liability. NO payout code exists
+  commercial-report.js Growth → Pipeline (GET /api/platform/commercial): customerRows() + attribution + stream B enrollments
+                     (fail-soft); test businesses/test subscriptions never customers or revenue; revenue/commission/retention live only
   testbusiness.js    Admin-marked test businesses (test_businesses): out of metrics; never live Ads/messaging/Stripe
   business-accounts.js Account types (0034, docs/ACCOUNT_TYPES.md): internal_live | sandbox | customer; billing
                      complimentary|stripe, environment production|sandbox, provider_spend allowed|blocked. Complimentary =
@@ -449,7 +463,8 @@ Non-negotiables:
   ADS_ENABLED=false (Ads tab + /api/dashboard/ads/* + /api/ads/* connect), AI_STUDIO_ENABLED=false (Teach Your AI),
   WEBSITE_STUDIO_ENABLED=false. Seeing a tool never spends or changes anything customer-facing: live use stays behind
   ADS_LIVE_LAUNCH (real campaign create/resume) and AI_RULES_LIVE_BUSINESSES.
-- Release switches (off unless exactly 'true'): ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
+- Release switches (off unless exactly 'true'): ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off),
+  REFERRALS_ENABLED (referral commission accruals; needs the founder's approval of partner economics, terms, eligibility).
   Website Studio (server/website-studio.js studioAccess(), owner decision 2026-11-16: every eligible business, no
   allowlist) = own Claude/OpenAI key, AI designer, website import (+ old-address redirects). Eligible: Studio not switched
   off (WEBSITE_STUDIO_ENABLED === 'false' is the emergency off switch; default on), business active (not suspended),

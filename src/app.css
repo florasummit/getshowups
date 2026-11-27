@@ -4666,6 +4666,19 @@ input[role='switch']:focus-visible { outline: none; box-shadow: var(--focus-ring
 .growth .acq-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .growth .acq-copy { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; max-width: 100%; }
 .growth .acq-copy input { width: 26rem; max-width: 100%; }
+/* Pipeline + Partners (src/admin/Commercial.jsx): wide totals scroll inside their own frame, never the page. */
+.growth .com .card-title { margin-top: 20px; }
+.growth .com-table-wrap { max-width: 100%; overflow-x: auto; margin: 8px 0 4px; border: 1px solid var(--ink-100); border-radius: 8px; }
+.growth .com-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.growth .com-table th, .growth .com-table td { padding: 8px 10px; border-top: 1px solid var(--ink-100); text-align: left; white-space: nowrap; }
+.growth .com-table thead th { border-top: 0; color: var(--text-muted); font-weight: 600; }
+.growth .com-table .com-num { text-align: right; font-variant-numeric: tabular-nums; }
+.growth .com-table .com-na { text-align: right; color: var(--text-muted); }
+.growth .com-new, .growth .com-edit { display: grid; gap: 10px; margin-top: 8px; }
+.growth .com-new > *, .growth .com-edit > *, .growth .com .field, .growth .com .field > * { min-width: 0; max-width: 100%; }
+.growth .com-terms .field, .growth .com-new .field { display: grid; gap: 4px; }
+.growth .com-partner .row-main { display: grid; gap: 4px; width: 100%; }
+.growth .com-partner .row-sub, .growth .com .row-title { overflow-wrap: anywhere; }
 .growth .acq-add { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
 .growth .acq-add input { flex: 1 1 12rem; max-width: 16rem; }
 .growth .acq-add .ui-save-error, .growth .acq-add .ui-save-status { flex: 1 1 100%; }

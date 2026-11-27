@@ -10,6 +10,7 @@ import { timingSafeEqual } from './google-oauth.js'
 import { track } from './events.js'
 import { testStatus } from './testbusiness.js'
 import { adminEmails } from './platform.js'
+import { accrueCommission, endCommissions, reverseCommission } from './commissions.js'
 
 // Live billing is a separate, explicit decision: unless STRIPE_LIVE_ENABLED is exactly 'true', only
 // test-mode keys (sk_test_/rk_test_) count as configured, and live-mode events are refused.
@@ -305,6 +306,8 @@ export async function handleEvent(env, event, { after = null } = {}) {
     case 'customer.subscription.deleted':
       if (customer) {
         await upsertSubscription(env, customer, event, obj)
+        // Referral commissions stop with the subscription (server/commissions.js).
+        if (event.type === 'customer.subscription.deleted') await endCommissions(db, customer, event.created * 1000)
         holdCheck(customer)
         // Assisted enrollment (server/enrollment.js): the verified subscription event is what moves it to 'paid'.
         // Best effort: never fails or delays the receipt; the enrollment view re-derives from the stored subscription.
@@ -319,8 +322,17 @@ export async function handleEvent(env, event, { after = null } = {}) {
       }
       if (customer && obj.amount_paid > 0) {
         await track(env, 'revenue', { id: `revenue:${obj.id}`, customer, props: { amountCents: obj.amount_paid, currency: obj.currency, livemode: event.livemode === true }, at: event.created * 1000 })
+        // Referral commission from the collected amount (no-op unless REFERRALS_ENABLED; one accrual per invoice).
+        await accrueCommission(env, customer, event, obj)
       }
       return { handled: Boolean(customer) }
+    case 'charge.refunded':
+    case 'charge.dispute.created':
+    case 'charge.dispute.funds_withdrawn': {
+      // Refunds and chargebacks reverse a referral commission proportionally (never more than was accrued).
+      const r = await reverseCommission(env, event, { lookupInvoice: (pi) => invoiceForPaymentIntent(env, pi) })
+      return { handled: r.reversed === true }
+    }
     case 'invoice.payment_failed':
       if (customer) {
         await track(env, 'payment_failed', { id: `stripe:${event.id}`, customer, at: event.created * 1000 })
@@ -333,6 +345,19 @@ export async function handleEvent(env, event, { after = null } = {}) {
     default:
       return { handled: false }
   }
+}
+
+// Which invoice a payment intent paid (API 2025-03-31+: invoice payments). Read-only; throws on a Stripe failure so the
+// webhook is retried; null when Stripe lists none.
+async function invoiceForPaymentIntent(env, paymentIntent) {
+  if (!stripeConfigured(env)) return null
+  const r = await stripePost(env, '/invoice_payments', { payment: { type: 'payment_intent', payment_intent: paymentIntent }, limit: 1 }, { method: 'GET' })
+  if (!r.ok) {
+    if (r.error === 'resource_missing') return null
+    throw new Error(`invoice lookup failed: ${r.error}`)
+  }
+  const inv = r.body?.data?.[0]?.invoice
+  return typeof inv === 'string' ? inv : typeof inv?.id === 'string' ? inv.id : null
 }
 
 // ---------- account deletion ----------
