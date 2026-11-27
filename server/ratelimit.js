@@ -91,6 +91,8 @@ export const RULES = {
   health: { limit: 60, windowSec: 600 }, //          GET /api/health (per IP)
   qaIngest: { limit: 30, windowSec: 600 }, //        POST /api/qa/runs (per IP; bearer QA_INGEST_TOKEN)
   qaWrite: { limit: 600, windowSec: 600 }, //        POST /api/platform/qa (per admin; guided human QA)
+  qaCenterWrite: { limit: 300, windowSec: 600 }, //  POST /api/platform/qa/* results, items, settings, evidence, import (per admin)
+  qaCenterRun: { limit: 20, windowSec: 600 }, //     POST /api/platform/qa/run + cancel (per admin; starts CI / production checks)
   supportDiagnose: { limit: 6, windowSec: 600 }, //  POST /api/platform/inspector calendar diagnosis (per business)
   aiBudgetAdmin: { limit: 30, windowSec: 600 }, //   POST /api/platform/ai-spend limit changes (per admin)
   researchRead: { limit: 300, windowSec: 600 }, //   GET /api/research/vault (per researcher)

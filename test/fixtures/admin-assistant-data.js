@@ -13,6 +13,8 @@
 //   sandbox-test-co      admin-marked TEST business with its own problems (must never be counted)
 // Plus: a medium platform incident, a reconciliation with 1 real mismatch, an outreach follow-up due, AI costs yesterday.
 import { appendAudit } from '../../server/auditlog.js'
+import { storeResults } from '../../server/ops/qa-results.js'
+import { changeStatus, createItem } from '../../server/ops/qa-items.js'
 
 export const DAY = 86_400_000
 export const CALENDARS = ['blue-lagoon-pools', 'sunny-side-spa', 'pine-ridge-plumbing', 'lakeside-movers', 'sandbox-test-co']
@@ -105,6 +107,9 @@ export async function seedAdminFixture(db, now = Date.now()) {
   for (let i = 0; i < 6; i++) await run("INSERT INTO events (id, type, customer, at, props) VALUES (?1, 'ai_ask', 'blue-lagoon-pools', ?2, ?3)", `fx:ai${i}`, y + i * 60_000, JSON.stringify({ ok: true, costMicros: 2100, tools: ['list_leads'] }))
   for (let i = 0; i < 3; i++) await run("INSERT INTO receptionist_conversations (id, customer, channel, status, cost_micros, created_at, updated_at) VALUES (?1, 'blue-lagoon-pools', 'chat', 'closed', 4500, ?2, ?2)", `fx-conv-${i}`, y + i * 60_000)
   await run("INSERT INTO website_generations (id, customer, content, source, model, cost_micros, created_at) VALUES ('fx-gen-1', 'coastal-electric', '{}', 'ai', 'fixture', 12000, ?1)", y)
+  await seedQaFixture(db, now).catch((err) => {
+    if (!/no such table/.test(String(err?.message))) throw err // before 0051: no QA records
+  })
   return { now }
 }
 
@@ -115,3 +120,49 @@ export const fakeTokens = (ids = CALENDARS) => ({
   put: async () => {},
   delete: async () => {},
 })
+
+// ---------- QA Command Center (fictional): the deployed release, results before and after it, defects and backlog ----------
+// Release f00dfee yesterday (previous c0ffee0). After it: 4 unit tests and 2 production checks passed; the settings browser
+// test and the homepage production check FAILED; a booking unit test needs a retest (stale); a guided step was verified.
+// Before it: two booking browser tests passed on the previous commit (impact unknown now). A paid admin evaluation cost
+// $0.012 this month; paid evaluations are off (no QA budget). Defects: one high (booking), one medium (settings). Backlog:
+// two near-duplicate texting ideas, a performance, a cost and a deferred AI idea.
+export const QA_RELEASE = { commit: 'f00dfeed1234567890abcdef1234567890abcdef', previous: 'c0ffee00abcdef1234567890abcdef1234567890' }
+export const QA_TESTS = {
+  verified: ['unit:acceptance:4b41f4a967', 'unit:acceptance:5a40390ff6', 'unit:acceptance:df700da301', 'unit:acceptance:48ccfdae52'],
+  failedAfter: ['e2e:account:ebadee7e16', 'prod:homepage'],
+  stale: 'unit:booking-excellence:0e6c201238',
+}
+// Every QA item title the fixture records (the grader checks how answers write them).
+export const QA_TITLES = ['Booking page shows no open times after a calendar reconnect', 'Settings save stays disabled after the recent sign-in prompt', 'Let owners text back new inquiries from the dashboard', 'Reply to inquiries by SMS from the dashboard', 'Make the Overview cards load faster on phones', 'Use a cheaper model for after-hours receptionist chats', 'Receptionist should offer the next two open times, not one']
+export async function seedQaFixture(db, now = Date.now()) {
+  const ago = (d) => now - d * DAY
+  const cur = QA_RELEASE.commit.slice(0, 12)
+  const prev = QA_RELEASE.previous.slice(0, 12)
+  await db.prepare('SELECT 1 FROM qa_items LIMIT 1').first()
+  await appendAudit(db, { actorType: 'system', actor: 'system:cron', action: 'platform.release', at: ago(1), details: { commit: QA_RELEASE.commit, previous: QA_RELEASE.previous, pendingMigrations: [] } })
+  await storeResults(db, [{ testId: 'e2e:booking-excellence:55600b50c6', status: 'pass' }, { testId: 'e2e:booking-excellence:d8396ff257', status: 'pass' }, { testId: QA_TESTS.stale, status: 'pass' }], { environment: 'ci', revision: prev }, ago(3))
+  await storeResults(db, QA_TESTS.verified.map((testId) => ({ testId, status: 'pass', ms: 900 })), { environment: 'ci', revision: cur }, ago(0.8))
+  await storeResults(db, [{ testId: 'prod:build-commit', status: 'pass' }, { testId: 'prod:edge-headers', status: 'pass' }], { environment: 'production', revision: cur }, ago(0.7))
+  await storeResults(db, [{ testId: QA_TESTS.stale, status: 'retest_required' }], { environment: 'ci', revision: cur }, ago(0.6))
+  await storeResults(db, [{ testId: 'e2e:account:ebadee7e16', status: 'fail', expected: 'Save works after the recent sign-in prompt', actual: 'The Save button stayed disabled after the recent sign-in prompt' }], { environment: 'ci', revision: cur }, ago(0.5))
+  await storeResults(db, [{ testId: 'prod:homepage', status: 'fail', expected: 'Status 200', actual: 'Status 503 from the edge' }], { environment: 'production', revision: cur }, ago(0.4))
+  await storeResults(db, [{ testId: 'human:activation.offer', status: 'pass', reviewer: 'ref:fixture' }], { environment: 'manual', revision: cur }, ago(0.9))
+  await storeResults(db, [{ testId: 'eval:admin:week', status: 'pass', costMicros: 12000, model: 'claude-haiku-5-5', provider: 'real' }], { environment: 'local', revision: cur }, ago(0.3))
+  await db.prepare("INSERT INTO qa_executions (id, requested_by, requested_at, environment, preset, scope, estimate, status, revision, progress, started_at, finished_at, updated_at) VALUES ('qx_fixtureallsafe', 'ref:fixture', ?1, 'ci', 'all_safe', '{}', '{}', 'partial', ?2, ?3, ?1, ?4, ?4)").bind(ago(0.8), cur, JSON.stringify({ done: 7, total: 7, pass: 6, fail: 1 }), ago(0.5)).run()
+  const add = async (b, status = null) => {
+    const r = await createItem(db, b, 'ref:fixture', ago(2))
+    if (r.error) throw new Error(`fixture item: ${r.error}`)
+    if (status) await changeStatus(db, { id: r.item.id, status }, 'ref:fixture', ago(1.5))
+    return r.item.id
+  }
+  const ids = {}
+  ids.booking = await add({ kind: 'bug', title: 'Booking page shows no open times after a calendar reconnect', area: 'booking', severity: 'high', customerImpact: 'Customers can’t book until the owner reconnects a second time', steps: '1. Disconnect Google Calendar. 2. Reconnect. 3. Open the booking page.', testIds: ['e2e:booking-excellence:d8396ff257'] })
+  ids.settings = await add({ kind: 'regression', title: 'Settings save stays disabled after the recent sign-in prompt', area: 'business_settings', severity: 'medium', testIds: ['e2e:account:ebadee7e16'] })
+  ids.textBack = await add({ kind: 'feature', title: 'Let owners text back new inquiries from the dashboard', area: 'messaging' })
+  ids.smsReply = await add({ kind: 'feature', title: 'Reply to inquiries by SMS from the dashboard', area: 'messaging' }, 'under_review')
+  ids.fast = await add({ kind: 'performance', title: 'Make the Overview cards load faster on phones', area: 'layouts' }, 'planned')
+  ids.cheap = await add({ kind: 'cost', title: 'Use a cheaper model for after-hours receptionist chats', area: 'receptionist' })
+  ids.nextTwo = await add({ kind: 'ai', title: 'Receptionist should offer the next two open times, not one', area: 'receptionist', customerImpact: 'Fewer back-and-forth messages before booking' }, 'deferred')
+  return ids
+}

@@ -12,8 +12,14 @@ import { setTestBusiness, testStatus } from '../testbusiness.js'
 import { stripeConfigured } from '../stripe.js'
 import { CUSTOMER_RE } from '../invites.js'
 import { SALES_BUSINESS } from '../metrics.js'
+import { emailRef } from '../auditlog.js'
+import { makePlan } from '../ops/qa-plan.js'
+import { createExecution } from '../ops/qa-executions.js'
+import { BACKLOG_KINDS, changeStatus, createItem, getItemRow } from '../ops/qa-items.js'
+import { qaCenterReady } from '../ops/qa-results.js'
+import { SAFE_PRESETS } from './qa.js'
 
-export const TYPES = ['resend_invitation', 'mark_abandoned', 'run_reconciliation', 'code_status', 'test_mark']
+export const TYPES = ['resend_invitation', 'mark_abandoned', 'run_reconciliation', 'code_status', 'test_mark', 'qa_run', 'qa_item', 'qa_status']
 const ENR_RE = /^enr_[A-Za-z0-9_-]{16}$/
 const INV_RE = /^[A-Za-z0-9_-]{8,40}$/
 const fail = (status, error) => ({ ok: false, status, error })
@@ -90,6 +96,43 @@ export async function applyAdminProposal(env, admin, body, now = Date.now()) {
     if (!r.ok) return fail(r.httpStatus || 503, r.error)
     if (r.changed) await audit(env, admin.email, want ? 'customer.test_mark' : 'customer.test_unmark', id, { via: 'admin_assistant' })
     return { ok: true, state: want ? 'Marked as a test business.' : 'Test-business mark removed.' }
+  }
+  // ---------- QA Command Center: through qa-core's own functions, with the checks its routes make ----------
+  if (['qa_run', 'qa_item', 'qa_status'].includes(p.type) && !(await qaCenterReady(db))) return fail(503, 'not_available')
+  if (p.type === 'qa_run') {
+    const preset = p.after?.preset
+    if (!SAFE_PRESETS.includes(preset) || typeof p.before.planId !== 'string') return fail(400, 'invalid_request')
+    const plan = await makePlan(env, { preset }, now)
+    // The plan shown on the card must still be the plan (same tests, same deployed commit).
+    if (plan.planId !== p.before.planId) return fail(409, 'stale')
+    if (!plan.runnable) return fail(403, 'not_runnable')
+    if (plan.estimate.usdMicros > 0 || plan.scope.byClass.authorization > 0) return fail(403, 'not_allowed')
+    if (plan.duplicate && p.after.rerun !== true) return fail(409, 'stale')
+    const r = await createExecution(env, plan, await emailRef(admin.email), now)
+    await audit(env, admin.email, 'qa.execution_requested', null, { execution: r.execution?.id ?? r.executionId ?? null, environment: plan.environment, preset, tests: plan.scope.tests, usdMicros: 0, outcome: r.error || r.execution?.status, via: 'admin_assistant' })
+    if (r.error) return fail(r.error === 'already_running' ? 409 : 403, r.error)
+    return { ok: true, state: plan.environment === 'production' ? 'Production verification queued; results appear in the QA Command Center within minutes.' : 'Run requested; results appear in the QA Command Center when it finishes.' }
+  }
+  if (p.type === 'qa_item') {
+    const a = p.after || {}
+    if (!BACKLOG_KINDS.includes(a.kind) || typeof a.title !== 'string') return fail(400, 'invalid_request')
+    const r = await createItem(db, { kind: a.kind, title: a.title, description: a.description ?? undefined, area: a.area ?? undefined, customerImpact: a.customerImpact ?? undefined }, await emailRef(admin.email), now)
+    if (r.error) return fail(400, r.error)
+    await audit(env, admin.email, 'qa.item_create', null, { item: r.item.id, kind: r.item.kind, status: r.item.status, via: 'admin_assistant' })
+    return { ok: true, state: 'Added to the backlog (Inbox). Nothing else starts.' }
+  }
+  if (p.type === 'qa_status') {
+    const id = String(t.id || '')
+    const status = p.after?.status
+    if (t.kind !== 'qa_item' || typeof status !== 'string' || status === 'verified') return fail(400, 'invalid_request')
+    const cur = await getItemRow(db, id)
+    if (!cur) return fail(404, 'not_found')
+    if (cur.status === status) return { ok: true, already: true, state: 'Already in that status.' }
+    if (cur.status !== p.before.status) return fail(409, 'stale')
+    const r = await changeStatus(db, { id, status }, await emailRef(admin.email), now)
+    if (r.error) return fail(r.error === 'conflict' ? 409 : 400, r.error)
+    await audit(env, admin.email, 'qa.item_status', null, { item: id, kind: r.item.kind, status: r.item.status, via: 'admin_assistant' })
+    return { ok: true, state: 'Status changed.' }
   }
   return fail(400, 'invalid_request')
 }

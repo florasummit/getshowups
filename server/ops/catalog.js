@@ -87,6 +87,24 @@ registerCapability({
   state: async (env) => ((await registerReady(env.ONBOARDING_DB)) ? { mode: 'live', note: 'Built from records every cron run' } : { mode: 'disabled', note: 'Migration 0031 not applied', approval: 'Apply migration 0031' }),
 })
 registerCapability({
+  id: 'platform.qa',
+  tier: 'optional',
+  action: { label: 'Open the QA Command Center', href: '/admin/control?view=qa' },
+  name: 'QA Command Center (test inventory, runs, defects, backlog)',
+  journey: 'platform',
+  description: 'Derived test inventory, CI dispatch, read-only production verification by the cron, guided manual QA, append-only results, defects and backlog (server/ops/qa-*.js).',
+  dependsOn: ['platform.database', 'platform.cron'],
+  external: 'GitHub Actions',
+  state: async (env) => {
+    const { qaCenterReady } = await import('./qa-results.js')
+    if (!(await qaCenterReady(env.ONBOARDING_DB))) return { mode: 'disabled', note: 'Migration 0051 not applied', approval: 'Apply migration 0051' }
+    const { dispatchConfigured, ingestConfigured } = await import('./qa-dispatch.js')
+    const ci = dispatchConfigured(env) && ingestConfigured(env)
+    return { mode: 'live', note: ci ? 'Production checks + CI runs from the console' : 'Production checks and manual QA; CI runs need QA_GITHUB_DISPATCH_TOKEN + QA_INGEST_TOKEN (docs/QA_CI_SETUP.md)' }
+  },
+  verify: seen('QA result', 7, 'SELECT max(at) AS at FROM qa_test_results'),
+})
+registerCapability({
   id: 'platform.tokens',
   tier: 'operate',
   name: 'Encrypted credentials store (KV)',

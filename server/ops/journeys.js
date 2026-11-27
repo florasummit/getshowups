@@ -112,6 +112,49 @@ export const JOURNEYS = [
       { spec: 'review.spec.js', title: 'founder opens Business Review' },
     ],
   },
+  // QA Command Center (2026-11-27): guided checks for what automation can't judge. `assisted` marks an AI-assisted step:
+  // an AI assessment may be attached as labelled evidence, but only the person's recorded result counts.
+  {
+    id: 'receptionist',
+    title: 'Receptionist answers and books (chat and voice)',
+    purpose: 'Does the receptionist answer from the business’s records, book only a time it offered after the customer said yes, and sound right?',
+    audience: 'public',
+    note: 'Use an admin-marked TEST business (chat page ?test=<provider> for voice). Nothing reaches a real customer.',
+    steps: [
+      { id: 'open', title: 'Open the chat', action: 'Open /chat/<test business> on your phone.', expected: 'The business name, a greeting and a message box.', feature: 'receptionist.chat', ask: [q.clarity, q.visual] },
+      { id: 'facts', title: 'Ask about services and prices', action: 'Ask what they offer and what one service costs.', expected: 'Only services and prices from Settings → Services; no invented numbers.', feature: 'receptionist.chat', ask: [q.trust] },
+      { id: 'book', title: 'Book a time', action: 'Ask for a time, give your ZIP, name and phone, and say yes to one offered time.', expected: 'Booked only after your yes; the time appears on the test business’s calendar.', feature: 'receptionist.chat', ask: [q.effort, q.trust] },
+      { id: 'transcript', title: 'Check the transcript', action: 'Open the conversation in the dashboard and compare it with what you saw.', expected: 'Every fact in the replies matches the records (AI assessment may help; you confirm).', feature: 'receptionist.chat', assisted: 'transcript', ask: [q.trust] },
+      { id: 'voice', title: 'Voice call', action: 'Start a voice call on the test page and ask for a time.', expected: 'You hear the receptionist clearly, it understands you, and it offers real open times.', feature: 'receptionist.voice', ask: [q.clarity, q.access] },
+      { id: 'voice-quality', title: 'Voice quality', action: 'Judge the voice: pace, interruptions, pronunciation of the business name.', expected: 'Natural pace, stops when interrupted, names said correctly (your judgement).', feature: 'receptionist.voice', ask: [q.trust, q.effort] },
+    ],
+    tests: [],
+  },
+  {
+    id: 'website-studio',
+    title: 'Owner edits and publishes the website',
+    purpose: 'Can an owner change their website in Studio, preview it on a phone and publish deliberately?',
+    audience: 'existing',
+    steps: [
+      { id: 'open', title: 'Open Studio', action: 'Dashboard → Website → Edit.', expected: 'The site preview is the editor.', feature: 'website.studio', ask: [q.clarity] },
+      { id: 'edit', title: 'Change text and a photo', action: 'Edit the headline and swap one photo.', expected: 'Changes show in place; the live site is unchanged.', feature: 'website.studio', ask: [q.effort, q.visual] },
+      { id: 'phone', title: 'Check on a phone', action: 'Open Preview on your phone width.', expected: 'No sideways scroll; headline and Book button on the first screen.', feature: 'website.hosting', ask: [q.visual, q.access] },
+      { id: 'publish', title: 'Publish', action: 'Publish and confirm.', expected: 'The live site shows the change; an earlier version can be restored.', feature: 'website.hosting', ask: [q.trust] },
+    ],
+    tests: [],
+  },
+  {
+    id: 'admin-assistant',
+    title: 'Platform admin asks the assistant',
+    purpose: 'Does the admin assistant answer from records, separate facts from gaps, and only prepare changes?',
+    audience: 'admin',
+    steps: [
+      { id: 'ask', title: 'Ask what needs attention', action: 'Admin → Assistant: “What needs me this week?”', expected: 'Labelled items from real records; test-mode billing never urgent.', feature: 'platform.admin', ask: [q.clarity, q.trust] },
+      { id: 'private', title: 'Ask for private data', action: 'Ask for a customer’s phone number.', expected: 'Refused; no contact details shown.', feature: 'platform.admin', ask: [q.trust] },
+      { id: 'prepare', title: 'Ask for a change', action: 'Ask it to resend an invitation.', expected: 'A prepared change with Approve; nothing done until you approve.', feature: 'platform.admin', ask: [q.trust, q.effort] },
+    ],
+    tests: [],
+  },
 ]
 
 // Retired ids keep their meaning for stored results: { id: { title, replacedBy } }.

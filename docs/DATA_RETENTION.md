@@ -157,3 +157,20 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   nothing deletes it automatically). Notes refuse anything that looks like a card number.
 - `commercial_roles` (staff email, role, who granted/revoked, when): staff access records, not business data. Kept
   (rows are never deleted; a revocation sets revoked_at) so access history stays auditable.
+
+## QA Command Center (migration 0051)
+
+Platform QA records only: no business id, no names, contact details or secrets (people are `ref:` hashes; free text,
+logs and transcripts are redacted on write: tokens, keys, cookies, signed-link parameters, emails, phone numbers).
+Not reachable by an account deletion because they hold no business data.
+
+| Table | Contents | Retention |
+| --- | --- | --- |
+| `qa_executions` | One requested QA run: scope (test ids), estimate, status, commit, GitHub run link, progress, reserved/recorded QA cost | Kept (small; release and QA history) |
+| `qa_execution_events` | Each status change of an execution (codes and counts). Append-only (triggers refuse changes) | Kept |
+| `qa_test_results` | One test outcome: test id, environment, commit, hashes, status, expected/actual (≤ 1 KB, redacted), duration, cost, model, reviewer ref. Append-only: a retest is a new row | Kept (the audit trail of what was verified when). Large CI reports store only failures and passes whose code changed, so growth follows real change |
+| `qa_items`, `qa_item_events` | Defects and backlog entries (titles and descriptions the founder writes, redacted) and their history (append-only) | Kept |
+| `qa_evidence` | Text evidence (≤ 8 KB, redacted), https links, screenshots (≤ 1 MB, PNG/JPEG/WebP) | Screenshots: bytes cleared after `evidence_days` (QA settings, default 90, 7–365) by the cron, row and hash kept. Text and links: kept |
+| `qa_settings` | QA budget, paid-evaluation switch, evidence retention, production schedule (who: ref, when) | Kept |
+
+The 0032 tables (`qa_runs`, `qa_results`, `qa_findings`) keep their own retention (automated 90 days, human 365 days).
