@@ -231,6 +231,7 @@ async function run() {
   const out = opt('out', 'adm-eval')
   const only = opt('only') ? new Set(opt('only').split(',')) : null
   mkdirSync(out, { recursive: true })
+  const startedAt = Date.now()
   const T = provider === 'claude' ? await claudeTarget(Number(opt('cap-usd', '2'))) : httpTarget(opt('base', 'http://127.0.0.1:4560'))
   const g = await T.get()
   const meta = g.body
@@ -252,9 +253,10 @@ async function run() {
       break
     }
     T.reset()
+    const spentBefore = T.spent ? T.spent.micros : 0
     const res = await T.post({ question: s.q, history, refs })
     const body = res.body
-    const r = { id: s.id, q: s.q, history, status: res.status, body, ms: Date.now() - t0 }
+    const r = { id: s.id, q: s.q, history, status: res.status, body, ms: Date.now() - t0, costMicros: T.spent ? Math.ceil(T.spent.micros - spentBefore) : (body?.usage?.costMicros ?? 0) }
     r.fail = grade(s, r, briefText)
     r.pass = r.fail.length === 0
     r.route = ['not_here', 'private'].includes(body.kind) ? 'fixed (no model)' : body.usage ? 'model' : body.kind === 'records' ? 'records fallback' : 'other'
@@ -290,11 +292,37 @@ async function run() {
   writeFileSync(`${out}/summary.md`, `${md.join('\n')}\n`)
   const tr = results.map((r) => [`## ${r.id} — ${r.pass ? 'PASS' : 'FAIL'}`, '', ...r.history.map((h) => `> (earlier) Q: ${h.q}\n> (earlier) A: ${h.a}`), `**Q:** ${r.q}`, '', `**A (${r.body?.kind || r.status}):** ${r.body?.answer || r.body?.error || ''}`, ...(r.body?.proposals?.length ? ['', `Prepared: ${r.body.proposals.map((p) => `${p.type} → ${p.target?.id || p.target?.kind} (${p.title}: ${p.name})`).join('; ')}`] : []), ...(r.body?.lookups?.length ? ['', `Lookups: ${r.body.lookups.map((l) => `${l.tool} ${JSON.stringify(l.args)}`).join('; ')}`] : []), ...(r.body?.sources?.length ? ['', `Sources: ${r.body.sources.map((s) => `${s.tool} [${s.period}]`).join('; ')}`] : []), ...(r.body?.usage ? ['', `Usage: ${r.body.usage.calls} model calls, ${r.body.usage.in} in / ${r.body.usage.out} out tokens, $${(r.body.usage.costMicros / 1e6).toFixed(5)}, ${r.ms} ms`] : []), ...(r.fail.length ? ['', `Failed: ${r.fail.join('; ')}`] : []), ''].join('\n'))
   writeFileSync(`${out}/transcripts.md`, `# Admin assistant transcripts (fictional data)\n\n${tr.join('\n')}`)
+  // QA Command Center: a report the ingest accepts (scripts/qa-report.mjs --eval <file> in CI, or Admin → QA → Import):
+  // one result per scenario, class "authorization required", with the model and the recorded cost of that scenario.
+  const qaJson = opt('qa-json')
+  if (qaJson) {
+    const report = qaReport(results, provider, startedAt)
+    // The definition + dependency hashes of these scenarios, and the commit, so the results can go stale correctly.
+    const { computeHashes } = await import('./qa-inventory.mjs')
+    const hashes = await computeHashes()
+    report.hashes = Object.fromEntries(Object.entries(hashes).filter(([k]) => k.startsWith('eval:admin:')))
+    try {
+      report.revision = (await import('node:child_process')).execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    } catch {}
+    writeFileSync(qaJson, `${JSON.stringify(report, null, 2)}\n`)
+  }
   console.log(JSON.stringify(summary, null, 2))
+}
+
+// → { source, provider, startedAt, results: [{ kind: 'eval', testId, file, title, status, durationMs, costMicros, model, error }] }
+// Failure reasons are the grader's codes and regexes (fictional data only); no answer text is included.
+export function qaReport(results, provider, startedAt = Date.now()) {
+  const model = provider === 'claude' ? MODELS.claude.model : MODELS.workers.model
+  return {
+    source: 'local',
+    provider: 'real',
+    startedAt,
+    results: results.map((r) => ({ kind: 'eval', testId: `eval:admin:${r.id}`, file: 'scripts/admin-assistant-eval.mjs', title: r.q, status: r.pass ? 'passed' : 'failed', durationMs: r.ms, costMicros: Math.max(0, Math.round(r.costMicros || 0)), model, error: r.pass ? null : r.fail.join('; ').slice(0, 900) })),
+  }
 }
 
 // Run only as a script (the unit tests import the scenarios and the grader).
 const main = import.meta.url === new URL(`file://${process.argv[1]}`).href
 if (main && cmd === 'seed') await seed(rest[0] || 'adm-eval')
 else if (main && cmd === 'run') await run()
-else if (main) console.log('usage: admin-assistant-eval.mjs seed <dir> | run [--provider workers|claude] [--base <url>] --out <dir> [--only id,id] [--cap-usd 2]')
+else if (main) console.log('usage: admin-assistant-eval.mjs seed <dir> | run [--provider workers|claude] [--base <url>] --out <dir> [--only id,id] [--cap-usd 2] [--qa-json <file>]')
