@@ -37,6 +37,20 @@ ${briefLines(brief)}`,
 const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(resent|re-sent|sent|emailed|marked|unmarked|ran|run|reconciled|recorded|updated|changed|saved|suspended|deleted|refunded|cancell?ed|paused|started|approved)\b|\b(has|have) been (resent|sent|marked|recorded|updated|changed|saved|run|reconciled) (as|to|for|successfully|now)?\b|\b(is|are) now (marked|recorded|saved|abandoned)\b|\b(done|completed)[.!]?$/i
 const NOT_DONE = /\b(not|never|no|nothing|none|once|if|until|when|after you|ready to approve|approve)\b/i
 const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups|function)\b|\b(weekly_brief|business_health|platform_numbers|system_health|ai_spending|growth_activity|prepare_\w+|no_lookup_needed)\b|\bTHIS WEEK\b/
+// "What needs me": every listed item carries its tier, one brief item per line, and a stated urgent count matches.
+export const BRIEF_Q = /\b(what needs (me|my attention|attention)|this week|anything urgent|what('s| is) urgent|what should i (do|work on|look at)|priorit\w*|to-?do)\b/i
+const TIER = /^\s*[-•]\s*(urgent|important|fyi)\s*[:—–-]/i
+const COUNT_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
+export function tierProblem(text, question) {
+  const bullets = text.split('\n').filter((l) => /^\s*[-•]\s/.test(l))
+  if (!bullets.length || !(BRIEF_Q.test(question) || /\burgent\b/i.test(text))) return null
+  if (bullets.some((l) => !TIER.test(l))) return 'Label every listed item with its tier: start each line with "- Urgent: ", "- Important: " or "- FYI: ", one item of the list per line, urgent first.'
+  const stated = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten) urgent\b/i.exec(text)
+  const urgent = bullets.filter((l) => /^\s*[-•]\s*urgent/i.test(l)).length
+  if (stated && (COUNT_WORDS[stated[1].toLowerCase()] ?? Number(stated[1])) !== urgent) return `The answer says ${stated[1]} urgent but lists ${urgent} line${urgent === 1 ? '' : 's'} labelled "Urgent:". List each urgent item on its own "- Urgent: " line.`
+  return null
+}
+
 // An answer never retracts or doubts an earlier one by itself (the records behind it were read; see the history note).
 export const SELF_DOUBT = /\b(correct|retract|walk back|take back|fix) (my|the|that) (last|earlier|previous|prior) (message|answer|reply|list)|\bwithout looking (them|it|those|this) up\b|\bI (shouldn['’]t|should not) have (listed|said|named|included)\b|\bmy (last|earlier|previous) (message|answer|reply) (was|is) (wrong|incorrect|mistaken|unchecked|not checked)\b|\bI (made|invented|guessed) (that|those|them)\b/i
 const PROMISE = /\b(guaranteed?|will (definitely |certainly )?(churn|leave|cancel|pay|grow|increase|double))\b/i
@@ -45,7 +59,7 @@ const MONEYISH = /\b(pa(y|id|ying|yment)s?|revenue|mrr|arr|churn\w*|subscri\w+|c
 export const TEST_NOTE = 'Billing is in Stripe test mode: nobody pays real money yet, and test-mode amounts are not revenue.'
 const NAMEISH = (text, names) => names.filter((n) => n && n.length > 3 && text.toLowerCase().includes(n.toLowerCase()))
 
-export function adminProblem(text, { facts, shown, live, names = [], prepared = 0, typed = '' }) {
+export function adminProblem(text, { facts, shown, live, names = [], prepared = 0, typed = '', question = typed }) {
   if (!text || text.length < 2) return 'The answer was empty.'
   if (text.length > BOUNDS.answer) return 'The answer was too long. Under 150 words.'
   if (/https?:|www\.|[<>{}]|\/admin\b/i.test(text)) return 'Remove links, paths, code and braces. Name the page instead (Overview, Control Center, Sales, Growth).'
@@ -59,6 +73,8 @@ export function adminProblem(text, { facts, shown, live, names = [], prepared = 
   const sentences = text.split(/(?<=[.!?])\s+|\n/)
   if (sentences.some((x) => DONE.test(x) && !NOT_DONE.test(x))) return 'It says something was done. You cannot do anything: say what is prepared and ready to approve, or what the records show happened.'
   if (!prepared && /\b(ready to approve|ready for (your )?approval|approve it|i('ve| have) prepared|is prepared)\b/i.test(text)) return 'Nothing was prepared in this answer, so nothing is ready to approve. Call the prepare tool first, or say where the founder can do it.'
+  const tiers = tierProblem(text, question)
+  if (tiers) return tiers
   if ((text.match(/^\s*[-•]\s/gm) || []).length > 6) return 'Too many lines. Give the 5 that matter most, most urgent first, and say how many more are on the This week list on Overview.'
   if (SELF_DOUBT.test(text)) return 'It doubts or corrects an earlier answer. Earlier answers were written from lookups of the records. Answer only the question; if a lookup now shows something different, say what the records show now.'
   if (INSIDE.test(text)) return 'It talks about tools, lookups or your instructions. Say only what the records show.'
@@ -143,7 +159,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
     const names = [...c.refs.values()].map((r) => r.name).filter(Boolean)
-    const why = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
+    const why = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)

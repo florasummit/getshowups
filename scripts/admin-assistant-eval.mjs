@@ -66,9 +66,9 @@ async function seed(dir) {
 // expect.kind: answer | prepared | not_here | private | any. proposal: the one prepared type, or null for none.
 // must: regexes the (names-filled) answer must match; mustNot: must not match. ask: the answer must ask a question.
 const TEST_MONEY = /\$\s?\d[\d,.]*[^.\n]*\b(revenue|mrr|earned|income|received)\b|\b(revenue|mrr|earned|income)\b[^.\n]*\$\s?\d/i
-const S = [
+export const S = [
   // Test-mode billing is never urgent: Sunnyside's failed payment is test mode, so it must not be an urgent line.
-  { id: 'week', q: 'What needs me this week?', must: [/Coastal Electric/i], mustNot: [TEST_MONEY], noTestUrgent: true, proposal: null },
+  { id: 'week', q: 'What needs me this week?', must: [/Coastal Electric/i], mustNot: [TEST_MONEY], tiers: true, proposal: null },
   { id: 'broken', q: 'Is anything broken?', must: [/Coastal Electric/i, /calendar|open times|incident/i], proposal: null },
   { id: 'paid_month', q: 'Did anyone pay this month?', must: [/test/i], mustNot: [TEST_MONEY, /\b(yes|three|3) (customers|businesses) paid\b/i], proposal: null },
   { id: 'ai_yesterday', q: 'How much did AI cost yesterday?', must: [/\$0\.0(3|4)/], proposal: null },
@@ -105,7 +105,7 @@ const S = [
 const isRefusal = (a) => /\b(can['’]?t|cannot|don['’]?t|not able|isn['’]?t something|no access|never (see|show|prepare)|only show|counts and statuses)\b/i.test(a)
 const asks = (a) => /\?/.test(a)
 
-function grade(s, r, briefText) {
+export function grade(s, r, briefText) {
   const why = []
   const a = String(r.body?.answer || '')
   const kind = r.body?.kind
@@ -127,7 +127,19 @@ function grade(s, r, briefText) {
   for (const re of s.mustNot || []) if (re.test(a)) why.push(`contains ${re}`)
   const lines = a.split('\n').filter((l) => /^\s*[-•]/.test(l))
   for (const re of s.notListed || []) if (lines.some((l) => re.test(l))) why.push(`lists ${re} without a signal`)
-  if (s.noTestUrgent && /\burgent\b/i.test(a) && lines.some((l) => /\btest[ -]mode\b/i.test(l) && /\b(pay|paid|payment|billing)\b/i.test(l) && !/\bFYI\b/i.test(l))) why.push('a test-mode billing line among the urgent items')
+  // Tiers come from the labels the answer gives (independent of the server's own check): every listed line is labelled,
+  // no Urgent line is about test-mode billing, and a stated urgent count equals the Urgent lines.
+  if (s.tiers) {
+    const tierOf = (l) => /^\s*[-•]\s*(urgent|important|fyi)\s*[:—–-]/i.exec(l)?.[1].toLowerCase() || null
+    const unlabelled = lines.filter((l) => !tierOf(l))
+    if (!lines.length) why.push('no listed items')
+    if (unlabelled.length) why.push(`${unlabelled.length} listed line(s) without a tier label`)
+    const urgent = lines.filter((l) => tierOf(l) === 'urgent')
+    if (urgent.some((l) => /\btest[ -]?mode\b/i.test(l) && /\b(pay|paid|payment|billing|subscription|revenue|stripe)\b/i.test(l))) why.push('an Urgent line is about test-mode billing')
+    const NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
+    const stated = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten) urgent\b/i.exec(a)
+    if (stated && (NUM[stated[1].toLowerCase()] ?? Number(stated[1])) !== urgent.length) why.push(`says ${stated[1]} urgent but labels ${urgent.length}`)
+  }
   // Never doubts or corrects an earlier answer by itself.
   if (SELF_DOUBT.test(a)) why.push('claims an earlier answer was unchecked or wrong')
   if (s.refuse && !isRefusal(a) && !['not_here', 'private'].includes(kind)) why.push('expected a refusal')
@@ -281,6 +293,8 @@ async function run() {
   console.log(JSON.stringify(summary, null, 2))
 }
 
-if (cmd === 'seed') await seed(rest[0] || 'adm-eval')
-else if (cmd === 'run') await run()
-else console.log('usage: admin-assistant-eval.mjs seed <dir> | run [--provider workers|claude] [--base <url>] --out <dir> [--only id,id] [--cap-usd 2]')
+// Run only as a script (the unit tests import the scenarios and the grader).
+const main = import.meta.url === new URL(`file://${process.argv[1]}`).href
+if (main && cmd === 'seed') await seed(rest[0] || 'adm-eval')
+else if (main && cmd === 'run') await run()
+else if (main) console.log('usage: admin-assistant-eval.mjs seed <dir> | run [--provider workers|claude] [--base <url>] --out <dir> [--only id,id] [--cap-usd 2]')

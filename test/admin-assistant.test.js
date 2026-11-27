@@ -15,7 +15,8 @@ import { TOOLS as OWNER_TOOLS } from '../server/operator-tools.js'
 import { TOOL_NAMES, TOOLS, adminContext, runAdminTool } from '../server/admin-assist/tools.js'
 import { weeklyBrief } from '../server/admin-assist/brief.js'
 import { consequentialAsk, ownerDataAsk } from '../server/admin-assist/guard.js'
-import { adminProblem } from '../server/admin-assist/operator.js'
+import { adminProblem, tierProblem } from '../server/admin-assist/operator.js'
+import { grade, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
 import { ADMIN_DAILY_MICROS } from '../server/admin-assist/data.js'
 import { ADMIN, ENROLLMENTS, fakeTokens, seedAdminFixture } from './fixtures/admin-assistant-data.js'
 
@@ -263,6 +264,35 @@ test('churn: only businesses with a churn signal may be listed', async () => {
   assert.match(calls.at(-1).messages.at(-1).content, /has no churn signal/)
   const at = await runAdminTool(adminContext(env, {}), 'business_health', { which: 'at_risk' })
   assert.ok(at.businesses.length && at.businesses.every((x) => x.churn_signals.length), JSON.stringify(at.businesses.map((x) => x.churn_signals)))
+})
+
+test('“what needs me”: every listed item is tier-labelled, one per line, and a stated urgent count matches', async () => {
+  // Unlabelled bullets, then a count that doesn't match the Urgent lines, then a correct answer.
+  script.push(
+    () => say('Two urgent items:\n- Coastal calendar and its incident.\n- Reconciliation mismatch.\n- Oak Tree is stuck.'),
+    () => say('Two urgent items:\n- Urgent: Coastal calendar and its incident.\n- Important: Reconciliation mismatch, test mode, no real money.'),
+    () => say('Two urgent items:\n- Urgent: Coastal calendar disconnected.\n- Urgent: Coastal incident open.\n- Important: Reconciliation mismatch, test mode, no real money.'),
+  )
+  const r = await ask('admin', { question: 'What needs me this week?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.match(r.body.answer, /- Urgent: Coastal calendar disconnected\.\n- Urgent: Coastal incident open\./)
+  const backs = calls.slice(1).map((b) => b.messages.at(-1).content)
+  assert.match(backs[0], /Label every listed item with its tier/)
+  assert.match(backs[1], /says Two urgent but lists 1 line/)
+  // Pure rule: a follow-up that isn't about the list may use plain bullets; any answer that mentions "urgent" may not.
+  assert.equal(tierProblem('- one\n- two', 'Which enrollments are stuck?'), null)
+  assert.match(tierProblem('The urgent one:\n- one', 'Is anything broken?'), /Label every listed item/)
+  assert.equal(tierProblem('- FYI: one\n- Important: two', 'what needs me'), null)
+})
+
+test('the grader reads tiers from the labels: unlabelled fails, Urgent test-mode billing fails, a mismatched count fails', () => {
+  const week = SCENARIOS.find((x) => x.id === 'week')
+  const g = (answer) => grade(week, { status: 200, body: { kind: 'answer', answer, evidence: [], proposals: [] } }, '')
+  const run5 = 'One urgent item:\n- Urgent: Coastal Electric: calendar disconnected; ask the owner to reconnect (Overview).\n- Important: Billing records don’t match Stripe for 1 real business; Stripe is in test mode, so no real money is affected (Overview).'
+  assert.deepEqual(g(run5), [])
+  assert.ok(g('Two urgent items:\n- Coastal Electric: calendar disconnected.\n- Reconciliation mismatch.').some((w) => /without a tier label/.test(w)))
+  assert.ok(g('Two urgent items:\n- Urgent: Coastal Electric calendar and incident.').some((w) => /says Two urgent but labels 1/.test(w)))
+  assert.ok(g('- Urgent: Coastal Electric calendar.\n- Urgent: Sunnyside payment failed in test mode.').some((w) => /Urgent line is about test-mode billing/.test(w)))
 })
 
 test('the model failing or failing its checks: the records are shown, never a guess', async () => {
