@@ -326,6 +326,24 @@ INSERT INTO business_addresses (customer, street, unit, city, state, zip, public
 npx wrangler kv key put "google:$E2E_DETAILS_CUSTOMER" "$(record "$E2E_DETAILS_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
+# Phone line (phone.spec.js): a seeded line (no Twilio purchase), one verified phone that rings, one missed call with its
+# callback task. Nothing calls Twilio: the spec only reads and saves settings.
+d1 "
+INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
+  ('$E2E_PHONE_CUSTOMER', 'Dial Pools', 'America/New_York', '', '09:00', '17:00', '1,2,3,4,5', $NOW, $NOW, $NOW);
+INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$E2E_PHONE_CUSTOMER.example', '$E2E_PHONE_CUSTOMER', $NOW);
+INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash "$E2E_PHONE_SESSION_TOKEN")', 'owner@$E2E_PHONE_CUSTOMER.example', $NOW, $FAR);
+INSERT INTO business_profiles (customer, phone, industry, description, services, cities, updated_at) VALUES ('$E2E_PHONE_CUSTOMER', '', 'pool', '', '[]', '[]', $NOW);
+INSERT INTO phone_lines (id, customer, number, source, status, created_at, updated_at) VALUES ('pl_e2e', '$E2E_PHONE_CUSTOMER', '+18435550160', 'website', 'active', $NOW, $NOW);
+INSERT INTO phone_destinations (id, customer, number, label, verified_at, created_at) VALUES ('pd_e2e', '$E2E_PHONE_CUSTOMER', '+18435550161', 'Owner cell', $NOW, $NOW);
+INSERT INTO receptionist_requests (id, customer, conversation_id, kind, phone, note, created_at, updated_at) VALUES ('rq_e2e_call', '$E2E_PHONE_CUSTOMER', 'call:CA00000000000000000000000000000e2e', 'callback', '+18435550162', 'Missed phone call', $NOW, $NOW);
+INSERT INTO phone_calls (call_sid, customer, line_id, caller, caller_state, source, route, outcome, duration_seconds, request_id, started_at, ended_at, updated_at) VALUES
+  ('CA00000000000000000000000000000e2e', '$E2E_PHONE_CUSTOMER', 'pl_e2e', '+18435550162', 'known', 'website', 'team', 'callback', 31, 'rq_e2e_call', $((NOW - 600000)), $((NOW - 569000)), $NOW);
+"
+# A connected calendar, so the dashboard opens on its tabs (Settings) instead of onboarding.
+npx wrangler kv key put "google:$E2E_PHONE_CUSTOMER" "$(record "$E2E_PHONE_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
+  -c test/e2e/wrangler.e2e.toml >/dev/null
+
 # Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
 # kept (changed since). So every seeded business is a ROLLOUT PIN on Retell (same behaviour as before for every other
@@ -375,6 +393,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding CRON_SECRET="$E2E_CRON_SECRET" \
   --binding QA_INGEST_TOKEN="$E2E_QA_INGEST_TOKEN" \
   --binding RECEPTIONIST_VOICE_BUSINESSES="$E2E_VOICE_M_CUSTOMER" \
+  --binding PHONE_ENABLED=true \
   --binding META_APP_ID="$E2E_META_APP_ID" \
   --binding META_APP_SECRET="$E2E_META_APP_SECRET" \
   --binding META_WEBHOOK_VERIFY_TOKEN="$E2E_META_VERIFY_TOKEN" \

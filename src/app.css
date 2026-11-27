@@ -6124,3 +6124,7 @@ html.help-open .app {
 /* Settings → Booking hours → "Different hours on some days": one row per booking day. */
 .day-hours-row { margin-top: 10px; display: grid; gap: 6px; justify-items: start; }
 .day-hours-row > .field-row { width: 100%; }
+
+/* Settings → Phone line (PhoneSettings.jsx) */
+.phone-settings .subhead { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+.phone-settings .plain-list { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.5rem; }

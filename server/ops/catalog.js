@@ -556,6 +556,25 @@ registerCapability({
     return s === 'available' ? { status: 'ok', summary: 'Voice released' } : { status: 'off', summary: s === 'testing' ? 'Voice in testing (not released)' : 'Voice not configured' }
   },
 })
+// ---------- Business phone lines (server/telephony/, migration 0049) ----------
+registerCapability({
+  id: 'phone.calls',
+  tier: 'optional',
+  name: 'Business phone line (Twilio numbers, team ringing, AI or call-back fallback)',
+  journey: 'lead',
+  description: 'Calls to a business line: ring verified team phones, then the AI receptionist (Retell over SIP) or a call-back task. Failures: phone.webhook_failed / phone.ai_unavailable events.',
+  external: 'Twilio',
+  dependsOn: ['receptionist.voice'],
+  state: (env) =>
+    env.PHONE_ENABLED !== 'true'
+      ? { mode: 'disabled', note: 'PHONE_ENABLED off', approval: 'Privacy policy names call records; PHONE_ENABLED=true' }
+      : !env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN
+        ? { mode: 'missing', note: 'Twilio not configured' }
+        : env.PHONE_NUMBER_PURCHASE === 'true'
+          ? { mode: 'live', note: 'Numbers can be bought' }
+          : { mode: 'sandbox', note: 'Lines on, buying numbers off', approval: 'PHONE_NUMBER_PURCHASE=true' },
+  verify: seen('call answered on a real business line', 30, `SELECT max(c.started_at) AS at FROM phone_calls c WHERE c.outcome IN ('answered', 'ai') AND ${NOT_TEST_BIZ('c.customer', 'c.started_at')}`),
+})
 // ---------- Teach Your AI (server/intelligence/, migration 0033) ----------
 registerCapability({
   id: 'intelligence.studio',

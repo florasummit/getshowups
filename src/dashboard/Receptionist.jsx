@@ -68,6 +68,15 @@ const channelName = (c) => (c === 'voice' ? 'Browser voice' : 'Chat')
 // (functions/api/dashboard/receptionist/index.js: chat = model configured; voiceStatus = the business's ACTIVE voice
 // provider resolved server-side: 'available' | 'testing' (Retell not released for this business, RECEPTIONIST_VOICE_
 // BUSINESSES) | 'not_configured'; staffEmail = the MESSAGES_LIVE gate; no phone line exists). Never a hardcoded state.
+// The business phone line's own state (Settings → Phone line owns its routing; this page only reports it).
+const phoneTile = (p) =>
+  !p || p.state === 'unavailable'
+    ? ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']
+    : p.state === 'not_started'
+      ? ['neutral', 'Not set up', 'No phone line yet. Get a number under Settings → Phone line.']
+      : p.state === 'needs_owner'
+        ? ['warn', 'Rings nobody', 'Calls get the fallback because no verified phone is set to ring. Fix it under Settings → Phone line.']
+        : ['ok', 'Active', 'Calls ring your team, then the fallback you chose under Settings → Phone line.']
 function channelTiles(cap, on, chatUrl, admin, panel) {
   const voice = !on
     ? ['neutral', 'Off', 'Turn the receptionist on below; voice follows the same switch as chat.']
@@ -79,7 +88,7 @@ function channelTiles(cap, on, chatUrl, admin, panel) {
   return [
     ['Website chat', !on ? ['neutral', 'Off', 'Turn it on below.'] : cap.chatClosed === 'setup' ? ['warn', 'Not reachable yet', 'It is on, but customers can open the chat only once your calendar is connected and your booking hours are confirmed in Settings.'] : cap.chat ? ['ok', 'Active', panel ? `Customers chat in a panel on your website, or at ${chatUrl}.` : `Customers chat at ${chatUrl}, linked from your website.`] : ['bad', 'Unavailable', 'The AI model is not configured on the platform, so nothing answers.']],
     ['Browser voice', voice],
-    ['Phone calls', ['neutral', 'Not available yet', 'No phone line can be connected yet: calls are not answered, transferred or dialed.']],
+    ['Phone calls', phoneTile(cap.phoneLine)],
     ['Team notifications', cap.staffEmail === 'live' ? ['ok', 'Email on', 'Your team gets an email about each callback request and message.'] : ['warn', 'Email off', `You won’t get an email about a callback request or message right now. ${NO_EMAIL}; every request shows on this page.`]],
   ]
 }
@@ -599,6 +608,11 @@ export default function Receptionist() {
               and adds other situations, once your published rules are used with customers.
             </p>
           </fieldset>
+          {cap.phoneLine && cap.phoneLine.state !== 'unavailable' ? (
+            <p className="ui-hint rx-phone">
+              Phone calls: who answers and what happens when nobody does are set under <a href="/dashboard/settings#phone">Settings → Phone line</a>.
+            </p>
+          ) : (
           <details className="ui-group ui-group--advanced rx-phone">
             <summary>
               Phone calls (not available yet) <Pill tone="neutral">Not available yet</Pill>
@@ -619,6 +633,7 @@ export default function Receptionist() {
               <span className="ui-hint">Not used until a phone line is connected.</span>
             </label>
           </details>
+          )}
           <div className="ui-form-actions">
             <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !dirty}>
               {busy ? 'Saving…' : 'Save'}
