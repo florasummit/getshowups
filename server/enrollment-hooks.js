@@ -3,7 +3,7 @@
 import { recordAttribution } from './commercial-attribution.js'
 
 // Who closed the sale and through which channel (server/commercial-attribution.js; idempotent, first touch kept, a no-op
-// before migration 0048). ownerEmail lets the self-referral check run before the owner is a member.
+// before migration 0048). ownerEmail runs the self-referral check before the owner is a member.
 export async function attributeAssisted(env, customerId, { channel, repEmail, partnerCode = null, ownerEmail = null }, now = Date.now()) {
   try {
     return (await recordAttribution(env.ONBOARDING_DB, customerId, { channel, repEmail, partnerCode, source: 'assisted', ownerEmail }, now)) ?? { recorded: true }
@@ -12,15 +12,14 @@ export async function attributeAssisted(env, customerId, { channel, repEmail, pa
   }
 }
 
-// Telephone setup (owned by the telephony work, server/telephony/lines.js phoneSetup, read-only). Until that module is
-// released: "Phone: not available yet". Loaded at run time so this file works with or without it.
-const UNAVAILABLE = { state: 'not_available', next: null, href: null, label: 'Phone: not available yet' }
+// Telephone setup: server/telephony/lines.js phoneSetup (read-only, owned by the telephony work, draft PR #192) →
+// { state: 'unavailable' | 'not_started' | 'needs_owner' | 'ready' | 'live', next, href }. Loaded at run time, so this file
+// works with or without that module; 'unavailable' (and any failure) shows "Phone: not available yet" in the checklist.
+const UNAVAILABLE = { state: 'unavailable', next: null, href: null }
 export async function phoneHook(env, customerId) {
   try {
     const mod = await import('./telephony/lines.js')
-    const r = typeof mod.phoneSetup === 'function' ? await mod.phoneSetup(env, customerId) : null
-    if (!r || r.state === 'unavailable') return UNAVAILABLE
-    return { ...r, label: r.next || null }
+    return (typeof mod.phoneSetup === 'function' && customerId ? await mod.phoneSetup(env, customerId) : null) || UNAVAILABLE
   } catch {
     return UNAVAILABLE
   }

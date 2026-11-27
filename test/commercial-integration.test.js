@@ -54,5 +54,5 @@ test('staff may sign in by email only while their role is active; revocation end
 
 test('the telephone hook says "not available yet" until that module is released', async () => {
   const r = await phoneHook(env(d1()), 'assisted1')
-  assert.equal(r.label, 'Phone: not available yet')
+  assert.equal(r.state, 'unavailable')
 })

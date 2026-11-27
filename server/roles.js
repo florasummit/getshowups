@@ -47,6 +47,17 @@ export async function requireRole(request, env, roles, { write = false } = {}) {
   return { staff: { email: session.email, roles: have }, session }
 }
 
+// Stream A (email sign-in eligibility): does this email hold an active commercial role? Never throws; false before 0047.
+export async function hasCommercialRole(db, email) {
+  const e = norm(email)
+  if (!e) return false
+  try {
+    return Boolean(await db.prepare('SELECT 1 FROM commercial_roles WHERE email = ?1 AND revoked_at IS NULL LIMIT 1').bind(e).first())
+  } catch {
+    return false
+  }
+}
+
 export const isAdmin = (staff) => staff?.roles?.has('platform_admin') === true
 
 // Active grants (platform admin view). Fail-soft: null before the migration.

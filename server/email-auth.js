@@ -21,6 +21,8 @@ import { enrollmentOpen } from './onboarding.js'
 import { authEmailLive, emailConfigured, sendEmail } from './email.js'
 import { EMAIL_RE, siteOrigin } from './auth.js'
 import { b64url, decrypt, encrypt, randomToken, readCookie, sha256Hex, timingSafeEqual } from './google-oauth.js'
+import { hasCommercialRole } from './roles.js'
+import { pendingClaimFor } from './enrollment.js'
 
 export const EMAIL_LOGIN_COOKIE = '__Host-gsu_email_login'
 export const EMAIL_LOGIN_TTL_MS = 15 * 60 * 1000
@@ -65,7 +67,9 @@ export async function emailSignInOffered(env) {
 // Other ways a person may be expected (stream B: hasCommercialRole(db, email) from server/roles.js and
 // pendingClaimFor(db, email, now) from the ownership invitations) are added at integration with addSignInCheck(), never
 // by querying their tables here. Each check is (db, email, now) → truthy; one that throws counts as no (fail-soft).
-const EXTRA_CHECKS = []
+// Wired at integration: active sales/onboarding staff (server/roles.js) and owners with an open ownership invitation
+// (server/enrollment.js). Both are fail-soft and false before migration 0047.
+const EXTRA_CHECKS = [(db, email) => hasCommercialRole(db, email), (db, email, now) => pendingClaimFor(db, email, now)]
 export const addSignInCheck = (check) => {
   if (typeof check === 'function' && !EXTRA_CHECKS.includes(check)) EXTRA_CHECKS.push(check)
 }

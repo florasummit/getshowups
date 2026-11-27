@@ -4,11 +4,12 @@
 // The token stays in this tab's storage, never in the address after the first load.
 //
 // Sign-in seam (stream A): today "Continue with Google"; the shared sign-in component (Google or email) replaces the
-// SignInChoice below. Whatever the method, the server compares the session's VERIFIED email with the invited one.
+// the shared sign-in panel (Google or email; src/dashboard/SignIn.jsx). Whatever the method, the server compares the session's VERIFIED email with the invited one.
 import { useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
 import { api, endStaffMode, noIndex } from '../lib/api.js'
 import '../app.css'
+import SignIn from '../dashboard/SignIn.jsx'
 
 // Bump together with CLAIM_TERMS_VERSION in server/enrollment.js (the server refuses any other version).
 const TERMS = [
@@ -51,13 +52,6 @@ function Panel({ title, children, state }) {
   )
 }
 
-function SignInChoice() {
-  return (
-    <a className="btn btn-primary btn-lg btn-block" href="/api/auth/google/start?next=/claim">
-      Continue with Google
-    </a>
-  )
-}
 
 async function signOutHere() {
   await api('/api/auth/logout', { method: 'POST' })
@@ -137,7 +131,7 @@ export default function Claim() {
     return (
       <Panel title={`Claim ${p.businessName}`} state="signed-out">
         <p className="lede">Your account is set up and ready. Sign in with {p.email} to take ownership.</p>
-        <SignInChoice />
+        <SignIn compact next="/claim" googleHref="/api/auth/google/start?next=/claim" />
         <p className="fine">
           We only use your email address to sign you in. <a href="/privacy">Privacy policy</a>
         </p>

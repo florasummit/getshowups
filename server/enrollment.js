@@ -189,7 +189,10 @@ export async function checklist(env, row, f, now = Date.now()) {
   if (rec) items.push({ id: 'receptionist', label: 'AI receptionist (the owner turns it on)', state: rec.state, detail: rec.detail, required: false })
   const checks = await setupCheck(env, f.customer, now).catch(() => [])
   const phone = await phoneHook(env, f.customer.id).catch(() => ({ state: 'not_available', label: 'Phone: not available yet' }))
-  items.push({ id: 'phone', label: phone?.label || 'Phone', state: phone?.state === 'ready' ? 'ok' : 'off', detail: phone?.state || 'not_available', required: false, ...(phone?.href ? { href: phone.href } : {}) })
+  // phoneSetup states: unavailable | not_started | needs_owner | ready | live (missing module → not_available).
+  const ps = phone?.state || 'not_available'
+  const phoneOff = ps === 'unavailable' || ps === 'not_available'
+  items.push({ id: 'phone', label: phoneOff ? 'Phone: not available yet' : 'Phone line', state: ps === 'ready' || ps === 'live' ? 'ok' : phoneOff ? 'off' : 'action', detail: ps, required: false, ...(phone?.href && !phoneOff ? { href: phone.href } : {}) })
   items.push({ id: 'invitation', label: 'Ownership invitation', state: f.invite.state === 'accepted' ? 'ok' : f.invite.state === 'pending' ? 'pending' : 'action', detail: f.invite.state, required: false })
   return {
     items,
@@ -417,6 +420,27 @@ export async function revokeInvitation(env, staff, id, now = Date.now()) {
   if (!revoked) return fail(409, 'no_invitation')
   await audit(env, staff.email, 'enrollment.invitation_revoked', row.customer, { enrollment: row.id })
   return { ok: true }
+}
+
+// Stream A (email sign-in eligibility): is an ownership invitation waiting for this email (unexpired, not revoked, not
+// used, bound to an assisted enrollment that isn't claimed)? Ownership invitations are account_invites rows referenced
+// by assisted_enrollments.invite_id. Never throws; false before 0047.
+export async function pendingClaimFor(db, email, now = Date.now()) {
+  const e = String(email || '').trim().toLowerCase()
+  if (!e) return false
+  try {
+    return Boolean(
+      await db
+        .prepare(
+          `SELECT 1 FROM account_invites i JOIN assisted_enrollments a ON a.invite_id = i.id
+            WHERE i.email = ?1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > ?2 AND a.stage <> 'claimed' LIMIT 1`,
+        )
+        .bind(e, now)
+        .first(),
+    )
+  } catch {
+    return false
+  }
 }
 
 // ---------- ownership claim (public page /claim; the signed-in session's VERIFIED email decides) ----------
