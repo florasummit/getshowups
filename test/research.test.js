@@ -5,6 +5,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { sha256Hex } from '../server/google-oauth.js'
 import { MODELS, cleanParams, describe, phi, invPhi, sampleSize, analyzeExperiment, updateBelief, wilson } from '../server/research/math.js'
@@ -252,11 +253,12 @@ test('isolation: no customer-facing code or assistant imports research; no brows
 })
 
 test('no research records in the public repository: no file contains program or other research records (they belong in the vault)', () => {
-  const skip = new Set(['node_modules', 'dist', '.git', '.wrangler', 'test-results', 'playwright-report'])
-  const walk = (dir) =>
-    readdirSync(new URL(dir, import.meta.url), { withFileTypes: true }).flatMap((e) => (skip.has(e.name) ? [] : e.isDirectory() ? walk(`${dir}${e.name}/`) : /\.(js|jsx|json|md|sql|mjs|txt|csv)$/.test(e.name) ? [`${dir}${e.name}`] : []))
+  // Files Git tracks (what reaches the public repository); a git-ignored local file is fine.
+  const root = new URL('../', import.meta.url)
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter((f) => /\.(js|jsx|json|md|sql|mjs|txt|csv)$/.test(f))
+  assert.ok(tracked.length > 100, 'git ls-files works here')
   // A research record in JSON form ({"kind": "program", "record": …}) is what the founder imports from a local file.
   const record = /"kind"\s*:\s*"(program|question|thesis|hypothesis|recommendation|evidence|experiment)"\s*,\s*"record"/
-  const offenders = walk('../').filter((f) => !f.endsWith('research.test.js') && record.test(readFileSync(new URL(f, import.meta.url), 'utf8')))
+  const offenders = tracked.filter((f) => !f.endsWith('research.test.js') && record.test(readFileSync(new URL(f, root), 'utf8')))
   assert.deepEqual(offenders, [], 'research records must live in the vault (D1) or local ignored files, never in the repository')
 })
