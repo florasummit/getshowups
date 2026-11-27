@@ -11,7 +11,7 @@ import * as assistApi from '../functions/api/platform/assist.js'
 import * as approveApi from '../functions/api/platform/assist-approve.js'
 import { adminContext, runAdminTool } from '../server/admin-assist/tools.js'
 import { consequentialAsk, ideaCapture, ownerDataAsk, qaAsk } from '../server/admin-assist/guard.js'
-import { fillRefs, readinessProblem } from '../server/admin-assist/operator.js'
+import { fillRefs, readinessProblem, restatedTitle } from '../server/admin-assist/operator.js'
 import { similarity, suggestPriority } from '../server/admin-assist/qa.js'
 import { categoriesOf, checks, QA_SCENARIOS, REGRESSION, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
 import { ADMIN, fakeTokens, QA_TESTS, seedAdminFixture } from './fixtures/admin-assistant-data.js'
@@ -87,7 +87,8 @@ test('qa_items: duplicates by similarity, priority SUGGESTIONS (not recorded), a
   const booking = r.items.find((x) => c.refs.get(x.ref).id === ids['Booking page shows'])
   assert.deepEqual(booking.suggested_priority, { priority: 'p1', why: 'high severity with recorded customer impact' })
   assert.equal(booking.recorded_priority, 'none')
-  assert.match(r.notes[0], /suggestion .* not recorded/)
+  assert.match(r.notes.join(' '), /suggestion .* not recorded/)
+  assert.match(r.notes[0], /never restate the title/)
   assert.ok(similarity('Reply to inquiries by SMS from the dashboard', 'Let owners text back new inquiries from the dashboard') >= 0.5)
   assert.equal(suggestPriority({ group: 'backlog', kind: 'cost' }).priority, 'p3')
   const cost = (await tool('qa_cost')).r
@@ -225,7 +226,6 @@ test('an item’s title is never filled in twice in one sentence; the grader fai
   // A [Q] title is filled in quotes; the sentence keeps its own punctuation; never twice in one sentence.
   assert.equal(fillRefs('Yes, it’s already in the backlog as [Q3]. It’s still in Inbox.', f), `Yes, it’s already in the backlog as “${T}”. It’s still in Inbox.`)
   assert.equal(fillRefs('See [Q3]; it is old, and [Q3]: still Inbox!', f), `See “${T}”; it is old, and “${T}”: still Inbox!`)
-  assert.equal(fillRefs(`[Q3], “${T},” is sitting in Inbox.`, f), `“${T}” is sitting in Inbox.`)
   assert.equal(fillRefs(`“${T}” [Q3] is in Inbox.`, f), `“${T}” is in Inbox.`)
   assert.equal(fillRefs(`[Q3] is in Inbox (“${T}”).`, f), `“${T}” is in Inbox.`)
   assert.equal(fillRefs(`It’s in the backlog as “${T}” [Q3]. Still Inbox.`, f), `It’s in the backlog as “${T}”. Still Inbox.`)
@@ -236,4 +236,34 @@ test('an item’s title is never filled in twice in one sentence; the grader fai
   assert.deepEqual(g('Yes, it’s already recorded: “Let owners text back new inquiries from the dashboard” is in Inbox, and a similar SMS reply idea is under review.'), [])
   // A title that runs into the next sentence fails (stricter), quoted or not.
   for (const bad of ['Yes, it’s already in the backlog as Let owners text back new inquiries from the dashboard It’s still in Inbox.', 'Yes, it’s in the backlog as “Let owners text back new inquiries from the dashboard” It’s still in Inbox.']) assert.ok(g(bad).some((x) => x.cat === 'facts' && /runs into the next sentence/.test(x.why)), bad)
+})
+
+test('an item is never restated after its reference: such a sentence goes back to the model; the fill never eats words or punctuation', async () => {
+  const titles = { Q1: 'Booking page shows no open times after a calendar reconnect', Q3: 'Let owners text back new inquiries from the dashboard' }
+  // The exact raw sentences from the full-suite run.
+  assert.match(restatedTitle('[Q1], a high-severity defect where the booking page shows no open times after a calendar reconnect', titles), /don't restate what it is/)
+  assert.match(restatedTitle('Open high defect: [Q1], the booking page shows no open times after a calendar reconnect.', titles), /don't restate/)
+  assert.match(restatedTitle('[Q3], “Let owners text back new inquiries from the dashboard,” is sitting in Inbox.', titles), /don't restate/)
+  assert.equal(restatedTitle('[Q1], a high-severity bug in booking, open 2 days.', titles), null)
+  assert.equal(restatedTitle('[Q1] is open. The booking page shows no open times after a calendar reconnect for some owners.', titles), null) // another sentence
+  // The fill removes only an exact quoted or bracketed copy of the title; everything else, commas included, stays.
+  assert.equal(fillRefs('Open high defect: [Q1], the booking page shows no open times after a calendar reconnect.', titles), 'Open high defect: “Booking page shows no open times after a calendar reconnect”, the booking page shows no open times after a calendar reconnect.')
+  assert.equal(fillRefs('[Q3] (“Let owners text back new inquiries from the dashboard”) is in Inbox, still.', titles), '“Let owners text back new inquiries from the dashboard” is in Inbox, still.')
+  assert.equal(fillRefs('Open: [Q1], high, 2 days; [Q3], Inbox.', titles), 'Open: “Booking page shows no open times after a calendar reconnect”, high, 2 days; “Let owners text back new inquiries from the dashboard”, Inbox.')
+  // End to end: the restating draft is sent back; the rewrite (reference + severity, kind, status, age) is accepted.
+  script.push(
+    callTool('qa_status'),
+    (b) => {
+      const ref = /"ref":"(Q\d+)"/.exec(b.messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' '))[1]
+      return say(`One blocker: [${ref}], a high-severity defect where the booking page shows no open times after a calendar reconnect.`)
+    },
+    (b) => {
+      const ref = /"ref":"(Q\d+)"/.exec(b.messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' '))[1]
+      return say(`One blocker: [${ref}], a high-severity bug, open for 2 days.`)
+    },
+  )
+  const r = await ask({ question: 'Are there any commercial launch blockers?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.match(calls.at(-1).messages.at(-1).content, /don't restate what it is/)
+  assert.equal(r.body.answer, 'One blocker: “Booking page shows no open times after a calendar reconnect”, a high-severity bug, open for 2 days.')
 })

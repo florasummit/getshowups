@@ -68,7 +68,7 @@ export function readinessProblem(text, question) {
 // References → names for the page, never the same name twice in one sentence. A QA item [Q] is filled as its title in
 // typographic quotes (“…”), so a title never runs into the sentence; the sentence's own punctuation is kept as written.
 // When the model also spelled the name out: written BEFORE the reference, the reference disappears; written AFTER it in
-// quotes or brackets (“…”, (…), , “…,”), that copy is removed and the reference is the subject.
+// quotes or brackets (exactly “title” or (title)), that copy alone is removed: never other words, never punctuation.
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 function fillSentence(sentence, filled) {
   let out = ''
@@ -87,7 +87,7 @@ function fillSentence(sentence, filled) {
       out = `${before}${m[1][0] === 'Q' ? `“${name}”` : name}`
       done.add(m[1])
       const n = esc(name)
-      after = after.replace(new RegExp(`(\\s*,)?\\s*(?:[“"‘']${n}[,.]?[”"’']|\\(\\s*[“"‘']?${n}[,.]?[”"’']?\\s*\\)|\\[\\s*[“"‘']?${n}[,.]?[”"’']?\\s*\\])(\\s*,(?=\\s))?`, 'i'), '')
+      after = after.replace(new RegExp(`\\s*(?:[“"]${n}[”"]|\\(\\s*[“"]?${n}[”"]?\\s*\\)|\\[\\s*[“"]?${n}[”"]?\\s*\\])`), '')
     }
     rest = after
   }
@@ -100,6 +100,22 @@ export function fillRefs(text, filled) {
     .map((line) => line.split(/(?<=[.!?]) +/).map((s) => fillSentence(s, filled)).join(' '))
     .join('\n')
     .trim()
+}
+
+// After a [Qn] reference the page shows the item's title, so the answer must not restate it in its own words: a sentence
+// whose text right after the reference repeats 5 or more consecutive words of that title is sent back. titles: ref → title.
+const wordList = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)
+export function restatedTitle(text, titles) {
+  for (const m of text.matchAll(/\[(Q\d{1,3})\]/g)) {
+    const title = titles[m[1]]
+    if (!title) continue
+    const t = wordList(title)
+    if (t.length < 5) continue
+    const tail = text.slice(m.index + m[0].length).split(/[.!?\n]/)[0]
+    const w = ` ${wordList(tail).join(' ')} `
+    for (let i = 0; i + 5 <= t.length; i++) if (w.includes(` ${t.slice(i, i + 5).join(' ')} `)) return `After [${m[1]}] the page already shows the item's title: don't restate what it is. Write [${m[1]}] and add only its severity, kind, area, status or age.`
+  }
+  return null
 }
 
 // An answer never retracts or doubts an earlier one by itself (the records behind it were read; see the history note).
@@ -209,10 +225,13 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     }
     const text = String(reply.text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/(?<![[\w])([BEPQ]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
     // Asked who might churn: every business listed must have a churn signal in the lookup.
+    // Restating a QA item right after its reference (titles read for the page anyway).
+    const qUsed = [...new Set([...text.matchAll(/\[(Q\d{1,3})\]/g)].map((x) => x[1]))]
+    const restated = qUsed.length ? restatedTitle(text, await namesFor(c, qUsed)) : null
     const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
     const names = [...c.refs.values()].map((r) => r.name).filter(Boolean)
-    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : 'It was cut off. Shorter, and finish the sentence.') : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
+    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : 'It was cut off. Shorter, and finish the sentence.') : restated ? restated : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)
