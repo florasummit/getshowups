@@ -182,15 +182,30 @@ export function RunsView({ params, go }) {
   const [release, setRelease] = useState(params.release || '')
   const set = (k, v) => go({ ...params, view: 'qa', tab: 'runs', [k]: v || null }, { replace: true })
   const list = d && !d.error ? qa.arr(d.executions) : []
-  const filtered = Object.values(f).some((v) => v != null && v !== '')
+  const active = Object.values(f).filter((v) => v != null && v !== '').length
+  const filtered = active > 0
+  // Phones: the filters sit behind one button so the run list starts on the first screen (desktop shows them all).
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const clear = () => (setRelease(''), setTestText(''), go({ view: 'qa', tab: 'runs' }, { replace: true }))
   // Browser-report run records (older ones included): they carry related incidents and per-test retest history.
   const earlier = legacy && !legacy.error && !filtered ? qa.arr(legacy.automated) : []
     return (
     <div className="cc-main" data-qa-runs>
       <PageHead go={go} crumbs={[crumbs[0]]} title="Runs" lede="Every run, automated, production, manual or imported: who started it, against which release, and what it found." />
       <ImportReport go={go} onImported={() => (reload(true), reloadLegacy(true))} />
+      <div className="qa-filters-toggle" data-filters-toggle>
+        <button type="button" className="btn btn-quiet btn-sm" aria-expanded={filtersOpen} aria-controls="qa-run-filters" onClick={() => setFiltersOpen(!filtersOpen)}>
+          Filters{active ? ` (${active})` : ''}
+        </button>
+        {filtered && (
+          <button type="button" className="link-btn" onClick={clear}>
+            Clear
+          </button>
+        )}
+      </div>
       <form
-        className="cc-toolbar qa-filters"
+        id="qa-run-filters"
+        className={`cc-toolbar qa-filters qa-run-filters${filtersOpen ? ' qa-run-filters--open' : ''}`}
         aria-label="Filter runs"
         onSubmit={(e) => {
           e.preventDefault()
@@ -285,7 +300,7 @@ export function RunsView({ params, go }) {
           </div>
         </details>
         {filtered && (
-          <button type="button" className="link-btn" onClick={() => (setRelease(''), setTestText(''), go({ view: 'qa', tab: 'runs' }, { replace: true }))}>
+          <button type="button" className="link-btn qa-filters-clear" onClick={clear}>
             Clear filters
           </button>
         )}

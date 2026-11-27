@@ -258,13 +258,15 @@ export function qaTabOf(p = {}) {
   return 'overview'
 }
 
+// Presets the server uses for runs it records (not offered as buttons).
+const PRESET_EXTRA = { report: 'CI or imported report', manual_continue: 'Manual checks' }
 // What a run covered, in words ("Quick smoke tests", "42 tests", "3 tests + 1 journey"). The server sends the preset
 // at the top level and scope.tests as a count (or a list).
 export function scopeText(x) {
   if (x?.title) return x.title
   const s = x?.scope || {}
   const preset = x?.preset || s.preset
-  if (preset) return PRESETS.find(([id]) => id === preset)?.[1] || preset
+  if (preset) return PRESETS.find(([id]) => id === preset)?.[1] || PRESET_EXTRA[preset] || preset
   const n = Array.isArray(s.tests) ? s.tests.length : Number(s.tests) || 0
   const j = Array.isArray(s.journeys) ? s.journeys.length : 0
   return [n ? plural(n, 'test') : '', j ? plural(j, 'journey') : ''].filter(Boolean).join(' + ') || 'Run'

@@ -1564,6 +1564,8 @@ export const TESTS = [
 ["e2e:qa-center:e70f61dbad","import a report: preview what it will record (results, environment, release, cost) before confirming, then link to the run","test/e2e/qa-center.spec.js"],
 ["e2e:qa-center:c578c05874","QA at phone width: overview, tests, manual and a plan fit with no sideways scroll @mobile","test/e2e/qa-center.spec.js"],
 ["e2e:qa-center:c578c05874.mobile","QA at phone width: overview, tests, manual and a plan fit with no sideways scroll @mobile","test/e2e/qa-center.spec.js",{"mobile":true}],
+["e2e:qa-center:8795cdc848","Runs at phone width: filters behind one button, the first run on the first screen @mobile","test/e2e/qa-center.spec.js"],
+["e2e:qa-center:8795cdc848.mobile","Runs at phone width: filters behind one button, the first run on the first screen @mobile","test/e2e/qa-center.spec.js",{"mobile":true}],
 ["e2e:quality:9f88ed6482","one page frame: ${shell} logo, tab row and title size stay put on every tab","test/e2e/quality.spec.js",{"pattern":true}],
 ["e2e:quality:289ea5359a","the browser tab names the page after a load and after an in-app click","test/e2e/quality.spec.js"],
 ["e2e:quality:8fc16dcaa0","phone: the current ${shell} tab is on screen, a longer row shows it, and the page never scrolls sideways @mobile","test/e2e/quality.spec.js",{"pattern":true}],

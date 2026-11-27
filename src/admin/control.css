@@ -1451,3 +1451,21 @@ button.cc-item:hover {
   padding-top: 8px;
   padding-bottom: 8px;
 }
+/* Runs filters: all visible on desktop; on a phone behind one "Filters" button so the run list starts on the first
+   screen. The toggle is display:none only where this file created it (never a shared control). */
+.qa-filters-toggle {
+  display: none;
+}
+@media (max-width: 560px) {
+  .qa-filters-toggle {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .qa-run-filters:not(.qa-run-filters--open) {
+    display: none;
+  }
+  .qa-run-filters .qa-filters-clear {
+    display: none;
+  }
+}
