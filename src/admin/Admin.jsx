@@ -10,6 +10,7 @@ import SignInPanel from '../dashboard/SignIn.jsx'
 import { Pill, TabBar } from '../dashboard/ui.jsx'
 import { usePageTitle } from '../dashboard/ui-hooks.js'
 import { sharedFigures } from './figures.js'
+import { AdminAssistantButton, AdminAssistantPanel, ThisWeek } from './AdminAssistant.jsx'
 import '../app.css'
 
 const Review = lazyPage(() => import('./Review.jsx'))
@@ -767,7 +768,7 @@ function Reconciliation() {
   }
   const last = r?.last
   return (
-    <section className="card" aria-labelledby="reconcile-title">
+    <section className="card" aria-labelledby="reconcile-title" id="reconciliation">
       <h2 className="card-title" id="reconcile-title">
         Billing reconciliation
       </h2>
@@ -1472,10 +1473,25 @@ function SalesSetup() {
   )
 }
 
+// ?business=<id> opens that business (links from "This week" and the assistant); #reconciliation scrolls to that card.
+const businessParam = () => new URLSearchParams(window.location.search).get('business')
 function Overview({ me }) {
   const [data, setData] = useState(null)
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState(null)
+  const [selected, setSelectedRaw] = useState(businessParam)
+  const setSelected = (id) => {
+    setSelectedRaw(id)
+    const url = id ? `/admin?business=${encodeURIComponent(id)}` : '/admin'
+    if (`${window.location.pathname}${window.location.search}` !== url) window.history.pushState(null, '', url)
+  }
+  useEffect(() => {
+    const onPop = () => setSelectedRaw(businessParam())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  useEffect(() => {
+    if (data && !selected && window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: 'start' })
+  }, [data, selected])
   const [inviting, setInviting] = useState(false)
   const load = useCallback(() => api('/api/platform/overview').then(({ status, data: d }) => setData(status === 200 ? d : { error: true })), [])
   useEffect(() => {
@@ -1509,6 +1525,7 @@ function Overview({ me }) {
           <InviteForm onDone={load} />
         </section>
       )}
+      <ThisWeek />
       <Metrics m={data.metrics} />
 
       {attention.length > 0 && (
@@ -1705,7 +1722,7 @@ function Console({ me }) {
     <div className={`app${section !== 'overview' ? ' app--wide' : ''}`}>
       <header className="app-header">
         <Logo href="/" />
-        <SignOut email={me.email} to="/admin" />
+        <SignOut email={me.email} to="/admin" extra={<AdminAssistantButton />} />
       </header>
       <TabBar label="Admin" tabs={SECTIONS} current={section} onGo={go} />
       <main className="app-main">
@@ -1733,6 +1750,7 @@ function Console({ me }) {
           <Overview me={me} />
         )}
       </main>
+      <AdminAssistantPanel />
     </div>
   )
 }

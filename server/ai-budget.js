@@ -34,6 +34,7 @@ export const ENTRIES = {
   assistant: { public: false, daily: () => 1_000_000 }, // owner Assistant on Claude
   ads_plan: { public: false, daily: () => 1_000_000 }, // "Draft my plan" (Claude)
   ads_creative: { public: false, daily: () => 1_000_000 }, // ad images (OpenAI)
+  admin_assistant: { public: false, daily: () => 500_000 }, // platform-admin Assistant (server/admin-assist/), booked on 'getshowups'
 }
 export const DEFAULTS = { platform_micros: 5_000_000, public_micros: 3_000_000, business_micros: 1_000_000, retell_minutes: 60, openai_minutes: 30, elevenlabs_minutes: 30, all_off: 0 }
 // What an admin may set (a typo can't open the tap): ceilings up to $100 / day, Retell up to 1,000 minutes.
