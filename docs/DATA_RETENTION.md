@@ -120,6 +120,10 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   (migration 0035) `receptionist_voice_settings` and (migration 0036) `receptionist_voice_inherit`
   (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,
   calls and requests) are purged 365 days after their last update (cron).
+- Research Vault (migration 0052, docs/RESEARCH_VAULT.md): `research_members`, `research_nodes`, `research_versions`,
+  `research_edges` hold GetShowUps' own research (corporate records, retained). They hold no customer personal data and
+  no conversations. Business ids appear only for GetShowUps-owned businesses (internal_live), so account deletion has
+  nothing to erase there. Versions and links are append-only by design (research history).
 - Business phone lines (migration 0049, docs/TELEPHONE.md): `phone_lines` (the business's numbers and the owner's own forwarding
   number), `phone_settings`, `phone_destinations` (team phones that ring) and `phone_calls` (caller number when not hidden,
   time, length, outcome, where the number is shown, the linked customer) are in `ERASED_TABLES`; the numbers are released

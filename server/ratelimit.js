@@ -95,6 +95,8 @@ export const RULES = {
   qaCenterRun: { limit: 20, windowSec: 600 }, //     POST /api/platform/qa/run + cancel (per admin; starts CI / production checks)
   supportDiagnose: { limit: 6, windowSec: 600 }, //  POST /api/platform/inspector calendar diagnosis (per business)
   aiBudgetAdmin: { limit: 30, windowSec: 600 }, //   POST /api/platform/ai-spend limit changes (per admin)
+  researchRead: { limit: 300, windowSec: 600 }, //   GET /api/research/vault (per researcher)
+  researchWrite: { limit: 240, windowSec: 600 }, //  POST /api/research/vault (per researcher; sliders evaluate here, server-side)
   alertTest: { limit: 3, windowSec: 3600 }, //       POST /api/platform/alerts test email (per admin)
   voiceLabStart: { limit: 30, windowSec: 3600 }, //  POST /api/platform/voice-lab/session start (per admin)
   voiceLabTool: { limit: 600, windowSec: 600 }, //   POST /api/platform/voice-lab/tool (per admin)
