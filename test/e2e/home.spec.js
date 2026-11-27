@@ -253,3 +253,21 @@ test('early access goes through our own booking page when it runs: every button 
   await page.goto('/?utm_source=openai&utm_medium=paid&utm_campaign=gsu-gpt-a', { waitUntil: 'networkidle' })
   await expect(page.locator('.hero').getByRole('link', { name: /Request early access/ })).toHaveAttribute('href', '/book/getshowups?utm_source=openai&utm_medium=paid&utm_campaign=gsu-gpt-a')
 })
+
+test('homepage chat panel: shown when the GetShowUps business turned it on (enrollment.salesPanel); the same panel and chat page as customer sites @mobile', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('[data-gsu-chat-panel]')).toHaveCount(0) // this server has no GetShowUps record
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: false, salesChat: true, salesPanel: true } }))
+  await page.goto('/?utm_source=google&utm_campaign=brand')
+  const panel = page.locator('[data-gsu-chat-panel]')
+  await expect(panel.locator('summary')).toContainText('Chat or talk with us')
+  // Nothing loads until it is opened; then the frame is the sales chat page, with the visitor's campaign codes.
+  await expect(panel.locator('iframe')).toBeHidden()
+  await panel.locator('summary').click()
+  await expect(panel.locator('iframe')).toHaveAttribute('src', '/chat/getshowups?utm_source=google&utm_campaign=brand&embed=1')
+  await expect(panel.getByRole('link', { name: 'Open the chat in a new tab' })).toHaveAttribute('href', '/chat/getshowups?utm_source=google&utm_campaign=brand')
+  // Off (or no sales chat): no panel.
+  await page.route('**/api/enrollment', (r) => r.fulfill({ json: { open: false, salesChat: true, salesPanel: false } }))
+  await page.goto('/')
+  await expect(page.locator('[data-gsu-chat-panel]')).toHaveCount(0)
+})

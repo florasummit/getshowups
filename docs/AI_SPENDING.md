@@ -11,6 +11,8 @@ Verified 2026-11-27 against the code and with mocked providers (`test/ai-budget.
 | Public chat and voice AI (receptionist), all businesses together | **$3** | `public_micros` |
 | One business, every AI feature | **$1** | `business_micros` |
 | Retell voice minutes, platform-wide (browser voice and, later, phone AI) | **60 min** | `retell_minutes` |
+| OpenAI realtime voice minutes, platform-wide | **30 min** | `openai_minutes` |
+| ElevenLabs voice minutes, platform-wide | **30 min** | `elevenlabs_minutes` |
 | Everything off | off | `all_off` |
 
 - **Changing a limit**: Admin → "AI spending today" → change the number → "Change …" → type a reason → "Save the new
@@ -60,9 +62,28 @@ Entry points:
 | Failed requests | — | Yes | A provider refusal (HTTP status) is settled at $0; a timeout or abort keeps its worst case | **Yes** (conservative) |
 | **Retell voice minutes** | Retell (about $0.07/min) | **No**: separate, counted in minutes | `retell_minutes` (default 60/day). A start is allowed only if finished calls, plus every open call at its full 15-minute ceiling, plus this call fit. Unreadable means refused. | **Nearly**: starts that land in the same instant can each pass before the other is recorded. Bounded by 3 calls at once per business and 6 starts per IP per 10 min. Retell also bills hold time and short calls as 10 s, so its bill can exceed our measured minutes slightly. |
 | The model inside a Retell call | Anthropic (our engine) | Yes | Each turn is reserved like chat | **Yes** |
-| OpenAI and ElevenLabs browser voice minutes | OpenAI, ElevenLabs | No (minutes) | 600 min per provider per day, 120 per business, 3 at once, 15 min per session | **No**: a running session counts only elapsed time, so calls already running can exceed the day's minutes by up to 15 min each |
+| OpenAI and ElevenLabs browser voice minutes | OpenAI, ElevenLabs | No (minutes) | `openai_minutes` / `elevenlabs_minutes` (default 30 a day each, set in admin), counted like Retell (open calls at their full 15 min). Also 600 per provider (variable), 120 per business, 3 at once, 15 min per session. | **Nearly**: the same same-instant race as Retell. ElevenLabs bills its own LLM on top. |
 | Phone lines (PR #192, off) | Twilio | No | `PHONE_DAILY_MINUTES`, `PHONE_CONCURRENT`; AI turns go through the guard; the AI leg's Retell minutes count toward `retell_minutes` | Off until approved |
 | Sign-in emails (Claude 2, PR #198) | Resend | No | 300 per hour platform-wide, 5 per address per hour, 10 per IP per 10 min; test recipients only until `AUTH_EMAIL_LIVE` | Yes, by count |
+
+## Maximum financial exposure per UTC day (defaults)
+
+Prices are the ones recorded in the code (`server/voice/providers.js`, `server/telephony/lines.js`): estimates, not
+bills.
+
+| Cost | Hard limit | Typical maximum | What can still go over, and by how much |
+| --- | --- | --- | --- |
+| GetShowUps-paid model calls (all features) | $5 (public $3, per business $1) | **$5.00** | Provider timeouts. A timed-out request keeps its full worst-case reservation (about $0.23 for a receptionist call). The SDK's one retry may be billed without being reported. Absolute worst case: every call times out, about 22 reservations a day, so **about +$5** unreported. |
+| Retell voice minutes (about $0.07/min) | 60 min | **about $4.20** | Starts within the same instant both pass before either is recorded: **+15 min (about $1.05) per such start**, bounded by 3 sessions at once per business. Retell bills hold time and rounds calls under 10 s up to 10 s. |
+| OpenAI realtime voice (about $0.08/min, more on long calls) | 30 min | **about $2.40** | The same same-instant race: +15 min (about $1.20) per such start. Long calls cost more per minute. |
+| ElevenLabs voice (about $0.08/min) | 30 min | **about $2.40** | The same race. ElevenLabs bills its own LLM usage on top; that isn't measured here. |
+| The model inside every voice call (our engine) | inside the $3 public limit | included above | — |
+| Phone lines (Twilio) | off (`PHONE_ENABLED`, `PHONE_NUMBER_PURCHASE`) | **$0** | Nothing until approved. |
+| Sign-in emails (#198) | 300 per hour, test recipients only | **$0** until `AUTH_EMAIL_LIVE` | — |
+
+**Total**: about **$14 a day** with every limit reached. The theoretical worst, with every model call timing out, is about
+$19 a day plus about $1 for each same-instant voice start. All of it shows on the admin card. "Turn all AI off now" stops
+new model calls and voice starts within 30 seconds; calls already running finish, at most 15 minutes each.
 
 ## Cloudflare (dashboard, Free plan): what to enable and what not to
 
