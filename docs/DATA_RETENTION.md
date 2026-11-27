@@ -68,7 +68,8 @@ Added 2026-11-26 (migration 0045): `booking_day_hours` (a business's booking day
 | `receptionist_voice_defaults` | Platform-wide default voice provider history (versions; ids of businesses a version pinned) | Platform configuration, not business data | Permanent (business ids only, no personal data) |
 | `acquisition_codes` | GetShowUps' own acquisition plan (migration 0044): per tracking code, the status and cost the founder recorded, and an optional company or place label | Platform operations, not business data; no business id | Permanent (no email addresses or phone numbers: labels refuse them) |
 | `commission_ledger` | Referral commission accruals and reversals (migration 0048): partner id, business id, Stripe invoice/charge/refund ids, amounts, applied terms; no names or contact details. Append-only (triggers refuse changes) | Commission accounting and disputes with partners; tied to collected revenue | 7 years, as billing records (confirm). `commercial_attribution` (the business's source/partner/rep) is erased with the business (ERASED_TABLES) |
-| `referral_partners` | GetShowUps' own partner records: name, contact address, code, terms (no business id) | Platform operations | While the partner relationship lasts; a partner's contact address is removed on their request (owner decision needed on the period) |
+| `referral_partners`, `partner_terms`, `partner_agreements`, `partner_acceptances` | GetShowUps' own partner records: name, contact address, code, status, payout details as words only (bank/card numbers refused), versioned terms, agreement versions and recorded acceptances (no business id) | Platform operations; proof of what each partner agreed to | While the partner relationship lasts plus the period payout records are kept; a partner's contact address is removed on their request (owner decision needed on the period). Terms, agreements and acceptances are append-only |
+| `partner_payouts`, `payout_settlements` | Payouts made outside GetShowUps (date, amount, method label, reference, period) and which commissions they settled; append-only (reversals, never edits) | Accounting with partners | 7 years, as billing records (confirm) |
 | `stripe_events`, `rate_limits`, `sessions` | Event ids, hashed keys, sign-in sessions (not tied to the business) | Idempotency, abuse prevention | Their own expiry |
 
 ## 5. Processors and backups (what we can and can't control)
@@ -119,6 +120,13 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   (migration 0035) `receptionist_voice_settings` and (migration 0036) `receptionist_voice_inherit`
   (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,
   calls and requests) are purged 365 days after their last update (cron).
+- Business phone lines (migration 0049, docs/TELEPHONE.md): `phone_lines` (the business's numbers and the owner's own forwarding
+  number), `phone_settings`, `phone_destinations` (team phones that ring) and `phone_calls` (caller number when not hidden,
+  time, length, outcome, where the number is shown, the linked customer) are in `ERASED_TABLES`; the numbers are released
+  by closing the Twilio subaccount (integrations step). Call records and their callback tasks are removed 365 days after
+  the call (cron `purgeOldCalls`, 200 per run). Nothing is recorded or transcribed by the phone line; what the AI
+  receptionist hears on a call is a receptionist conversation (above). Included in the owner's export (phone_calls.csv,
+  phone_lines.csv).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
   for as long as the lead exists.
 

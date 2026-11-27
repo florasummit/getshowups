@@ -662,7 +662,7 @@ test('emergency off: with ADS_ENABLED=false every ads dashboard route is 404 and
   }
   assert.equal(db.sql.prepare('SELECT count(*) AS n FROM ad_profiles').get().n, 0)
   const me = await import('../functions/api/dashboard/me.js')
-  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false, accountDeletion: false, teachAi: true })
+  assert.deepEqual((await call(me, 'GET', '/api/dashboard/me', { cookie: c })).json.features, { ads: false, ghl: false, accountDeletion: false, teachAi: true, phone: false })
 })
 
 test('ads hold: the Ads screen says why ads are paused (suspended / failed payment), per business only', async () => {

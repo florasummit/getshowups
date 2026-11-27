@@ -102,10 +102,24 @@ const attr = (id) => ({ ...(db.sql.prepare('SELECT * FROM commercial_attribution
 const markTest = (id) => db.sql.prepare("INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES (?, 1, 'founder', 1)").run(id)
 
 const TERMS = { type: 'percent', value: 20, recurring: 'lifetime', windowDays: 90 }
-async function makePartner(fields = {}) {
-  const cookie = await cookieFor(ADMIN)
-  const r = await call(partnersRoute, 'POST', { cookie, body: { action: 'create', name: 'Pool Supply Co', contactEmail: 'rep@poolsupply.example', terms: TERMS, ...fields } })
+const admin = async (body) => call(partnersRoute, 'POST', { cookie: await cookieFor(ADMIN), body })
+// The current partner agreement (created once per test database).
+async function agreementId() {
+  const row = db.sql.prepare('SELECT id FROM partner_agreements ORDER BY id DESC LIMIT 1').get()
+  if (row) return row.id
+  const r = await admin({ action: 'agreement', title: 'Partner agreement', versionLabel: 'v1', url: 'https://getshowups.com/partner-agreement-v1' })
   assert.equal(r.status, 200, JSON.stringify(r.json))
+  return r.json.agreement.id
+}
+// Creates a partner and (by default) takes it through onboarding: terms, the current agreement accepted, activated.
+async function makePartner(fields = {}, { activate = true } = {}) {
+  const r = await admin({ action: 'create', name: 'Pool Supply Co', contactEmail: 'rep@poolsupply.example', terms: TERMS, ...fields })
+  assert.equal(r.status, 200, JSON.stringify(r.json))
+  if (activate) {
+    assert.equal((await admin({ action: 'accept', id: r.json.partner.id, agreementId: await agreementId() })).status, 200)
+    const a = await admin({ action: 'status', id: r.json.partner.id, to: 'active' })
+    assert.equal(a.status, 200, JSON.stringify(a.json))
+  }
   return r.json.partner
 }
 async function signup(email, name, partner = undefined) {
@@ -215,7 +229,7 @@ test('duplicate / conflicting referrals: the first VALID touch wins; unknown and
   assert.equal((await recordAttribution(db, 'b1', { partnerCode: [{ code: first.code, at: t - 2 * DAY }, { code: second.code, at: t - DAY }] }, t)).partnerId, first.id)
   assert.equal((await recordAttribution(db, 'b2', { partnerCode: [{ code: 'unknown123', at: t - 3 * DAY }, { code: paused.code, at: t - 2 * DAY }, { code: second.code, at: t - DAY }] }, t)).partnerId, second.id)
   const none = await recordAttribution(db, 'b3', { partnerCode: [{ code: paused.code, at: t }] }, t)
-  assert.deepEqual([none.partnerId, none.refusal, attr('b3').partner_refusal], [null, 'paused', 'paused'])
+  assert.deepEqual([none.partnerId, none.refusal, attr('b3').partner_refusal], [null, 'not_active', 'not_active'])
 })
 
 test('self-referral is refused: owner = partner, same company domain, partner already a member, partner = closing rep; shared public mailbox domains are fine', async () => {
@@ -303,7 +317,7 @@ test('invoice.paid accrues one commission from the collected amount (tax exclude
   assert.deepEqual(ledger(), [{ kind: 'accrual', amount: 9980, obj: 'in_1', livemode: 0, customer: id, partner_id: p.id }])
   const row = db.sql.prepare('SELECT basis_cents, paid_cents, rule, stripe_charge_id FROM commission_ledger').get()
   assert.deepEqual([row.basis_cents, row.paid_cents, row.stripe_charge_id], [49900, 54390, 'ch_in_1'])
-  assert.deepEqual(Object.keys(JSON.parse(row.rule)).sort(), ['partnerId', 'recurring', 'termsUpdatedAt', 'type', 'value', 'windowDays'])
+  assert.deepEqual(Object.keys(JSON.parse(row.rule)).sort(), ['effectiveFrom', 'partnerId', 'recurring', 'termsVersionId', 'type', 'value', 'version', 'windowDays'])
   // The same event again (Stripe retry) and the same invoice under another event id: still one accrual.
   assert.equal((await paid(id, 'in_1', { amount: 54390, tax: 4490, eventId: 'evt_same' })).json.duplicate, true)
   await paid(id, 'in_1', { amount: 54390, tax: 4490 })
@@ -319,7 +333,7 @@ test('invoice.paid accrues one commission from the collected amount (tax exclude
   assert.ok(!ev[0].details.includes('@'))
 })
 
-test('recurring rules over real payments: once, months:N, lifetime; changing terms applies to later payments only', async () => {
+test('recurring rules over real payments: once, months:N, lifetime; a new terms version applies to businesses attributed after it', async () => {
   const t0 = Math.floor(Date.UTC(2027, 0, 10) / 1000)
   const once = await makePartner({ name: 'Once', terms: { type: 'fixed', value: 5000, currency: 'usd', recurring: 'once', windowDays: 90 } })
   const two = await makePartner({ name: 'Two', terms: { type: 'percent', value: 10, recurring: 'months:2', windowDays: 90 } })
@@ -332,17 +346,26 @@ test('recurring rules over real payments: once, months:N, lifetime; changing ter
   assert.deepEqual(n(a), [5000])
   assert.deepEqual(n(b), [4990, 4990], 'payments within 2 months of the first commissioned one')
   assert.deepEqual(n(c), [4990, 4990, 4990, 4990])
-  await call(partnersRoute, 'POST', { cookie: await cookieFor(ADMIN), body: { action: 'terms', id: life.id, terms: { type: 'percent', value: 5, recurring: 'lifetime', windowDays: 90 } } })
-  await paid(c, `in_${c}_4`, { at: t0 + 4 * MONTH_S })
-  assert.deepEqual(n(c), [4990, 4990, 4990, 4990, 2495])
+  // A new terms version (effective after the latest accrual) applies to businesses attributed from then on; C keeps v1.
+  const v2From = Date.UTC(2027, 5, 1)
+  assert.equal((await admin({ action: 'terms', id: life.id, terms: { type: 'percent', value: 5, recurring: 'lifetime', windowDays: 90 }, effectiveFrom: '2027-06-01' })).json.version, 2)
+  await paid(c, `in_${c}_4`, { at: Math.floor(v2From / 1000) + 5 * 86400 })
+  assert.deepEqual(n(c), [4990, 4990, 4990, 4990, 4990], 'already-referred business: still the version it was attributed under')
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, created_at, updated_at) VALUES ('later1', 'Later', 'UTC', '', 1, 1)").run()
+  await recordAttribution(db, 'later1', { partnerCode: [{ code: life.code, at: v2From + DAY }] }, v2From + DAY)
+  await paid('later1', 'in_later1', { at: Math.floor(v2From / 1000) + 2 * 86400 })
+  assert.deepEqual(n('later1'), [2495])
+  const rows = db.sql.prepare("SELECT customer, terms_version_id, rule FROM commission_ledger WHERE customer IN (?, 'later1') ORDER BY id DESC LIMIT 2").all(c)
+  assert.deepEqual(rows.map((r) => JSON.parse(r.rule).version), [2, 1])
+  assert.ok(rows.every((r) => r.terms_version_id === JSON.parse(r.rule).termsVersionId))
   const audits = db.sql.prepare("SELECT action, details FROM admin_audit WHERE action LIKE 'partner.%'").all()
-  assert.ok(audits.some((x) => x.action === 'partner.terms_set' && JSON.parse(x.details).from.terms.value === 10))
+  assert.ok(audits.some((x) => x.action === 'partner.terms_versioned' && JSON.parse(x.details).version === 2))
   assert.ok(audits.every((x) => !x.details.includes('rep@poolsupply.example')), 'the partner contact address never enters the audit')
 })
 
-test('no accrual when: switch off, partner paused, no terms, test business, subscription ended, partner became a member', async () => {
+test('no accrual when: switch off, partner paused, partner not active (no terms),  test business, subscription ended, partner became a member', async () => {
   const p = await makePartner()
-  const noTerms = await makePartner({ name: 'No terms', terms: undefined })
+  const noTerms = await makePartner({ name: 'No terms', terms: undefined }, { activate: false })
   const id = await signup('owner@pools.example', 'Pools Co', [{ code: p.code, at: Date.now() }])
   const idNoTerms = await signup('owner@spa.example', 'Spa Co', [{ code: noTerms.code, at: Date.now() }])
   const idTest = await signup('owner@hvac.example', 'Hvac Co', [{ code: p.code, at: Date.now() }])
@@ -517,4 +540,135 @@ test('assisted enrollments (stream B, 0047 shape): rep or founder channel, stage
   assert.equal(row('tst1'), undefined)
   assert.deepEqual([v.enrollmentsReady, v.enrollmentStages], [true, { invited: 1, paid: 1, prospect: 1 }])
   assert.ok(!JSON.stringify(v).includes('o@p.example'))
+})
+
+// ---------- onboarding, agreements, terms history, payouts (founder-approved partner admin) ----------
+test('lifecycle + checklist: invited → onboarding → active needs terms and the current agreement accepted; ended is final and confirmed', async () => {
+  const p = await makePartner({ payoutReference: undefined }, { activate: false })
+  const noTerms = await makePartner({ name: 'Bare', terms: undefined, contactEmail: undefined }, { activate: false })
+  const view = async () => (await call(commercialRoute, 'GET', { cookie: await cookieFor(ADMIN) })).json.partners
+  assert.equal((await view()).partners.find((x) => x.id === p.id).status, 'invited')
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'active' })).json.error, 'no_agreement')
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'paused' })).json.error, 'invalid_transition')
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'onboarding' })).status, 200)
+  const agr = await agreementId()
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'active' })).json.error, 'agreement_not_accepted')
+  assert.equal((await admin({ action: 'accept', id: p.id, agreementId: agr, acceptedAt: '2999-01-01' })).json.error, 'invalid_accepted_date')
+  assert.equal((await admin({ action: 'accept', id: p.id, agreementId: agr, evidence: 'Signed copy in the shared drive, 2026-11-20' })).status, 200)
+  assert.equal((await admin({ action: 'accept', id: p.id, agreementId: agr })).json.error, 'already_accepted')
+  await admin({ action: 'accept', id: noTerms.id, agreementId: agr })
+  assert.equal((await admin({ action: 'status', id: noTerms.id, to: 'active' })).json.error, 'terms_required')
+  let me = (await view()).partners.find((x) => x.id === p.id)
+  assert.deepEqual(me.checklist.items, { contactDetails: true, terms: true, agreement: true, payoutDetails: false })
+  assert.deepEqual(me.checklist.blockers, [])
+  // Payout details: a free-text reference only; card / bank numbers are refused before storage.
+  for (const bad of ['Card 4242 4242 4242 4242', 'Account 123456789012', 'IBAN DE89370400440532013000']) assert.equal((await admin({ action: 'details', id: p.id, payoutReference: bad })).json.error, 'sensitive_number', bad)
+  assert.equal((await admin({ action: 'details', id: p.id, payoutReference: 'PayPal business account (on file with finance)' })).status, 200)
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'active' })).status, 200)
+  me = (await view()).partners.find((x) => x.id === p.id)
+  assert.deepEqual([me.status, me.checklist.items.payoutDetails, me.acceptances[0].evidence, me.acceptances.length], ['active', true, 'Signed copy in the shared drive, 2026-11-20', 1])
+  // A new agreement version: partners who haven't accepted it are listed; an active one keeps earning, but resuming needs it.
+  assert.equal((await admin({ action: 'agreement', title: 'Partner agreement', versionLabel: 'v2', body: 'Updated terms of the referral program.' })).status, 200)
+  assert.equal((await admin({ action: 'agreement', title: 'Partner agreement', versionLabel: 'v2', body: 'x' })).json.error, 'version_label_taken')
+  const v = await view()
+  assert.deepEqual([v.agreements[0].versionLabel, v.agreements[0].current, v.notAccepted.map((x) => x.id).sort()], ['v2', true, [p.id, noTerms.id].sort()])
+  await admin({ action: 'pause', id: p.id })
+  assert.equal((await admin({ action: 'resume', id: p.id })).json.error, 'agreement_not_accepted')
+  await admin({ action: 'accept', id: p.id, agreementId: v.agreements[0].id })
+  assert.equal((await admin({ action: 'resume', id: p.id })).status, 200)
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'ended' })).json.error, 'confirmation_required')
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'ended', confirm: true })).status, 200)
+  assert.equal((await admin({ action: 'status', id: p.id, to: 'active' })).json.error, 'invalid_transition')
+  assert.equal((await admin({ action: 'terms', id: p.id, terms: TERMS })).json.error, 'partner_ended')
+  // Not active = no new referrals.
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, service_zips, created_at, updated_at) VALUES ('after-end', 'A', 'UTC', '', 1, 1)").run()
+  assert.equal((await recordAttribution(db, 'after-end', { partnerCode: p.code })).refusal, 'not_active')
+  const audits = db.sql.prepare("SELECT action, details FROM admin_audit WHERE action LIKE 'partner.%'").all()
+  assert.ok(audits.some((x) => x.action === 'partner.status_changed' && JSON.parse(x.details).to === 'ended'))
+  assert.ok(audits.some((x) => x.action === 'partner.agreement_accepted'))
+  for (const x of audits) assert.ok(!/rep@poolsupply|PayPal business|shared drive/.test(x.details), x.action)
+  for (const t of ['partner_terms', 'partner_agreements', 'partner_acceptances']) assert.throws(() => db.sql.prepare(`DELETE FROM ${t}`).run(), /append-only/)
+})
+
+test('agreement acceptance gates earning: an active partner without any accepted agreement earns nothing', async () => {
+  const p = await makePartner()
+  const id = await signup('owner@pools.example', 'Pools Co', [{ code: p.code, at: Date.now() }])
+  // Simulate a partner activated without an acceptance (e.g. a restored database): the accrual is refused.
+  db.sql.prepare("INSERT INTO referral_partners (id, name, contact_email, code, status, created_by, created_at, updated_at) VALUES ('prt_noagree', 'N', NULL, 'noagree234', 'active', 'x', 1, 1)").run()
+  db.sql.prepare("INSERT INTO partner_terms (partner_id, version, terms, effective_from, created_by, created_at) VALUES ('prt_noagree', 1, ?, 0, 'x', 1)").run(JSON.stringify(TERMS))
+  const other = await signup('owner@spa.example', 'Spa Co', [{ code: 'noagree234', at: Date.now() }])
+  assert.equal(attr(other).partner_id, 'prt_noagree')
+  await paid(other, 'in_noagree')
+  await paid(id, 'in_ok')
+  assert.deepEqual(ledger().map((l) => l.obj), ['in_ok'])
+  assert.deepEqual(await accrueCommission(env, other, { id: 'e2', created: Math.floor(Date.now() / 1000) }, { id: 'in_noagree2', amount_paid: 100 }), { accrued: false, reason: 'no_agreement' })
+})
+
+test('terms versions: history kept; a version can never start before the previous one or the latest accrual', async () => {
+  const p = await makePartner()
+  const id = await signup('owner@pools.example', 'Pools Co', [{ code: p.code, at: Date.now() }])
+  await paid(id, 'in_1')
+  assert.equal((await admin({ action: 'terms', id: p.id, terms: TERMS, effectiveFrom: '2020-01-01' })).json.error, 'effective_before_previous')
+  assert.equal((await admin({ action: 'terms', id: p.id, terms: TERMS, effectiveFrom: 'soon' })).json.error, 'invalid_effective_date')
+  const lastAccrual = db.sql.prepare('SELECT created_at FROM commission_ledger').get().created_at
+  db.sql.prepare("INSERT INTO commission_ledger (partner_id, customer, kind, stripe_object_id, amount_cents, currency, basis_cents, paid_cents, livemode, rule, created_at) VALUES (?, ?, 'accrual', 'in_future', 1, 'usd', 1, 1, 0, '{}', ?)").run(p.id, id, lastAccrual + 10 * DAY)
+  assert.equal((await admin({ action: 'terms', id: p.id, terms: TERMS })).json.error, 'effective_before_accrual')
+  const ok = await admin({ action: 'terms', id: p.id, terms: { ...TERMS, value: 15 }, effectiveFrom: new Date(lastAccrual + 11 * DAY).toISOString().slice(0, 10) })
+  assert.equal(ok.json.version, 2)
+  const me = (await call(commercialRoute, 'GET', { cookie: await cookieFor(ADMIN) })).json.partners.partners.find((x) => x.id === p.id)
+  assert.deepEqual(me.termsHistory.map((h) => [h.version, h.terms.value, h.inEffect]), [[1, 20, true], [2, 15, false]])
+  assert.equal(me.terms.value, 20, 'v2 is not in effect yet')
+  assert.throws(() => db.sql.prepare('UPDATE partner_terms SET terms = 1').run(), /append-only/)
+})
+
+test('payouts: recorded only; itemized or on account; never over the live balance; an accrual is settled once; reversal frees it; append-only', async () => {
+  env.STRIPE_LIVE_ENABLED = 'true'
+  const p = await makePartner()
+  const id = await signup('owner@pools.example', 'Pools Co', [{ code: p.code, at: Date.now() }])
+  await paid(id, 'in_test') // test mode: never payable
+  await paid(id, 'in_l1', { live: true })
+  await paid(id, 'in_l2', { live: true })
+  const [l1, l2] = db.sql.prepare("SELECT id FROM commission_ledger WHERE livemode = 1 ORDER BY id").all().map((r) => r.id)
+  const pay = (b) => admin({ action: 'payout', id: p.id, paidOn: new Date().toISOString().slice(0, 10), methodLabel: 'Bank transfer', ...b })
+  const mine = async () => (await call(commercialRoute, 'GET', { cookie: await cookieFor(ADMIN) })).json.partners.partners.find((x) => x.id === p.id).payouts
+  assert.deepEqual((await mine()).balances, { usd: { earnedCents: 19960, paidCents: 0, owedCents: 19960 } })
+  assert.equal((await mine()).unsettled.length, 2)
+  // Validation: no future dates, no bank/card numbers, known live accruals only.
+  assert.equal((await pay({ paidOn: '2999-01-01', amountCents: 100, currency: 'usd' })).json.error, 'invalid_paid_on')
+  assert.equal((await pay({ externalReference: 'acct 0123456789', amountCents: 100, currency: 'usd' })).json.error, 'sensitive_number')
+  const testRow = db.sql.prepare("SELECT id FROM commission_ledger WHERE livemode = 0").get().id
+  assert.equal((await pay({ accrualIds: [testRow] })).json.error, 'unknown_accrual', 'test-mode commission is never payable')
+  // Itemized: settles l1 (its net). The same accrual can't be settled twice.
+  const first = await pay({ accrualIds: [l1], externalReference: 'Wise transfer TR-88', periodFrom: '2026-11-01', periodTo: '2026-11-30' })
+  assert.deepEqual([first.status, first.json.payout.amountCents, first.json.payout.settles], [200, 9980, [l1]])
+  assert.equal((await pay({ accrualIds: [l1] })).json.error, 'already_settled')
+  assert.equal((await pay({ accrualIds: [l2], amountCents: 1 })).json.error, 'amount_mismatch')
+  // On account: never above what is owed.
+  assert.equal((await pay({ amountCents: 9981, currency: 'usd' })).json.error, 'over_balance')
+  assert.equal((await pay({ amountCents: 9980, currency: 'usd' })).status, 200)
+  assert.equal((await pay({ amountCents: 1, currency: 'usd' })).json.error, 'over_balance')
+  assert.equal((await pay({ accrualIds: [l2] })).json.error, 'over_balance', 'l2 is unsettled but the balance is already paid on account')
+  assert.deepEqual((await mine()).balances.usd, { earnedCents: 19960, paidCents: 19960, owedCents: 0 })
+  // The database refuses a second settlement of the same accrual even without the checks above.
+  assert.throws(() => db.sql.prepare("INSERT INTO payout_settlements (payout_id, ledger_id, cycle, amount_cents, created_at) VALUES ('x', ?, 0, 1, 1)").run(l1), /UNIQUE/)
+  // A mistaken payout is reversed (confirmed, once); what it settled is free again; nothing is edited.
+  assert.equal((await admin({ action: 'payout_reverse', id: p.id, payoutId: first.json.payout.id })).json.error, 'confirmation_required')
+  const rev = await admin({ action: 'payout_reverse', id: p.id, payoutId: first.json.payout.id, confirm: true, note: 'Recorded against the wrong partner' })
+  assert.equal(rev.status, 200)
+  assert.equal((await admin({ action: 'payout_reverse', id: p.id, payoutId: first.json.payout.id, confirm: true })).json.error, 'already_reversed')
+  const after = await mine()
+  assert.deepEqual(after.balances.usd, { earnedCents: 19960, paidCents: 9980, owedCents: 9980 })
+  assert.deepEqual(after.unsettled.map((u) => u.ledgerId).sort(), [l1, l2].sort())
+  assert.equal(after.history.find((h) => h.id === first.json.payout.id).reversedBy, rev.json.reversal.id)
+  assert.equal((await pay({ accrualIds: [l1] })).status, 200, 'settled again after its payout was reversed')
+  for (const t of ['partner_payouts', 'payout_settlements']) {
+    assert.throws(() => db.sql.prepare(`UPDATE ${t} SET created_at = 1`).run(), /append-only/)
+    assert.throws(() => db.sql.prepare(`DELETE FROM ${t}`).run(), /append-only/)
+  }
+  // A refund after payment leaves the partner overpaid (shown, never hidden).
+  await refunded('ch_in_l1', 49900, 49900, { live: true })
+  assert.equal((await mine()).balances.usd.owedCents, -9980)
+  const audits = db.sql.prepare("SELECT action, details FROM admin_audit WHERE action LIKE 'partner.payout%'").all()
+  assert.deepEqual(audits.map((a) => a.action), ['partner.payout_recorded', 'partner.payout_recorded', 'partner.payout_reversed', 'partner.payout_recorded'])
+  assert.ok(audits.every((a) => !a.details.includes('Wise transfer') && !a.details.includes('rep@')))
 })

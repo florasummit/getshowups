@@ -33,6 +33,7 @@ import { spokenToDigits } from './digits.js'
 import { activeRules, decisionFor, noteAnswer, observe, ruleBlock, NOTE_ANSWER_TOOL } from '../intelligence/runtime.js'
 import { turnNote } from '../intelligence/compile.js'
 import { understand, mergeFacts } from '../intelligence/understand.js'
+import { reserveAi, worstCase } from '../ai-budget.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
 export const DEFAULT_MODEL = 'claude-opus-5-5'
@@ -890,6 +891,13 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     if (opts.isStale?.() && !ctx.committed) return stale()
     // Aborting is only allowed while the turn has done nothing; after a booking/request the answer is still produced.
     const signal = opts.signal && !ctx.committed ? opts.signal : undefined
+    // One spending guard (server/ai-budget.js): the call's worst case is reserved against the platform, public, business
+    // and receptionist ceilings before it is made; refused → the booking/contact fallback below, no model call.
+    const budget = await reserveAi(env, { entry: 'receptionist', customerId: customer.id, now, micros: worstCase({ chars: JSON.stringify(transcript).length + system[0].text.length + JSON.stringify(tools).length, maxOutput: 4096, inPerToken: PRICE.cacheWrite, outPerToken: PRICE.output }) })
+    if (!budget.ok) {
+      failed = `budget_${budget.reason}`
+      break
+    }
     const tm = Date.now()
     let startUsage = null // what the stream reported when it began: the known part of an aborted call's bill
     try {
@@ -903,6 +911,8 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
       timing.modelMs += Date.now() - tm
       timing.modelCalls++
       spent += costMicros(startUsage)
+      // An aborted stream may have been billed for output we never saw: it keeps its worst-case reservation.
+      if (!(err instanceof Anthropic.APIUserAbortError || signal?.aborted)) pending.push(budget.settle(costMicros(startUsage)))
       if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) return stale()
       failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
       break
@@ -910,6 +920,7 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     timing.modelMs += Date.now() - tm
     timing.modelCalls++
     spent += costMicros(res.usage)
+    pending.push(budget.settle(costMicros(res.usage))) // off the critical path; settled before the turn is saved
     const u = res.usage || {}
     tokens.in += u.input_tokens || 0
     tokens.cr += u.cache_read_input_tokens || 0

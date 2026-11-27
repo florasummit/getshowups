@@ -92,6 +92,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)
+  api/phone/twilio/[step]  Business phone line webhooks (server/telephony/); api/dashboard/phone: Settings → Phone line
   api/platform/voice-provider  Admin Console voice-provider management for ANY business (server/voice/admin.js; /admin/voice-lab)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
@@ -227,7 +228,15 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      codes (src/lib/referral.js, /r/<code> → /?partner=, or ?ref=); first VALID one wins; refusals recorded as codes
                      (unknown_code, paused, self_referral: partner = owner/member/rep or same non-public domain, outside_window)
   partners.js        Referral partners (admin only, POST /api/platform/partners, audited; NO login/access for partners). Random
-                     10-char codes; terms typed field by field, NO defaults anywhere; no terms = nothing accrues
+                     10-char codes; status invited → onboarding → active ⇄ paused → ended (final); activate/resume needs a terms
+                     version + recorded acceptance of the CURRENT agreement version (partner_agreements/partner_acceptances,
+                     method recorded_by_admin); only active partners gain referrals or earn. Payout details = words only (13–19
+                     digit runs, 8+ digit runs, IBANs refused). Terms: partner-terms.js, append-only versions, NO defaults; a
+                     business earns under the version in effect when it was attributed; a version never starts before the
+                     previous one or the latest accrual; ledger rows keep rule snapshot + terms_version_id (never recalculated)
+  partner-payouts.js Payouts made OUTSIDE GetShowUps, recorded only (no payment code). Live ledger rows only; itemized (settles
+                     accruals at their net) or on account; INSERT guarded by the owed balance; payout_settlements unique
+                     (ledger_id, cycle) = never settled twice; mistakes → one audited reversal row (append-only, never edited)
   commissions.js     Append-only commission_ledger (triggers; unique (kind, stripe_object_id)). REFERRALS_ENABLED exactly 'true'
                      or nothing accrues. invoice.paid → accrual from amount_paid − tax (window, recurring once|months:N|lifetime,
                      partner active, not test business, subscription not ended, re-checked self-referral); charge.refunded
@@ -634,6 +643,19 @@ Non-negotiables:
   the outbox) is tracked separately: recorded / pending / sent / failed / not_sent (held). Phone routing settings stay
   disabled and labelled "not connected" until a line exists. Voice: an interrupted turn that did nothing is never
   saved; a call continues the page's conversation; ending the conversation ends the call.
+- Business phone lines (server/telephony/, migration 0049, docs/TELEPHONE.md; NOT live): a Twilio number in the business's OWN
+  subaccount, bought + configured by API (buyNumber: VoiceUrl/StatusCallback = /api/phone/twilio/voice|status). Webhooks
+  functions/api/phone/twilio/[step].js (voice|screen|dial|ai|status|verify) are signed per subaccount and act ONLY for the
+  business owning it. planCall(): ring VERIFIED destinations (code typed on a verification call; US only, no premium/N11;
+  never our lines or the owner's forwarding number) with press-1 screening, then the fallback: AI = the same receptionist
+  engine via Retell register-phone-call + <Dial><Sip>sip:<call_id>@sip.retellai.com (receptionist on + voice released), or
+  callback = spoken message + a receptionist_requests row (call:<CallSid>; never a promised time). CallSid idempotent,
+  outcomes forward-only, loops rejected, PHONE_CONCURRENT / PHONE_DAILY_MINUTES limits, test businesses never call or buy.
+  Recording does not exist (no setting/column/<Record>). Callers link to a lead only on an exact single-person number match
+  or the AI conversation's own lead. Settings → Phone line owns routing (Receptionist page links there); phoneSetup() is
+  the one status (enrollment checklist, Setup check, tile); operator tool list_calls returns refs, never numbers. Costs are
+  labelled estimates (COST_ESTIMATES). Switches (approval): PHONE_ENABLED (needs privacy wording naming call records),
+  PHONE_NUMBER_PURCHASE. Call rows purged after 365 days; tables in ERASED_TABLES.
 - Customer-facing voice on every provider (server/voice/customer.js, public routes api/receptionist/[customer]/voice,
   voice-connect, voice-tool, voice-session): the provider comes from receptionist_voice_settings (never the browser),
   sessions are pinned to their provider, tools run through runVoiceTool bound to the session's business (dry run only
@@ -738,6 +760,15 @@ Non-negotiables:
   forward-only. An unknown send outcome is never resent. Conversation text: owner inbox only, never logged or in admin
   views; purged after 365 days; erased with the account. Live SMS / registration submission / number purchase need
   approval (docs/TEXTING_ACTIVATION.md).
+- AI spending guard (server/ai-budget.js, docs/AI_SPENDING.md): EVERY model call GetShowUps pays for (receptionist, Teach,
+  Assistant on Claude, ads plan/images; any new one too) calls reserveAi({ entry, customerId, micros: worst case }) BEFORE
+  the provider and settle(reported cost) after. One conditional UPDATE charges platform / public / business / entry
+  daily ceilings together (atomic; a refusal charges nothing); fails CLOSED; aborted or timed-out calls keep the worst
+  case. Refused → the entry's fixed fallback, never a silent model call. Limits ($5 platform / $3 public / $1 business,
+  Retell 60 min, all_off) live in ai_budget_settings (0050), set in Admin → "AI spending today" (audited, 30 s cache);
+  variables can only lower them. Emergency off: all_off, restriction 'ai' per business, AI_ALL_OFF / AI_OFF_BUSINESSES
+  (also stop voice starts). Every Retell start checks retellRoom() (open calls at their full 15 min). Own-key and
+  Workers AI calls don't go through it. Never enable Cloudflare Bot Fight Mode: it can't exempt webhooks.
 - Founder alerts (server/alerts.js): OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Platform admins only,
   through the outbox and launch gate (queued only for admins recipientAllowed() delivers to now); one email per incident
   (deterministic outbox id), ≤ 1 per business + kind per 6 h (flapping), ≤ 10 per run + digest; test/deleted businesses never alert; codes and counts only.

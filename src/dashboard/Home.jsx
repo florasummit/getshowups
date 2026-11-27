@@ -24,6 +24,7 @@ import { usePageTitle } from './ui-hooks.js'
 
 const Ads = lazyPage(() => import('./Ads.jsx'))
 const GhlSettings = lazyPage(() => import('./GhlSettings.jsx'))
+const PhoneSettings = lazyPage(() => import('./PhoneSettings.jsx'))
 const WebsiteTab = lazyPage(() => import('./WebsiteTab.jsx'))
 const FollowUps = lazyPage(() => import('./FollowUps.jsx'))
 const Receptionist = lazyPage(() => import('./Receptionist.jsx'))
@@ -512,12 +513,13 @@ function Reminders() {
 
 // Every card of the page, in order: [id, the card's heading, short name for the menu]. The menu stays in reach while the
 // page scrolls (a row of links on a wide screen, one "Jump to" control on a phone), so no card is a long scroll away.
-const settingsSections = ({ plan, ghl }) =>
+const settingsSections = ({ plan, ghl, phone }) =>
   [
     ['setup-check', 'Setup check'],
     ['business', 'Business'],
     ['services', 'Services and prices', 'Services'],
     ['details', 'Details on your website (phone number)', 'Phone and details'],
+    phone && ['phone', 'Phone line', 'Phone line'],
     ['policies', 'What customers should know'],
     ['booking-hours', 'Booking hours'],
     ['closed-dates', 'Closed dates and notice', 'Closed dates'],
@@ -581,7 +583,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
   return (
     <div className="enter">
       <h1 className="title title--page">Settings</h1>
-      <SettingsMenu sections={settingsSections({ plan: planCard, ghl: me.features?.ghl })} />
+      <SettingsMenu sections={settingsSections({ plan: planCard, ghl: me.features?.ghl, phone: me.features?.phone })} />
       <section className="card" id="setup-check" aria-labelledby="setup-check-title">
         <h2 className="card-title" id="setup-check-title">
           Setup check
@@ -601,6 +603,14 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
         <TitleHelp help="website_details">Details on your website</TitleHelp>
         <ProfileForm />
       </section>
+      {me.features?.phone && (
+        <section className="card" id="phone">
+          <h2 className="card-title">Phone line</h2>
+          <Suspense fallback={<div aria-busy="true" />}>
+            <PhoneSettings />
+          </Suspense>
+        </section>
+      )}
       <section className="card" id="policies">
         <TitleHelp help="policies">What customers should know</TitleHelp>
         <PoliciesForm />

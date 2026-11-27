@@ -81,7 +81,10 @@ test('founder-assisted: prospect → workspace → Stripe-hosted payment → con
   const d = page.locator('[data-enrollment]')
   await expect(d.locator('[data-check="details"]')).toHaveAttribute('data-state', 'ok')
   await expect(d.locator('[data-check="hours"]')).toHaveAttribute('data-state', 'ok')
-  await expect(d.locator('[data-check="phone"]')).toContainText('Phone: not available yet')
+  // Phone setup comes from the phone-lines module (server/telephony/lines.js phoneSetup; PHONE_ENABLED in e2e): a new
+  // workspace has no line yet, so it is an optional "to do" that never blocks readiness.
+  await expect(d.locator('[data-check="phone"]')).toContainText('Phone line')
+  await expect(d.locator('[data-check="phone"]')).toHaveAttribute('data-state', 'action')
   await expect(d).toHaveAttribute('data-stage', 'ready')
   await d.locator('[data-send-invite]').click()
   const claimUrl = await d.locator('[data-claim-url] input').inputValue()

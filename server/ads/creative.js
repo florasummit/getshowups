@@ -11,6 +11,7 @@
 // Tests use CREATIVE_API_MOCK_ORIGIN (loopback only) — never set in production.
 import { randomToken } from '../google-oauth.js'
 import { readAsset, sniffImage } from '../assets.js'
+import { reserveAi } from '../ai-budget.js'
 
 // An owner's own website photo becomes an ad creative (no AI, no cost): the bytes stay in website_assets
 // (storage_key 'asset:<id>'); it still needs the owner's explicit approval before an ad can use it.
@@ -92,6 +93,12 @@ export async function generateImage(env, customer, { prompt, campaignId = null, 
   const cost = Number(env.IMAGE_COST_CENTS) > 0 ? Number(env.IMAGE_COST_CENTS) : 8
   const r = await reserve(env, customer, 'image', 'openai', cost, now)
   if (!r.ok) return r
+  // The shared daily guard too (server/ai-budget.js): the image's price (cents → micro-dollars) against every ceiling.
+  const budget = await reserveAi(env, { entry: 'ads_creative', customerId: customer, now, micros: cost * 10_000 })
+  if (!budget.ok) {
+    await refund(env, r.usageId)
+    return { ok: false, error: 'ai_limit' }
+  }
   const id = randomToken(12)
   let res
   try {
@@ -103,12 +110,13 @@ export async function generateImage(env, customer, { prompt, campaignId = null, 
     })
   } catch {
     await refund(env, r.usageId)
-    return { ok: false, error: 'provider_unavailable', retryable: true }
+    return { ok: false, error: 'provider_unavailable', retryable: true } // a timeout keeps its reservation (it may have been billed)
   }
   const body = await res.json().catch(() => ({}))
   const b64 = body?.data?.[0]?.b64_json
   if (!res.ok || typeof b64 !== 'string') {
     await refund(env, r.usageId)
+    if (!res.ok) await budget.settle(0)
     const error = res.status === 429 ? 'provider_rate_limited' : res.status === 400 ? 'provider_rejected' : 'provider_error'
     return { ok: false, error, retryable: res.status === 429 || res.status >= 500 }
   }
@@ -146,7 +154,7 @@ export async function startVideo(env, customer, { prompt, imageCreativeId, campa
     })
   } catch {
     await refund(env, r.usageId)
-    return { ok: false, error: 'provider_unavailable', retryable: true }
+    return { ok: false, error: 'provider_unavailable', retryable: true } // a timeout keeps its reservation (it may have been billed)
   }
   const body = await res.json().catch(() => ({}))
   if (!res.ok || typeof body.id !== 'string') {

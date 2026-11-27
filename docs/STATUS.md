@@ -2,6 +2,27 @@
 
 _Update at the end of every task. Newest first._
 
+## Business phone lines (2026-11-27, branch feat/phone-lines; NOT released, needs founder approval)
+Twilio numbers in each business's own subaccount; ring verified team phones (press-1 screening), then the AI receptionist
+(Retell custom telephony over SIP, same engine) or a callback task in Needs attention. Call records with caller (or hidden),
+outcome, length, where the number is shown, a person only on evidence. Settings → Phone line; Receptionist tile + Setup
+check + owner assistant (list_calls) read the same state. docs/TELEPHONE.md (architecture, safety, costs, activation).
+- **Verified (simulated only):** 27 unit tests (test/phone.test.js: signatures, tenant isolation, idempotency, screening,
+  fallbacks, AI registration, loops, limits, toll-fraud refusals, verification, purchase gates, test businesses, assistant,
+  retention, deletion) + test/e2e/phone.spec.js (Settings card). Nothing ran against real Twilio or Retell.
+- **Migration 0049** (phone_lines, phone_settings, phone_destinations, phone_calls; additive). Number order: 0046–0048 are
+  claimed by the commercial-enrollment work (Claude 2); whichever releases first applies only its own file.
+- **Off until approved:** PHONE_ENABLED (privacy policy must name call records first), PHONE_NUMBER_PURCHASE (paid numbers).
+- **Next:** founder decisions (provider, privacy wording, usage model), then release, then the first live PoolThru line.
+
+## AI spending guard (2026-11-27, branch fix/ai-budget; NOT released, needs founder approval)
+One reservation layer (server/ai-budget.js) before every GetShowUps-paid model call. Founder defaults (pre-revenue):
+platform $5, public chat + voice $3, business $1 per UTC day, Retell 60 min/day platform-wide (open calls counted at
+their full 15 min); stricter endpoint limits kept. Atomic, fails closed, settled to the reported cost. Limits, warnings
+and "Turn all AI off now" in Admin → "AI spending today" (reason + confirm, audited, applied within 30 s; migration 0050
+ai_budget_settings); per business: restriction "All AI". Verified with mocked providers only. Cloudflare: one edge
+rate-limit rule recommended; Bot Fight Mode NOT recommended (can't exempt webhooks). docs/AI_SPENDING.md.
+
 ## Follow-up on the remaining usability findings (2026-11-27, PR #190, live; founder approved, migration 0045 applied)
 **Release record (2026-11-27 UTC):** main 8ea75f9, deployment e73b1ab9-0807-4844-a74a-f999eded61ea, rollback
 0d1989d2-afb8-4916-9afe-e51cc4260868 (main da69a9e). Migration 0045 (booking_day_hours, business_addresses; CREATE TABLE IF
