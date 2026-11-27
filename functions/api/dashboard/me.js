@@ -8,6 +8,7 @@ import { adsAccess } from '../../../server/ads/access.js'
 import { deletionEnabled, deletionStatus } from '../../../server/deletion.js'
 import { testStatus } from '../../../server/testbusiness.js'
 import { studioAccess } from '../../../server/intelligence/access.js'
+import { phoneEnabled } from '../../../server/telephony/lines.js'
 
 export async function onRequestGet({ request, env }) {
   const { session, response } = await requireSession(request, env, { needCustomer: false })
@@ -29,6 +30,6 @@ export async function onRequestGet({ request, env }) {
     progress: await progress(env, customer),
     bookingUrl: customer ? `${siteOrigin(env)}/book/${customer.id}` : null,
     // Ads and Teach Your AI: every eligible business (server/eligibility.js), nothing to switch on per business.
-    features: { ads: customer ? await adsAccess(env, customer) : false, ghl: env.GHL_ENABLED === 'true', accountDeletion: Boolean(customer) && deletionEnabled(env), teachAi: customer ? await studioAccess(env, customer).catch(() => false) : false },
+    features: { ads: customer ? await adsAccess(env, customer) : false, ghl: env.GHL_ENABLED === 'true', accountDeletion: Boolean(customer) && deletionEnabled(env), teachAi: customer ? await studioAccess(env, customer).catch(() => false) : false, phone: Boolean(customer) && phoneEnabled(env) },
   })
 }

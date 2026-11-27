@@ -47,6 +47,7 @@ const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 // Erased per business, children before parents (foreign keys).
 export const ERASED_TABLES = [
   'ai_rule_versions', 'ai_rules',
+  'phone_calls', 'phone_destinations', 'phone_settings', 'phone_lines',
   'receptionist_requests', 'receptionist_events', 'receptionist_calls', 'receptionist_conversations', 'receptionist_settings', 'receptionist_voice_inherit', 'receptionist_voice_settings',
   'thread_messages', 'lead_threads', 'followup_settings', 'sms_provider_objects', 'sms_registration_extra', 'sms_accounts', 'sms_registrations', 'messages', 'sms_consents', 'message_optouts', 'appointment_confirmations', 'revenue_entries', 'coverage_requests', 'appointment_outcomes', 'appointment_changes',
   'lead_services', 'lead_addresses', 'lead_attribution', 'test_marks', 'meta_lead_events', 'ghl_links', 'lsa_leads', 'google_calls', 'google_call_setup', 'appointments', 'leads',

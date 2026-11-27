@@ -80,6 +80,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/profile    Business details (phone, industry, description, services+prices, towns)
   api/dashboard/receptionist/voices  GET the active provider's voice catalog (admin: ?provider=, &refresh=1)
   api/receptionist/[customer]/voice-connect | voice-tool | voice-session  Customer voice sessions on OpenAI/ElevenLabs (server/voice/customer.js)
+  api/phone/twilio/[step]  Business phone line webhooks (server/telephony/); api/dashboard/phone: Settings → Phone line
   api/platform/voice-provider  Admin Console voice-provider management for ANY business (server/voice/admin.js; /admin/voice-lab)
   api/dashboard/onboarding GET readiness checklist; POST check_availability | tested | finish
   api/dashboard/ads/  Ads: index (GET), profile, plan, budget, campaign (save/approve/validate/launch/pause/resume/remove), creative
@@ -594,6 +595,19 @@ Non-negotiables:
   the outbox) is tracked separately: recorded / pending / sent / failed / not_sent (held). Phone routing settings stay
   disabled and labelled "not connected" until a line exists. Voice: an interrupted turn that did nothing is never
   saved; a call continues the page's conversation; ending the conversation ends the call.
+- Business phone lines (server/telephony/, migration 0049, docs/TELEPHONE.md; NOT live): a Twilio number in the business's OWN
+  subaccount, bought + configured by API (buyNumber: VoiceUrl/StatusCallback = /api/phone/twilio/voice|status). Webhooks
+  functions/api/phone/twilio/[step].js (voice|screen|dial|ai|status|verify) are signed per subaccount and act ONLY for the
+  business owning it. planCall(): ring VERIFIED destinations (code typed on a verification call; US only, no premium/N11;
+  never our lines or the owner's forwarding number) with press-1 screening, then the fallback: AI = the same receptionist
+  engine via Retell register-phone-call + <Dial><Sip>sip:<call_id>@sip.retellai.com (receptionist on + voice released), or
+  callback = spoken message + a receptionist_requests row (call:<CallSid>; never a promised time). CallSid idempotent,
+  outcomes forward-only, loops rejected, PHONE_CONCURRENT / PHONE_DAILY_MINUTES limits, test businesses never call or buy.
+  Recording does not exist (no setting/column/<Record>). Callers link to a lead only on an exact single-person number match
+  or the AI conversation's own lead. Settings → Phone line owns routing (Receptionist page links there); phoneSetup() is
+  the one status (enrollment checklist, Setup check, tile); operator tool list_calls returns refs, never numbers. Costs are
+  labelled estimates (COST_ESTIMATES). Switches (approval): PHONE_ENABLED (needs privacy wording naming call records),
+  PHONE_NUMBER_PURCHASE. Call rows purged after 365 days; tables in ERASED_TABLES.
 - Customer-facing voice on every provider (server/voice/customer.js, public routes api/receptionist/[customer]/voice,
   voice-connect, voice-tool, voice-session): the provider comes from receptionist_voice_settings (never the browser),
   sessions are pinned to their provider, tools run through runVoiceTool bound to the session's business (dry run only

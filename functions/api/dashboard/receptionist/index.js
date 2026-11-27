@@ -28,6 +28,7 @@ import { knowledgeFor, knowledgeWarnings, LIMITS } from '../../../../server/rece
 import { customerVoiceStatus } from '../../../../server/voice/customer.js'
 import { chatPanelSetting, saveChatPanel } from '../../../../server/chat-panel.js'
 import { checkProviderSwitch, getVoiceSettings, isPlatformAdminEmail, ownerView, providerOverview, rollbackProvider, saveVoicePreferences, switchProvider, voiceSettingsReady } from '../../../../server/voice/settings.js'
+import { phoneSetup } from '../../../../server/telephony/lines.js'
 
 const MODES = ['ai_first', 'human_first', 'after_hours']
 const clean = (v, max) => String(v ?? '').replace(/\r/g, '').trim().slice(0, max)
@@ -123,7 +124,8 @@ export async function onRequestGet({ request, env }) {
       voiceStatus: !modelConfigured(env) ? 'not_configured' : await customerVoiceStatus(env, customer.id), // 'testing' = Retell not released yet (RECEPTIONIST_VOICE_BUSINESSES)
       callbacks: withRequests, // callback requests and messages are recorded
       staffEmail: messagesLive(env) ? 'live' : 'test_mode', // owner emails about callbacks leave test mode only with MESSAGES_LIVE
-      phoneLine: false, // no phone number is connected to GetShowUps: no phone routing, no live transfer
+      // The business phone line (server/telephony/lines.js phoneSetup): 'unavailable' until PHONE_ENABLED and 0049; routing is set in Settings → Phone line.
+      phoneLine: await phoneSetup(env, customer.id).catch(() => ({ state: 'unavailable' })),
     },
     settings,
     warnings: knowledgeWarnings(k),

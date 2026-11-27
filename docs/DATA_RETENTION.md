@@ -117,6 +117,13 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
   (migration 0035) `receptionist_voice_settings` and (migration 0036) `receptionist_voice_inherit`
   (callback requests/messages: name, phone/email, note) are in `ERASED_TABLES`; conversations (with their events,
   calls and requests) are purged 365 days after their last update (cron).
+- Business phone lines (migration 0049, docs/TELEPHONE.md): `phone_lines` (the business's numbers and the owner's own forwarding
+  number), `phone_settings`, `phone_destinations` (team phones that ring) and `phone_calls` (caller number when not hidden,
+  time, length, outcome, where the number is shown, the linked customer) are in `ERASED_TABLES`; the numbers are released
+  by closing the Twilio subaccount (integrations step). Call records and their callback tasks are removed 365 days after
+  the call (cron `purgeOldCalls`, 200 per run). Nothing is recorded or transcribed by the phone line; what the AI
+  receptionist hears on a call is a receptionist conversation (above). Included in the owner's export (phone_calls.csv,
+  phone_lines.csv).
 - Opt-outs remain hashes (`message_optouts`); texting consent evidence stays in `sms_consents` (wording version + time)
   for as long as the lead exists.
 

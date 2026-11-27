@@ -620,7 +620,7 @@ test('owner screen: real capability statuses (phone line never claimed), setting
   await seed('alpha')
   const cookie = await owner('alpha')
   const g = (await call(ownerApi, 'GET', '/api/dashboard/receptionist', { cookie })).json()
-  assert.deepEqual([g.ready, g.settings.enabled, g.capabilities.phoneLine, g.capabilities.voice, g.capabilities.callbacks], [true, false, false, false, true])
+  assert.deepEqual([g.ready, g.settings.enabled, g.capabilities.phoneLine.state, g.capabilities.voice, g.capabilities.callbacks], [true, false, 'unavailable', false, true])
   // REC-01: "Try it as a customer" is offered only when the customer chat page really opens. chatClosed says why it
   // is closed, by the same checks as the public chat route (off → 'off'; on → open exactly when that route says enabled).
   const chatPage = async () => (await call(infoApi, 'GET', '/api/receptionist/alpha', { params: { customer: 'alpha' } })).json()

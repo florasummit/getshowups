@@ -9,6 +9,7 @@ import { getProfile } from './onboarding.js'
 import { getPolicies } from './policies.js'
 import { liveContent } from './website.js'
 import { track } from './events.js'
+import { phoneSetup } from './telephony/lines.js'
 
 const ORDER = { critical: 0, important: 1, optional: 2 }
 // A calendar date as people say it ("Thu, Nov 26"): owners never see 2026-11-26 (docs/DESIGN_SYSTEM.md "Copy").
@@ -41,13 +42,14 @@ export async function setupCheck(env, customer, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const UNREAD = Symbol('unread')
   const soft = (p) => Promise.resolve(p).catch(() => UNREAD)
-  const [profile, policies, rules, cal, live, rec] = await Promise.all([
+  const [profile, policies, rules, cal, live, rec, phone] = await Promise.all([
     soft(getProfile(db, customer.id)),
     soft(getPolicies(db, customer.id)),
     soft(bookingRules(db, customer.id)),
     soft(env.GOOGLE_TOKENS.get(`google:${customer.id}`).then(Boolean)),
     soft(liveContent(db, customer.id)),
     soft(db.prepare('SELECT enabled, greeting FROM receptionist_settings WHERE customer = ?1').bind(customer.id).first()),
+    soft(phoneSetup(env, customer.id)),
   ])
   const out = []
   const add = (id, level, title, why, fix, where, more = {}) => out.push({ id, level, title, why, fix, where, ...more })
@@ -80,6 +82,7 @@ export async function setupCheck(env, customer, now = Date.now()) {
     if (!profile?.cities?.length && visits) add('no_towns', 'important', 'No towns are listed', 'The website and receptionist can’t say where you work.', 'List the towns you serve.', 'settings#details')
     if (!profile?.description) add('no_description', 'optional', 'No short description', 'The receptionist has less to say about you.', 'Add two sentences.', 'settings#details')
   }
+  if (phone !== UNREAD && phone?.state === 'needs_owner') add('phone_rings_nobody', 'important', 'Calls to your phone line ring nobody', 'No verified phone is set to ring, so every caller gets the fallback.', 'Add and verify a phone under Phone line.', 'settings#phone')
   if (/\b(LLC|Inc\.?|Corp\.?|Ltd\.?)\s*$/i.test(customer.name)) add('legal_name', 'optional', `Customers see “${customer.name}” when they book`, 'A legal suffix reads oddly on a booking page.', 'Use the name on your truck or sign.', 'settings#business')
   if (rec && rec !== UNREAD && rec.enabled === 1 && /\b(calling|your call|on the line)\b/i.test(rec.greeting || '')) add('greeting_call', 'optional', 'Your chat greeting sounds like a phone call', `It says “${String(rec.greeting).slice(0, 80)}”.`, 'Change the greeting on Receptionist.', 'receptionist')
   if (policies !== UNREAD && !policies.beforeVisit) add('no_visit_note', 'optional', 'No visit instructions', 'Customers aren’t told about gates, pets or parking.', 'Add a note in Settings.', 'settings#policies')
