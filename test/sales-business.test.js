@@ -79,6 +79,13 @@ test('admin creates the sales business once: Software playbook, hours, the liste
   kv.set('google:getshowups', JSON.stringify({ customer: 'getshowups', refreshToken: 'x' }))
   assert.equal(await salesChatAvailable(env), true)
   assert.equal((await call(enrollment, 'GET', '/api/enrollment')).json().salesChat, true)
+  // The homepage is the GetShowUps business's website: its "chat panel on your website" choice shows the panel there.
+  assert.equal((await call(enrollment, 'GET', '/api/enrollment')).json().salesPanel, false)
+  db.sql.prepare("INSERT INTO website_chat_settings (customer, panel, updated_at) VALUES ('getshowups', 1, 1)").run()
+  assert.equal((await call(enrollment, 'GET', '/api/enrollment')).json().salesPanel, true)
+  // Never without the sales chat itself (receptionist on + bookable).
+  kv.delete('google:getshowups')
+  assert.deepEqual([(await call(enrollment, 'GET', '/api/enrollment')).json().salesChat, (await call(enrollment, 'GET', '/api/enrollment')).json().salesPanel], [false, false])
 })
 
 test('the Lab test business is admin-marked, offered by the Voice Lab status, and never the real sales record', async () => {

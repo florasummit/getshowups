@@ -8,6 +8,7 @@ import Pricing from './components/Pricing.jsx'
 import BookDemo from './components/BookDemo.jsx'
 import Faq from './components/Faq.jsx'
 import Footer from './components/Footer.jsx'
+import SalesChatPanel from './components/SalesChatPanel.jsx'
 
 export default function App() {
   // Arriving from another page at /#section (e.g. "Book a call" on the closed sign-up screen): the browser's own
@@ -35,6 +36,7 @@ export default function App() {
         <Faq />
       </main>
       <Footer />
+      <SalesChatPanel />
     </div>
   )
 }

@@ -8,7 +8,7 @@ let pending = null
 export function fetchEnrollment() {
   pending ??= fetch('/api/enrollment', { headers: { Accept: 'application/json' } })
     .then((r) => (r.ok ? r.json() : null))
-    .then((d) => (typeof d?.open === 'boolean' ? { open: d.open, salesChat: d.salesChat === true } : null))
+    .then((d) => (typeof d?.open === 'boolean' ? { open: d.open, salesChat: d.salesChat === true, salesPanel: d.salesChat === true && d.salesPanel === true } : null))
     .catch(() => null)
   return pending
 }
@@ -41,6 +41,19 @@ export const CONTACT_EMAIL = 'hello@getshowups.com'
 export const SALES_BUSINESS = 'getshowups'
 export function useSalesChat() {
   return useEnrollment()?.salesChat === true
+}
+// The GetShowUps business chose the chat panel for its website (Receptionist page): the homepage shows it.
+export function useSalesPanel() {
+  return useEnrollment()?.salesPanel === true
+}
+// The sales chat page, carrying the campaign codes the visitor arrived with (the chat keeps them as attribution).
+export function salesChatHref(search = typeof window === 'undefined' ? '' : window.location.search) {
+  const inbound = new URLSearchParams(search)
+  const out = new URLSearchParams()
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign']) if (CODE.test(inbound.get(k) || '')) out.set(k, inbound.get(k))
+  if (/^[A-Za-z0-9_-]{10,200}$/.test(inbound.get('gclid') || '')) out.set('gclid', inbound.get('gclid'))
+  const q = out.toString()
+  return `/chat/${SALES_BUSINESS}${q ? `?${q}` : ''}`
 }
 
 // Our own booking page for a call with the founder: GetShowUps' consultation calendar, through the same booking

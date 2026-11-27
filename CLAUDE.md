@@ -735,6 +735,15 @@ Non-negotiables:
   forward-only. An unknown send outcome is never resent. Conversation text: owner inbox only, never logged or in admin
   views; purged after 365 days; erased with the account. Live SMS / registration submission / number purchase need
   approval (docs/TEXTING_ACTIVATION.md).
+- AI spending guard (server/ai-budget.js, docs/AI_SPENDING.md): EVERY model call GetShowUps pays for (receptionist, Teach,
+  Assistant on Claude, ads plan/images; any new one too) calls reserveAi({ entry, customerId, micros: worst case }) BEFORE
+  the provider and settle(reported cost) after. One conditional UPDATE charges platform / public / business / entry
+  daily ceilings together (atomic; a refusal charges nothing); fails CLOSED; aborted or timed-out calls keep the worst
+  case. Refused → the entry's fixed fallback, never a silent model call. Limits ($5 platform / $3 public / $1 business,
+  Retell 60 min, all_off) live in ai_budget_settings (0050), set in Admin → "AI spending today" (audited, 30 s cache);
+  variables can only lower them. Emergency off: all_off, restriction 'ai' per business, AI_ALL_OFF / AI_OFF_BUSINESSES
+  (also stop voice starts). Every Retell start checks retellRoom() (open calls at their full 15 min). Own-key and
+  Workers AI calls don't go through it. Never enable Cloudflare Bot Fight Mode: it can't exempt webhooks.
 - Founder alerts (server/alerts.js): OFF unless FOUNDER_ALERTS_ENABLED is exactly 'true' (approval). Platform admins only,
   through the outbox and launch gate (queued only for admins recipientAllowed() delivers to now); one email per incident
   (deterministic outbox id), ≤ 1 per business + kind per 6 h (flapping), ≤ 10 per run + digest; test/deleted businesses never alert; codes and counts only.
