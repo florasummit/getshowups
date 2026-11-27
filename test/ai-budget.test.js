@@ -6,7 +6,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { reserveAi, spendToday, worstCase, aiOff, resetSettingsCache, retellRoom, setBudgetSetting, DEFAULTS } from '../server/ai-budget.js'
+import { reserveAi, spendToday, worstCase, aiOff, resetSettingsCache, retellRoom, voiceRoom, setBudgetSetting, DEFAULTS } from '../server/ai-budget.js'
 import { setRestriction } from '../server/restrictions.js'
 import { sha256Hex } from '../server/google-oauth.js'
 import * as spendApi from '../functions/api/platform/ai-spend.js'
@@ -151,7 +151,7 @@ test('admin view: platform admins only; today’s totals, top businesses and ent
 })
 
 test('conservative defaults: $5 platform, $3 public, $1 per business, 60 Retell minutes; stricter entry limits still apply', async () => {
-  assert.deepEqual(DEFAULTS, { platform_micros: 5_000_000, public_micros: 3_000_000, business_micros: 1_000_000, retell_minutes: 60, all_off: 0 })
+  assert.deepEqual(DEFAULTS, { platform_micros: 5_000_000, public_micros: 3_000_000, business_micros: 1_000_000, retell_minutes: 60, openai_minutes: 30, elevenlabs_minutes: 30, all_off: 0 })
   // $1 per business stops a business long before the receptionist's own $5.
   const r = await Promise.all(Array.from({ length: 12 }, () => reserveAi(env, { entry: 'receptionist', customerId: 'alpha', micros: 100_000, now: NOW })))
   assert.equal(r.filter((x) => x.ok).length, 10)
@@ -197,6 +197,15 @@ test('Retell minutes: open calls count their full 15 minutes; a start is allowed
   assert.deepEqual(await retellRoom(env, NOW), { ok: false, used: 55, cap: 60 })
   await setBudgetSetting(env, 'retell_minutes', 120, 'staff@getshowups.com')
   assert.equal((await retellRoom(env, NOW)).ok, true)
+  // OpenAI and ElevenLabs have their own conservative allowance (30 min each), counted the same strict way.
+  db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES ('web_1', 'alpha', 'c', 'openai', ?)").run(NOW - 1000)
+  assert.deepEqual(await voiceRoom(env, 'openai', NOW), { ok: true, used: 15, cap: 30 })
+  db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES ('web_2', 'alpha', 'c', 'openai', ?)").run(NOW - 500)
+  assert.equal((await voiceRoom(env, 'openai', NOW)).ok, false)
+  assert.deepEqual(await voiceRoom(env, 'elevenlabs', NOW), { ok: true, used: 0, cap: 30 })
+  assert.equal((await voiceRoom(env, 'unknown', NOW)).ok, false)
+  await setBudgetSetting(env, 'openai_minutes', 45, 'staff@getshowups.com')
+  assert.equal((await voiceRoom(env, 'openai', NOW)).ok, true)
   const broken = { ONBOARDING_DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error('D1') }, all: async () => { throw new Error('D1') } }), all: async () => { throw new Error('D1') } }) } }
   resetSettingsCache()
   const errs = console.error

@@ -168,6 +168,9 @@ test('the provider is chosen server-side: Retell by default with the same payloa
 test('no fallback, clear errors, bounded: an unconfigured or switched-off active provider refuses (the customer can keep typing), the Retell release gate still applies to customers, concurrency and daily minutes are capped per business and per provider', async () => {
   await seed('alpha')
   await seed('beta')
+  // This test checks the per-business and per-provider limits below; the platform voice allowance (server/ai-budget.js,
+  // 30 OpenAI minutes by default, open sessions counted at 15 min) is tested in test/ai-budget.test.js.
+  db.sql.prepare("INSERT INTO ai_budget_settings (key, value, updated_by, updated_at) VALUES ('openai_minutes', 1000, 'test', 1)").run()
   setProvider('alpha', 'openai')
   assert.deepEqual([(await start('alpha', {}, undefined)).status, (await start('alpha')).json().provider], [200, 'openai'])
   env.OPENAI_API_KEY = ''

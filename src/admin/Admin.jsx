@@ -837,7 +837,10 @@ const AI_LIMITS = [
   ['public_micros', 'Public chat + voice per day ($)', true],
   ['business_micros', 'Each business per day ($)', true],
   ['retell_minutes', 'Retell minutes per day', false],
+  ['openai_minutes', 'OpenAI voice minutes per day', false],
+  ['elevenlabs_minutes', 'ElevenLabs voice minutes per day', false],
 ]
+const VOICE_NAMES = { retell: 'Retell', openai: 'OpenAI', elevenlabs: 'ElevenLabs' }
 function AiSpend() {
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState({})
@@ -856,7 +859,7 @@ function AiSpend() {
     setNote('Saved and audited. Applies to every business within 30 seconds.')
     return null
   }
-  const WARN = { platform: 'Platform', public: 'Public chat + voice', business: 'Business', retell: 'Retell minutes' }
+  const WARN = { platform: 'Platform', public: 'Public chat + voice', business: 'Business', retell: 'Retell minutes', openai: 'OpenAI voice minutes', elevenlabs: 'ElevenLabs voice minutes' }
   return (
     <section className="card" aria-labelledby="ai-spend-title" data-ai-spend>
       <h2 className="card-title" id="ai-spend-title">
@@ -880,8 +883,12 @@ function AiSpend() {
           <p className="fine">
             Platform {usd(d.platform)} of {usd(d.ceilings.platform)} · public (receptionist) {usd(d.public)} of {usd(d.ceilings.public)} · each business up to {usd(d.ceilings.business)}. Reserved before each call, settled to what the provider reported.
           </p>
-          <p className="fine">
-            Retell voice: {d.retell.used == null ? 'unreadable (new calls refused)' : `${d.retell.used} min`} of {d.retell.cap} min (open calls count their full 15 minutes). Retell bills these minutes itself; they are not in the dollar figures.
+          <p className="fine" data-voice-minutes>
+            Voice minutes today:{' '}
+            {Object.entries(d.voice)
+              .map(([p, v]) => `${VOICE_NAMES[p]} ${v.used == null ? 'unreadable (new calls refused)' : `${v.used} min`} of ${v.cap}`)
+              .join(' · ')}
+            . Open calls count their full 15 minutes. Each provider bills these minutes itself; they are not in the dollar figures.
           </p>
           <div className="form" data-ai-limits>
             {AI_LIMITS.map(([key, label, money]) => {

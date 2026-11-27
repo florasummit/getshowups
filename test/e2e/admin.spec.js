@@ -110,7 +110,9 @@ test('AI spending: today’s use against the limits, Retell minutes, and a limit
   const card = page.locator('[data-ai-spend]')
   await expect(card.getByRole('heading', { name: 'AI spending today (UTC)' })).toBeVisible()
   await expect(card).toContainText('All AI: on')
-  await expect(card).toContainText('Retell voice:')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('Retell')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('OpenAI')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('ElevenLabs')
   // The e2e server seeds generous limits (serve.sh); 999 of 1,000 Retell minutes changes nothing for parallel specs.
   const row = card.locator('[data-ai-limit="retell_minutes"]')
   await row.getByRole('textbox').fill('999')

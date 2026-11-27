@@ -310,7 +310,8 @@ npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")"
 # minutes, open calls counted at 15 min) would refuse mocked voice and chat calls of parallel specs during one run.
 d1 "
 INSERT INTO ai_budget_settings (key, value, updated_by, updated_at) VALUES
-  ('platform_micros', 100000000, 'e2e', $NOW), ('public_micros', 100000000, 'e2e', $NOW), ('business_micros', 100000000, 'e2e', $NOW), ('retell_minutes', 1000, 'e2e', $NOW);
+  ('platform_micros', 100000000, 'e2e', $NOW), ('public_micros', 100000000, 'e2e', $NOW), ('business_micros', 100000000, 'e2e', $NOW), ('retell_minutes', 1000, 'e2e', $NOW),
+  ('openai_minutes', 1000, 'e2e', $NOW), ('elevenlabs_minutes', 1000, 'e2e', $NOW);
 "
 
 # Business details (business-details.spec.js): per-day hours saved in Settings, and a public address on the booking page.
