@@ -67,6 +67,11 @@ export function ManualCard({ t, onSaved, executionId, go }) {
           </ul>
         </div>
       )}
+      {(t.blocked || t.steps?.blocked) && (
+        <p className="cc-status-line" role="note" data-qa-blocked>
+          Blocked: {t.blocked || t.steps.blocked}
+        </p>
+      )}
       <div className="qa-do">
         <div className="cc-callout">
           <span className="cc-label">What to do</span>

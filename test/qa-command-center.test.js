@@ -146,7 +146,7 @@ function edgeStub(over = {}) {
     fetches.push({ url: String(url), init })
     const u = new URL(String(url))
     if (u.origin !== EDGE) throw new Error('unexpected network call')
-    const route = { '/build.json': () => Response.json(build), '/dashboard': () => new Response('<html>', { headers: { 'X-Frame-Options': 'DENY' } }), '/': () => new Response('<html>'), '/api/dashboard/me': () => Response.json({ error: 'unauthenticated' }, { status: 401 }), '/api/platform/me': () => Response.json({}, { status: 401 }), '/api/platform/qa/overview': () => Response.json({}, { status: 401 }), '/api/admin/google-health': () => Response.json({}, { status: 401 }), '/p/qa-test-pools': () => new Response('<html>'), '/book/qa-test-pools': () => new Response('<html>'), ...over }[u.pathname]
+    const route = { '/build.json': () => Response.json(build), '/dashboard': () => new Response('<html>', { headers: { 'X-Frame-Options': 'DENY' } }), '/': () => new Response('<html>'), '/api/dashboard/me': () => Response.json({ error: 'unauthenticated' }, { status: 401 }), '/api/platform/me': () => Response.json({}, { status: 401 }), '/api/platform/qa/overview': () => Response.json({}, { status: 401 }), '/api/admin/google-health': () => Response.json({}, { status: 401 }), '/p/qa-test-pools': () => new Response('<html>'), '/book/qa-test-pools': () => new Response('<html>'), '/r/qaprobe000000': () => new Response(null, { status: 302, headers: { Location: '/?partner=qaprobe000000' } }), ...over }[u.pathname]
     return route ? route() : new Response('not found', { status: 404 })
   }
 }
@@ -194,7 +194,7 @@ test('production verification: queued by a click, run by the cron in bounded bat
   assert.equal(d.json.execution.progress.done, total)
   assert.ok(['passed', 'partial', 'failed'].includes(d.json.execution.status))
   const byId = Object.fromEntries(d.json.results.map((r) => [r.testId, r]))
-  for (const id of ['prod:build-commit', 'prod:edge-headers', 'prod:homepage', 'prod:migrations', 'prod:qa-hashes', 'prod:dashboard-signed-out', 'prod:platform-signed-out', 'prod:qa-signed-out', 'prod:admin-api-unauthorized', 'prod:test-site', 'prod:test-booking-page']) assert.equal(byId[id]?.status, 'pass', `${id}: ${byId[id]?.actual}`)
+  for (const id of ['prod:build-commit', 'prod:edge-headers', 'prod:homepage', 'prod:migrations', 'prod:qa-hashes', 'prod:dashboard-signed-out', 'prod:platform-signed-out', 'prod:qa-signed-out', 'prod:admin-api-unauthorized', 'prod:test-site', 'prod:test-booking-page', 'prod:referral-link']) assert.equal(byId[id]?.status, 'pass', `${id}: ${byId[id]?.actual}`)
   assert.match(byId['prod:test-site'].actual, /qa-test-pools/)
   // POST refusals are never sent to the edge: in process, labelled, never "verified".
   for (const id of ['prod:write-signed-out', 'prod:chat-cross-site']) {
@@ -202,7 +202,7 @@ test('production verification: queued by a click, run by the cron in bounded bat
     assert.match(byId[id].actual, /^in-process, not through the edge: HTTP 40[13] as expected/)
   }
   assert.equal(d.json.execution.progress.mode, 'edge')
-  assert.equal(d.json.execution.progress.rateLimitRows, 1, 'the site view is the one rate-limited request')
+  assert.equal(d.json.execution.progress.rateLimitRows, 2, 'the site view and the referral link are the rate-limited requests')
   assert.equal(byId['prod:cron-heartbeat'].status, 'blocked', 'no cron run recorded yet: blocked, never a fake pass')
   assert.ok(d.json.results.every((r) => r.environment === 'production' && r.revision === COMMIT))
   // A switched-off capability is skipped with its reason, never failed.
@@ -671,4 +671,30 @@ test('qa-report sends measured durations only: node:test total, Playwright stats
   }
   assert.deepEqual(run(`${dir}/pw.json`, '--unit', `${dir}/unit.json`, '--job-ms', `${dir}/job.txt`).durations, { jobMs: 540000, unitMs: 61234, e2eMs: 300000 })
   assert.equal(run('--unit', `${dir}/unit.json`).durations.jobMs, undefined, 'no job time reported → none sent')
+})
+
+test('affiliate / referral journey: existing tests mapped to it; the referred production sign-up is Blocked with its reason, never a pass', async () => {
+  const c = await admin()
+  const list = allTests().list
+  const j = list.filter((t) => t.journey === 'affiliate-referral')
+  assert.ok(j.some((t) => t.kind === 'unit' && t.file === 'test/commercial.test.js'), 'unit tests mapped, not duplicated')
+  assert.ok(j.some((t) => t.kind === 'e2e' && t.file === 'test/e2e/commercial.spec.js'))
+  assert.deepEqual(j.filter((t) => t.kind === 'human').map((t) => t.id.split('.')[1]), ['partner', 'link', 'attribution', 'accrual', 'payout', 'referred-signup'])
+  assert.ok(list.some((t) => t.id === 'prod:referral-link' && t.feature === 'commercial.attribution'))
+  const id = 'human:affiliate-referral.referred-signup'
+  const blocked = await call(resultRoute, 'POST', '/api/platform/qa/result', { c, body: { testId: id, status: 'pass', confirm: true } })
+  assert.equal(blocked.status, 409)
+  assert.equal(blocked.json.error, 'test_blocked')
+  assert.match(blocked.json.reason, /Enrollment is closed in production/)
+  assert.equal((await call(resultRoute, 'POST', '/api/platform/qa/result', { c, body: { testId: id, status: 'blocked', actual: 'still closed', confirm: true } })).status, 201)
+  assert.equal((await freshness(env)).statuses.get(id).status, 'blocked')
+  const inv = (await call(inventoryRoute, 'GET', '/api/platform/qa/inventory?area=partners', { c })).json
+  const leaf = inv.areas[0].journeys.flatMap((x) => x.features).flatMap((f) => f.tests).find((t) => t.id === id)
+  assert.equal(leaf.status, 'blocked')
+  assert.match(leaf.blocked, /assisted enrollment never passes a partner code/)
+  const plan = (await call(planRoute, 'POST', '/api/platform/qa/plan', { c, body: { journeys: ['affiliate-referral'], environment: 'manual' } })).json
+  assert.equal(plan.scope.tests, 5)
+  assert.ok(plan.scope.excluded.some((x) => x.id === id && x.why === 'blocked'))
+  // The other steps can be recorded normally.
+  assert.equal((await call(resultRoute, 'POST', '/api/platform/qa/result', { c, body: { testId: 'human:affiliate-referral.link', status: 'pass', confirm: true } })).status, 201)
 })
