@@ -2,6 +2,28 @@
 
 _Update at the end of every task. Newest first._
 
+## Follow-up on the remaining usability findings (2026-11-27, PR #190, live; founder approved, migration 0045 applied)
+**Release record (2026-11-27 UTC):** main 8ea75f9, deployment e73b1ab9-0807-4844-a74a-f999eded61ea, rollback
+0d1989d2-afb8-4916-9afe-e51cc4260868 (main da69a9e). Migration 0045 (booking_day_hours, business_addresses; CREATE TABLE IF
+NOT EXISTS only) rehearsed twice on a restored copy, applied alone at 00:18 UTC: 104 tables, both new tables empty, every
+existing table unchanged; 0040 still NOT applied. Backup ~/getshowups-backups/prod-20261127T001811Z-pre-0045.sql
+(integrity ok, 102 tables equal to production); Time Travel bookmark before 0045
+000014f2-00000000-00005130-8b72220619428e83668ec50787f61f99. scripts/release.sh: HEALTHY.
+- **Resolved:** SET-03 per-day booking hours (one global slot length), BOOK-08 optional public business address (never for
+  businesses that visit customers), WEB-14 one service catalog (website services linked to Settings → Services, read at
+  request time; editor edits write the catalog), TEACH-04 published rules before personality, DASH-08 one date per metric,
+  ONB-10 no extra click after connecting the calendar. PRs #187, #188, #189 merged through #190.
+- **Production checks (read-only):** live sites of poolthru-llc (and www.poolthru.com), toys-for-us and bob-electrical
+  byte-identical; booking availability identical (no slot lost or added), services, durations and slot lengths identical;
+  no business address exposed; PoolThru's services ([]), hours, minimum notice and closures unchanged. Not verifiable in
+  production without an owner session or model calls: Settings per-day hours and address forms, Overview/Assistant
+  numbers, Teach precedence in prompts, the calendar-connect redirect (all covered by CI).
+- **Ledger, final:** 82 resolved (some in part with the remainder documented), ONB-01 homepage sign-up retained while
+  enrollment is closed (founder decision), ONB-14 step-card widths retained, DASH-01 production-model behaviour blocked
+  (needs paid model calls).
+- **PoolThru:** its website keeps its own service copy until the founder saves services in Settings; then the site shows
+  the Settings values (names matched ignoring punctuation). A price is at most 40 characters.
+
 ## Product Excellence: the 85 usability findings (2026-11-26, PR #185, live; founder approved)
 **Release record (2026-11-26 UTC):** main 80c7d97, deployment f38a0904-74c5-4599-973a-c6f5533751a8, rollback
 9000a737-cc3a-460b-a1ce-d43aad1c0b12 (main fc2eea9). No migration. Backup
