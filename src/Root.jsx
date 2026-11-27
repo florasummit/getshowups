@@ -8,6 +8,7 @@ const Dashboard = lazyPage(() => import('./dashboard/Dashboard.jsx'))
 const EmailLink = lazyPage(() => import('./dashboard/EmailLink.jsx'))
 const BookingPage = lazyPage(() => import('./booking/BookingPage.jsx'))
 const Admin = lazyPage(() => import('./admin/Admin.jsx'))
+const ResearchVault = lazyPage(() => import('./admin/research/ResearchVault.jsx'))
 const Privacy = lazyPage(() => import('./legal/Privacy.jsx'))
 const ChatPage = lazyPage(() => import('./receptionist/ChatPage.jsx'))
 const Claim = lazyPage(() => import('./claim/Claim.jsx'))
@@ -51,6 +52,14 @@ export default function Root() {
     return (
       <Suspense fallback={null}>
         <Claim />
+      </Suspense>
+    )
+  }
+  // Research Vault: its own lazy chunk, not in any navigation; the server authorizes every request (404 otherwise).
+  if (path === '/admin/research-vault' || path.startsWith('/admin/research-vault/')) {
+    return (
+      <Suspense fallback={null}>
+        <ResearchVault />
       </Suspense>
     )
   }

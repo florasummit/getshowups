@@ -2,6 +2,16 @@
 
 _Update at the end of every task. Newest first._
 
+## Research Vault, Stage A (2026-11-27, branch feat/research-vault; NOT released, needs founder approval)
+Founder-only research workspace at /admin/research-vault (docs/RESEARCH_VAULT.md).
+- **What it contains:** one versioned, append-only knowledge store; 5 built-in models with derivations, server-side
+  numeric checks and counterexamples; slider charts; KPIs from the existing definitions (GetShowUps-owned businesses
+  only); funnel accountability without blame; experiments (sample size, no early verdicts, Bayesian update); an
+  expected-value decision queue; an on-request evidence scan that stays dormant without enough data; "what is unproven".
+- **Costs and limits:** $0 more; no AI, cron or outside calls. Cross-account research off.
+- **Release needs:** migration 0052 (additive) and `RESEARCH_FOUNDER_EMAIL` (founder's admin email); until it is set, the
+  vault is 404 for everyone.
+
 ## Spending gaps (2026-11-27, PR #201, live; founder approved at cc6fe2e)
 **Release record:** main 0e387a2, deployment 568f1148-c59d-4f28-b971-eefd86d1625a, rollback 05abb6e8 (main 7b3df87). No
 migration (120 tables). Backup ~/getshowups-backups/prod-20261127T181633Z-pre-201.sql (integrity ok, 120 tables).

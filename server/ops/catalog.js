@@ -594,6 +594,17 @@ registerCapability({
     return s === 'available' ? { status: 'ok', summary: 'Voice released' } : { status: 'off', summary: s === 'testing' ? 'Voice in testing (not released)' : 'Voice not configured' }
   },
 })
+// ---------- Research Vault (server/research/, migration 0052) ----------
+registerCapability({
+  id: 'research.vault',
+  tier: 'optional',
+  name: 'Research Vault (confidential research records, models, experiments, decisions)',
+  journey: 'platform',
+  description: 'Founder-only research workspace at /admin/research-vault. Deterministic: no model calls, no cron, no outside requests.',
+  external: null,
+  dependsOn: [],
+  state: (env) => (String(env.RESEARCH_FOUNDER_EMAIL || '').trim() ? { mode: 'live', note: 'Founder set' } : { mode: 'disabled', note: 'RESEARCH_FOUNDER_EMAIL not set', approval: 'Set RESEARCH_FOUNDER_EMAIL to the founder’s admin email' }),
+})
 // ---------- Business phone lines (server/telephony/, migration 0049) ----------
 registerCapability({
   id: 'phone.calls',

@@ -1,0 +1,24 @@
+/* Research Vault (ResearchVault.jsx): loaded only with its own chunk. Uses the app tokens; nothing global. */
+.rv-page { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+.rv-page .card { margin-top: 16px; }
+.rv-expr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--cloud, #f5f7fb); padding: 8px 12px; border-radius: 8px; overflow-x: auto; }
+.rv-studio { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 20px; align-items: start; }
+.rv-sliders input[type='range'] { width: 100%; min-height: 44px; }
+.rv-chart { margin: 0; }
+.rv-chart svg { width: 100%; height: auto; display: block; }
+.rv-axis { stroke: currentColor; opacity: 0.35; }
+.rv-tick { font-size: 11px; fill: currentColor; opacity: 0.7; }
+.rv-line { stroke-width: 2.5; }
+.rv-line-0 { stroke: #2563eb; }
+.rv-line-1 { stroke: #e8590c; }
+.rv-marker { stroke: currentColor; opacity: 0.35; stroke-dasharray: 4 4; }
+.rv-results { margin-top: 8px; }
+.rv-section { margin-top: 12px; }
+.rv-section summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.rv-checks { list-style: none; padding: 0; display: grid; gap: 6px; }
+.rv-sub { font-size: 1rem; margin: 16px 0 6px; }
+.rv-row-btn { all: unset; cursor: pointer; display: grid; gap: 2px; width: 100%; min-height: 44px; }
+.rv-row-btn:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .rv-studio { grid-template-columns: 1fr; }
+}
