@@ -296,7 +296,7 @@ export async function executionReported(env, executionId, { runId, stored, costM
 export const CI_JOB_LIMIT_MS = 25 * MIN // the CI job time limit the founder tracks against
 export const CI_WARN_SHARE = 0.8
 export async function ciTime(db, limit = 10) {
-  const { results } = await db.prepare("SELECT id, requested_at, finished_at, revision, durations FROM qa_executions WHERE environment = 'ci' AND durations IS NOT NULL ORDER BY coalesce(finished_at, requested_at) DESC LIMIT ?1").bind(limit).all()
+  const { results } = await db.prepare("SELECT id, requested_at, finished_at, revision, durations FROM qa_executions WHERE environment = 'ci' AND durations IS NOT NULL ORDER BY coalesce(finished_at, requested_at) DESC, rowid DESC LIMIT ?1").bind(limit).all()
   const runs = results.map((r) => ({ executionId: r.id, at: r.finished_at || r.requested_at, commit: r.revision, ...parse(r.durations, {}) })).filter((r) => Number.isFinite(r.jobMs))
   const ms = runs.map((r) => r.jobMs).sort((a, b) => a - b)
   const median = ms.length ? (ms.length % 2 ? ms[(ms.length - 1) / 2] : Math.round((ms[ms.length / 2 - 1] + ms[ms.length / 2]) / 2)) : null
