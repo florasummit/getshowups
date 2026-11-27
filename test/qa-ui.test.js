@@ -182,3 +182,32 @@ test('every QA request goes through the one client module (no fetch or api() in 
     assert.doesNotMatch(src, /\bfetch\(|from '\.\.\/\.\.\/\.\.\/lib\/api\.js'/, `${f}.jsx must use ../qa-api.js`)
   }
 })
+
+test('import preview: says exactly what a report will record, refuses what is not a report', async () => {
+  const { previewReport } = await import('../src/admin/control/qa-lib.js')
+  const p = previewReport({
+    source: 'local',
+    provider: 'real',
+    revision: '54a9422e1f0c3b7d9a2e6f4b8c1d0e3f5a7b9c2d',
+    hashes: { 'eval:admin:week': { def: 'a1b2c3d4', deps: 'b2c3d4e5' } },
+    results: [
+      { kind: 'eval', testId: 'eval:admin:week', status: 'passed', costMicros: 120000, model: 'claude-opus-5-5' },
+      { kind: 'eval', testId: 'eval:admin:cost', status: 'failed', costMicros: 80000, model: 'claude-opus-5-5' },
+      { kind: 'unit', file: 'test/x.test.js', title: 't', status: 'skipped' },
+    ],
+  })
+  assert.equal(p.tests, 3)
+  assert.deepEqual(p.byStatus, { pass: 1, fail: 1, blocked: 0, skipped: 1 })
+  assert.deepEqual(p.byKind, { eval: 2, unit: 1 })
+  assert.equal(p.costUsd, 0.2)
+  assert.equal(p.environment, 'local')
+  assert.equal(p.provider, 'real')
+  assert.deepEqual(p.models, ['claude-opus-5-5'])
+  assert.equal(p.hashes, 1)
+  // No cost in the file → unknown, never $0.
+  assert.equal(previewReport({ results: [{ status: 'passed' }] }).costUsd, null)
+  assert.equal(previewReport({ results: [{ status: 'passed' }], revision: 'not a sha' }).revision, null)
+  assert.match(previewReport({ suites: [] }).error, /raw Playwright report/)
+  assert.match(previewReport([]).error, /JSON object/)
+  assert.match(previewReport({ results: [] }).error, /no results/)
+})

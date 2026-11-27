@@ -257,6 +257,35 @@ test('backlog: "Note an idea" from any QA screen lands in the Inbox; status chan
   await expect(page.locator('[data-item-history]')).toContainText('Planned')
 })
 
+test('import a report: preview what it will record (results, environment, release, cost) before confirming, then link to the run', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto('/admin/control?view=qa&tab=runs')
+  await page.locator('[data-import-open]').click()
+  const box = page.locator('[data-import]')
+  // Not a report: refused in the page, nothing sent.
+  await box.getByLabel(/Report file/).setInputFiles({ name: 'pw.json', mimeType: 'application/json', buffer: Buffer.from('{"suites":[]}') })
+  await expect(box.locator('[data-import-error]')).toContainText('raw Playwright report')
+  const report = {
+    source: 'local',
+    provider: 'real',
+    startedAt: Date.now(),
+    results: [
+      { kind: 'eval', testId: 'eval:admin:e2e-import-' + Date.now().toString(36), file: 'scripts/admin-assistant-eval.mjs', title: 'What needs my attention?', status: 'passed', durationMs: 900, costMicros: 1500, model: 'e2e-model' },
+      { kind: 'eval', testId: 'eval:admin:e2e-import-b' + Date.now().toString(36), file: 'scripts/admin-assistant-eval.mjs', title: 'What did QA cost?', status: 'failed', durationMs: 800, costMicros: 500, model: 'e2e-model', error: 'missing_fact' },
+    ],
+  }
+  await box.getByLabel(/Report file/).setInputFiles({ name: 'eval.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(report)) })
+  const preview = box.locator('[data-import-preview]')
+  await expect(preview.locator('[data-import-tests]')).toContainText('2 (1 passed · 1 failed)')
+  await expect(preview.locator('[data-import-cost]')).toHaveText('$0.002')
+  await expect(preview).toContainText('Local')
+  await expect(preview).toContainText('Not in the report')
+  await preview.locator('[data-import-confirm]').click()
+  const done = box.locator('[data-import-done]')
+  await expect(done).toContainText(/Recorded \d+ results?\.|Already imported/)
+  await expect(done).toContainText('Recorded cost')
+})
+
 test('QA at phone width: overview, tests, manual and a plan fit with no sideways scroll @mobile', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin/control?view=qa')

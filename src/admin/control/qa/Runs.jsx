@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { Badge, Empty, Facts, Link, LoadError, Loading, PageHead, Section } from '../ui.jsx'
 import * as qa from '../qa-api.js'
-import { ENV, EXEC_STATUS, PRESETS, duration, isActive, scopeText, sha, stamp, usd } from '../qa-lib.js'
+import { ENV, EXEC_STATUS, MAX_REPORT_BYTES, PRESETS, duration, isActive, previewReport, scopeText, sha, stamp, usd } from '../qa-lib.js'
 import { ConfirmButton, EnvLabel, ExecPill, ResultPill } from './parts.jsx'
 import { useLoad, usePlan } from './hooks.jsx'
 
@@ -42,9 +42,137 @@ function ExecRow({ x, go }) {
   )
 }
 
+// ---------- import a report ----------
+// A report produced off-CI (the admin assistant evaluation, a local run) recorded in the QA system with its costs:
+// pick the file → see exactly what it will record → confirm → a link to the new run.
+function ImportReport({ go, onImported }) {
+  const [open, setOpen] = useState(false)
+  const [file, setFile] = useState(null) // { name, report, preview } | { name, error }
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(null)
+  const [err, setErr] = useState('')
+  const pick = async (f) => {
+    setDone(null)
+    setErr('')
+    if (!f) return setFile(null)
+    if (f.size > MAX_REPORT_BYTES) return setFile({ name: f.name, error: 'The file is larger than 2 MB.' })
+    let report
+    try {
+      report = JSON.parse(await f.text())
+    } catch {
+      return setFile({ name: f.name, error: 'This file isn’t valid JSON.' })
+    }
+    const preview = previewReport(report)
+    setFile(preview.error ? { name: f.name, error: preview.error } : { name: f.name, report, preview })
+  }
+  const record = async () => {
+    setBusy(true)
+    setErr('')
+    const r = await qa.importReport(file.report)
+    setBusy(false)
+    if (!r.ok || !r.data?.run) return setErr(r.error || 'Nothing was recorded. Try again.')
+    setDone(r.data.run)
+    setFile(null)
+    onImported?.()
+  }
+  if (!open)
+    return (
+      <div className="cc-actions">
+        <button type="button" className="btn btn-quiet btn-sm" onClick={() => setOpen(true)} data-import-open>
+          Import a report
+        </button>
+      </div>
+    )
+  const p = file?.preview
+  return (
+    <section className="qa-card" aria-labelledby="qa-import-h" data-import>
+      <div className="qa-plan-head">
+        <h2 id="qa-import-h">Import a report</h2>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={() => (setOpen(false), setFile(null), setDone(null))}>
+          Close
+        </button>
+      </div>
+      <p className="cc-status-line">For results produced outside CI: an AI evaluation (admin-assistant-eval.mjs --qa-json) or a local run (qa-report.mjs --out). They are recorded as a local run, with the costs the report lists.</p>
+      <label className="field" htmlFor="qa-import-file">
+        <span>Report file (JSON, up to 2 MB)</span>
+        <input id="qa-import-file" type="file" accept="application/json,.json" onChange={(e) => pick(e.target.files?.[0])} />
+      </label>
+      {file?.error && (
+        <p className="form-error" role="alert" data-import-error>
+          {file.name}: {file.error}
+        </p>
+      )}
+      {p && (
+        <div className="stack" data-import-preview>
+          <span className="cc-label">What it will record</span>
+          <dl className="cc-facts">
+            <div>
+              <dt>Results</dt>
+              <dd data-import-tests={p.tests}>
+                {p.tests} ({p.byStatus.pass} passed · {p.byStatus.fail} failed{p.byStatus.blocked ? ` · ${p.byStatus.blocked} blocked` : ''}
+                {p.byStatus.skipped ? ` · ${p.byStatus.skipped} skipped` : ''})
+              </dd>
+            </div>
+            <div>
+              <dt>Environment</dt>
+              <dd>
+                {ENV.local}
+                {p.provider === 'real' ? ' · real providers' : ' · stand-in providers'}
+              </dd>
+            </div>
+            <div>
+              <dt>Release (commit)</dt>
+              <dd>{p.revision ? <span className="cc-code">{sha(p.revision)}</span> : 'Not in the report: results can’t be tied to a release'}</dd>
+            </div>
+            <div>
+              <dt>Recorded cost</dt>
+              <dd data-import-cost>{p.costUsd == null ? 'Not in the report' : usd(p.costUsd, { free: false })}</dd>
+            </div>
+          </dl>
+          <p className="cc-status-line">
+            {Object.entries(p.byKind)
+              .map(([k, n]) => `${n} ${k === 'eval' ? 'AI evaluation' : k === 'unit' ? 'unit' : 'browser'} ${n === 1 ? 'result' : 'results'}`)
+              .join(' · ')}
+            {p.models.length ? ` · model ${p.models.join(', ')}` : ''}
+            {p.startedAt ? ` · run ${stamp(p.startedAt)}` : ''}
+            {p.hashes ? '' : ' · no code versions, so these results can’t be checked for staleness'}. Results that don’t match a test in the inventory are counted and left out. AI evaluation results are graded by fixed checks; they record what the checks found.
+          </p>
+          {err && (
+            <p className="form-error" role="alert">
+              {err}
+            </p>
+          )}
+          <div className="cc-actions">
+            <button type="button" className="btn btn-primary btn-sm" onClick={record} disabled={busy} data-import-confirm>
+              {busy ? 'Recording…' : `Record ${p.tests} ${p.tests === 1 ? 'result' : 'results'}`}
+            </button>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setFile(null)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {done && (
+        <div className="cc-callout cc-callout--ok" role="status" data-import-done={done.id}>
+          <strong>{done.duplicate ? 'Already imported: nothing new was recorded.' : `Recorded ${done.stored} ${done.stored === 1 ? 'result' : 'results'}.`}</strong>
+          <span>
+            {done.unmatched ? `${done.unmatched} didn’t match a test in the inventory and were left out. ` : ''}
+            Recorded cost {usd((done.costMicros || 0) / 1e6, { free: false })}. Each result is on its test’s history.
+          </span>
+          {done.id && (
+            <Link to={{ run: done.id }} go={go} className="cc-more">
+              Open the imported run →
+            </Link>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function RunsView({ params, go }) {
   const [d, reload] = useLoad(() => qa.listExecutions({ status: params.status, environment: params.env, preset: params.kind, commit: params.release, from: dayStart(params.since) }), [params.status, params.env, params.kind, params.release, params.since])
-  const [legacy] = useLoad(qa.getLegacy, [])
+  const [legacy, reloadLegacy] = useLoad(qa.getLegacy, [])
   const [release, setRelease] = useState(params.release || '')
   const set = (k, v) => go({ ...params, view: 'qa', tab: 'runs', [k]: v || null }, { replace: true })
   const list = d && !d.error ? qa.arr(d.executions) : []
@@ -53,6 +181,7 @@ export function RunsView({ params, go }) {
   return (
     <div className="cc-main" data-qa-runs>
       <PageHead go={go} crumbs={[crumbs[0]]} title="Runs" lede="Every run, automated or manual: who started it, against which release, and what it found. Results by test, area or severity are under Tests and Defects." />
+      <ImportReport go={go} onImported={() => (reload(true), reloadLegacy(true))} />
       <form
         className="cc-toolbar qa-filters"
         onSubmit={(e) => {

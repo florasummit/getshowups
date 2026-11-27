@@ -269,3 +269,43 @@ export function scopeText(x) {
   const j = Array.isArray(s.journeys) ? s.journeys.length : 0
   return [n ? plural(n, 'test') : '', j ? plural(j, 'journey') : ''].filter(Boolean).join(' + ') || 'Run'
 }
+
+// ---------- importing a report (Runs → Import a report) ----------
+// What an uploaded report (scripts/qa-report.mjs --out, scripts/admin-assistant-eval.mjs --qa-json) WILL record, read
+// from the file in the browser before anything is sent. The server re-validates, matches tests to the inventory and
+// stores it as a local run; this preview never claims more than the file says.
+export const MAX_REPORT_BYTES = 2_000_000
+const REPORT_STATUS = { passed: 'pass', expected: 'pass', flaky: 'pass', pass: 'pass', failed: 'fail', unexpected: 'fail', timedOut: 'fail', fail: 'fail', interrupted: 'blocked', blocked: 'blocked', skipped: 'skipped', todo: 'skipped', cancelled: 'skipped' }
+export function previewReport(report) {
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return { error: 'This file isn’t a QA report (expected a JSON object).' }
+  if (!Array.isArray(report.results)) return { error: report.suites ? 'This is a raw Playwright report. Convert it first with scripts/qa-report.mjs --out.' : 'This file has no results list, so there is nothing to record.' }
+  if (!report.results.length) return { error: 'The report has no results.' }
+  const byStatus = { pass: 0, fail: 0, blocked: 0, skipped: 0 }
+  const byKind = {}
+  const models = new Set()
+  let costMicros = 0
+  let costKnown = false
+  for (const r of report.results) {
+    byStatus[REPORT_STATUS[r?.status] || 'blocked'] += 1
+    const k = r?.kind || 'e2e'
+    byKind[k] = (byKind[k] || 0) + 1
+    if (r?.model) models.add(String(r.model))
+    if (Number.isFinite(r?.costMicros) && r.costMicros >= 0) {
+      costKnown = true
+      costMicros += r.costMicros
+    }
+  }
+  const revision = /^[a-f0-9]{7,40}$/.test(String(report.revision || '')) ? report.revision : null
+  return {
+    tests: report.results.length,
+    byStatus,
+    byKind,
+    revision,
+    provider: report.provider === 'real' ? 'real' : 'mocked',
+    environment: 'local',
+    costUsd: costKnown ? costMicros / 1e6 : null,
+    models: [...models],
+    startedAt: Number.isFinite(report.startedAt) ? report.startedAt : null,
+    hashes: report.hashes && typeof report.hashes === 'object' ? Object.keys(report.hashes).length : 0,
+  }
+}

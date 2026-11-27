@@ -141,3 +141,6 @@ export function normalizeInventory(d) {
     areaList: arr(d.areaList).length ? d.areaList : areas.map((a) => ({ id: a.id, title: a.title })),
   }
 }
+
+// Upload a report produced off-CI (an evaluation or a local run). Recorded as a local run with its costs; audited.
+export const importReport = (report) => post(`${BASE}/import`, { report, confirm: true })
