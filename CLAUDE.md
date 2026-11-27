@@ -320,7 +320,7 @@ Non-negotiables:
 - Email sign-in (server/email-auth.js, migration 0046; docs/DESIGN_SYSTEM.md §16; UI src/dashboard/SignIn.jsx, the ONE
   sign-in panel): start answers identically for every well-formed address (lookup + send run in waitUntil); an email
   (code + link, one request, 15 min, single use, ≤5 wrong codes, hashes only, code HMAC-keyed) goes only to who may sign in
-  today (signInAllowed: admin, member, open account invite, B's roles/ownership invites fail-soft, open sign-up/tester).
+  today (signInAllowed: admin, member, open account invite, open sign-up/tester, plus checks wired with addSignInCheck: B's hasCommercialRole / pendingClaimFor).
   Sent directly (never the outbox). Link = /dashboard/email-sign-in#t= (fragment), POST to consume, only in the browser
   that asked (HttpOnly sealed cookie); the code works anywhere. Success = createSession + landingFor, same as Google.
   Gate: AUTH_EMAIL_LIVE (or MESSAGES_LIVE) exactly 'true' or only MESSAGE_TEST_RECIPIENTS (approval); the screens offer
