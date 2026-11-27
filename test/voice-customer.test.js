@@ -139,7 +139,7 @@ test('the provider is chosen server-side: Retell by default with the same payloa
   assert.equal(r0.status, 200)
   const d0 = r0.json()
   assert.deepEqual([d0.provider, typeof d0.accessToken, typeof d0.callId, typeof d0.conversationId, typeof d0.token], ['retell', 'string', 'string', 'string', 'string'], 'Retell, whatever the browser says')
-  assert.equal(JSON.parse(fetches.find((f) => f.url.endsWith('/v3/create-web-call')).init.body).agent_override, undefined, 'no row = the same call as before')
+  assert.deepEqual(JSON.parse(fetches.find((f) => f.url.endsWith('/v3/create-web-call')).init.body).agent_override, { agent: { max_call_duration_ms: 900_000 } }, 'no row = the same call as before, with only Retell’s 15-minute end')
   assert.equal(state(d0.conversationId).voice.provider, 'retell')
   setProvider('alpha', 'openai', 'cedar', 'Cedar')
   const r1 = await start('alpha')

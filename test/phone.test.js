@@ -262,6 +262,7 @@ test('AI fallback: registers a Retell phone call, dials its SIP address, routes 
   assert.match(r.text, /<Sip>sip:call_ai_0001@sip\.retellai\.com<\/Sip>/)
   const reg = JSON.parse(fetches.find((f) => f.url.endsWith('/v2/register-phone-call')).init.body)
   assert.deepEqual([reg.agent_id, reg.direction, reg.to_number, reg.metadata.business], ['agent_abcdef123', 'inbound', LINE.alpha, 'alpha'])
+  assert.deepEqual(reg.agent_override, { agent: { max_call_duration_ms: 900_000 } }, 'Retell ends the AI leg at 15 minutes')
   const rc = db.sql.prepare("SELECT * FROM receptionist_calls WHERE call_id = 'call_ai_0001'").get()
   assert.equal(rc.customer, 'alpha')
   assert.equal(callRow(11).conversation_id, rc.conversation_id)

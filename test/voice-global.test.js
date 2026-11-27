@@ -148,7 +148,10 @@ test('resolution and existing behaviour: nothing set = retell (same Retell call 
   let s = await getVoiceSettings(db, 'alpha')
   assert.deepEqual([s.provider, s.inherited, s.defaultProvider, s.defaultVersion, s.version], ['retell', true, 'retell', 0, 0])
   assert.equal((await startVoiceCall(env, alpha)).ok, true)
-  assert.deepEqual(Object.keys(JSON.parse(fetches.find((f) => f.url.endsWith('/v3/create-web-call')).init.body)).sort(), ['agent_id', 'agent_version', 'metadata'], 'PoolThru regression guard: same call as before')
+  // PoolThru regression guard: the same call as before, plus Retell's own 15-minute end (the only override).
+  const sent = JSON.parse(fetches.find((f) => f.url.endsWith('/v3/create-web-call')).init.body)
+  assert.deepEqual(Object.keys(sent).sort(), ['agent_id', 'agent_override', 'agent_version', 'metadata'])
+  assert.deepEqual(sent.agent_override, { agent: { max_call_duration_ms: 900_000 } })
   // Owner save: a row appears, the business still follows the global default.
   assert.equal((await saveVoicePreferences(env, alpha, { personality: 'warm', version: 0 }, 'owner@alpha.example')).ok, true)
   s = await getVoiceSettings(db, 'alpha')

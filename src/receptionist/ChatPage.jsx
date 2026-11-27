@@ -29,6 +29,8 @@ const ERRORS = {
   rate_limited: 'That was a lot of messages at once. Wait a moment, then try again.',
   busy: 'Still working on your last message. Try again in a moment.',
 }
+// The longest voice call (server/voice/budgets.js SESSION_CEILING_MS): the page ends OpenAI / ElevenLabs calls before it.
+const VOICE_MAX_MS = 15 * 60 * 1000
 const VOICE_ERRORS = {
   voice_not_configured: 'Voice isn’t available right now. You can keep typing.',
   conversation_ended: 'This conversation has ended. Start a new one to talk.',
@@ -246,11 +248,16 @@ export default function ChatPage({ id }) {
         const adapter = data.provider === 'openai' ? mod.createOpenAIAdapter({ routes }) : mod.createElevenLabsAdapter({ routes })
         const live = []
         callRef.current = { stopCall: () => adapter.stop({ outcome: 'ended' }), adapter }
+        // OpenAI and ElevenLabs document no session-length cap we can set from the server: the page ends the call just
+        // before the 15 minutes the spending guard counts for it (server/ai-budget.js voiceRoom). Retell is capped by
+        // Retell itself (max_call_duration_ms).
+        const limit = setTimeout(() => callRef.current?.adapter === adapter && adapter.stop({ outcome: 'ended' }), VOICE_MAX_MS - 10_000)
         const onEvent = (name, p) => {
           if (name === 'status') {
             if (p.state === 'connected') setVoice((v) => ({ ...v, state: 'live', talking: typeof p.speaking === 'boolean' ? p.speaking : p.mode ? p.mode === 'speaking' : v.talking }))
             if (p.state === 'connecting' || p.state === 'reconnecting') setVoice((v) => ({ ...v, state: 'connecting' }))
             if (p.state === 'stopped' || p.state === 'failed') {
+              clearTimeout(limit)
               callRef.current = null
               setAudioBlocked(false)
               // A failure carries the adapter's disconnect record (phase, code, WebSocket close code, the provider's

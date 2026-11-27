@@ -55,14 +55,26 @@ Entry points:
 
 | Cost | Paid to | In the dollar guard? | How it is capped | Strict? |
 | --- | --- | --- | --- | --- |
-| Receptionist, Teach, Assistant, ads plan: Claude tokens | Anthropic | Yes | Reserved before the call, settled after | **Yes**, except the timeout row below |
+| Receptionist, Teach, Assistant, ads plan: Claude tokens | Anthropic | Yes | Reserved before the call, settled after | **Yes** |
 | Ad images | OpenAI | Yes | Image price reserved before the call | **Yes** |
-| A first attempt the SDK retries after a timeout (`maxRetries: 1`) | Anthropic | Only if reported | The SDK reports usage only for the attempt that succeeds | **No**: at most one extra call per request, only on provider timeouts (visible as `model_timeout` events) |
+| Retries | Anthropic | Yes | The SDK never retries (`maxRetries: 0` on every paid client). At most **two attempts** per model call, each **with its own reservation** (`paidCall`, and the receptionist's own loop). A retry happens only after a transient failure (timeout, network, 429, 5xx), while nothing has been said or done, and only if the budget still has room. | **Yes** |
+| Timed-out or lost requests | Anthropic | Yes | No HTTP status means the provider may have billed it, so the attempt **keeps its full worst-case reservation**. A provider refusal (HTTP status) is settled at $0. | **Yes** (conservative) |
 | Concurrent requests | — | Yes | One atomic statement | **Yes** |
-| Failed requests | — | Yes | A provider refusal (HTTP status) is settled at $0; a timeout or abort keeps its worst case | **Yes** (conservative) |
-| **Retell voice minutes** | Retell (about $0.07/min) | **No**: separate, counted in minutes | `retell_minutes` (default 60/day). A start is allowed only if finished calls, plus every open call at its full 15-minute ceiling, plus this call fit. Unreadable means refused. | **Nearly**: starts that land in the same instant can each pass before the other is recorded. Bounded by 3 calls at once per business and 6 starts per IP per 10 min. Retell also bills hold time and short calls as 10 s, so its bill can exceed our measured minutes slightly. |
+| **Retell voice minutes** | Retell (about $0.07/min) | **No**: separate, counted in minutes | `retell_minutes` (default 60/day). A start is allowed only if finished calls, plus every open call at its full 15 minutes, plus this call fit. **Retell ends every call at 15 minutes** (`agent_override.agent.max_call_duration_ms`: browser, Lab and phone). Unreadable means refused. | **Nearly**: starts that land in the same instant can each pass before the other is recorded. Retell bills hold time, and calls under 10 s as 10 s. |
 | The model inside a Retell call | Anthropic (our engine) | Yes | Each turn is reserved like chat | **Yes** |
-| OpenAI and ElevenLabs browser voice minutes | OpenAI, ElevenLabs | No (minutes) | `openai_minutes` / `elevenlabs_minutes` (default 30 a day each, set in admin), counted like Retell (open calls at their full 15 min). Also 600 per provider (variable), 120 per business, 3 at once, 15 min per session. | **Nearly**: the same same-instant race as Retell. ElevenLabs bills its own LLM on top. |
+| OpenAI and ElevenLabs browser voice minutes | OpenAI, ElevenLabs | No (minutes) | `openai_minutes` / `elevenlabs_minutes` (default 30 a day each), counted like Retell. The chat page ends the call at 15 minutes. OpenAI client secrets last 60 s (one secret can start several sessions until it expires). Also 600 per provider (variable), 120 per business, 3 at once. | **No hard provider cap** (see below). The same same-instant race. ElevenLabs bills its own LLM on top. |
+| **Provider reconciliation** | — | — | Retell's `call_cost` and ElevenLabs' conversation cost are fetched hourly (cron, 10 sessions per run) and on an admin's request. Admin shows them next to our estimate and warns when a provider bills over 25% above it. | Reporting only. OpenAI has no per-session charge record. |
+
+### Enforced by us versus enforced by the provider
+
+| Limit | Enforced by | Hard? |
+| --- | --- | --- |
+| Dollar ceilings (platform, public, business, entry), retries, timeouts | Our server, before each call | Yes, at our server. The provider would still accept calls made with the key from anywhere else. |
+| Retell call length, 15 minutes | **Retell** (`max_call_duration_ms` on every call we create) | **Yes**, provider-enforced |
+| Retell, OpenAI and ElevenLabs minutes per day | Our server, at session start | Yes for starts. A call already running runs to its own cap. |
+| OpenAI realtime session length | Our chat page (ends it at 15 min) | **No**: OpenAI documents no session-length limit, and a modified browser can keep a session open |
+| ElevenLabs conversation length | Our chat page (ends it at 15 min); the agent's own maximum is set in ElevenLabs | Not verified: ElevenLabs' docs couldn't be read. Set the agent's maximum duration to 15 min in the ElevenLabs dashboard. |
+| Provider account spending limits | **The providers' own dashboards** (Anthropic, OpenAI and ElevenLabs usage limits, Retell's prepaid balance) | **Yes**, but configured outside GetShowUps. Recommended as the final backstop: set a monthly limit at each provider. |
 | Phone lines (PR #192, off) | Twilio | No | `PHONE_DAILY_MINUTES`, `PHONE_CONCURRENT`; AI turns go through the guard; the AI leg's Retell minutes count toward `retell_minutes` | Off until approved |
 | Sign-in emails (Claude 2, PR #198) | Resend | No | 300 per hour platform-wide, 5 per address per hour, 10 per IP per 10 min; test recipients only until `AUTH_EMAIL_LIVE` | Yes, by count |
 
@@ -73,17 +85,29 @@ bills.
 
 | Cost | Hard limit | Typical maximum | What can still go over, and by how much |
 | --- | --- | --- | --- |
-| GetShowUps-paid model calls (all features) | $5 (public $3, per business $1) | **$5.00** | Provider timeouts. A timed-out request keeps its full worst-case reservation (about $0.23 for a receptionist call). The SDK's one retry may be billed without being reported. Absolute worst case: every call times out, about 22 reservations a day, so **about +$5** unreported. |
-| Retell voice minutes (about $0.07/min) | 60 min | **about $4.20** | Starts within the same instant both pass before either is recorded: **+15 min (about $1.05) per such start**, bounded by 3 sessions at once per business. Retell bills hold time and rounds calls under 10 s up to 10 s. |
-| OpenAI realtime voice (about $0.08/min, more on long calls) | 30 min | **about $2.40** | The same same-instant race: +15 min (about $1.20) per such start. Long calls cost more per minute. |
+| GetShowUps-paid model calls (all features) | $5 (public $3, per business $1) | **$5.00** | Nothing unreported: every attempt, retries included, is reserved, and lost attempts keep their worst case. Only an underestimated worst case can go over: input tokens estimated from characters ÷ 3.5. **At most the estimate error of one call**, which is then counted in full. |
+| Retell voice minutes (about $0.07/min) | 60 min | **about $4.20** | Starts within the same instant both pass before either is recorded: **+15 min (about $1.05) per such start**, bounded by 3 sessions at once per business. Each call ends at 15 min (Retell). Retell bills hold time and rounds calls under 10 s up to 10 s. |
+| OpenAI realtime voice (about $0.08/min, more on long calls) | 30 min | **about $2.40** | The same same-instant race. **A tampered browser could keep one session open past 15 minutes**, and OpenAI documents no limit. It's bounded only by OpenAI's own project spending limit. |
 | ElevenLabs voice (about $0.08/min) | 30 min | **about $2.40** | The same race. ElevenLabs bills its own LLM usage on top; that isn't measured here. |
 | The model inside every voice call (our engine) | inside the $3 public limit | included above | — |
 | Phone lines (Twilio) | off (`PHONE_ENABLED`, `PHONE_NUMBER_PURCHASE`) | **$0** | Nothing until approved. |
 | Sign-in emails (#198) | 300 per hour, test recipients only | **$0** until `AUTH_EMAIL_LIVE` | — |
 
-**Total**: about **$14 a day** with every limit reached. The theoretical worst, with every model call timing out, is about
-$19 a day plus about $1 for each same-instant voice start. All of it shows on the admin card. "Turn all AI off now" stops
-new model calls and voice starts within 30 seconds; calls already running finish, at most 15 minutes each.
+**Total**: about **$14 a day** with every limit reached, plus about $1 for each same-instant voice start. There's no
+longer a hidden retry term. All of it shows on the admin card, with provider-verified figures beside the estimates.
+"Turn all AI off now" stops new model calls and voice starts within 30 seconds. Calls already running finish: Retell at
+15 minutes. OpenAI and ElevenLabs sessions end at 15 minutes in an honest browser, and only the provider's own account
+limit bounds a tampered one.
+
+**What can't be eliminated technically, and its backstop:**
+1. Same-instant voice starts: about $1 each, rare, visible on the card.
+2. OpenAI realtime session length: no documented server-side limit. Backstop: set a monthly budget in OpenAI's project
+   settings.
+3. ElevenLabs conversation length and its own LLM charges: set the agent's maximum duration (15 min) and a usage limit in
+   ElevenLabs.
+4. Provider prices changing after the estimates were written: the hourly reconciliation flags this within the day.
+5. Calls made with our keys outside GetShowUps, if a key ever leaked: only provider-side limits stop those. Keys stay
+   Cloudflare secrets.
 
 ## Cloudflare (dashboard, Free plan): what to enable and what not to
 

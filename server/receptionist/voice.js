@@ -36,6 +36,8 @@ export const voiceAllowedFor = (env, customerId) => typeof customerId === 'strin
 // 'available' | 'testing' (voice exists but not released for this business) | 'not_configured'
 export const voiceStatus = (env, customerId) => (!voiceConfigured(env) ? 'not_configured' : voiceAllowedFor(env, customerId) ? 'available' : 'testing')
 const CALL_TTL_MS = 60 * 60 * 1000
+// Every Retell call (browser, Lab, phone) is ended by Retell after 15 minutes: agent_override.agent.max_call_duration_ms.
+export const RETELL_MAX_CALL_MS = 15 * 60 * 1000
 
 // → { ok, accessToken, callId, conversationId } | { ok: false, error }. `existing`: the customer's current chat
 // conversation (already verified by its token) — the call continues it, so nothing they said is lost.
@@ -53,7 +55,9 @@ export async function startVoiceCall(env, customer, now = Date.now(), existing =
       headers: { Authorization: `Bearer ${env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       // 'latest' = the agent's newest version, draft included (we never publish automatically); override with
       // RETELL_AGENT_VERSION (e.g. 'latest_published' or a version number) once a version is published.
-      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id }, ...(agentOverride && typeof agentOverride === 'object' && Object.keys(agentOverride).length ? { agent_override: { agent: agentOverride } } : {}) }),
+      // agent_override.agent.max_call_duration_ms: Retell itself ends the call at 15 minutes (a provider-enforced hard cap;
+      // the agent default is 1 hour), matching the 15 minutes the spending guard counts for every open call.
+      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, agent_version: /^(latest|latest_published|\d{1,6})$/.test(env.RETELL_AGENT_VERSION || '') ? (/^\d+$/.test(env.RETELL_AGENT_VERSION) ? Number(env.RETELL_AGENT_VERSION) : env.RETELL_AGENT_VERSION) : 'latest', metadata: { business: customer.id, conversation: conv.id }, agent_override: { agent: { ...(agentOverride && typeof agentOverride === 'object' ? agentOverride : {}), max_call_duration_ms: RETELL_MAX_CALL_MS } } }),
       signal: AbortSignal.timeout(10_000),
     })
   } catch {
