@@ -4,7 +4,8 @@ import { fmt } from '../../lib/api.js'
 
 export const BASE = '/admin/control'
 // Params that describe "where am I" in the Control Center.
-const KEYS = ['view', 'incident', 'business', 'integration', 'run', 'session', 'journey', 'filter', 'q', 'for']
+// QA Command Center: tab (sub-view), test / exec / item (detail pages), list (defects|backlog) and its filters.
+const KEYS = ['view', 'incident', 'business', 'integration', 'run', 'session', 'journey', 'filter', 'q', 'for', 'tab', 'test', 'exec', 'item', 'list', 'area', 'status', 'cls', 'kind', 'env', 'sev', 'release', 'result', 'from', 'since']
 
 export const hrefFor = (params = {}) => {
   const p = new URLSearchParams()
