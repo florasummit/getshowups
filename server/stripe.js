@@ -108,7 +108,11 @@ export async function billingSubscription(env, customerId) {
 // customer. Before opening Checkout we ask Stripe whether that customer already has a subscription
 // (covers a payment whose webhook has not arrived yet) and reuse a still-open session if there is one.
 const LIVE_SUB = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused']
-export async function createCheckout(env, { customer, email, planId, origin }) {
+// assisted (server/enrollment.js): { enrollment, success, cancel, authorization } — the owner pays on a Stripe-hosted page
+// from a link the representative shares; it returns to the claim page (no account yet), states the recurring
+// authorization on the submit button, and asks for Stripe's terms consent when STRIPE_CHECKOUT_TERMS is exactly 'true'
+// (needs a Terms of Service URL in the Stripe Dashboard; otherwise Stripe refuses the session). Every other rule is the same.
+export async function createCheckout(env, { customer, email, planId, origin, assisted = null }) {
   if (await liveBlocked(env, customer.id)) return { ok: false, httpStatus: 403, error: 'test_business' }
   if (await isComplimentary(env, customer.id)) return { ok: false, httpStatus: 403, error: 'complimentary' }
   if (!(await sandboxCheckoutAllowed(env, customer.id, email))) return { ok: false, httpStatus: 403, error: 'billing_not_live' }
@@ -163,9 +167,15 @@ export async function createCheckout(env, { customer, email, planId, origin }) {
     line_items: { 0: { price: plan.stripe_price_id, quantity: 1 } },
     // A trial is offered only to a business that has never subscribed (the founding plan has none).
     subscription_data: { metadata: { customer: customer.id, plan: plan.id }, trial_period_days: neverSubscribed && plan.trial_days > 0 ? plan.trial_days : undefined },
-    metadata: { customer: customer.id, plan: plan.id },
-    success_url: `${origin}/dashboard?billing=success`,
-    cancel_url: `${origin}/dashboard?billing=canceled`,
+    metadata: { customer: customer.id, plan: plan.id, ...(assisted ? { enrollment: assisted.enrollment } : {}) },
+    success_url: assisted ? `${origin}${assisted.success}` : `${origin}/dashboard?billing=success`,
+    cancel_url: assisted ? `${origin}${assisted.cancel}` : `${origin}/dashboard?billing=canceled`,
+    ...(assisted
+      ? {
+          custom_text: { submit: { message: String(assisted.authorization).slice(0, 1200) } },
+          consent_collection: env.STRIPE_CHECKOUT_TERMS === 'true' ? { terms_of_service: 'required' } : undefined,
+        }
+      : {}),
     // Two tabs (or a double click) within a minute get the same Checkout, never two that could both be paid.
   }, { idempotencyKey: `gsu-checkout-${customer.id}-${plan.id}-${stripeCustomer}-${Math.floor(Date.now() / 60000)}` })
   return r.ok ? { ok: true, url: r.body.url } : r
@@ -296,6 +306,9 @@ export async function handleEvent(env, event, { after = null } = {}) {
       if (customer) {
         await upsertSubscription(env, customer, event, obj)
         holdCheck(customer)
+        // Assisted enrollment (server/enrollment.js): the verified subscription event is what moves it to 'paid'.
+        // Best effort: never fails or delays the receipt; the enrollment view re-derives from the stored subscription.
+        await import('./enrollment.js').then((m) => m.syncEnrollmentFor(env, customer)).catch((err) => console.error('enrollment sync skipped:', err?.name))
       }
       return { handled: Boolean(customer) }
     case 'invoice.paid':

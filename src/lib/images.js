@@ -2,6 +2,8 @@
 // transparency; photos become JPEG. Returns a Blob ≤ ~1 MB, or null if the file isn't an image.
 // Phone photos: the camera's EXIF orientation is applied while decoding (imageOrientation 'from-image'), so a portrait
 // photo stays upright; re-encoding through the canvas writes pixels only, so EXIF/GPS metadata is never uploaded.
+import { staffHeaders } from './api.js'
+
 export async function prepareImage(file, { kind = 'photo', max: maxSide } = {}) {
   if (!file || !/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(file.type)) return null
   const max = maxSide || (kind === 'logo' ? 600 : 1600)
@@ -28,7 +30,7 @@ export async function uploadImage(file, kind) {
   const blob = await prepareImage(file, { kind })
   if (!blob) return { error: 'That file isn’t a photo we can use. Try a JPG or PNG.' }
   try {
-    const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type }, body: blob })
+    const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type, ...staffHeaders() }, body: blob })
     const data = await res.json().catch(() => ({}))
     if (res.status === 201) return { asset: data.asset }
     return { error: data.error === 'too_many' ? 'You’ve reached the photo limit. Remove photos you no longer use first.' : data.error === 'quota' ? 'You’ve used your 50 MB of photo storage. Remove photos you no longer use first.' : 'Upload failed. Please try again.' }
@@ -38,7 +40,7 @@ export async function uploadImage(file, kind) {
 }
 
 async function send(blob) {
-  const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type }, body: blob })
+  const res = await fetch('/api/dashboard/website/assets', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type, ...staffHeaders() }, body: blob })
   const data = await res.json().catch(() => ({}))
   if (res.status === 201) return { asset: data.asset }
   return { error: data.error === 'too_many' ? 'You’ve reached the photo limit. Remove photos you no longer use first.' : data.error === 'quota' ? 'You’ve used your 50 MB of photo storage. Remove photos you no longer use first.' : 'Upload failed. Please try again.' }

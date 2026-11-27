@@ -23,6 +23,8 @@ export async function onRequestGet({ request, env }) {
     checkoutOpen: stripeConfigured(env) ? await sandboxCheckoutAllowed(env, customer?.id || null, email) : billingMisconfigured(env) ? false : null,
     email,
     customer,
+    // Configure mode (assisted enrollment): staff acting for this business, never its owner (server/staff-context.js).
+    staff: session.staff ? { role: session.staff.role, enrollmentId: session.staff.enrollmentId } : null,
     closing: customer?.status === 'suspended' ? await deletionStatus(env.ONBOARDING_DB, customer.id).then((x) => x?.report?.scheduledFor ?? null, () => null) : null,
     // Admin-marked test business: browser acceptance (scripts/acceptance) refuses to run anywhere else. Unreadable = not confirmed.
     testBusiness: customer ? await testStatus(env, customer.id).then((t) => t.test === true && !t.unreadable) : false,

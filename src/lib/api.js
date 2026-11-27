@@ -1,11 +1,35 @@
+// Configure mode (assisted enrollment, server/staff-context.js): GetShowUps staff working on an enrollment's workspace.
+// Dashboard requests then name the enrollment (header; the cookie lets preview frames and images show the same
+// business). Not a credential: the server checks the staff session, role, assignment and stage on every request.
+let staffEnrollment = null
+const STAFF_COOKIE = '__Host-gsu_staff'
+export function startStaffMode(id) {
+  staffEnrollment = id
+  try {
+    document.cookie = `${STAFF_COOKIE}=${id}; Path=/; Secure; SameSite=Strict; Max-Age=43200`
+  } catch {
+    // no cookie: frames show nothing for staff; requests still carry the header
+  }
+}
+export function endStaffMode() {
+  staffEnrollment = null
+  try {
+    document.cookie = `${STAFF_COOKIE}=; Path=/; Secure; SameSite=Strict; Max-Age=0`
+  } catch {
+    // ignore
+  }
+}
+export const staffHeaders = () => (staffEnrollment ? { 'X-GSU-Enrollment': staffEnrollment } : {})
+
 // Same-origin JSON helper. Session auth rides on the HttpOnly cookie; nothing secret lives here.
 // keepalive: the request completes even if the page is closing (a voice session's end record on unload; small bodies only).
 export async function api(path, { method = 'GET', body, keepalive = false } = {}) {
   try {
+    const staff = path.startsWith('/api/dashboard/') ? staffHeaders() : {}
     const res = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: body === undefined ? { Accept: 'application/json', ...staff } : { Accept: 'application/json', 'Content-Type': 'application/json', ...staff },
       body: body === undefined ? undefined : JSON.stringify(body),
       ...(keepalive ? { keepalive: true } : {}),
     })

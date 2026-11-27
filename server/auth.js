@@ -6,12 +6,16 @@ import { json, missingConfig, randomToken, readCookie, sha256Hex } from './googl
 import { activeDayHours, withDayHoursColumn } from './day-hours.js'
 
 export const LOGIN_COOKIE = '__Host-gsu_login'
+// Set by the dashboard's configure mode (src/lib/api.js) to an enrollment id: not a credential (authorization is the
+// session + role + assignment, checked on every request), only which enrollment a staff member's preview frames show.
+export const STAFF_COOKIE = '__Host-gsu_staff'
 export const SESSION_COOKIE = '__Host-gsu_session'
 export const LOGIN_TTL_SECONDS = 600
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 // Where a sign-in may return to: the admin console or a dashboard tab. Anything else → /dashboard (never an
 // arbitrary URL, so the destination can't be used as an open redirect).
-export const safeNext = (v) => (typeof v === 'string' && /^\/(admin(\/(review|control|voice-lab|growth))?|dashboard(\/(appointments|followups|receptionist|website|ads|settings))?)$/.test(v) ? v : '/dashboard')
+// /claim: the ownership claim of an assisted enrollment (the token stays in that tab's storage, never in the address).
+export const safeNext = (v) => (typeof v === 'string' && /^\/(admin(\/(review|control|voice-lab|growth|sales))?|dashboard(\/(appointments|followups|receptionist|website|ads|settings))?|claim)$/.test(v) ? v : '/dashboard')
 
 export const LOGIN_SCOPES = ['openid', 'email']
 export const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/
@@ -99,6 +103,23 @@ export async function requireSession(request, env, { needCustomer = true, write 
     return { response: json(503, { error: 'storage_error' }) }
   }
   if (!session) return { response: json(401, { error: 'unauthenticated' }) }
+  // Staff configuring an assisted-enrollment workspace (server/staff-context.js): their own session, acting for that
+  // enrollment's business on the configuration routes only, checked (role, assignment, stage) on every request. Writes
+  // need the explicit header; reads (previews in frames, the preview link) may also name it in ?enrollment= or the
+  // configure tab's cookie.
+  // A cookie that doesn't authorize (not staff, not this route, access ended) is simply ignored.
+  const header = request.headers.get('X-GSU-Enrollment')
+  const enrollment = header ?? (request.method === 'GET' ? new URL(request.url).searchParams.get('enrollment') ?? readCookie(request, STAFF_COOKIE) : null)
+  if (enrollment !== null) {
+    try {
+      const { staffSession } = await import('./staff-context.js')
+      const staff = await staffSession(request, env, session, enrollment, { write })
+      if (header !== null || staff.session) return staff
+    } catch (err) {
+      console.error('Staff context failed:', err?.name)
+      return { response: json(503, { error: 'storage_error' }) }
+    }
+  }
   if (needCustomer && !session.customer) return { response: json(409, { error: 'setup_required' }) }
   return { session }
 }

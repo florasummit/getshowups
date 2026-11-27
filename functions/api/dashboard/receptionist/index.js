@@ -148,6 +148,9 @@ export async function onRequestPost({ request, env }) {
   if (rl.limited) return tooManyJson(rl.retryAfter)
   const b = await request.json().catch(() => ({}))
   const now = Date.now()
+  // Staff configuring an assisted workspace (server/staff-context.js) prepare the settings and voice; turning the
+  // receptionist on for customers stays the owner's own decision.
+  if (session.staff && (!['settings', 'voice'].includes(b?.action) || (b.action === 'settings' && b.enabled === true && (await getSettings(db, session.customer.id))?.enabled !== true))) return json(403, { error: 'owner_decision' })
   if (b?.action === 'resolve') {
     if (!(await receptionistRequestsReady(db)) || typeof b.requestId !== 'string') return json(400, { error: 'invalid_request' })
     if (!(await resolveRequest(db, session.customer.id, b.requestId, now))) return json(404, { error: 'not_found' })
