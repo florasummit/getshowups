@@ -2,6 +2,13 @@
 
 _Update at the end of every task. Newest first._
 
+## AI spending guard (2026-11-27, branch fix/ai-budget; NOT released, needs founder approval)
+One reservation layer (server/ai-budget.js) before every GetShowUps-paid model call: platform $25, public $15, business
+$6 and per-entry daily ceilings, atomic, fails closed, settled to the reported cost; AI_ALL_OFF / AI_OFF_BUSINESSES;
+Admin → "AI spending today". Verified with mocked providers only (test/ai-budget.test.js, receptionist fallback test).
+No migration, no switch changed. Open: VOICE_PROVIDER_DAILY_MINUTES_RETELL (Retell has no platform cap), Cloudflare Bot
+Fight Mode + one edge rate-limit rule (dashboard; not readable from here). docs/AI_SPENDING.md.
+
 ## Follow-up on the remaining usability findings (2026-11-27, PR #190, live; founder approved, migration 0045 applied)
 **Release record (2026-11-27 UTC):** main 8ea75f9, deployment e73b1ab9-0807-4844-a74a-f999eded61ea, rollback
 0d1989d2-afb8-4916-9afe-e51cc4260868 (main da69a9e). Migration 0045 (booking_day_hours, business_addresses; CREATE TABLE IF

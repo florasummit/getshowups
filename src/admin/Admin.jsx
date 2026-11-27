@@ -829,6 +829,57 @@ const SWITCHES = [
   ['assistant', 'Assistant'],
   ['twilioConfigured', 'Twilio'],
 ]
+// Today's GetShowUps-paid AI spending against its ceilings (server/ai-budget.js). Read-only; the switches are Cloudflare
+// variables (AI_ALL_OFF, AI_OFF_BUSINESSES), changed there with approval.
+function AiSpend() {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    api('/api/platform/ai-spend').then(({ status, data }) => setD(status === 200 ? data : { error: true }))
+  }, [])
+  const usd = (micros) => `$${(micros / 1e6).toFixed(2)}`
+  return (
+    <section className="card" aria-labelledby="ai-spend-title" data-ai-spend>
+      <h2 className="card-title" id="ai-spend-title">
+        AI spending today (UTC)
+      </h2>
+      {!d ? (
+        <p className="fine">Loading…</p>
+      ) : d.error ? (
+        <p className="empty">Not available.</p>
+      ) : (
+        <>
+          <p className="tags">
+            <Pill tone={d.off.all ? 'bad' : 'neutral'}>All AI: {d.off.all ? 'off' : 'on'}</Pill>
+            {d.off.businesses.length > 0 && <Pill tone="bad">Off for: {d.off.businesses.join(', ')}</Pill>}
+          </p>
+          <p className="fine">
+            Platform {usd(d.platform)} of {usd(d.ceilings.platform)} · public (receptionist) {usd(d.public)} of {usd(d.ceilings.public)} · each business up to {usd(d.ceilings.business)}. Reserved before each call, settled to what the provider reported.
+          </p>
+          {Object.keys(d.entries).length > 0 && (
+            <p className="fine">
+              By entry point:{' '}
+              {Object.entries(d.entries)
+                .map(([k, v]) => `${k} ${usd(v)}`)
+                .join(' · ')}
+            </p>
+          )}
+          {d.businesses.length > 0 && (
+            <ul className="rows">
+              {d.businesses.map((b) => (
+                <li key={b.customer} className="row">
+                  <div className="row-main">
+                    <p className="row-title">{b.customer}</p>
+                    <p className="row-sub">{usd(b.micros)}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
 function MessagingOps() {
   const [m, setM] = useState(null)
   const [tick, setTick] = useState(0)
@@ -1468,6 +1519,7 @@ function Overview({ me }) {
 
       {me.billingConfigured && <Reconciliation />}
 
+      <AiSpend />
       <MessagingOps />
       <AcceptanceTesting />
       <AuditLog />

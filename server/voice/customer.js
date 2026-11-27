@@ -25,6 +25,7 @@ import { REF_RE } from './charges.js'
 import { runVoiceTool, appendVoiceTranscript, voiceInstructions, TOOL_KINDS_SET } from './tools.js'
 import { getVoiceSettings, sessionVoiceFor } from './style.js'
 import { adminEmails } from '../platform.js'
+import { aiOff } from '../ai-budget.js'
 export const isPlatformAdminEmail = (env, email) => adminEmails(env).includes(String(email || '').toLowerCase())
 
 export const VOICE_SESSION_MAX_MS = SESSION_CEILING_MS
@@ -90,6 +91,8 @@ export async function startCustomerVoiceSession(env, customer, { existing = null
   // Retell keeps its release gate for customers (RECEPTIONIST_VOICE_BUSINESSES); admin tests are not gated by it.
   if (provider === 'retell' && !test && !voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available', httpStatus: 403 }
   if ((await openSessions(env, customer.id, now)) >= voiceConcurrentLimit(env)) return { ok: false, error: 'voice_busy', httpStatus: 429 }
+  // Emergency AI switches (server/ai-budget.js): no voice session starts while AI is off for this business or everyone.
+  if (aiOff(env, customer.id)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
   if ((await businessMinutesToday(env, customer.id, now)) >= voiceDailyMinutes(env)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
   // Per-provider ceiling (server/voice/budgets.js: OpenAI/ElevenLabs by default, Retell only with its own switch).
   const providerCap = providerDailyLimit(env, provider)

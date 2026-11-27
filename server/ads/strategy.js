@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { LIMITS, unapprovedClaims } from './spec.js'
 import { taughtFor, taughtLines } from '../intelligence/knowledge.js'
 import { recordTextUsage } from './creative.js'
+import { reserveAi, worstCase } from '../ai-budget.js'
 
 export const STRATEGY_MODEL = 'claude-opus-5-5'
 const PRICE = { inputPerM: 4, outputPerM: 20 } // USD per million tokens (claude-opus-5-5)
@@ -220,6 +221,12 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
   if (!env.ANTHROPIC_API_KEY && !client) return { ok: true, plan: templatePlan(customer, profile), source: 'template', costCents: 0 }
   const reserved = await recordTextUsage(env, customer.id, 15, now) // reserve ~15¢; adjusted below
   if (!reserved.ok) return reserved
+  // The shared daily guard too (server/ai-budget.js): platform + business ceilings and the emergency switches.
+  const budget = client ? null : await reserveAi(env, { entry: 'ads_plan', customerId: customer.id, now, micros: worstCase({ chars: SYSTEM.length + 4000, maxOutput: 16000, inPerToken: PRICE.inputPerM, outPerToken: PRICE.outputPerM }) })
+  if (budget && !budget.ok) {
+    await env.ONBOARDING_DB.prepare('DELETE FROM ai_usage WHERE id = ?1').bind(reserved.usageId).run()
+    return { ok: false, error: 'ai_limit' }
+  }
   const taught = await taughtFor(env, customer, 'ads', now)
   const anthropic = client || new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 120000 })
   let response
@@ -235,6 +242,7 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
     })
   } catch (err) {
     await env.ONBOARDING_DB.prepare('DELETE FROM ai_usage WHERE id = ?1').bind(reserved.usageId).run()
+    if (err?.status) await budget?.settle(0) // refused by the provider: nothing billed; a timeout keeps its worst case
     const status = err?.status
     if (err instanceof Anthropic.RateLimitError) return { ok: false, error: 'ai_rate_limited', retryable: true }
     if (err instanceof Anthropic.AuthenticationError) return { ok: false, error: 'ai_not_configured' }
@@ -245,6 +253,7 @@ export async function generatePlan(env, customer, profile, { client, now = Date.
   }
   const costCents = Math.max(1, Math.ceil(((response.usage?.input_tokens ?? 0) * PRICE.inputPerM + (response.usage?.output_tokens ?? 0) * PRICE.outputPerM) / 1e6 * 100))
   await env.ONBOARDING_DB.prepare('UPDATE ai_usage SET cost_cents = ?2 WHERE id = ?1').bind(reserved.usageId, costCents).run()
+  await budget?.settle((response.usage?.input_tokens ?? 0) * PRICE.inputPerM + (response.usage?.output_tokens ?? 0) * PRICE.outputPerM)
   if (response.stop_reason === 'refusal') return { ok: false, error: 'ai_declined' }
   const text = (response.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
   let raw
