@@ -10,6 +10,13 @@
 //   3. node scripts/admin-assistant-eval.mjs run --base http://127.0.0.1:4560 --out <dir> [--only id,id]
 //        asks every scenario, grades it automatically and writes <dir>/transcripts.md, <dir>/results.json and
 //        <dir>/summary.md (pass/fail per scenario, latency, tokens, recorded cost).
+//   Claude (the production provider): node scripts/admin-assistant-eval.mjs run --provider claude --out <dir> [--cap-usd 2]
+//        No server: the same route handlers run IN THIS PROCESS on an in-memory database seeded with the same fixture,
+//        with operatorModel(env) = Claude. The key comes ONLY from the environment variable EVAL_ANTHROPIC_API_KEY, read
+//        once into memory and removed from process.env; it is never written to disk, logged or put in a transcript.
+//        Cost is counted from the usage Claude reports on every call, priced at the HIGHER of the repo's price table
+//        and a conservative ceiling ($1 / $5 per million input / output tokens); the run stops itself before a call that
+//        could pass --cap-usd (default $2).
 // Grading (automatic, from the fictional records): expected facts appear, nothing listed under mustNot appears, every
 // number in the answer is in the records the server returned (evidence + brief) or the question, a refusal is a refusal,
 // and the prepared change (if any) is exactly the expected one. Human review: read transcripts.md.
@@ -17,6 +24,7 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { inventedNumbers } from '../server/fact-numbers.js'
+import { MODELS } from '../server/operator-model.js'
 
 const ROOT = new URL('..', import.meta.url)
 const TOKEN = 'adminEvalSessionTokenLocalOnly0000000000001' // fictional, local only
@@ -124,14 +132,88 @@ function grade(s, r, briefText) {
   return why
 }
 
+// ---------- Claude, in process ----------
+// Per token, micro-dollars: the higher of the repo's table and $1 / $5 per million (a cap must never under-count).
+const CAP_PRICE = { in: Math.max(MODELS.claude.price.in, 1), out: Math.max(MODELS.claude.price.out, 5), read: Math.max(MODELS.claude.price.read, 0.1), write: Math.max(MODELS.claude.price.write, 1.25) }
+async function claudeTarget(capUsd) {
+  const key = process.env.EVAL_ANTHROPIC_API_KEY
+  delete process.env.EVAL_ANTHROPIC_API_KEY
+  if (!key || !/^sk-ant-/.test(key.trim())) throw new Error('EVAL_ANTHROPIC_API_KEY is not set (or not an Anthropic key)')
+  const { default: Anthropic } = await import('@anthropic-ai/sdk')
+  const { seedAdminFixture, fakeTokens, ADMIN } = await import('../test/fixtures/admin-assistant-data.js')
+  const assist = await import('../functions/api/platform/assist.js')
+  const sql = new DatabaseSync(':memory:')
+  for (const f of readdirSync(new URL('migrations/', ROOT)).sort()) sql.exec(readFileSync(new URL(`migrations/${f}`, ROOT), 'utf8'))
+  const stmt = (q, a = []) => ({ q, args: a, bind: (...x) => stmt(q, x), first: async () => sql.prepare(q).get(...a) ?? null, all: async () => ({ results: sql.prepare(q).all(...a) }), run: async () => ({ meta: { changes: Number(sql.prepare(q).run(...a).changes) } }) })
+  const db = { prepare: (q) => stmt(q), batch: async (l) => l.map((s) => sql.prepare(s.q).run(...s.args)) }
+  const now = Date.now()
+  await seedAdminFixture(db, now)
+  await db.prepare('INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)').bind(createHash('sha256').update(TOKEN).digest('hex'), ADMIN, now, now + 86_400_000).run()
+  const real = new Anthropic({ apiKey: key.trim(), maxRetries: 1 })
+  const spent = { micros: 0, calls: 0, in: 0, out: 0, read: 0, write: 0 }
+  const capMicros = capUsd * 1e6
+  const client = {
+    messages: {
+      create: async (params) => {
+        // Before each call: the worst case of this call must fit under the cap (input ≈ chars / 3.5, all output tokens).
+        const worst = (JSON.stringify(params).length / 3.5) * CAP_PRICE.write + params.max_tokens * CAP_PRICE.out
+        if (spent.micros + worst > capMicros) throw Object.assign(new Error('eval_cap_reached'), { status: 402 })
+        const res = await real.messages.create(params)
+        const u = res.usage || {}
+        spent.calls++
+        for (const [k, f] of [['in', 'input_tokens'], ['out', 'output_tokens'], ['read', 'cache_read_input_tokens'], ['write', 'cache_creation_input_tokens']]) spent[k] += u[f] || 0
+        spent.micros += (u.input_tokens || 0) * CAP_PRICE.in + (u.output_tokens || 0) * CAP_PRICE.out + (u.cache_read_input_tokens || 0) * CAP_PRICE.read + (u.cache_creation_input_tokens || 0) * CAP_PRICE.write
+        return res
+      },
+    },
+  }
+  const base = 'https://getshowups.com'
+  const env = {
+    GOOGLE_CLIENT_ID: 'eval', GOOGLE_CLIENT_SECRET: 'eval', GOOGLE_REDIRECT_URI: `${base}/api/google/oauth/callback`, TOKEN_ENCRYPTION_KEY: 'k'.repeat(44), ADMIN_API_TOKEN: 'a'.repeat(40),
+    ONBOARDING_DB: db, GOOGLE_TOKENS: fakeTokens(), PLATFORM_ADMIN_EMAILS: ADMIN, STRIPE_SECRET_KEY: 'sk_test_eval', STRIPE_WEBHOOK_SECRET: 'whsec_eval',
+    OPERATOR_PROVIDER: 'claude', OPERATOR_ANTHROPIC_API_KEY: 'in-memory-client', ANTHROPIC_CLIENT: client,
+  }
+  const headers = { Cookie: `__Host-gsu_session=${TOKEN}`, Origin: base, 'Content-Type': 'application/json' }
+  return {
+    spent,
+    capMicros,
+    // The eval's own daily counters must not stop it (the real ceilings are tested in test/admin-assistant.test.js).
+    reset: () => sql.exec("DELETE FROM rate_limits; DELETE FROM events WHERE type = 'admin_ai_ask'"),
+    get: async () => {
+      const r = await assist.onRequestGet({ env, request: new Request(`${base}/api/platform/assist`, { headers }) })
+      return { status: r.status, body: await r.json() }
+    },
+    post: async (body) => {
+      const r = await assist.onRequestPost({ env, request: new Request(`${base}/api/platform/assist`, { method: 'POST', headers, body: JSON.stringify(body) }) })
+      return { status: r.status, body: await r.json().catch(() => ({})) }
+    },
+  }
+}
+
+function httpTarget(base) {
+  const headers = { Cookie: `__Host-gsu_session=${TOKEN}`, Origin: base, 'Content-Type': 'application/json', Accept: 'application/json' }
+  return {
+    reset: () => {},
+    pause: 7600, // stay under the 8 questions/minute limit
+    get: async () => {
+      const g = await fetch(`${base}/api/platform/assist`, { headers })
+      return { status: g.status, body: await g.json() }
+    },
+    post: async (body) => {
+      const res = await fetch(`${base}/api/platform/assist`, { method: 'POST', headers, body: JSON.stringify(body) })
+      return { status: res.status, body: await res.json().catch(() => ({})) }
+    },
+  }
+}
+
 async function run() {
-  const base = opt('base', 'http://127.0.0.1:4560')
+  const provider = opt('provider', 'workers')
   const out = opt('out', 'adm-eval')
   const only = opt('only') ? new Set(opt('only').split(',')) : null
   mkdirSync(out, { recursive: true })
-  const headers = { Cookie: `__Host-gsu_session=${TOKEN}`, Origin: base, 'Content-Type': 'application/json', Accept: 'application/json' }
-  const g = await fetch(`${base}/api/platform/assist`, { headers })
-  const meta = await g.json()
+  const T = provider === 'claude' ? await claudeTarget(Number(opt('cap-usd', '2'))) : httpTarget(opt('base', 'http://127.0.0.1:4560'))
+  const g = await T.get()
+  const meta = g.body
   if (g.status !== 200 || !meta.enabled) throw new Error(`assistant not available: ${g.status} ${JSON.stringify(meta).slice(0, 200)}`)
   const briefText = JSON.stringify(meta.brief)
   const done = new Map()
@@ -142,8 +224,13 @@ async function run() {
     const history = prev ? [...prev.history, { q: prev.q, a: prev.body?.raw || prev.body?.answer || '' }] : []
     const refs = prev?.body?.refs || {}
     const t0 = Date.now()
-    const res = await fetch(`${base}/api/platform/assist`, { method: 'POST', headers, body: JSON.stringify({ question: s.q, history, refs }) })
-    const body = await res.json().catch(() => ({}))
+    if (T.spent && T.spent.micros >= T.capMicros * 0.97) {
+      console.log(`STOP: cost cap reached ($${(T.spent.micros / 1e6).toFixed(4)})`)
+      break
+    }
+    T.reset()
+    const res = await T.post({ question: s.q, history, refs })
+    const body = res.body
     const r = { id: s.id, q: s.q, history, status: res.status, body, ms: Date.now() - t0 }
     r.fail = grade(s, r, briefText)
     r.pass = r.fail.length === 0
@@ -151,7 +238,7 @@ async function run() {
     done.set(s.id, r)
     results.push(r)
     console.log(`${r.pass ? 'PASS' : 'FAIL'} ${s.id.padEnd(16)} ${String(r.ms).padStart(6)} ms  ${r.route}${r.pass ? '' : `  ← ${r.fail.join('; ')}`}`)
-    await new Promise((x) => setTimeout(x, 7600)) // stay under the 8 questions/minute limit
+    if (T.pause) await new Promise((x) => setTimeout(x, T.pause))
   }
   const model = results.filter((r) => r.body?.usage)
   const tok = model.reduce((t, r) => ({ in: t.in + (r.body.usage.in || 0), out: t.out + (r.body.usage.out || 0), calls: t.calls + (r.body.usage.calls || 0), micros: t.micros + (r.body.usage.costMicros || 0) }), { in: 0, out: 0, calls: 0, micros: 0 })
@@ -159,6 +246,8 @@ async function run() {
   const lat = model.map((r) => r.ms).sort((a, b) => a - b)
   const summary = {
     at: new Date().toISOString(),
+    provider,
+    ...(T.spent ? { claudeReported: { calls: T.spent.calls, tokens: { in: T.spent.in, out: T.spent.out, cacheRead: T.spent.read, cacheWrite: T.spent.write }, costUsdAtCapPrices: Math.round(T.spent.micros) / 1e6, capUsd: T.capMicros / 1e6 } } : {}),
     scenarios: results.length,
     passed: pass,
     passRate: results.length ? Math.round((pass / results.length) * 1000) / 10 : null,
@@ -174,7 +263,7 @@ async function run() {
     failures: results.filter((r) => !r.pass).map((r) => ({ id: r.id, why: r.fail })),
   }
   writeFileSync(`${out}/results.json`, JSON.stringify({ summary, results }, null, 2))
-  const md = [`# Admin assistant evaluation, ${summary.at}`, '', `Pass ${pass}/${results.length} (${summary.passRate}%). Model answered ${model.length} (${summary.modelPassed} passed); fixed answers ${summary.fixedAnswers}; records fallbacks ${summary.fallbacks}.`, `Model calls ${tok.calls}, tokens in ${tok.in} / out ${tok.out}, recorded cost $${summary.costUsd.toFixed(4)} ($${(summary.costPerModelQuestionUsd || 0).toFixed(4)} per model question). Latency median ${summary.latencyMs?.median} ms, p90 ${summary.latencyMs?.p90} ms.`, '', '| scenario | result | route | ms | tools | why |', '| --- | --- | --- | --- | --- | --- |', ...results.map((r) => `| ${r.id} | ${r.pass ? 'pass' : 'FAIL'} | ${r.route} | ${r.ms} | ${(r.body?.sources || []).map((s) => s.tool).join(', ')} | ${r.fail.join('; ').replace(/\|/g, '/')} |`)]
+  const md = [`# Admin assistant evaluation (${provider}), ${summary.at}`, '', ...(T.spent ? [`Claude reported ${T.spent.calls} calls, ${T.spent.in} in / ${T.spent.out} out tokens; cost at cap prices $${(T.spent.micros / 1e6).toFixed(4)} (cap $${T.capMicros / 1e6}).`, ''] : []), `Pass ${pass}/${results.length} (${summary.passRate}%). Model answered ${model.length} (${summary.modelPassed} passed); fixed answers ${summary.fixedAnswers}; records fallbacks ${summary.fallbacks}.`, `Model calls ${tok.calls}, tokens in ${tok.in} / out ${tok.out}, recorded cost $${summary.costUsd.toFixed(4)} ($${(summary.costPerModelQuestionUsd || 0).toFixed(4)} per model question). Latency median ${summary.latencyMs?.median} ms, p90 ${summary.latencyMs?.p90} ms.`, '', '| scenario | result | route | ms | tools | why |', '| --- | --- | --- | --- | --- | --- |', ...results.map((r) => `| ${r.id} | ${r.pass ? 'pass' : 'FAIL'} | ${r.route} | ${r.ms} | ${(r.body?.sources || []).map((s) => s.tool).join(', ')} | ${r.fail.join('; ').replace(/\|/g, '/')} |`)]
   writeFileSync(`${out}/summary.md`, `${md.join('\n')}\n`)
   const tr = results.map((r) => [`## ${r.id} — ${r.pass ? 'PASS' : 'FAIL'}`, '', ...r.history.map((h) => `> (earlier) Q: ${h.q}\n> (earlier) A: ${h.a}`), `**Q:** ${r.q}`, '', `**A (${r.body?.kind || r.status}):** ${r.body?.answer || r.body?.error || ''}`, ...(r.body?.proposals?.length ? ['', `Prepared: ${r.body.proposals.map((p) => `${p.type} → ${p.target?.id || p.target?.kind} (${p.title}: ${p.name})`).join('; ')}`] : []), ...(r.body?.lookups?.length ? ['', `Lookups: ${r.body.lookups.map((l) => `${l.tool} ${JSON.stringify(l.args)}`).join('; ')}`] : []), ...(r.body?.sources?.length ? ['', `Sources: ${r.body.sources.map((s) => `${s.tool} [${s.period}]`).join('; ')}`] : []), ...(r.body?.usage ? ['', `Usage: ${r.body.usage.calls} model calls, ${r.body.usage.in} in / ${r.body.usage.out} out tokens, $${(r.body.usage.costMicros / 1e6).toFixed(5)}, ${r.ms} ms`] : []), ...(r.fail.length ? ['', `Failed: ${r.fail.join('; ')}`] : []), ''].join('\n'))
   writeFileSync(`${out}/transcripts.md`, `# Admin assistant transcripts (fictional data)\n\n${tr.join('\n')}`)
@@ -183,4 +272,4 @@ async function run() {
 
 if (cmd === 'seed') await seed(rest[0] || 'adm-eval')
 else if (cmd === 'run') await run()
-else console.log('usage: admin-assistant-eval.mjs seed <dir> | run --base <url> --out <dir> [--only id,id]')
+else console.log('usage: admin-assistant-eval.mjs seed <dir> | run [--provider workers|claude] [--base <url>] --out <dir> [--only id,id] [--cap-usd 2]')

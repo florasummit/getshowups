@@ -9,6 +9,7 @@ import { inventedNumbers } from '../fact-numbers.js'
 import { chat, costOf, operatorModel, providerReason } from '../operator-model.js'
 import { ADMIN_INSTRUCTIONS, PAGES } from './instructions.js'
 import { adminContext, namesFor, runAdminTool, TOOLS } from './tools.js'
+import { SALES_BUSINESS } from './data.js'
 
 export const BOUNDS = { rounds: 4, calls: 7, callMs: 25_000, totalMs: 45_000, tokens: 1200, answer: 1800, resultChars: 6000 }
 const SPECS = TOOLS.map(({ name, description, parameters }) => ({ name, description, parameters }))
@@ -95,7 +96,8 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     const left = BOUNDS.totalMs - (Date.now() - started)
     if (left < 1500) break
     const last = round >= BOUNDS.rounds - 1 || calls >= BOUNDS.calls
-    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens }
+    // On Claude every call reserves budget first (server/ai-budget.js): its own entry, booked on the GetShowUps business.
+    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens, entry: 'admin_assistant', customerId: SALES_BUSINESS }
     let reply
     try {
       reply = await chat(env, model, req1, Math.min(BOUNDS.callMs, left)).catch(async (err) => {

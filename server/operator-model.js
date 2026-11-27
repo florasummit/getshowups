@@ -99,10 +99,10 @@ async function workers(env, m, { system, messages, tools, mustLook, maxTokens },
   return readWorkers(await withTimeout(env.AI.run(m.model, body), ms))
 }
 
-async function claude(env, m, { system, messages, tools, allTools, maxTokens, customerId }, ms) {
+async function claude(env, m, { system, messages, tools, allTools, maxTokens, customerId, entry = 'assistant' }, ms) {
   // One spending guard (server/ai-budget.js): the call's worst case is reserved first; refused → treated like the
   // provider's own limit (the assistant answers from records without a model).
-  const budget = await reserveAi(env, { entry: 'assistant', customerId, micros: worstCase({ chars: JSON.stringify([system, messages, allTools]).length, maxOutput: maxTokens, inPerToken: m.price.write, outPerToken: m.price.out }) })
+  const budget = await reserveAi(env, { entry, customerId, micros: worstCase({ chars: JSON.stringify([system, messages, allTools]).length, maxOutput: maxTokens, inPerToken: m.price.write, outPerToken: m.price.out }) })
   if (!budget.ok) throw Object.assign(new Error('ai_budget'), { budget: budget.reason })
   let settled = false
   try {

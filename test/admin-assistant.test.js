@@ -62,7 +62,7 @@ const approve = async (who, body, origin) => {
   const r = await req(approveApi, 'POST', who, body, origin, '/api/platform/assist-approve')
   return { status: r.status, body: await r.json() }
 }
-const PRIVATE = [/owner@/, /8435550/, /Fictional Owner/, /Prefers calls/, /Jordan/, /customer\.example/, /poolpros\.example/, /tradealliance\.example/, /poolpros01/, /riverbend\.example/, /harbor\.example/]
+const PRIVATE = [/Bank ending/, /owner@/, /8435550/, /Fictional Owner/, /Prefers calls/, /Jordan/, /customer\.example/, /poolpros\.example/, /tradealliance\.example/, /poolpros01/, /riverbend\.example/, /harbor\.example/]
 
 // ---------- permission separation ----------
 test('only platform admins reach the admin assistant: owner, sales rep, signed out and cross-origin are refused', async () => {
@@ -253,6 +253,26 @@ test('a change nobody asked for is never prepared, even when the model tries', a
   assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
   assert.deepEqual(r.body.proposals, [])
   assert.match(calls[1].messages.find((m) => m.role === 'tool').content, /did not ask for this change/)
+})
+
+test('on Claude (production), every call reserves the admin_assistant budget on the GetShowUps business', async () => {
+  env.OPERATOR_PROVIDER = 'claude'
+  env.OPERATOR_ANTHROPIC_API_KEY = 'sk-ant-test-not-a-key'
+  const replies = [
+    { content: [{ type: 'tool_use', id: 't1', name: 'billing', input: { period: 'this_month' } }], stop_reason: 'tool_use', usage: { input_tokens: 3000, output_tokens: 20 } },
+    { content: [{ type: 'text', text: 'One payment failed this month, in test mode.' }], stop_reason: 'end_turn', usage: { input_tokens: 3200, output_tokens: 20 } },
+  ]
+  env.ANTHROPIC_CLIENT = { messages: { create: async () => replies.shift() } }
+  const r = await ask('admin', { question: 'Did any payment fail this month?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  const keys = db.sql.prepare("SELECT key, count FROM rate_limits WHERE key LIKE 'aib:%'").all()
+  assert.ok(keys.some((k) => k.key.startsWith('aib:entry:admin_assistant:getshowups:') && k.count > 0), JSON.stringify(keys))
+  assert.ok(keys.some((k) => k.key.startsWith('aib:biz:getshowups:')))
+  // The spending guard switched off for GetShowUps → no model call, the records instead.
+  env.AI_OFF_BUSINESSES = 'getshowups'
+  env.ANTHROPIC_CLIENT = { messages: { create: async () => assert.fail('no call when the guard refuses') } }
+  const off = await ask('admin', { question: 'Did any payment fail this month?' })
+  assert.equal(off.body.kind, 'records')
 })
 
 test('the spend ceiling: at the admin assistant’s daily ceiling no model is called and the records are shown', async () => {

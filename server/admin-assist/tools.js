@@ -216,7 +216,7 @@ async function systemHealth(c) {
 }
 
 async function aiSpending(c, { period = 'yesterday' } = {}) {
-  const [s, today] = await Promise.all([c.L.aiSpend(period), c.L.adminSpendToday()])
+  const [s, today, budget] = await Promise.all([c.L.aiSpend(period), c.L.adminSpendToday(), c.L.budgetToday()])
   if (!s) return { source: 'recorded AI costs', error: 'could_not_be_read' }
   const part = (p) => (p ? { uses: p.uses, cost: usd(p.micros) } : 'could not be read')
   return {
@@ -227,6 +227,7 @@ async function aiSpending(c, { period = 'yesterday' } = {}) {
     on_owners_own_keys_not_our_cost: part(s.ownKeys),
     today_admin_assistant: today ? { cost: usd(today.micros), daily_ceiling: usd(today.ceilingMicros), questions: today.asks } : 'could not be read',
     today_owner_assistant_shared_allowance: today ? `${today.ownerAsksToday} of ${today.ownerSharedAllowance} questions` : 'could not be read',
+    today_paid_providers_spending_guard: budget ? { total: usd(budget.platform), platform_ceiling: usd(budget.ceilings?.platform), by_entry: Object.fromEntries(Object.entries(budget.entries || {}).map(([k, v]) => [k, usd(v)])), warnings: (budget.warnings || []).map((w) => `${w.scope} ${w.state}`) } : 'could not be read',
     notes: ['receptionist costs are counted by conversation (last activity in the period)', 'follow-up answers include the text-message cost once sent'],
   }
 }
@@ -280,7 +281,7 @@ async function partners(c, { name = '' } = {}) {
   const byId = new Map((rows || []).map((r) => [r.id, r]))
   const sum = (m) => Object.entries(m || {}).map(([cur, v]) => `${(v.owedCents / 100).toFixed(2)} ${cur.toUpperCase()}`).join(', ') || '0'
   return {
-    source: 'referral partners, attribution and the commission ledger',
+    source: 'referral partners, their terms in effect, the commission ledger and recorded payouts',
     period: 'since each partner was added',
     billing_mode: c.L.live ? 'live' : 'Stripe test mode: test-mode commissions are never owed',
     referrals_program: c.env.REFERRALS_ENABLED === 'true' ? 'on' : 'off: nothing accrues; switching it on is a platform setting that needs your approval (no button)',
@@ -290,12 +291,14 @@ async function partners(c, { name = '' } = {}) {
       return {
         ref: c.ref('P', x.id, x.name),
         status: x.status,
-        terms: x.terms ? `${x.terms.type === 'percent' ? `${x.terms.value}%` : `${(x.terms.value / 100).toFixed(2)} ${String(x.terms.currency || '').toUpperCase()}`} ${x.terms.recurring}, window ${x.terms.windowDays} days` : 'no terms recorded',
+        terms: x.terms ? `version ${x.termsVersion}: ${x.terms.type === 'percent' ? `${x.terms.value}%` : `${(x.terms.value / 100).toFixed(2)} ${String(x.terms.currency || '').toUpperCase()}`} ${x.terms.recurring}, window ${x.terms.windowDays} days` : 'no terms in effect',
         referred_businesses: real.length,
         referred_test_businesses: x.referred.length - real.length,
         referred_live_setups: real.filter((r) => byId.get(r.customer)?.onboarding === 'live').length,
         referred_paying_live: real.filter((r) => byId.get(r.customer) && billingOf(byId.get(r.customer), modes, c.L.live, selfServe).paying).length,
-        commission_owed_live: c.L.live ? sum(x.liability) : 'none (live billing off)',
+        commission_owed_live: c.L.live ? Object.entries(x.balances).map(([cur, b]) => `${(b.owedCents / 100).toFixed(2)} ${cur.toUpperCase()} owed (${(b.earnedCents / 100).toFixed(2)} earned, ${(b.paidCents / 100).toFixed(2)} paid)`).join(', ') || '0' : 'none (live billing off)',
+        accruals_not_yet_paid_out: c.L.live ? x.unsettled : 0,
+        ...(x.setupMissing.length ? { setup_missing: x.setupMissing.map((b) => b.replace(/_/g, ' ')) } : {}),
         test_mode_commission_not_owed: sum(x.testMode),
       }
     }),

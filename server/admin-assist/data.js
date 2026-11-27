@@ -16,10 +16,11 @@ import { partnersOverview } from '../partners.js'
 import { acquisitionOverview } from '../acquisition.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
 import { RULES } from '../ratelimit.js'
+import { spendToday } from '../ai-budget.js'
 
 export const DAY = 86_400_000
-// The admin assistant's own daily money ceiling (recorded costs of 'admin_ai_ask' events, UTC day). Seam: when
-// server/ai-budget.js exists, register this ceiling there as one of its ENTRIES instead of keeping it here.
+// The admin assistant's own daily money ceiling (recorded costs of 'admin_ai_ask' events, UTC day). On Claude every call
+// is also reserved in server/ai-budget.js (ENTRIES.admin_assistant, $0.50/day, booked on the 'getshowups' business).
 export const ADMIN_DAILY_MICROS = 500_000 // $0.50 a day ≈ 200 questions on the included model
 export const ADMIN_ANSWERS_PER_DAY = 80
 
@@ -95,11 +96,13 @@ export function loaders(env, now = Date.now()) {
       once('partners', async () => {
         const p = await partnersOverview(env, { live: L.live })
         // Picked field by field: the partner's contact address, code and link never pass.
-        return { ready: p.ready, partners: p.partners.map((x) => ({ id: x.id, name: x.name, status: x.status, terms: x.terms, createdAt: x.createdAt, referred: x.referred, liability: x.liability, testMode: x.testMode })) }
+        return { ready: p.ready, partners: p.partners.map((x) => ({ id: x.id, name: x.name, status: x.status, terms: x.terms, termsVersion: x.termsVersion, createdAt: x.createdAt, referred: x.referred, liability: x.liability, testMode: x.testMode, balances: x.payouts?.balances || {}, unsettled: (x.payouts?.unsettled || []).length, setupMissing: x.checklist?.blockers || [] })) }
       }),
     acquisition: () => once('acquisition', () => acquisitionOverview(env, null, { now })),
     aiSpend: (period) => once(`ai:${period}`, () => aiSpend(db, periodRange(period, now))),
     adminSpendToday: () => once('adminSpendToday', () => adminSpendToday(db, now)),
+    // The spending guard's counters today (paid providers only; business ids only).
+    budgetToday: () => once('budgetToday', () => spendToday(env, now)),
   }
   return L
 }
