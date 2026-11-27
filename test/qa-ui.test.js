@@ -170,6 +170,7 @@ test('statuses: six manual results; "verified" is never a manual defect choice',
 
 test('scope text and idea context', () => {
   assert.equal(scopeText({ scope: { preset: 'smoke' } }), 'Quick smoke tests')
+  assert.equal(scopeText({ preset: 'report' }), 'CI or imported report')
   assert.equal(scopeText({ scope: { tests: ['a', 'b'], journeys: ['j'] } }), '2 tests + 1 journey')
   assert.equal(scopeText({}), 'Run')
   assert.deepEqual(ideaContext({ test: 't1' }).testIds, ['t1'])

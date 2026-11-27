@@ -332,3 +332,43 @@ test('QA at phone width: overview, tests, manual and a plan fit with no sideways
   await expect(page.locator('[data-new-item="defects"]')).toBeVisible()
   await noSideScroll(page)
 })
+
+test('Runs at phone width: filters behind one button, the first run on the first screen @mobile', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  // Make sure there is a run (read-only production verification; nothing outside QA records changes). One may already
+  // be going from another test: then the plan says so and links to it, and the list has it anyway.
+  await page.goto('/admin/control?view=qa&tab=runs')
+  await expect(page.locator('[data-qa-runs] [data-exec], [data-qa-runs] .cc-empty').first()).toBeVisible()
+  if (!(await page.locator('[data-exec]').count())) {
+    await page.goto('/admin/control?view=qa')
+    await page.locator('[data-preset="production_verify"]').click()
+    const plan = page.locator('[data-plan]')
+    await expect(plan.locator('[data-plan-facts]')).toBeVisible()
+    const dup = plan.locator('[data-plan-duplicate]')
+    if (await dup.isVisible().catch(() => false)) await dup.getByLabel('Run them again anyway').check()
+    await plan.locator('[data-plan-start]').click()
+    await expect(page).toHaveURL(/exec=qx_/)
+    await page.goto('/admin/control?view=qa&tab=runs')
+  }
+  const firstRun = page.locator('[data-exec]').first()
+  await expect(firstRun).toBeVisible()
+  const isPhone = (page.viewportSize()?.width || 1440) <= 560
+  if (isPhone) {
+    // Filters are folded away; the first run row sits inside the first screen.
+    await expect(page.locator('#qa-run-filters')).toBeHidden()
+    await expect(firstRun).toBeInViewport()
+    const toggle = page.locator('[data-filters-toggle] button').first()
+    await expect(toggle).toHaveText('Filters')
+    await toggle.click()
+    await page.getByLabel('Environment').selectOption('production')
+    await expect(page).toHaveURL(/env=production/)
+    await expect(toggle).toHaveText('Filters (1)')
+    await page.locator('[data-filters-toggle]').getByRole('button', { name: 'Clear' }).click()
+    await expect(page).not.toHaveURL(/env=/)
+  } else {
+    // Desktop: every filter is on the page, no toggle.
+    await expect(page.locator('#qa-run-filters')).toBeVisible()
+    await expect(page.locator('[data-filters-toggle]')).toBeHidden()
+  }
+  await noSideScroll(page)
+})
