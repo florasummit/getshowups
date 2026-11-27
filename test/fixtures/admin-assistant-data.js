@@ -133,6 +133,8 @@ export const QA_TESTS = {
   failedAfter: ['e2e:account:ebadee7e16', 'prod:homepage'],
   stale: 'unit:booking-excellence:0e6c201238',
 }
+// Every QA item title the fixture records (the grader checks how answers write them).
+export const QA_TITLES = ['Booking page shows no open times after a calendar reconnect', 'Settings save stays disabled after the recent sign-in prompt', 'Let owners text back new inquiries from the dashboard', 'Reply to inquiries by SMS from the dashboard', 'Make the Overview cards load faster on phones', 'Use a cheaper model for after-hours receptionist chats', 'Receptionist should offer the next two open times, not one']
 export async function seedQaFixture(db, now = Date.now()) {
   const ago = (d) => now - d * DAY
   const cur = QA_RELEASE.commit.slice(0, 12)

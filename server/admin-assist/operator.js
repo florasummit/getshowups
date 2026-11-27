@@ -65,30 +65,34 @@ export function readinessProblem(text, question) {
   return null
 }
 
-// References → names for the page, never the same name twice in one sentence. When the model also spelled the name out
-// (it quoted an item's title next to its reference): a name written BEFORE the reference makes the reference disappear;
-// a name written AFTER it (usually in quotes or brackets) is removed, the reference being the subject. Tidied after.
+// References → names for the page, never the same name twice in one sentence. A QA item [Q] is filled as its title in
+// typographic quotes (“…”), so a title never runs into the sentence; the sentence's own punctuation is kept as written.
+// When the model also spelled the name out: written BEFORE the reference, the reference disappears; written AFTER it in
+// quotes or brackets (“…”, (…), , “…,”), that copy is removed and the reference is the subject.
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 function fillSentence(sentence, filled) {
   let out = ''
   let rest = sentence
+  const done = new Set() // references filled in this sentence: the model repeating one is not a written-out title
   for (let m = REF_IN.exec(rest); m; m = REF_IN.exec(rest)) {
+    REF_IN.lastIndex = 0
     const name = filled[m[1]]
     const before = out + rest.slice(0, m.index)
     let after = rest.slice(m.index + m[0].length)
-    REF_IN.lastIndex = 0
     if (!name) {
       out = `${before}${m[0].startsWith('[B') ? 'that business' : 'that item'}`
-    } else if (before.toLowerCase().includes(name.toLowerCase())) {
-      out = before
+    } else if (!done.has(m[1]) && before.toLowerCase().includes(name.toLowerCase())) {
+      out = before.replace(/[ \t]+$/, after.match(/^[,.;:!?)]/) ? '' : ' ')
     } else {
-      out = `${before}${name}`
-      after = after.replace(new RegExp(`,?\\s*[(\\[]?\\s*[“"‘']?${esc(name)}[,.]?[”"’']?\\s*[)\\]]?,?`, 'i'), ' ')
+      out = `${before}${m[1][0] === 'Q' ? `“${name}”` : name}`
+      done.add(m[1])
+      const n = esc(name)
+      after = after.replace(new RegExp(`(\\s*,)?\\s*(?:[“"‘']${n}[,.]?[”"’']|\\(\\s*[“"‘']?${n}[,.]?[”"’']?\\s*\\)|\\[\\s*[“"‘']?${n}[,.]?[”"’']?\\s*\\])(\\s*,(?=\\s))?`, 'i'), '')
     }
     rest = after
   }
   REF_IN.lastIndex = 0
-  return (out + rest).replace(/\(\s*\)|\[\s*\]|“\s*”|""/g, '').replace(/[ \t]+([,.;:!?])/g, '$1').replace(/,\s*,/g, ',').replace(/[ \t]{2,}/g, ' ')
+  return (out + rest).replace(/\(\s*\)|\[\s*\]/g, '').replace(/[ \t]+([,.;:!?])/g, '$1').replace(/,\s*,/g, ',').replace(/[ \t]{2,}/g, ' ')
 }
 export function fillRefs(text, filled) {
   return text

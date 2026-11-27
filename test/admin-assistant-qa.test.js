@@ -103,7 +103,7 @@ test('qa_prompt: the deterministic template attached for the chosen item, never 
   assert.equal(r.body.attachments.length, 1)
   assert.match(r.body.attachments[0].text, /^Fix this GetShowUps defect: Booking page shows no open times after a calendar reconnect/)
   assert.match(r.body.attachments[0].text, /Tests:\n- BOOK-01/)
-  assert.match(r.body.answer, /Booking page shows no open times after a calendar reconnect is below/)
+  assert.match(r.body.answer, /“Booking page shows no open times after a calendar reconnect” is below/)
   assert.deepEqual(checks(SCENARIOS.find((x) => x.id === 'qa_prompt'), { status: 200, body: r.body }, ''), [])
 })
 
@@ -221,12 +221,19 @@ test('capturing an idea is never an owner-data request; real data requests stay 
 
 test('an item’s title is never filled in twice in one sentence; the grader fails a repeated title', () => {
   const f = { Q3: 'Let owners text back new inquiries from the dashboard', B1: 'Blue Lagoon Pools' }
-  assert.equal(fillRefs('[Q3], “Let owners text back new inquiries from the dashboard,” is sitting in Inbox.', f), 'Let owners text back new inquiries from the dashboard is sitting in Inbox.')
-  assert.equal(fillRefs('“Let owners text back new inquiries from the dashboard” [Q3] is in Inbox.', f), '“Let owners text back new inquiries from the dashboard” is in Inbox.')
-  assert.equal(fillRefs('[Q3] is in Inbox (“Let owners text back new inquiries from the dashboard”).', f), 'Let owners text back new inquiries from the dashboard is in Inbox.')
+  const T = 'Let owners text back new inquiries from the dashboard'
+  // A [Q] title is filled in quotes; the sentence keeps its own punctuation; never twice in one sentence.
+  assert.equal(fillRefs('Yes, it’s already in the backlog as [Q3]. It’s still in Inbox.', f), `Yes, it’s already in the backlog as “${T}”. It’s still in Inbox.`)
+  assert.equal(fillRefs('See [Q3]; it is old, and [Q3]: still Inbox!', f), `See “${T}”; it is old, and “${T}”: still Inbox!`)
+  assert.equal(fillRefs(`[Q3], “${T},” is sitting in Inbox.`, f), `“${T}” is sitting in Inbox.`)
+  assert.equal(fillRefs(`“${T}” [Q3] is in Inbox.`, f), `“${T}” is in Inbox.`)
+  assert.equal(fillRefs(`[Q3] is in Inbox (“${T}”).`, f), `“${T}” is in Inbox.`)
+  assert.equal(fillRefs(`It’s in the backlog as “${T}” [Q3]. Still Inbox.`, f), `It’s in the backlog as “${T}”. Still Inbox.`)
   assert.equal(fillRefs('[B1] is fine.\n- Urgent: [B1] calendar.', f), 'Blue Lagoon Pools is fine.\n- Urgent: Blue Lagoon Pools calendar.')
   const dup = SCENARIOS.find((x) => x.id === 'qa_dup_idea')
   const g = (answer) => checks(dup, { status: 200, body: { kind: 'answer', answer, evidence: [], proposals: [] } }, '')
   assert.ok(g('Yes: Let owners text back new inquiries from the dashboard, "Let owners text back new inquiries from the dashboard," is sitting in Inbox, similar to the SMS idea.').some((x) => x.cat === 'facts' && /twice in one sentence/.test(x.why)))
-  assert.deepEqual(g('Yes, it’s already recorded: Let owners text back new inquiries from the dashboard is in Inbox, and a similar SMS reply idea is under review.'), [])
+  assert.deepEqual(g('Yes, it’s already recorded: “Let owners text back new inquiries from the dashboard” is in Inbox, and a similar SMS reply idea is under review.'), [])
+  // A title that runs into the next sentence fails (stricter), quoted or not.
+  for (const bad of ['Yes, it’s already in the backlog as Let owners text back new inquiries from the dashboard It’s still in Inbox.', 'Yes, it’s in the backlog as “Let owners text back new inquiries from the dashboard” It’s still in Inbox.']) assert.ok(g(bad).some((x) => x.cat === 'facts' && /runs into the next sentence/.test(x.why)), bad)
 })

@@ -34,6 +34,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { inventedNumbers } from '../server/fact-numbers.js'
 import { MODELS } from '../server/operator-model.js'
 import { SELF_DOUBT } from '../server/admin-assist/operator.js'
+import { QA_TITLES } from '../test/fixtures/admin-assistant-data.js'
 
 const ROOT = new URL('..', import.meta.url)
 const TOKEN = 'adminEvalSessionTokenLocalOnly0000000000001' // fictional, local only
@@ -192,6 +193,8 @@ export function checks(s, r, briefText, brief = null) {
   const lines = a.split('\n').filter((l) => /^\s*[-•]/.test(l))
   for (const re of s.notListed || []) if (lines.some((l) => re.test(l))) fail('facts', `lists ${re} without a signal`)
   if (SELF_DOUBT.test(a)) fail('facts', 'claims an earlier answer was unchecked or wrong')
+  // A QA item's title never runs into the next sentence (a filled title followed by a capitalised word, no punctuation).
+  for (const t of QA_TITLES) if (new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[”"’']?[ \t]+[A-Z]`).test(a)) fail('facts', `the title “${t}” runs into the next sentence`)
   // A name or title said twice in one sentence (a reference filled in next to the same title written out).
   for (const sentence of a.split(/(?<=[.!?])\s+|\n/)) {
     const w = sentence.toLowerCase().replace(/[“”"'’‘,()]/g, ' ').split(/\s+/).filter(Boolean)
