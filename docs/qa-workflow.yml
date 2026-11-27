@@ -1,0 +1,186 @@
+# PROPOSED .github/workflows/qa.yml (docs/QA_CI_SETUP.md step 7). Not active while it lives in docs/.
+# A person with Workflows permission copies it: cp docs/qa-workflow.yml .github/workflows/qa.yml
+#
+# QA Command Center executor: runs a SELECTED subset of the same checks as ci.yml (node:test files / titles, Playwright
+# specs / titles, optional paid evaluations) when the QA Command Center dispatches it (workflow_dispatch from the server
+# with QA_GITHUB_DISPATCH_TOKEN), and posts the results back through the existing ingest (scripts/qa-report.mjs →
+# POST /api/qa/runs, QA_INGEST_TOKEN). Never triggered by pull requests or pushes.
+# Secrets are split exactly like ci-with-qa-report.yml:
+#   run     no secrets at all (npm ci + tests, mocked providers, fake credentials)
+#   evals   only when evaluations were requested AND paid for from the QA budget: environment `qa-paid` holds
+#           EVAL_ANTHROPIC_API_KEY (the server already reserved the worst case; --cap-usd stops the run before it)
+#   started / report   environment `qa-ingest` (main only) holds QA_INGEST_TOKEN; they install nothing and run only
+#           scripts/qa-report.mjs (Node built-ins only)
+# Inputs are never interpolated into shell code: they arrive as environment variables and are validated first.
+name: QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      execution_id: { description: 'QA Command Center execution id', required: true, type: string }
+      unit_files: { description: "'all', or space-separated test/*.test.js files", required: false, type: string, default: '' }
+      unit_pattern: { description: 'node --test-name-pattern (regex of titles)', required: false, type: string, default: '' }
+      e2e_files: { description: "'all', or space-separated test/e2e/*.spec.js files", required: false, type: string, default: '' }
+      e2e_grep: { description: 'Playwright --grep (regex of titles)', required: false, type: string, default: '' }
+      evals: { description: "paid evaluations, e.g. 'admin_eval:week,mrr'", required: false, type: string, default: '' }
+      cap_usd: { description: 'hard cost cap for paid evaluations (reserved by the server)', required: false, type: string, default: '0' }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-${{ inputs.execution_id }}
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  started:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: qa-ingest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Tell the QA Command Center the run started
+        run: node scripts/qa-report.mjs --started --execution "$QA_EXECUTION_ID"
+        env:
+          QA_EXECUTION_ID: ${{ inputs.execution_id }}
+          QA_INGEST_URL: ${{ vars.QA_INGEST_URL }}
+          QA_INGEST_TOKEN: ${{ secrets.QA_INGEST_TOKEN }}
+
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      QA_EXECUTION_ID: ${{ inputs.execution_id }}
+      UNIT_FILES: ${{ inputs.unit_files }}
+      UNIT_PATTERN: ${{ inputs.unit_pattern }}
+      E2E_FILES: ${{ inputs.e2e_files }}
+      E2E_GREP: ${{ inputs.e2e_grep }}
+    steps:
+      - name: Record the job start (CI time for the QA Command Center)
+        run: echo "JOB_STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate inputs
+        run: |
+          [[ "$QA_EXECUTION_ID" =~ ^qx_[A-Za-z0-9_-]{6,40}$ ]] || { echo 'bad execution id'; exit 1; }
+          [[ "$UNIT_FILES" =~ ^(all|(test/[a-z0-9._-]+\.test\.js( |$))*)$ ]] || { echo 'bad unit files'; exit 1; }
+          [[ "$E2E_FILES" =~ ^(all|(test/e2e/[a-z0-9._-]+\.spec\.js( |$))*)$ ]] || { echo 'bad e2e files'; exit 1; }
+      - run: npm ci
+      - name: Change-impact hashes of this commit
+        run: mkdir -p qa-out && node scripts/qa-inventory.mjs --hashes qa-out
+      - name: Unit tests (selected)
+        if: env.UNIT_FILES != ''
+        continue-on-error: true
+        run: |
+          if [ "$UNIT_FILES" = all ]; then FILES='test/*.test.js'; else FILES="$UNIT_FILES"; fi
+          ARGS=()
+          [ -n "$UNIT_PATTERN" ] && ARGS+=("--test-name-pattern=$UNIT_PATTERN")
+          # shellcheck disable=SC2086
+          node --test "${ARGS[@]}" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/qa-node-reporter.mjs --test-reporter-destination=qa-out/qa-unit.json $FILES
+      - name: Install Chromium for Playwright
+        if: env.E2E_FILES != ''
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests (selected; local workerd, fake credentials, mocked Google)
+        if: env.E2E_FILES != ''
+        continue-on-error: true
+        run: |
+          ARGS=()
+          [ "$E2E_FILES" != all ] && read -r -a ARGS <<< "$E2E_FILES"
+          [ -n "$E2E_GREP" ] && ARGS+=(--grep "$E2E_GREP")
+          npx playwright test "${ARGS[@]}"
+          cp qa-report.json qa-out/ 2>/dev/null || true
+      - name: Record the job time
+        if: always()
+        run: mkdir -p qa-out && echo $(( $(date +%s%3N) - JOB_STARTED_AT )) > qa-out/qa-job-ms.txt
+      - name: Keep the reports for the report job
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-run
+          path: |
+            qa-out/
+            qa-report.json
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  evals:
+    # Only when the QA Command Center dispatched paid evaluations (it reserved their cost from the QA budget first).
+    if: inputs.evals != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: qa-paid
+    env:
+      EVALS: ${{ inputs.evals }}
+      CAP_USD: ${{ inputs.cap_usd }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate inputs
+        run: |
+          [[ "$EVALS" =~ ^(admin_eval:[a-z0-9_,]+)?( ?receptionist_eval)?$ ]] || { echo 'bad evals'; exit 1; }
+          [[ "$CAP_USD" =~ ^[0-9]{1,2}(\.[0-9]{1,2})?$ ]] || { echo 'bad cap'; exit 1; }
+      - run: npm ci
+      - name: Admin assistant evaluation (Claude, in process, fictional data; stops before the cap)
+        if: contains(inputs.evals, 'admin_eval:')
+        continue-on-error: true
+        run: |
+          mkdir -p qa-out
+          ONLY=$(echo "$EVALS" | grep -o 'admin_eval:[a-z0-9_,]*' | cut -d: -f2)
+          node scripts/admin-assistant-eval.mjs run --provider claude --out qa-out/admin-eval --only "$ONLY" --cap-usd "$CAP_USD" --qa-json qa-out/eval.json
+        env:
+          EVAL_ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+      - name: Keep the evaluation report (no transcripts: fictional data, but kept out of artifacts anyway)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-eval
+          path: qa-out/eval.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  report:
+    needs: [run, evals]
+    if: always() && needs.run.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: qa-ingest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Download the reports
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: qa-*
+          merge-multiple: true
+      - name: Post to the QA Command Center
+        run: |
+          ARGS=(--execution "$QA_EXECUTION_ID" --source ci --provider mocked)
+          [ -f qa-report.json ] && ARGS=(qa-report.json "${ARGS[@]}")
+          [ -f qa-out/qa-unit.json ] && ARGS+=(--unit qa-out/qa-unit.json)
+          [ -f qa-out/qa-hashes.json ] && ARGS+=(--hashes qa-out/qa-hashes.json)
+          [ -f qa-out/eval.json ] && ARGS+=(--eval qa-out/eval.json)
+          [ -f qa-out/qa-job-ms.txt ] && ARGS+=(--job-ms qa-out/qa-job-ms.txt)
+          [ -f eval.json ] && ARGS+=(--eval eval.json)
+          node scripts/qa-report.mjs "${ARGS[@]}"
+        env:
+          QA_EXECUTION_ID: ${{ inputs.execution_id }}
+          QA_INGEST_URL: ${{ vars.QA_INGEST_URL }}
+          QA_INGEST_TOKEN: ${{ secrets.QA_INGEST_TOKEN }}

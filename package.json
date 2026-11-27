@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/build-info.mjs",
+    "build": "vite build && node scripts/build-info.mjs && node scripts/qa-inventory.mjs --hashes dist",
     "preview": "vite preview",
     "lint": "oxlint",
     "test": "node --test 'test/*.test.js'",

@@ -1,4 +1,4 @@
-// Control Center → Testing: guided human QA on the SAME journey definitions as automation (server/ops/journeys.js),
+// Control Center → QA → Manual (formerly the Testing tab): guided human QA on the SAME journey definitions as automation (server/ops/journeys.js),
 // one step at a time, saved to the server after every step (so a session can be paused and resumed), reviewed when
 // finished. Plus automated run history (Playwright, mocked vs real providers) and the activation measurement.
 // Observations only: nothing here changes a business, a message or a setting.
@@ -22,8 +22,10 @@ const RunStatus = ({ s }) => <Badge tone={RUN[s]?.[0] || 'neutral'}>{RUN[s]?.[1]
 const Result = ({ s }) => <Badge tone={RESULT[s]?.[0] || 'neutral'}>{RESULT[s]?.[1] || s}</Badge>
 const crumbs = [
   ['Control Center', {}],
-  ['Testing', { view: 'qa' }],
+  ['QA', { view: 'qa' }],
+  ['Manual', { view: 'qa', tab: 'manual' }],
 ]
+const MANUAL = { view: 'qa', tab: 'manual' }
 
 function useQa(reload = 0) {
   const [q, setQ] = useState(null)
@@ -96,13 +98,14 @@ function StartSession({ j, businesses, preset, go, open, onOpen }) {
   )
 }
 
-// ---------- the Testing home ----------
-export default function Testing({ o, params, go }) {
+// ---------- the guided-journey home (QA → Manual; `embedded` = inside that screen, which owns the page title, and the
+// automated run history lives under QA → Runs) ----------
+export default function Testing({ o, params, go, embedded = false }) {
   const q = useQa()
   const [opening, setOpening] = useState(params.journey || (params.for ? 'activation' : null))
   if (!q) return <Loading label="Loading testing…" />
-  if (q.error) return <LoadError what="testing" />
-  const head = <PageHead go={go} crumbs={[crumbs[0]]} title="Testing" lede="Guided tests for real people, automated test history, and the 20-minute activation target. Results are observations; nothing here changes an account." />
+  if (q.error) return <LoadError what="guided tests" />
+  const head = embedded ? null : <PageHead go={go} crumbs={[crumbs[0]]} title="Testing" lede="Guided tests for real people, automated test history, and the 20-minute activation target. Results are observations; nothing here changes an account." />
   if (!q.available)
     return (
       <>
@@ -215,7 +218,7 @@ export default function Testing({ o, params, go }) {
           <Empty title="No completed sessions yet.">Finished guided tests appear here with every observation and finding.</Empty>
         )}
       </Section>
-      <Section title="Automated runs" id="qa-auto" sub="Playwright browser tests against mocked providers (fake Google, Stripe and messaging). They check mechanics, not real-person experience.">
+      {!embedded && <Section title="Automated runs" id="qa-auto" sub="Playwright browser tests against mocked providers (fake Google, Stripe and messaging). They check mechanics, not real-person experience.">
         {q.failedJourneys.length > 0 && (
           <div className="cc-section-body">
             <div className="cc-callout cc-callout--warn">
@@ -253,7 +256,7 @@ export default function Testing({ o, params, go }) {
             No automated runs recorded. Connecting CI needs a token and a workflow change (approval): see docs/QA_CI_SETUP.md.
           </Empty>
         )}
-      </Section>
+      </Section>}
     </div>
   )
 }
@@ -507,7 +510,7 @@ export function Session({ id, go }) {
               timed={timed}
               onSaved={(sid, r) => setResults((x) => ({ ...x, [sid]: r }))}
               onNav={nav}
-              onPause={() => go({ view: 'qa' })}
+              onPause={() => go(MANUAL)}
             />
           ) : (
             <section className="qa-step" data-qa-review>
@@ -537,7 +540,7 @@ export function Session({ id, go }) {
                 </p>
               )}
               <div className="qa-nav">
-                <button type="button" className="btn btn-quiet btn-sm" onClick={() => go({ view: 'qa' })}>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => go(MANUAL)}>
                   Pause session
                 </button>
                 {finishing ? (
@@ -586,7 +589,7 @@ export function RunReview({ id, go }) {
   }
   return (
     <div className="cc-main" data-run={r.id}>
-      <PageHead go={go} crumbs={crumbs} title={human ? d.journey?.title || r.journey : `Automated run${r.revision ? ` · ${r.revision.slice(0, 7)}` : ''}`}>
+      <PageHead go={go} crumbs={human ? crumbs : [crumbs[0], crumbs[1], ['Runs', { view: 'qa', tab: 'runs' }]]} title={human ? d.journey?.title || r.journey : `Automated run${r.revision ? ` · ${r.revision.slice(0, 7)}` : ''}`}>
         <RunStatus s={r.status} />
         {human ? <Badge tone="info">Human-observed</Badge> : <Provider p={r.provider} />}
       </PageHead>

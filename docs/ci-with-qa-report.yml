@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # CI job time for the QA Command Center (engineering health; only measured values are reported).
+      - name: Record the job start
+        run: echo "JOB_STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -37,8 +41,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Lint, unit tests, build, Functions compile
-        run: npm run verify
+      # The same four checks as `npm run verify`, as separate steps so the unit results are also written as
+      # qa-unit.json and the build's change-impact hashes (dist/qa-hashes.json) can go to the QA Command Center.
+      - name: Lint (warnings fail)
+        run: npx oxlint --deny-warnings
+
+      - name: Unit tests
+        run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/qa-node-reporter.mjs --test-reporter-destination=qa-unit.json 'test/*.test.js'
+
+      - name: Build, Functions compile
+        run: npm run build && npm run check:functions
 
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
@@ -54,13 +66,21 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+      - name: Record the job time
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo $(( $(date +%s%3N) - JOB_STARTED_AT )) > qa-job-ms.txt
+
       # playwright.config.js writes qa-report.json in CI. Kept whether the tests passed or failed.
       - name: Keep the JSON report for the Control Center
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qa-report
-          path: qa-report.json
+          path: |
+            qa-report.json
+            qa-unit.json
+            qa-job-ms.txt
+            dist/qa-hashes.json
           if-no-files-found: ignore
           retention-days: 14
 
@@ -85,9 +105,16 @@ jobs:
         with:
           name: qa-report
 
+      # Browser results (qa-report.json) and unit results (qa-unit.json), with the build's change-impact hashes
+      # (dist/qa-hashes.json, read by default when present).
       - name: Post to the Control Center (mocked providers)
-        if: steps.report.outcome == 'success' && hashFiles('qa-report.json') != ''
-        run: node scripts/qa-report.mjs qa-report.json --source ci --provider mocked
+        if: steps.report.outcome == 'success' && (hashFiles('qa-report.json') != '' || hashFiles('qa-unit.json') != '')
+        run: |
+          ARGS=(--source ci --provider mocked)
+          [ -f qa-report.json ] && ARGS=(qa-report.json "${ARGS[@]}")
+          [ -f qa-unit.json ] && ARGS+=(--unit qa-unit.json)
+          [ -f qa-job-ms.txt ] && ARGS+=(--job-ms qa-job-ms.txt)
+          node scripts/qa-report.mjs "${ARGS[@]}"
         env:
           QA_INGEST_URL: ${{ vars.QA_INGEST_URL }}
           QA_INGEST_TOKEN: ${{ secrets.QA_INGEST_TOKEN }}

@@ -97,6 +97,30 @@ export function AdminAssistantButton() {
   )
 }
 
+// A copyable text the assistant generated deterministically (e.g. a Claude Code prompt from a QA item's evidence).
+function CopyText({ title, text }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <details className="ask-proposal" data-admin-attachment open>
+      <summary className="ask-proposal-title">{title}</summary>
+      <pre className="ask-copy">{text}</pre>
+      <div className="ask-proposal-actions">
+        <button type="button" className="btn btn-sm btn-quiet" onClick={copy}>
+          {copied ? 'Copied' : 'Copy prompt'}
+        </button>
+      </div>
+    </details>
+  )
+}
+
 function Proposal({ p }) {
   const [st, setSt] = useState({})
   const approve = async () => {
@@ -167,6 +191,9 @@ function Entry({ e }) {
           )}
           {(e.proposals || []).map((p) => (
             <Proposal key={p.id} p={p} />
+          ))}
+          {(e.attachments || []).map((x) => (
+            <CopyText key={x.ref || x.title} title={x.title} text={x.text} />
           ))}
           {e.sources?.length > 0 && (
             <p className="fine" data-sources>

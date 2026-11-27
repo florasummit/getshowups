@@ -35,6 +35,9 @@ export const ENTRIES = {
   ads_plan: { public: false, daily: () => 1_000_000 }, // "Draft my plan" (Claude)
   ads_creative: { public: false, daily: () => 1_000_000 }, // ad images (OpenAI)
   admin_assistant: { public: false, daily: () => 500_000 }, // platform-admin Assistant (server/admin-assist/), booked on 'getshowups'
+  // QA Command Center paid evaluations (server/ops/qa-spend.js), booked on 'getshowups'. The ceiling is the QA setting
+  // eval_daily_micros (default 0: every reservation is refused until a platform admin sets a QA budget).
+  qa_eval: { public: false, daily: async (env) => (await import('./ops/qa-spend.js')).evalDailyMicros(env) },
 }
 export const DEFAULTS = { platform_micros: 5_000_000, public_micros: 3_000_000, business_micros: 1_000_000, retell_minutes: 60, openai_minutes: 30, elevenlabs_minutes: 30, all_off: 0 }
 // What an admin may set (a typo can't open the tap): ceilings up to $100 / day, Retell up to 1,000 minutes.
@@ -123,7 +126,13 @@ export async function reserveAi(env, { entry, customerId, micros, now = Date.now
   const db = env.ONBOARDING_DB
   const amount = Math.max(1, Math.ceil(Number(micros) || 0))
   const c = await ceilings(env, now)
-  const limit = { platform: c.platform, public: c.public, business: c.business, entry: ENTRIES[entry].daily(env) }
+  let entryLimit
+  try {
+    entryLimit = Number(await ENTRIES[entry].daily(env)) || 0
+  } catch {
+    return { ok: false, reason: 'unavailable' }
+  }
+  const limit = { platform: c.platform, public: c.public, business: c.business, entry: entryLimit }
   const keys = keysFor(entry, customerId, now)
   const list = keys.map((_, i) => `?${i * 2 + 2}`).join(', ')
   const over = keys.map((_, i) => `(r.key = ?${i * 2 + 2} AND r.count + ?1 > ?${i * 2 + 3})`).join(' OR ')
@@ -168,6 +177,20 @@ export async function reserveAi(env, { entry, customerId, micros, now = Date.now
         console.error('ai budget settle failed:', err?.name || 'error')
       }
     },
+  }
+}
+
+// Settle a reservation made in an EARLIER request (QA evaluations: reserved before a CI dispatch, settled when the run
+// reports its cost): the same counters of the reservation's day, adjusted by actual − reserved (never below 0).
+export async function settleReservation(env, { entry, customerId, at, reserved, actual }) {
+  if (!ENTRIES[entry] || !CUSTOMER_RE.test(customerId || '')) return
+  const diff = Math.max(0, Math.ceil(Number(actual) || 0)) - Math.ceil(Number(reserved) || 0)
+  if (!diff) return
+  const keys = keysFor(entry, customerId, at).map(([k]) => k)
+  try {
+    await env.ONBOARDING_DB.prepare(`UPDATE rate_limits SET count = max(0, count + ?1) WHERE key IN (${keys.map((_, i) => `?${i + 2}`).join(', ')})`).bind(diff, ...keys).run()
+  } catch (err) {
+    console.error('ai budget settle failed:', err?.name || 'error')
   }
 }
 

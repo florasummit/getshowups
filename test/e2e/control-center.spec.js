@@ -99,7 +99,8 @@ test('demo: injected availability failure → detected incident on the test acco
 
   // 6. The failed automated run: sanitized failure, mocked providers, and the related open incident.
   const run1Id = (await run1.json()).id
-  await page.goto('/admin/control?view=qa')
+  // (Earlier CI runs moved from the Testing tab to QA → Runs.)
+  await page.goto('/admin/control?view=qa&tab=runs')
   await page.locator(`[data-qa-auto="${run1Id}"]`).click()
   const run = page.locator(`[data-run="${run1Id}"]`)
   await expect(run).toContainText('Mocked providers')
@@ -126,7 +127,7 @@ test('demo: injected availability failure → detected incident on the test acco
   const run2 = await report('passed', null)
   expect(run2.status()).toBe(201)
   const run2Id = (await run2.json()).id
-  await page.goto('/admin/control?view=qa')
+  await page.goto('/admin/control?view=qa&tab=runs')
   await page.locator(`[data-qa-auto="${run2Id}"]`).click()
   const passedRow = page.locator(`[data-run="${run2Id}"] [data-test^="calendar-recovery:control-center:demo"]`)
   await expect(passedRow).toHaveAttribute('data-result', 'pass')
@@ -183,7 +184,7 @@ test('guided QA end to end: start with a test account → record results + usabi
   await s2.getByRole('button', { name: 'Save and continue →' }).click()
   await expect(page.locator('[data-qa-step="resolved"]')).toBeVisible()
 
-  // Pause: back to Testing; the session is listed as in progress (server state, survives a reload).
+  // Pause: back to QA → Manual (the guided journeys); the session is listed as in progress (server state, survives a reload).
   await page.getByRole('button', { name: 'Pause session' }).click()
   await expect(page.locator('[data-testing]')).toBeVisible()
   await page.reload()
@@ -218,7 +219,7 @@ test('guided QA end to end: start with a test account → record results + usabi
   // A finished session can't be reopened for editing: its old URL shows the review.
   await page.goto(sessionUrl)
   await expect(page.locator('[data-run]')).toBeVisible()
-  await page.goto('/admin/control?view=qa')
+  await page.goto('/admin/control?view=qa&tab=manual')
   await expect(page.locator('[data-qa-human]').first()).toContainText('Calendar connection recovery')
 })
 
@@ -320,6 +321,7 @@ test('Control Center at phone width: no sideways scroll; nav, incident, account 
   await expect(page.getByRole('heading', { name: 'Incidents', level: 1 })).toBeVisible()
   await noSideScroll(page)
   await page.locator('[data-nav="qa"]').click()
+  await page.locator('[data-qa-subnav="manual"]').click()
   await expect(page.locator('[data-qa-journey="booking"]')).toBeVisible()
   await page.locator('[data-qa-journey="booking"]').getByRole('button', { name: /Start guided QA/ }).click()
   await page.locator('[data-start="booking"]').getByRole('button', { name: 'Begin' }).click()

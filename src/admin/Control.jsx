@@ -1,8 +1,10 @@
 // /admin/control — the Control Center (platform admins; every request is authorized server-side).
 // Overview answers: what's broken, who is affected, what to do next. Then Incidents, Accounts, Integrations and
-// Testing, each one click from the side navigation. Every screen is a URL (?view=…, ?incident=…, ?business=…,
-// ?integration=…, ?session=…, ?run=…), so Back, deep links and new tabs work. Read-only except guided-QA records,
-// the read-only calendar diagnosis and the founder-alert test (each confirmed, rate-limited and audited).
+// QA (the QA Command Center, which absorbed the earlier Testing tab), each one click from the side navigation. Every
+// screen is a URL (?view=…, ?incident=…, ?business=…, ?integration=…, ?session=…, ?run=…, ?view=qa&tab=…, ?test=…,
+// ?exec=…, ?item=…), so Back, deep links and new tabs work. Read-only except QA records (guided sessions, results,
+// defects, ideas, planned runs), the read-only calendar diagnosis and the founder-alert test (each confirmed,
+// rate-limited and audited).
 import { Suspense, useEffect, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
 import { api } from '../lib/api.js'
@@ -13,7 +15,7 @@ import { AccountInspector, AccountsList } from './control/Accounts.jsx'
 import { IntegrationDetail, IntegrationsList } from './control/Integrations.jsx'
 import './control.css'
 
-const Testing = lazyPage(() => import('./Qa.jsx'))
+const QaCenter = lazyPage(() => import('./control/qa/QaCenter.jsx'))
 const Session = lazyPage(() => import('./Qa.jsx').then((m) => ({ default: m.Session })))
 const RunReview = lazyPage(() => import('./Qa.jsx').then((m) => ({ default: m.RunReview })))
 
@@ -256,7 +258,7 @@ function Overview({ o, go }) {
             <Empty title="No integration is failing.">Integrations without recent evidence are listed as “not verified”, never as healthy.</Empty>
           )}
         </Section>
-        <Section title="Testing" id="cc-qa" action={<Link to={{ view: 'qa' }} go={go} className="cc-more">Open testing →</Link>}>
+        <Section title="QA" id="cc-qa" action={<Link to={{ view: 'qa' }} go={go} className="cc-more">Open QA →</Link>}>
           <div className="cc-section-body">
             <p className="cc-status-line" data-overview-activation={o.activation?.measured ? 'measured' : 'not-measured'}>
               <span className="cc-label">Activation (≤ 20 min)</span>
@@ -336,9 +338,10 @@ const NAV = [
   ['incidents', 'Incidents'],
   ['accounts', 'Accounts'],
   ['integrations', 'Integrations'],
-  ['qa', 'Testing'],
+  ['qa', 'QA'],
 ]
-const sectionOf = (p) => (p.incident ? 'incidents' : p.business ? 'accounts' : p.integration ? 'integrations' : p.session || p.run ? 'qa' : NAV.some(([id]) => id === p.view) ? p.view : 'overview')
+// ?view=testing (a name some notes use) is an alias of the QA tab.
+const sectionOf = (p) => (p.incident ? 'incidents' : p.business ? 'accounts' : p.integration ? 'integrations' : p.session || p.run || p.test || p.exec || p.item || p.view === 'testing' ? 'qa' : NAV.some(([id]) => id === p.view) ? p.view : 'overview')
 
 export default function Control() {
   const [params, go] = useLocation()
@@ -375,7 +378,7 @@ export default function Control() {
   else if (section === 'incidents') body = <IncidentsList o={o} params={params} go={go} />
   else if (section === 'accounts') body = <AccountsList key={params.filter || 'all'} o={o} params={params} go={go} />
   else if (section === 'integrations') body = <IntegrationsList o={o} go={go} />
-  else if (section === 'qa') body = <Testing o={o} params={params} go={go} />
+  else if (section === 'qa') body = <QaCenter o={o} params={params} go={go} />
   else body = <Overview o={o} go={go} />
   return (
     <div className="cc" data-cc-section={section}>

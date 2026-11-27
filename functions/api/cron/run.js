@@ -20,6 +20,9 @@ import { syncIncidents } from '../../../server/ops/incidents.js'
 import { purgeExpiredSessions } from '../../../server/sessions-purge.js'
 import { purgeExpiredSignIns } from '../../../server/email-auth.js'
 import { purgeQa } from '../../../server/ops/qa.js'
+import { qaCenterReady } from '../../../server/ops/qa-results.js'
+import { qaCron } from '../../../server/ops/qa-executions.js'
+import { purgeEvidence } from '../../../server/ops/qa-evidence.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
 import { enforceAdsHolds } from '../../../server/ads/holds.js'
@@ -114,8 +117,15 @@ export async function onRequestPost({ request, env }) {
     const sessions = await adsStep('expired sessions', () => purgeExpiredSessions(env))
     await adsStep('expired sign-in requests', () => purgeExpiredSignIns(env)) // email sign-in (0046; no-op before it)
     await adsStep('qa retention', () => purgeQa(env.ONBOARDING_DB))
+    // QA Command Center (migration 0051; no-op before it): execution recovery (bounded retries, expiry), read-only
+    // production verification (≤ 25 checks per run; queued automatically for each new deployment), evidence retention.
+    // Last: it never takes query budget from delivery, ads safety-stop or billing steps.
+    const qa = await adsStep('qa center', async () => {
+      if (!(await qaCenterReady(env.ONBOARDING_DB))) return { ready: false }
+      return { ...(await qaCron(env)), evidence: await purgeEvidence(env.ONBOARDING_DB) }
+    })
     await adsStep('heartbeat', () => beat(env.ONBOARDING_DB))
-    return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit, sessions })
+    return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit, sessions, qa })
   } catch (err) {
     console.error('cron run failed:', err?.message)
     return json(503, { error: 'storage_error' })

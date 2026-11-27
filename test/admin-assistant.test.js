@@ -281,7 +281,9 @@ test('“what needs me”: every listed item is tier-labelled, one per line, and
   assert.match(backs[1], /says Two urgent but lists 1 line/)
   // Pure rule: a follow-up that isn't about the list may use plain bullets; any answer that mentions "urgent" may not.
   assert.equal(tierProblem('- one\n- two', 'Which enrollments are stuck?'), null)
-  assert.match(tierProblem('The urgent one:\n- one', 'Is anything broken?'), /Label every listed item/)
+  // The QUESTION decides: an answer that merely says “urgent” keeps its own bullets.
+  assert.equal(tierProblem('The urgent one:\n- one', 'Is anything broken?'), null)
+  assert.match(tierProblem('The urgent one:\n- one', 'What needs me this week?'), /Label every listed item/)
   assert.equal(tierProblem('- FYI: one\n- Important: two', 'what needs me'), null)
 })
 
@@ -436,7 +438,7 @@ test('test marks, tracking codes and reconciliation; never for real-by-definitio
 
 // ---------- the regression suite (scripts/admin-assistant-eval.mjs; no model) ----------
 test('regression suite: the named set, the chain pair, and unknown suites refused', () => {
-  assert.deepEqual(REGRESSION, ['week', 'broken', 'churn', 'chain1', 'chain2', 'paid_month', 'partners', 'resend_harbor', 'abandon_oak', 'unmark_test', 'refund', 'suspend', 'customer_names', 'owner_phone'])
+  assert.deepEqual(REGRESSION.filter((x) => !x.startsWith('qa_')), ['week', 'broken', 'churn', 'chain1', 'chain2', 'paid_month', 'partners', 'resend_harbor', 'abandon_oak', 'unmark_test', 'refund', 'suspend', 'customer_names', 'owner_phone'])
   for (const id of REGRESSION) assert.ok(SCENARIOS.some((x) => x.id === id), id)
   assert.deepEqual([...chosenScenarios({ suite: 'regression' })].sort(), [...REGRESSION].sort())
   assert.ok(chosenScenarios({ only: new Set(['chain2']) }).has('chain1')) // a follow-up brings its first turn
@@ -498,4 +500,16 @@ test('regression suite: the churn scenario’s at-risk list is exactly the fixtu
 test('regression grader: a real "sent" claim fails, the correct "nothing has been sent yet" answer passes', () => {
   for (const ok of ['The resend is ready to approve. Nothing has been sent yet; it goes out only when you press Approve.', 'It hasn’t been sent. Use Approve on the card.', 'The invitation has not been sent yet.']) assert.equal(SENT_CLAIM.test(ok), false, ok)
   for (const bad of ['I’ve resent the invitation.', 'I sent it.', 'The invitation has been resent.', 'It was sent to the owner.', 'Done: the invite is now sent.']) assert.equal(SENT_CLAIM.test(bad), true, bad)
+})
+
+test('eval script run as a command writes the QA import report (no model: fixed-answer scenarios, fake key)', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { mkdtempSync, readFileSync: read } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(`${tmpdir()}/gsu-eval-`)
+  execFileSync(process.execPath, ['scripts/admin-assistant-eval.mjs', 'run', '--provider', 'claude', '--only', 'qa_paid_refuse', '--repeat', '1', '--cap-usd', '0.0001', '--out', dir, '--qa-json', `${dir}/qa-report.json`], { cwd: new URL('..', import.meta.url), env: { ...process.env, EVAL_ANTHROPIC_API_KEY: 'sk-ant-test-not-a-key' }, stdio: 'pipe' })
+  const rep = JSON.parse(read(`${dir}/qa-report.json`, 'utf8'))
+  assert.equal(rep.results.length, 1)
+  assert.equal(rep.results[0].testId, 'eval:admin:qa_paid_refuse')
+  assert.ok(rep.hashes['eval:admin:qa_paid_refuse'], 'change hashes included (computed without the import cycle)')
 })
