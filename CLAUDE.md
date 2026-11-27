@@ -665,7 +665,11 @@ Non-negotiables:
   returns; params are clamped numbers, never code). Numeric checks are never called proof; "formal" is never claimed. KPIs
   come from growthMeasure/funnel/spendToday (no second definition); only internal_live businesses are read; cross-account
   research is off (CROSS_ACCOUNT) until a legal basis exists. No cron, no model calls. Customer-facing code and assistants
-  never import server/research (a test enforces it).
+  never import server/research (a test enforces it). THE REPOSITORY IS PUBLIC: program definitions, research records,
+  proprietary formulas and discoveries live ONLY in the vault's D1 tables (a model the founder develops is a `model`
+  record, stored as text, never executed) or in git-ignored local files (research-programs*.json, research-private/).
+  Built-in code models are limited to published textbook results with references. A test fails if any repository file
+  contains a research record.
 - Customer-facing voice on every provider (server/voice/customer.js, public routes api/receptionist/[customer]/voice,
   voice-connect, voice-tool, voice-session): the provider comes from receptionist_voice_settings (never the browser),
   sessions are pinned to their provider, tools run through runVoiceTool bound to the session's business (dry run only
