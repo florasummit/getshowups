@@ -21,6 +21,7 @@ export const RULES = {
   bookAppointment: { limit: 15, windowSec: 600 }, // POST appointment (per IP)
   pageView: { limit: 120, windowSec: 600 }, //       GET /api/page/:id (per IP; public landing page)
   enrollment: { limit: 120, windowSec: 600 }, //     GET /api/enrollment (per IP; public homepage + sign-in page)
+  referralLink: { limit: 60, windowSec: 600 }, //   GET /r/<code> (per IP; a redirect, no lookup)
   invitePeek: { limit: 30, windowSec: 600 }, //      GET /api/invite (per IP)
   confirm: { limit: 30, windowSec: 600 }, //         GET/POST /api/appointment/confirm (per IP)
   unsubscribe: { limit: 30, windowSec: 600 }, //     GET/POST /api/messages/unsubscribe (per IP)

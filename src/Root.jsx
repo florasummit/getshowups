@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { lazyPage } from './lib/lazy.js'
 import App from './App.jsx'
+import { captureReferral } from './lib/referral.js'
 
 // App pages are separate lazy chunks so the marketing page stays small.
 const Dashboard = lazyPage(() => import('./dashboard/Dashboard.jsx'))
@@ -17,6 +18,7 @@ try {
 } catch {
   // storage unavailable: attribution falls back to 'direct'
 }
+captureReferral()
 
 export default function Root() {
   const path = window.location.pathname
