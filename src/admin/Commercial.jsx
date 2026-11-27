@@ -100,6 +100,14 @@ export function Pipeline() {
         Billing is {live ? 'live' : 'in test mode, so no business counts as paying and nothing is revenue'} · referral program {p.referralsEnabled ? 'on' : 'off (links and partners can be prepared; no commission accrues)'} · {plural(p.excludedTest, 'test business', 'test businesses')} left out.
         {p.enrollmentsReady ? '' : ' Assisted enrollments are not available yet.'}
       </p>
+      {p.enrollmentsReady && Object.keys(p.enrollmentStages || {}).length ? (
+        <p className="fine" data-com-enrollments>
+          Assisted enrollments:{' '}
+          {Object.entries(p.enrollmentStages)
+            .map(([s, n]) => `${String(s).replace(/_/g, ' ')} ${n}`)
+            .join(' · ')}
+        </p>
+      ) : null}
       <h2 className="card-title">By channel</h2>
       <Totals groups={p.byChannel} live={live} label="Channel" keyName="channel" />
       {p.byRep.length ? (

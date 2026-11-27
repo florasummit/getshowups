@@ -27,18 +27,26 @@ const soft = async (fn, fallback) => {
   }
 }
 
-// Assisted enrollments (stream B, migration 0047), if present: business id → { stage, repEmail }. Columns are read
-// defensively so a different shape degrades to "not available", never an error.
+// Assisted enrollments (stream B, migration 0047; read fail-soft): business id → { stage, repEmail } for enrollments with
+// a workspace (customer set; assigned_rep_email NULL = founder-handled), plus counts by stage over every enrollment that is
+// not a test business (prospects without a workspace have no business to mark, so they are counted).
 async function enrollments(db) {
-  return soft(async () => {
-    const { results } = await db.prepare('SELECT * FROM assisted_enrollments').all()
-    const out = new Map()
-    for (const r of results) {
-      const id = r.customer ?? r.customer_id ?? r.business ?? null
-      if (id) out.set(id, { stage: r.stage ?? r.status ?? null, repEmail: r.rep_email ?? r.assigned_rep ?? r.created_by ?? null })
-    }
-    return out
-  }, new Map())
+  return soft(
+    async () => {
+      const { results } = await db
+        .prepare(`SELECT customer, stage, assigned_rep_email, (customer IS NOT NULL AND EXISTS (SELECT 1 FROM test_businesses tb WHERE tb.customer = e.customer AND tb.is_test = 1)) AS is_test FROM assisted_enrollments e`)
+        .all()
+      const byCustomer = new Map()
+      const stages = {}
+      for (const r of results) {
+        if (r.is_test) continue
+        stages[r.stage] = (stages[r.stage] || 0) + 1
+        if (r.customer) byCustomer.set(r.customer, { stage: r.stage, repEmail: r.assigned_rep_email ?? null })
+      }
+      return { ready: true, byCustomer, stages }
+    },
+    { ready: false, byCustomer: new Map(), stages: {} },
+  )
 }
 
 export function paymentState(sub, livemode, live, selfServe) {
@@ -67,10 +75,10 @@ export async function commercialPipeline(env, now = Date.now()) {
 
   const out = rows.slice(0, 500).map((r) => {
     const a = attribution.get(r.id)
-    const e = assisted.get(r.id)
+    const e = assisted.byCustomer.get(r.id)
     // Without a recorded attribution (businesses from before 0048): derived only where a record says so, else 'unrecorded'
     // (created_via defaults to self_serve on older rows, so it alone never proves a self-serve signup).
-    const channel = a?.channel ?? (e ? 'sales_rep' : selfServe.has(r.id) ? 'self_serve' : r.createdVia === 'admin_invite' || r.createdVia === 'admin_link' ? 'founder' : 'unrecorded')
+    const channel = a?.channel ?? (e ? (e.repEmail ? 'sales_rep' : 'founder') : selfServe.has(r.id) ? 'self_serve' : r.createdVia === 'admin_invite' || r.createdVia === 'admin_link' ? 'founder' : 'unrecorded')
     const payment = paymentState(r.subscription, modes.get(r.id), live, selfServe.has(r.id))
     return {
       id: r.id,
@@ -125,7 +133,8 @@ export async function commercialPipeline(env, now = Date.now()) {
     billingMode: live ? 'live' : 'test',
     referralsEnabled: referralsEnabled(env),
     attributionReady: await soft(async () => Boolean(await db.prepare('SELECT 1 FROM commercial_attribution LIMIT 1').all()), false),
-    enrollmentsReady: assisted.size > 0 || (await soft(async () => Boolean(await db.prepare('SELECT 1 FROM assisted_enrollments LIMIT 1').all()), false)),
+    enrollmentsReady: assisted.ready,
+    enrollmentStages: assisted.stages,
     excludedTest: real.length - rows.length,
     rows: out,
     byChannel,
