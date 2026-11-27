@@ -590,6 +590,33 @@ test('outages and limits: model errors give a fixed message with the booking lin
   assert.equal((await chat('alpha', 'hi')).status, 404)
 })
 
+test('shared AI spending guard (server/ai-budget.js): emergency off or a reached ceiling → the booking fallback, no model call, nothing charged', async () => {
+  await seed('alpha')
+  enable('alpha')
+  env.AI_OFF_BUSINESSES = 'alpha'
+  const before = modelRequests.length
+  const off = await chat('alpha', 'how much is weekly care?')
+  assert.equal(off.status, 200)
+  assert.match(off.json().reply, /book\/alpha/)
+  assert.equal(modelRequests.length, before)
+  assert.ok(events(off.json().conversationId).some((e) => e.includes('budget_ai_off')), 'the refusal is recorded as a code')
+  delete env.AI_OFF_BUSINESSES
+  // The platform ceiling, reached by other businesses' spend, stops this one too; nothing more is charged.
+  env.AI_PLATFORM_DAILY_MICROS = '1000'
+  db.sql.prepare("INSERT INTO rate_limits (key, win, count, expires_at) VALUES (?, 0, 1000, ?)").run(`aib:platform:${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`, Date.now() + 864e5)
+  const capped = await chat('alpha', 'still there?', off.json())
+  assert.match(capped.json().reply, /book\/alpha/)
+  assert.equal(modelRequests.length, before)
+  // Within the ceilings: the call is made and settled to the reported cost (never left at the worst case).
+  delete env.AI_PLATFORM_DAILY_MICROS
+  script.push({ content: [{ type: 'text', text: 'Weekly pool care is $280.' }], stop_reason: 'end_turn', usage: { input_tokens: 1000, output_tokens: 10 } })
+  const ok = await chat('alpha', 'price please', off.json())
+  assert.equal(ok.status, 200)
+  assert.equal(modelRequests.length, before + 1)
+  const biz = db.sql.prepare("SELECT count FROM rate_limits WHERE key LIKE 'aib:biz:alpha:%'").get().count
+  assert.ok(biz > 0 && biz < 20_000, `settled to the reported cost, got ${biz}`)
+})
+
 test('prompt injection and tenant isolation: customer text never enters the system prompt; conversations, tools and data stay inside one business', async () => {
   await seed('alpha')
   await seed('beta', { zips: '10001' })

@@ -106,7 +106,7 @@ export async function onRequestPost({ request, env }) {
       if (!text || text.length > 1200) return json(400, { error: 'invalid_request' })
       let asked = false
       const started = Date.now()
-      const p = await propose(env, text, current.draft, records, { allowModel: async () => (asked = !(await hit(env, 'aiRulesTeachModel', customer.id)).limited) })
+      const p = await propose(env, text, current.draft, records, { customerId: customer.id, allowModel: async () => (asked = !(await hit(env, 'aiRulesTeachModel', customer.id)).limited) })
       // Cost and latency of the model call (numbers and codes only; never what the owner typed).
       if (asked && p.ok) await track(env, 'ai_teach_model', { customer: customer.id, props: { costMicros: p.costMicros, ms: Date.now() - started, ...(p.modelError ? { error: p.modelError } : {}) } })
       if (!p.ok) return json(400, { error: p.error })

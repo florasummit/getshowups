@@ -452,3 +452,21 @@ test('retention and deletion: calls older than 365 days go with their callback t
   assert.equal(requests().length, 0)
   for (const t of ['phone_calls', 'phone_destinations', 'phone_settings', 'phone_lines']) assert.ok(ERASED_TABLES.includes(t), t)
 })
+
+test('spending guard: with the platform’s Retell minutes used up, or AI off for the business, the caller gets the callback path, never the AI', async () => {
+  seed('alpha')
+  Object.assign(env, { RETELL_API_KEY: 'key_RETELL_SECRET', RETELL_AGENT_ID: 'agent_abcdef123', RETELL_WS_SECRET: 's'.repeat(40), RECEPTIONIST_VOICE_BUSINESSES: 'alpha' })
+  db.sql.prepare("INSERT INTO receptionist_settings (customer, enabled, mode, greeting, knowledge, updated_at) VALUES ('alpha', 1, 'ai_first', '', '', 1)").run()
+  db.sql.prepare("INSERT INTO phone_settings (customer, answer, ring_seconds, fallback, after_hours, screen, version, updated_at) VALUES ('alpha', 'fallback', 20, 'ai', 'same', 1, 1, 1)").run()
+  // Four Retell calls still open = 60 minutes at their 15-minute ceiling: no room for another.
+  for (let i = 0; i < 4; i++) db.sql.prepare("INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at) VALUES (?, 'alpha', 'c', 'retell', ?)").run(`open_${i}`, Date.now() - 1000)
+  const r = await ring(30)
+  assert.match(r.text, /call you back/)
+  assert.ok(!r.text.includes('<Sip>'))
+  assert.equal(fetches.filter((f) => f.url.endsWith('/v2/register-phone-call')).length, 0)
+  db.sql.prepare('DELETE FROM receptionist_calls').run()
+  env.AI_OFF_BUSINESSES = 'alpha'
+  assert.ok(!(await ring(31)).text.includes('<Sip>'))
+  delete env.AI_OFF_BUSINESSES
+  assert.match((await ring(32)).text, /<Sip>sip:call_ai_0001@sip\.retellai\.com<\/Sip>/)
+})

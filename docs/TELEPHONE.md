@@ -57,6 +57,10 @@ doesn't work with this method; the team rings **before** the AI, so no transfer 
 - **Idempotency**: CallSid is the key. Outcomes only move forward. One callback task per call (unique id `call:<CallSid>`).
 - **Limits**: `PHONE_CONCURRENT` (default 3 calls at once) and `PHONE_DAILY_MINUTES` (default 120 per business, rolling
   24 h). Over a limit, the caller gets the callback message: no ringing and no AI.
+- **AI spending** (server/ai-budget.js, docs/AI_SPENDING.md): the AI leg is offered only while AI isn't switched off
+  (for everyone or this business) and the platform's Retell minutes (`retell_minutes`, default 60 a day; open calls
+  count their full 15 minutes) have room. Otherwise the caller gets the callback path. Each AI turn is reserved like
+  chat.
 - **Recording**: doesn't exist. There's no setting, column or `<Record>`. Adding it would need consent wording,
   retention rules and approval.
 - **Failures**: if Retell is unreachable or refuses, the caller falls back to the callback path (`phone.ai_unavailable`

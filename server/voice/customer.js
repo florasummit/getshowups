@@ -25,6 +25,7 @@ import { REF_RE } from './charges.js'
 import { runVoiceTool, appendVoiceTranscript, voiceInstructions, TOOL_KINDS_SET } from './tools.js'
 import { getVoiceSettings, sessionVoiceFor } from './style.js'
 import { adminEmails } from '../platform.js'
+import { aiOff, retellRoom } from '../ai-budget.js'
 export const isPlatformAdminEmail = (env, email) => adminEmails(env).includes(String(email || '').toLowerCase())
 
 export const VOICE_SESSION_MAX_MS = SESSION_CEILING_MS
@@ -90,10 +91,15 @@ export async function startCustomerVoiceSession(env, customer, { existing = null
   // Retell keeps its release gate for customers (RECEPTIONIST_VOICE_BUSINESSES); admin tests are not gated by it.
   if (provider === 'retell' && !test && !voiceAllowedFor(env, customer.id)) return { ok: false, error: 'voice_not_available', httpStatus: 403 }
   if ((await openSessions(env, customer.id, now)) >= voiceConcurrentLimit(env)) return { ok: false, error: 'voice_busy', httpStatus: 429 }
+  // Emergency AI switches (server/ai-budget.js): no voice session starts while AI is off for this business or everyone.
+  if (await aiOff(env, customer.id, now)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
   if ((await businessMinutesToday(env, customer.id, now)) >= voiceDailyMinutes(env)) return { ok: false, error: 'voice_limit', httpStatus: 429 }
   // Per-provider ceiling (server/voice/budgets.js: OpenAI/ElevenLabs by default, Retell only with its own switch).
   const providerCap = providerDailyLimit(env, provider)
   if (providerCap != null && (await providerMinutesToday(env, provider, now)) >= providerCap) return { ok: false, error: 'voice_limit', httpStatus: 429 }
+  // Retell, platform-wide (server/ai-budget.js retellRoom, admin-set retell_minutes, default 60): open calls count their
+  // full 15-minute ceiling, so the day's minutes can't be passed by calls already running.
+  if (provider === 'retell' && !(await retellRoom(env, now)).ok) return { ok: false, error: 'voice_limit', httpStatus: 429 }
   // Test usage of this business today (admin tests + Lab calls): capped on its own, so testing never spends more
   // than VOICE_TEST_DAILY_MINUTES per business per day.
   if (test && (await testMinutesToday(env, customer.id, now)) >= testDailyMinutes(env)) return { ok: false, error: 'test_limit', httpStatus: 429 }

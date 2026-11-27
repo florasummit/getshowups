@@ -19,6 +19,7 @@ import { withinHours } from '../receptionist/routing.js'
 import { getSettings as receptionistSettings, startConversation } from '../receptionist/engine.js'
 import { voiceConfigured, voiceAllowedFor } from '../receptionist/voice.js'
 import { hit } from '../ratelimit.js'
+import { aiOff, retellRoom } from '../ai-budget.js'
 import { recordEvent } from '../auditlog.js'
 import { checkVerification, getSettings, limits, phoneEnabled, verifiedNumbers } from './lines.js'
 import { dialNumbers, dialSip, gather, hangup, say, twiml } from './twiml.js'
@@ -53,9 +54,13 @@ export function planCall({ settings, line, verified, open, aiOk, limited }) {
   return { route: 'team', fallback, ring: verified.map((d) => d.number), ringSeconds: settings.ringSeconds }
 }
 
-// The AI receptionist can take phone calls for this business right now (same gates as browser voice).
-async function aiAvailable(env, customer) {
+// The AI receptionist can take phone calls for this business right now (same gates as browser voice, plus the shared
+// spending guard: AI off for everyone or this business, or the platform's Retell minutes would be passed → the caller gets
+// the callback path instead; server/ai-budget.js).
+async function aiAvailable(env, customer, now = Date.now()) {
   if (env.RECEPTIONIST_ENABLED === 'false' || !voiceConfigured(env) || !voiceAllowedFor(env, customer.id)) return false
+  if (await aiOff(env, customer.id, now)) return false
+  if (!(await retellRoom(env, now)).ok) return false
   const s = await receptionistSettings(env.ONBOARDING_DB, customer.id).catch(() => null)
   return Boolean(s?.enabled)
 }
