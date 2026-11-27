@@ -1,9 +1,18 @@
 // GET /site-assets/:id — a website image. Public only while the business's live website uses it;
 // otherwise only the signed-in owner can load it (for the private preview).
 import { missingConfig } from '../../server/google-oauth.js'
-import { getSession } from '../../server/auth.js'
+import { STAFF_COOKIE, getSession } from '../../server/auth.js'
+import { readCookie } from '../../server/google-oauth.js'
+import { staffSession } from '../../server/staff-context.js'
 import { PUBLIC_MAX_AGE, readAsset } from '../../server/assets.js'
 import { hostingStatus, isHosted } from '../../server/website.js'
+
+async function staffCustomerId(request, env, session) {
+  const id = readCookie(request, STAFF_COOKIE)
+  if (!session || !id) return null
+  const r = await staffSession(request, env, session, id, { paths: false })
+  return r.session?.customer?.id ?? null
+}
 
 const notFound = () => new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
 
@@ -12,7 +21,9 @@ export async function onRequestGet({ request, env, params }) {
   const db = env.ONBOARDING_DB
   try {
     const session = await getSession(request, env).catch(() => null)
-    const found = await readAsset(db, String(params.id || ''), session?.customer?.id || null)
+    // Staff configuring an assisted workspace see its private images too (same checks as the dashboard routes).
+    const staffFor = await staffCustomerId(request, env, session).catch(() => null)
+    const found = await readAsset(db, String(params.id || ''), staffFor || session?.customer?.id || null)
     if (!found) return notFound()
     if (found.published && !isHosted(await hostingStatus(db, found.asset.customer, Date.now(), env))) return notFound()
     return new Response(found.asset.bytes, {

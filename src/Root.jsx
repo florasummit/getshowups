@@ -9,6 +9,7 @@ const BookingPage = lazyPage(() => import('./booking/BookingPage.jsx'))
 const Admin = lazyPage(() => import('./admin/Admin.jsx'))
 const Privacy = lazyPage(() => import('./legal/Privacy.jsx'))
 const ChatPage = lazyPage(() => import('./receptionist/ChatPage.jsx'))
+const Claim = lazyPage(() => import('./claim/Claim.jsx'))
 
 // First-touch acquisition source (utm_source or ref), kept on this device for signup attribution.
 try {
@@ -41,6 +42,13 @@ export default function Root() {
     return (
       <Suspense fallback={null}>
         <Privacy />
+      </Suspense>
+    )
+  }
+  if (path === '/claim' || path === '/claim/') {
+    return (
+      <Suspense fallback={null}>
+        <Claim />
       </Suspense>
     )
   }

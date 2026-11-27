@@ -295,6 +295,21 @@ for E in "$E2E_STUDIO_H_CUSTOMER:$E2E_STUDIO_H_SESSION_TOKEN" "$E2E_STUDIO_H_M_C
     -c test/e2e/wrangler.e2e.toml >/dev/null
 done
 
+# Assisted enrollment (enrollment.spec.js): two sales representatives and one whose access the spec revokes (roles as a
+# platform admin grants them), and two owners WITHOUT a business who claim what staff set up for them.
+d1 "
+  INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES
+    ('$(hash "$E2E_SALES_REP_SESSION_TOKEN")', '$E2E_SALES_REP_EMAIL', $NOW, $FAR),
+    ('$(hash "$E2E_SALES_REP2_SESSION_TOKEN")', '$E2E_SALES_REP2_EMAIL', $NOW, $FAR),
+    ('$(hash "$E2E_SALES_REVOKED_SESSION_TOKEN")', '$E2E_SALES_REVOKED_EMAIL', $NOW, $FAR),
+    ('$(hash "$E2E_SALES_OWNER_SESSION_TOKEN")', '$E2E_SALES_OWNER_EMAIL', $NOW, $FAR),
+    ('$(hash "$E2E_SALES_OWNER2_SESSION_TOKEN")', '$E2E_SALES_OWNER2_EMAIL', $NOW, $FAR);
+  INSERT INTO commercial_roles (email, role, granted_by, granted_at) VALUES
+    ('$E2E_SALES_REP_EMAIL', 'sales_rep', '$E2E_PLATFORM_ADMIN', $NOW),
+    ('$E2E_SALES_REP2_EMAIL', 'sales_rep', '$E2E_PLATFORM_ADMIN', $NOW),
+    ('$E2E_SALES_REVOKED_EMAIL', 'sales_rep', '$E2E_PLATFORM_ADMIN', $NOW);
+"
+
 # Control Center demo (control-center.spec.js): a bookable TEST business with a calendar record; faults are injected
 # through the Google mock (/__faults), never in the app.
 d1 "
@@ -371,7 +386,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding TWILIO_ACCOUNT_SID=ACe2e00000000000000000000000000000 \
   --binding TWILIO_AUTH_TOKEN="$E2E_TWILIO_AUTH_TOKEN" \
   --binding TWILIO_API_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
-  --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example,$E2E_JOURNEY_EMAIL,$E2E_JOURNEY_M_EMAIL,$E2E_EMAILAUTH_OWNER,$E2E_EMAILAUTH_NEW,$E2E_EMAILAUTH_LINK,$E2E_EMAILAUTH_PHONE,$E2E_EMAILAUTH_PHONE_M" \
+  --binding MESSAGE_TEST_RECIPIENTS="$E2E_TEXTS_LEAD_PHONE,$E2E_SELF_SERVE_EMAIL,founder-mobile@e2e-selfserve.example,$E2E_JOURNEY_EMAIL,$E2E_JOURNEY_M_EMAIL,$E2E_EMAILAUTH_OWNER,$E2E_EMAILAUTH_NEW,$E2E_EMAILAUTH_LINK,$E2E_EMAILAUTH_PHONE,$E2E_EMAILAUTH_PHONE_M,$E2E_SALES_OWNER_EMAIL,$E2E_SALES_OWNER2_EMAIL" \
   --binding AUTH_EMAIL_MOCK_ORIGIN="http://127.0.0.1:$E2E_GOOGLE_MOCK_PORT" \
   --binding FOLLOWUP_AI=true \
   --binding CRON_SECRET="$E2E_CRON_SECRET" \

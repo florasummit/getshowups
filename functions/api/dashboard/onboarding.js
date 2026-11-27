@@ -61,6 +61,8 @@ export async function onRequestPost({ request, env }) {
       await markStep(db, customer.id, 'publish', 'private')
       return json(200, { ok: true })
     case 'finish': {
+      // Assisted enrollment: the handoff (the owner's claim, server/enrollment.js) finishes onboarding, never staff.
+      if (session.staff) return json(403, { error: 'owner_decision' })
       const p = await progress(env, customer)
       const required = ['payment', 'details', 'services', 'calendar', 'hours', 'website']
       const missing = p.steps.filter((s) => required.includes(s.id) && !s.done).map((s) => s.id)

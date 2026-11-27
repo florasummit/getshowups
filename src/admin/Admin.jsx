@@ -16,14 +16,16 @@ const Review = lazyPage(() => import('./Review.jsx'))
 const Control = lazyPage(() => import('./Control.jsx'))
 const VoiceLab = lazyPage(() => import('./VoiceLab.jsx'))
 const Growth = lazyPage(() => import('./Growth.jsx'))
+const Enrollments = lazyPage(() => import('./Enrollments.jsx'))
 const SECTIONS = [
   ['overview', 'Overview', '/admin'],
   ['control', 'Control Center', '/admin/control'],
   ['review', 'Business Review', '/admin/review'],
   ['voicelab', 'Voice Lab', '/admin/voice-lab'],
   ['growth', 'Growth', '/admin/growth'],
+  ['sales', 'Sales', '/admin/sales'],
 ]
-const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') || path.startsWith('/admin/voice-providers') ? 'voicelab' : path.startsWith('/admin/growth') ? 'growth' : 'overview')
+const sectionFor = (path) => (path.startsWith('/admin/review') ? 'review' : path.startsWith('/admin/control') ? 'control' : path.startsWith('/admin/voice-lab') || path.startsWith('/admin/voice-providers') ? 'voicelab' : path.startsWith('/admin/growth') ? 'growth' : path.startsWith('/admin/sales') ? 'sales' : 'overview')
 
 const ONBOARDING = { invited: 'Invited', calendar: 'Connect calendar', hours: 'Set hours', live: 'Live', suspended: 'Suspended' }
 const ATTENTION = {
@@ -1516,7 +1518,12 @@ export default function Admin() {
   useEffect(() => {
     document.title = 'Admin · GetShowUps'
     const cleanup = noIndex()
-    api('/api/platform/me').then(({ status, data }) => setMe(status === 200 ? { data } : { status, email: null }))
+    api('/api/platform/me').then(async ({ status, data }) => {
+      if (status !== 403) return setMe(status === 200 ? { data } : { status, email: null })
+      // Not a platform admin: a sales representative or onboarding person sees their one screen (server/roles.js).
+      const sales = await api('/api/sales/me')
+      setMe(sales.status === 200 ? { sales: sales.data } : { status, email: null })
+    })
     return cleanup
   }, [])
 
@@ -1525,7 +1532,7 @@ export default function Admin() {
     return (
       <main className="center-page">
         <div className="panel panel--narrow enter">
-          <SignInPanel title="Platform sign-in" next="/admin" googleHref="/api/auth/google/start?next=/admin" notice={LOGIN_ERRORS[loginError] || ''} />
+          <SignInPanel title="Platform sign-in" next={window.location.pathname.startsWith('/admin/sales') ? '/admin/sales' : '/admin'} googleHref={`/api/auth/google/start?next=${window.location.pathname.startsWith('/admin/sales') ? '/admin/sales' : '/admin'}`} notice={LOGIN_ERRORS[loginError] || ''} />
         </div>
       </main>
     )
@@ -1541,8 +1548,30 @@ export default function Admin() {
       </Gate>
     )
   }
+  if (me.sales) return <SalesConsole me={me.sales} />
   if (!me.data) return <Gate title="Admin unavailable">{null}</Gate>
   return <Console me={me.data} />
+}
+
+// Sales representatives and onboarding personnel: Enrollments only (no other admin section; the server refuses them).
+function SalesConsole({ me }) {
+  usePageTitle('Sales · GetShowUps')
+  useEffect(() => {
+    if (!window.location.pathname.startsWith('/admin/sales')) window.history.replaceState(null, '', '/admin/sales')
+  }, [])
+  return (
+    <div className="app app--wide" data-sales-console>
+      <header className="app-header">
+        <Logo href="/" />
+        <SignOut email={me.email} to="/admin/sales" />
+      </header>
+      <main className="app-main">
+        <Suspense fallback={<div aria-busy="true" />}>
+          <Enrollments />
+        </Suspense>
+      </main>
+    </div>
+  )
 }
 
 function Console({ me }) {
@@ -1581,6 +1610,10 @@ function Console({ me }) {
         ) : section === 'growth' ? (
           <Suspense fallback={<div aria-busy="true" />}>
             <Growth />
+          </Suspense>
+        ) : section === 'sales' ? (
+          <Suspense fallback={<div aria-busy="true" />}>
+            <Enrollments />
           </Suspense>
         ) : (
           <Overview me={me} />

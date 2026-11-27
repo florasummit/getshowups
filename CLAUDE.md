@@ -98,6 +98,10 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      no automatic messages. Enterprise is sold by agreement, never checkout; organizations are design only
                      (docs/ENTERPRISE_ORGANIZATIONS.md). The $499 plan is named Growth in copy; its plan id stays `founding`
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
+  api/sales/         Assisted enrollment (docs/ASSISTED_ENROLLMENT.md, migration 0047): me (roles), roles (admin grant/revoke),
+                     enrollments (GET list/detail; POST create|update|assign|workspace|payment|invite|revoke_invite|abandon).
+                     api/claim (public GET preview / POST claim). Screens: src/admin/Enrollments.jsx (Admin → Sales; reps
+                     see only this), src/claim/Claim.jsx (/claim)
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
   invites.js         Single-use onboarding invites in D1 (atomic UPDATE…RETURNING)
@@ -749,6 +753,20 @@ Non-negotiables:
   a later real webhook still wins); skipped (other_subscription_running) when Stripe lists another running/pending
   subscription for that business; a failed confirming fetch changes nothing. Everything else is report-only. "Resync from Stripe" (admin, confirm, audited) applies
   Stripe's current subscription like a webhook (refused for live mode while live billing is off).
+
+- Assisted enrollment (server/enrollment.js, roles.js, staff-context.js; docs/ASSISTED_ENROLLMENT.md, PHONE_PAYMENTS.md):
+  roles = platform_admin (PLATFORM_ADMIN_EMAILS) | sales_rep (ONLY assigned enrollments) | onboarding (configure/invite,
+  never payment/assignment/roles), from commercial_roles, read every request (revocation = next request), audited; a
+  role never grants membership. Workspace = createCustomer with NO owner + self_signups row → unpaid (not hosted, not
+  bookable, no paid tools, provider spend blocked via assistedUnpaid, no staff AI generation). Payment = createCheckout
+  `assisted` (Stripe-hosted; returns to /claim; STRIPE_CHECKOUT_TERMS=true adds Stripe ToS consent); paid ONLY from the
+  verified webhook (syncEnrollmentFor); no "mark paid". Card-like numbers refused in every field; MOTO not built.
+  Configure mode: staff session + X-GSU-Enrollment header (GET also ?enrollment= / __Host-gsu_staff cookie, ignored
+  when not authorizing) on STAFF_PATHS only, role + assignment + stage per request, writes audited
+  (enrollment.staff_write); finish onboarding, receptionist on, calendar connect = owner's. Ownership invitation =
+  account_invites kind 'claim' (the ?invite= path refuses it: claim_required); /claim: verified email must equal the
+  invited one, terms version recorded, owner + enrollment claimed + invite used in ONE batch, staff access ends.
+  Seams for the lead: server/enrollment-hooks.js (attributeAssisted → stream C, phoneHook → telephony).
 
 ## Business Review and operational events (/admin/review)
 

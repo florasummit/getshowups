@@ -133,3 +133,13 @@ reason. Erased with the business (ERASED_TABLES). The change history lives in th
 | Also erased | ChatGPT Ads key; closed dates, booking notice, notice choices, restrictions | With the workflow |
 
 **Decisions:** recovery window (0 or 14) · retention after 90 days · billing records 7 years · all in docs/legal/ATTORNEY_REVIEW.md.
+
+## Assisted enrollment (migration 0047)
+
+- `assisted_enrollments` (one row per prospect handled by staff: business name, owner name, owner email, phone, call
+  notes, plan, assigned representative, stage timestamps, accepted terms version). Erased with the business
+  (ERASED_TABLES, by `customer`). A prospect that never got a workspace has no business id: it is not reachable by an
+  account deletion and stays until the founder decides a retention period for unconverted prospects (decision needed;
+  nothing deletes it automatically). Notes refuse anything that looks like a card number.
+- `commercial_roles` (staff email, role, who granted/revoked, when): staff access records, not business data. Kept
+  (rows are never deleted; a revocation sets revoked_at) so access history stays auditable.

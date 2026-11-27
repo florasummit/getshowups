@@ -20,7 +20,7 @@ import WebsiteGenerator, { ReviseBox } from './WebsiteGenerator.jsx'
 import { SUGGESTED } from '../content/service-suggestions.js'
 import { INDUSTRIES, SELF_SERVE_STEPS, acceptDecision, setupDecisions, stepPosition, visitsCustomers } from './setup-rules.js'
 
-const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done' }
+const LABELS = { business: 'Business', payment: 'Plan', details: 'Details', services: 'Services', calendar: 'Calendar', hours: 'Hours', website: 'Website', address: 'Address', publish: 'Publish', launch: 'Done', handoff: 'Handoff' }
 const PLAN_KEY = 'gsu_plan'
 const storedPlan = () => {
   try {
@@ -34,7 +34,11 @@ export default function Setup({ me, reload }) {
   const { progress, email } = me
   // Before the business exists the server lists one step. Someone starting a plan sees the whole path from step 1.
   const preview = progress.steps.length === 1 && Boolean(me.signupPlan) && me.checkoutOpen !== false
-  const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : progress.steps
+  // Configure mode (assisted enrollment): staff prepare the owner's setup with the same steps; payment is handled on the
+  // enrollment screen (Stripe-hosted, the owner pays) and the finish belongs to the owner, so both are left out and a
+  // last "Handoff" screen points back to the enrollment.
+  const staff = Boolean(me.staff)
+  const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : staff ? [...progress.steps.filter((s) => s.id !== 'payment' && s.id !== 'launch').map((s) => (s.id === 'calendar' ? { ...s, done: true } : s)), { id: 'handoff', done: false }] : progress.steps
   const [editing, setEditing] = useState(null)
   // Back from checkout: Stripe's confirmation can arrive before this page loads, so the plan step is already behind
   // the owner and never gets to say so. The next step says it once (only when the server reports the plan paid).
@@ -56,7 +60,7 @@ export default function Setup({ me, reload }) {
     <div className="app">
       <header className="app-header">
         <Logo href="/" />
-        <SignOut email={email} />
+        {staff ? null : <SignOut email={email} />}
       </header>
       <main className="center-page center-page--top">
         {steps.length > 1 && (
@@ -115,11 +119,13 @@ function Step({ id, me, done, back, revisit, justPaid }) {
   if (id === 'payment') return revisit ? <PaidStep billing={progress.billing} onDone={done} back={back} /> : <PaymentStep me={me} onDone={done} back={back} />
   if (id === 'details') return <DetailsStep customer={customer} onDone={done} back={back} justPaid={justPaid} />
   if (id === 'services') return <ServicesStep onDone={done} back={back} />
-  if (id === 'calendar') return <CalendarStep onBack={back} connected={revisit} onDone={done} />
+  // Staff never connect their own Google account: the owner connects theirs from a single-use link.
+  if (id === 'calendar') return me.staff ? <OwnerCalendarStep onBack={back} onDone={done} /> : <CalendarStep onBack={back} connected={revisit} onDone={done} />
   if (id === 'hours') return <HoursStep customer={customer} onDone={done} back={back} />
   if (id === 'website') return <WebsiteStep onDone={done} back={back} />
   if (id === 'address') return <AddressStep onDone={done} back={back} />
   if (id === 'publish') return <PublishStep onDone={done} back={back} />
+  if (id === 'handoff') return <HandoffStep me={me} back={back} />
   return <LaunchStep me={me} onDone={done} />
 }
 
@@ -196,6 +202,23 @@ function NameStep({ onDone, plan, customer }) {
 }
 
 // ---------- 2. Growth plan checkout (Stripe-hosted; plan id `founding`, unchanged) ----------
+// Configure mode only: every setup step staff can do is done. The rest (payment confirmation, the ownership
+// invitation, the owner's own calendar and receptionist decisions) is on the enrollment screen.
+function HandoffStep({ me, back }) {
+  return (
+    <div className="form" data-handoff>
+      <h1 id="step-title" className="title">
+        Setup is ready for {me.customer?.name}
+      </h1>
+      <p className="lede">Everything here is saved. Go back to the enrollment to check payment and readiness, then send the ownership invitation.</p>
+      <a className="btn btn-primary btn-block" href={`/admin/sales#${me.staff.enrollmentId}`}>
+        Back to the enrollment
+      </a>
+      <Back onClick={back} />
+    </div>
+  )
+}
+
 function PaymentStep({ me, onDone, back }) {
   const params = new URLSearchParams(window.location.search)
   const returned = params.get('billing')
@@ -553,6 +576,49 @@ function CalendarStep({ onBack, connected, onDone }) {
 }
 
 // ---------- 6. Hours (calendar verified live first) ----------
+function OwnerCalendarStep({ onBack, onDone }) {
+  const [state, setState] = useState({})
+  const [status, setStatus] = useState(null)
+  useEffect(() => {
+    api('/api/dashboard/calendar').then(({ status: s, data }) => setStatus(s === 200 ? data : null))
+  }, [])
+  const link = async () => {
+    setState({ busy: true })
+    const { status: s, data } = await api('/api/dashboard/connect-link', { method: 'POST' })
+    setState(s === 201 && data.url ? { url: data.url } : { failed: true })
+  }
+  const connected = status?.status === 'healthy'
+  return (
+    <>
+      <h1 id="step-title" className="title">
+        Google Calendar
+      </h1>
+      <p className="lede">
+        {connected ? 'The owner’s Google Calendar is connected.' : 'The owner connects their own Google Calendar. Send them this single-use link, or they’ll be asked after they claim the account.'}
+      </p>
+      {!connected && !state.url && (
+        <button type="button" className="btn btn-quiet btn-block" onClick={link} disabled={state.busy} data-owner-connect>
+          {state.busy ? 'Creating link…' : 'Create a connect link for the owner'}
+        </button>
+      )}
+      {state.url && (
+        <p className="fine" data-owner-connect-link>
+          Send this to the owner (it works once): <code>{state.url}</code>
+        </p>
+      )}
+      {state.failed && (
+        <p className="form-error" role="alert">
+          Couldn’t create the link. Try again.
+        </p>
+      )}
+      <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => onDone()}>
+        Continue
+      </button>
+      <Back onClick={onBack} />
+    </>
+  )
+}
+
 function CalendarHealth() {
   const [cal, setCal] = useState(null)
   useEffect(() => {

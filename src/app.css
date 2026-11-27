@@ -6181,3 +6181,15 @@ html.help-open .app {
 .notice-info .signin {
   margin-top: 12px;
 }
+/* ---------- assisted enrollment (src/admin/Enrollments.jsx, src/claim/Claim.jsx, configure mode) ---------- */
+.staff-bar { background: var(--info-bg); border-bottom-color: var(--border); color: var(--info-text); }
+.enrollments-grid { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 860px) { .enrollments-grid { grid-template-columns: minmax(0, 1fr); } }
+.enrollments .row.is-current { background: var(--ink-50); }
+.enrollments .row-btn { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; text-decoration: none; min-width: 0; }
+.enrollments .row-btn .row-sub { overflow-wrap: anywhere; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.copy-link { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.copy-link input { flex: 1; min-width: 0; font-size: 0.9rem; }
+.claim-terms { display: grid; gap: 8px; padding-left: 1.2em; margin: 16px 0; text-align: left; }
+[data-owner-connect-link] code { overflow-wrap: anywhere; }

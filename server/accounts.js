@@ -13,8 +13,17 @@ const DAY = 24 * 60 * 60 * 1000
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
 
 const inviteUrl = (env, token) => `${siteOrigin(env)}/dashboard?invite=${token}`
+// Ownership invitation of an assisted enrollment (server/enrollment.js): the same single-use, hashed, expiring,
+// revocable row, claimed on /claim (verified email must match, terms accepted, then owner in one step).
+const claimUrl = (env, token) => `${siteOrigin(env)}/claim?token=${token}`
 
-function inviteEmail(env, { token, businessName }) {
+function inviteEmail(env, { token, businessName, kind }) {
+  if (kind === 'claim') {
+    return {
+      subject: `Your ${businessName} account on GetShowUps is ready`,
+      body: `We've set up ${businessName} on GetShowUps for you.\n\nOpen this link and sign in with this email address to take ownership of your account:\n${claimUrl(env, token)}\n\nThe link works once and expires in 7 days. If you weren't expecting this, you can ignore this email.`,
+    }
+  }
   return {
     subject: `Set up ${businessName} on GetShowUps`,
     // Email sign-in (server/email-auth.js) is mentioned only once sign-in emails can reach every address.
@@ -23,7 +32,7 @@ function inviteEmail(env, { token, businessName }) {
 }
 
 // Creates (or replaces) the active invitation for email → customer and queues the email.
-export async function issueInvite(env, { email, customer, businessName, actor }, now = Date.now()) {
+export async function issueInvite(env, { email, customer, businessName, actor, kind = 'invite' }, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const token = randomToken(32)
   const id = randomToken(12)
@@ -37,13 +46,13 @@ export async function issueInvite(env, { email, customer, businessName, actor },
       )
       .bind(id, await sha256Hex(token), email, customer, actor, now, now + INVITE_TTL_MS),
   ])
-  const message = inviteEmail(env, { token, businessName })
-  await enqueue(env, { id: `invite:${id}`, to: email, customer, template: 'invite', ...message }, now)
+  const message = inviteEmail(env, { token, businessName, kind })
+  await enqueue(env, { id: `invite:${id}`, to: email, customer, template: kind === 'claim' ? 'ownership_invite' : 'invite', ...message }, now)
   await track(env, 'invite_created', { id: `invite_created:${id}`, customer, at: now })
-  return { id, url: inviteUrl(env, token), expiresAt: now + INVITE_TTL_MS }
+  return { id, url: kind === 'claim' ? claimUrl(env, token) : inviteUrl(env, token), expiresAt: now + INVITE_TTL_MS }
 }
 
-async function findActive(db, token, now) {
+export async function findActive(db, token, now) {
   if (!TOKEN_RE.test(String(token))) return null
   const row = await db
     .prepare(
@@ -55,7 +64,17 @@ async function findActive(db, token, now) {
   return row && timingSafeEqual(row.token_hash, await sha256Hex(token)) ? row : null
 }
 
-const maskEmail = (e) => e.replace(/^(.)[^@]*(@.*)$/, (_, a, b) => `${a}•••${b}`)
+// Fails closed only where it can: before migration 0047 no invitation can be bound to an enrollment.
+export async function claimBound(db, inviteId) {
+  try {
+    return Boolean(await db.prepare('SELECT 1 FROM assisted_enrollments WHERE invite_id = ?1').bind(inviteId).first())
+  } catch (err) {
+    if (/no such table/i.test(String(err?.message))) return false
+    throw err
+  }
+}
+
+export const maskEmail = (e) => e.replace(/^(.)[^@]*(@.*)$/, (_, a, b) => `${a}•••${b}`)
 
 // Public preview for the sign-in screen: business name and a masked email only.
 export async function peekAccountInvite(env, token, now = Date.now()) {
@@ -68,6 +87,8 @@ export async function acceptInvite(env, { token, email, hasBusiness }, now = Dat
   const db = env.ONBOARDING_DB
   const row = await findActive(db, token, now)
   if (!row) return { ok: false, error: 'invite_invalid' }
+  // An ownership invitation of an assisted enrollment is claimed only on /claim (terms + handoff in one step).
+  if (await claimBound(db, row.id)) return { ok: false, error: 'claim_required' }
   if (row.email !== email) return { ok: false, error: 'wrong_account', expected: maskEmail(row.email) }
   if (hasBusiness) return { ok: false, error: 'already_in_business' }
   try {

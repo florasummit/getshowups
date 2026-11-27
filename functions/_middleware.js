@@ -46,7 +46,7 @@ const text = (body, type = 'text/plain; charset=utf-8') => new Response(body, { 
 // Our own host: the signed-in areas can't be framed by another site (clickjacking: a hidden frame tricking an owner into
 // "Publish" or "Approve budget"), and browsers are told to use HTTPS only. Business websites set their own strict CSP
 // (no scripts at all, frame-ancestors 'none') in their renderer; booking/chat pages stay embeddable for now.
-export const FRAME_PROTECTED = /^\/(dashboard|admin)(\/|$)/
+export const FRAME_PROTECTED = /^\/(dashboard|admin|claim)(\/|$)/
 export async function withAppHeaders(res, url) {
   // A WebSocket upgrade (voice receptionist) must be returned as is: re-wrapping would drop the socket.
   if (res.status === 101 || res.webSocket) return res
