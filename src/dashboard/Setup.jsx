@@ -39,7 +39,7 @@ export default function Setup({ me, reload }) {
   // enrollment screen (Stripe-hosted, the owner pays) and the finish belongs to the owner, so both are left out and a
   // last "Handoff" screen points back to the enrollment.
   const staff = Boolean(me.staff)
-  const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : staff ? [...progress.steps.filter((s) => s.id !== 'payment' && s.id !== 'launch').map((s) => (s.id === 'calendar' ? { ...s, done: true } : s)), { id: 'handoff', done: false }] : progress.steps
+  const steps = preview ? SELF_SERVE_STEPS.map((id) => ({ id, done: false })) : staff ? [...progress.steps.filter((s) => s.id !== 'payment' && s.id !== 'launch').map((s) => (s.id === 'calendar' ? { ...s, done: true, owner: true } : s)), { id: 'handoff', done: false }] : progress.steps
   const [editing, setEditing] = useState(null)
   // Back from checkout: Stripe's confirmation can arrive before this page loads, so the plan step is already behind
   // the owner and never gets to say so. The next step says it once (only when the server reports the plan paid).
@@ -68,11 +68,15 @@ export default function Setup({ me, reload }) {
           <ol className="steps-bar steps-bar--wrap" aria-label="Setup progress">
             {steps.map((s, i) => {
               // The last screen is the finish itself: it shows a tick, not a number still to do.
-              const ticked = (s.done && i !== index) || (s.id === 'launch' && i === index)
+              // In configure mode the calendar is the owner's own step: staff can move past it, but it is never ticked.
+              const ticked = ((s.done && !s.owner) && i !== index) || (s.id === 'launch' && i === index)
               const inner = (
                 <>
                   <span className="steps-bar-dot">{ticked ? '✓' : i + 1}</span>
-                  <span className="steps-bar-label">{LABELS[s.id]}</span>
+                  <span className="steps-bar-label">
+                    {LABELS[s.id]}
+                    {s.owner ? ' (owner)' : ''}
+                  </span>
                 </>
               )
               return (

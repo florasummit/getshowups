@@ -364,7 +364,7 @@ async function readyForClaim() {
   const d = (await detail(REP, id)).json()
   assert.equal(d.enrollment.stage, 'ready')
   assert.equal(d.checklist.ready, true)
-  assert.deepEqual(d.checklist.items.find((i) => i.id === 'phone'), { id: 'phone', label: 'Phone: not available yet', state: 'off', detail: 'unavailable', required: false })
+  assert.deepEqual(d.checklist.items.find((i) => i.id === 'phone'), { id: 'phone', label: 'Phone: not available yet', state: 'off', detail: 'unavailable', required: false, optional: true })
   const inv = await act(REP, { action: 'invite', id })
   assert.equal(inv.status, 200, inv.text)
   const token = new URL(inv.json().url).searchParams.get('token')

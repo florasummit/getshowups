@@ -158,7 +158,7 @@ function CopyLink({ url, label, data }) {
 }
 
 const ITEM_TONE = { ok: 'ok', action: 'warn', pending: 'info', off: 'neutral' }
-const ITEM_WORD = { ok: 'Done', action: 'To do', pending: 'Waiting', off: 'Not available' }
+const ITEM_WORD = { ok: 'Done', action: 'To do', pending: 'Waiting', off: 'Not available', owner: 'Owner turns it on' }
 
 function Detail({ id, list, reload }) {
   const [d, setD] = useState(undefined)
@@ -307,7 +307,7 @@ function Detail({ id, list, reload }) {
                 <div className="row-main">
                   <p className="row-title">
                     {i.label}
-                    {i.required ? '' : ' (optional)'}
+                    {i.optional ? ' (optional)' : ''}
                   </p>
                 </div>
                 <Pill tone={ITEM_TONE[i.state] || 'neutral'}>{ITEM_WORD[i.state] || i.state}</Pill>

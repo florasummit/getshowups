@@ -186,13 +186,14 @@ export async function checklist(env, row, f, now = Date.now()) {
   }
   const launch = await readiness(env, f.customer, { calendarStatus: calendar ? 'healthy' : 'not_connected', origin: siteOrigin(env) }).catch(() => null)
   const rec = launch?.items.find((i) => i.id === 'receptionist')
-  if (rec) items.push({ id: 'receptionist', label: 'AI receptionist (the owner turns it on)', state: rec.state, detail: rec.detail, required: false })
+  // The receptionist is the owner's to turn on after the claim: "off" here means waiting for the owner, not unavailable.
+  if (rec) items.push({ id: 'receptionist', label: 'AI receptionist (the owner turns it on)', state: rec.state === 'off' ? 'owner' : rec.state, detail: rec.detail, required: false, optional: true })
   const checks = await setupCheck(env, f.customer, now).catch(() => [])
   const phone = await phoneHook(env, f.customer.id).catch(() => ({ state: 'not_available', label: 'Phone: not available yet' }))
   // phoneSetup states: unavailable | not_started | needs_owner | ready | live (missing module → not_available).
   const ps = phone?.state || 'not_available'
   const phoneOff = ps === 'unavailable' || ps === 'not_available'
-  items.push({ id: 'phone', label: phoneOff ? 'Phone: not available yet' : 'Phone line', state: ps === 'ready' || ps === 'live' ? 'ok' : phoneOff ? 'off' : 'action', detail: ps, required: false, ...(phone?.href && !phoneOff ? { href: phone.href } : {}) })
+  items.push({ id: 'phone', label: phoneOff ? 'Phone: not available yet' : 'Phone line', state: ps === 'ready' || ps === 'live' ? 'ok' : phoneOff ? 'off' : 'action', detail: ps, required: false, optional: true, ...(phone?.href && !phoneOff ? { href: phone.href } : {}) })
   items.push({ id: 'invitation', label: 'Ownership invitation', state: f.invite.state === 'accepted' ? 'ok' : f.invite.state === 'pending' ? 'pending' : 'action', detail: f.invite.state, required: false })
   return {
     items,
