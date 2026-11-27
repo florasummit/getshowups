@@ -9,8 +9,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 import { sha256Hex } from '../server/google-oauth.js'
-import { rolesOf } from '../server/roles.js'
-import { looksLikeCard, deriveStage, ABANDON_AFTER_DAYS } from '../server/enrollment.js'
+import { hasCommercialRole, rolesOf } from '../server/roles.js'
+import { looksLikeCard, deriveStage, ABANDON_AFTER_DAYS, pendingClaimFor } from '../server/enrollment.js'
 import { providerSpendAllowed } from '../server/business-accounts.js'
 import { businessEligible } from '../server/eligibility.js'
 import { hostingStatus } from '../server/website.js'
@@ -364,7 +364,7 @@ async function readyForClaim() {
   const d = (await detail(REP, id)).json()
   assert.equal(d.enrollment.stage, 'ready')
   assert.equal(d.checklist.ready, true)
-  assert.deepEqual(d.checklist.items.find((i) => i.id === 'phone'), { id: 'phone', label: 'Phone: not available yet', state: 'off', detail: 'not_available', required: false })
+  assert.deepEqual(d.checklist.items.find((i) => i.id === 'phone'), { id: 'phone', label: 'Phone: not available yet', state: 'off', detail: 'unavailable', required: false })
   const inv = await act(REP, { action: 'invite', id })
   assert.equal(inv.status, 200, inv.text)
   const token = new URL(inv.json().url).searchParams.get('token')
@@ -486,4 +486,22 @@ test('before migration 0047: the enrollment screen says so, claims answer the or
   assert.equal(list.json().ready, false)
   assert.equal((await call(claim, 'GET', `/api/claim?token=${'a'.repeat(43)}`)).status, 404)
   db.prepare = real
+})
+
+test('stream A eligibility: hasCommercialRole and pendingClaimFor follow grants, revocations and invitation state; never throw', async () => {
+  assert.equal(await hasCommercialRole(db, REP), false)
+  await grant(REP, 'sales_rep')
+  assert.equal(await hasCommercialRole(db, ' Rep@Sales.Example '), true)
+  await revoke(REP, 'sales_rep')
+  assert.equal(await hasCommercialRole(db, REP), false)
+  assert.equal(await pendingClaimFor(db, OWNER), false)
+  const { id } = await readyForClaim()
+  assert.equal(await pendingClaimFor(db, OWNER), true)
+  assert.equal(await pendingClaimFor(db, OWNER, Date.now() + 8 * DAY), false, 'expired')
+  assert.equal(await pendingClaimFor(db, 'someone@else.example'), false)
+  await act(REP, { action: 'revoke_invite', id })
+  assert.equal(await pendingClaimFor(db, OWNER), false, 'revoked')
+  const broken = { prepare: () => ({ bind: () => ({ first: async () => Promise.reject(new Error('no such table: commercial_roles')) }) }) }
+  assert.equal(await hasCommercialRole(broken, REP), false)
+  assert.equal(await pendingClaimFor(broken, OWNER), false)
 })
