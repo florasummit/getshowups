@@ -16,6 +16,8 @@ const REF_IN = /\[([BEP]\d{1,3})\]/g
 // The founder asked for a change (only then may one be prepared).
 export const ASKS_CHANGE = /\b(re-?send|send|mark|unmark|run|record|log|take (it |the \w+ )?off|remove (the )?test|prepare|abandon\w*|reconcile)\b/i
 
+// The brief as short lines (half the tokens of its JSON): the included model's daily allowance is shared with owners.
+const briefLines = (b) => (b?.items ? [`${b.counts.urgent} urgent, ${b.counts.important} important, ${b.counts.fyi} FYI (${b.total_items} in all).`, ...b.items.slice(0, 16).map((i) => `- ${i.level}: ${i.what}.${i.detail ? ` ${i.detail}` : ''} Next: ${i.next} (${i.page})`)].join('\n') : 'could not be read')
 export function systemPrompt(c, brief) {
   const now = new Date(c.now)
   return [
@@ -26,7 +28,7 @@ Billing mode: ${c.L.live ? 'LIVE (real payments count)' : 'Stripe TEST mode: nob
 Admin pages: ${Object.values(PAGES).map(([n, w]) => `${n} (${w})`).join('; ')}.
 
 THIS WEEK (weekly_brief, read just now)
-${fit(brief, 5000)}`,
+${briefLines(brief)}`,
   ]
 }
 
@@ -36,6 +38,8 @@ const NOT_DONE = /\b(not|never|no|nothing|none|once|if|until|when|after you|read
 const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups|function)\b|\b(weekly_brief|business_health|platform_numbers|system_health|ai_spending|growth_activity|prepare_\w+|no_lookup_needed)\b|\bTHIS WEEK\b/
 const PROMISE = /\b(guaranteed?|will (definitely |certainly )?(churn|leave|cancel|pay|grow|increase|double))\b/i
 const MONEY_WORD = /\b(revenue|mrr|arr|earned|made|income|paid us|money (in|received|came)|collected)\b/i
+const MONEYISH = /\b(pa(y|id|ying|yment)s?|revenue|mrr|arr|churn\w*|subscri\w+|commissions?|owe[ds]?|money|income|billing)\b/i
+export const TEST_NOTE = 'Billing is in Stripe test mode: nobody pays real money yet, and test-mode amounts are not revenue.'
 const NAMEISH = (text, names) => names.filter((n) => n && n.length > 3 && text.toLowerCase().includes(n.toLowerCase()))
 
 export function adminProblem(text, { facts, shown, live, names = [], prepared = 0, typed = '' }) {
@@ -70,6 +74,7 @@ const countable = (n, facts) => (facts.match(/"(ref|level|severity|what)":/g) ||
 export async function operateAdmin(env, req, { now = Date.now(), model = operatorModel(env), trace = null, context = null } = {}) {
   const started = Date.now()
   const c = context || adminContext(env, req.refs, now)
+  c.question = req.question
   const b = await runAdminTool(c, 'weekly_brief', {})
   const system = systemPrompt(c, b)
   const messages = []
@@ -84,7 +89,8 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
   let calls = 0
   let retries = 0
   let again = false
-  const base = () => ({ refs: c.book(), proposals: c.proposals, sources: c.sources, evidence: evidence.slice(0, 6), tools, usage, refusals, costMicros: Math.round(cost), ms: Date.now() - started })
+  const lookups = [] // which tools ran with which arguments (admin-only; for "why?" and review)
+  const base = () => ({ refs: c.book(), proposals: c.proposals, sources: c.sources, evidence: evidence.slice(0, 6), lookups, tools, usage, refusals, costMicros: Math.round(cost), ms: Date.now() - started })
   for (let round = 0; round <= BOUNDS.rounds; round++) {
     const left = BOUNDS.totalMs - (Date.now() - started)
     if (left < 1500) break
@@ -116,8 +122,9 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
         calls++
         const r = unasked.includes(x) ? { prepared: false, reason: 'The founder did not ask for this change. Prepare nothing; answer the question and mention it can be prepared if they want.' } : await runAdminTool(c, x.name, x.args)
         results.push({ tool: x.name, result: r })
+        lookups.push({ tool: x.name, args: x.args || {} })
         tools.push(r?.error ? `${x.name}:${r.error}` : x.name)
-        if (x.name !== 'no_lookup_needed' && !x.name.startsWith('prepare_')) evidence.push({ tool: x.name, args: x.args || {}, source: r?.source || null, period: r?.period || null, result: JSON.parse(fit(r, 3000)) })
+        if (x.name !== 'no_lookup_needed' && !x.name.startsWith('prepare_')) evidence.push({ tool: x.name, args: x.args || {}, source: r?.source || null, period: r?.period || null, result: JSON.parse(fit(r, BOUNDS.resultChars)) })
         trace?.push({ tool: x.name, args: x.args, result: r })
         out.push({ id: x.id, name: x.name, text: fit(r, BOUNDS.resultChars) })
       }
@@ -131,8 +138,10 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)
-      const answer = text.replace(REF_IN, (m, r) => filled[r] || 'that business')
-      return { ok: true, answer, raw: text, ...base() }
+      // Test mode is said whenever money or paying customers come up, by the application, not left to the model.
+      const note = !c.L.live && MONEYISH.test(`${req.question} ${text}`) && !/\btest\b/i.test(text) ? ` ${TEST_NOTE}` : ''
+      const answer = text.replace(REF_IN, (m, r) => filled[r] || 'that business') + note
+      return { ok: true, answer, raw: text + note, ...base() }
     }
     trace?.push({ refused: why, text })
     refusals.push(why.replace(/\[[BEP]\d+\]|\d+/g, '').slice(0, 40))

@@ -120,6 +120,8 @@ test('test mode is never revenue, and test businesses are never counted', async 
   assert.ok(!all.businesses.some((x) => c.refs.get(x.ref).id === 'sandbox-test-co'))
   const paying = await runAdminTool(c, 'business_health', { which: 'paying' })
   assert.ok(paying.businesses.every((x) => /TEST mode/.test(x.billing)))
+  // An enrollment the owner hasn't claimed is not a paying customer yet, whatever its subscription says.
+  assert.deepEqual(paying.businesses.map((x) => c.refs.get(x.ref).id).sort(), ['blue-lagoon-pools', 'coastal-electric', 'pine-ridge-plumbing', 'sunny-side-spa'])
   const p = await runAdminTool(c, 'partners')
   const pros = p.partners.find((x) => x.referred_businesses === 2)
   assert.equal(pros.commission_owed_live, 'none (live billing off)')
@@ -236,6 +238,13 @@ test('the model failing or failing its checks: the records are shown, never a gu
   assert.equal(u.body.aiOut, 'unchecked')
   assert.ok(calls.length >= 3) // first draft + two corrections, then the records
   assert.match(calls.at(-1).messages.at(-1).content, /\[check by the application\].*4,812/)
+})
+
+test('in test mode, an answer about money or paying customers always says so (added by the application)', async () => {
+  script.push(callTool('billing', { period: 'this_month' }), () => say('Four subscriptions are active and one payment failed.'))
+  const r = await ask('admin', { question: 'How many customers are paying?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.match(r.body.answer, /Billing is in Stripe test mode: nobody pays real money yet/)
 })
 
 test('a change nobody asked for is never prepared, even when the model tries', async () => {

@@ -7,7 +7,7 @@
 // (proposals.js applies it after the admin's explicit Approve); nothing here writes.
 import { CUSTOMER_RE } from '../invites.js'
 import { ATTENTION_WORDS, billingOf, DAY, integrationsOf, loaders, periodRange, PERIODS, SALES_BUSINESS, SETUP_WORDS } from './data.js'
-import { weeklyBrief } from './brief.js'
+import { ENROLLMENT_OWNS, weeklyBrief } from './brief.js'
 import { STATUSES as CODE_STATUSES } from '../acquisition.js'
 import { randomToken } from '../google-oauth.js'
 
@@ -84,7 +84,7 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
   if (given) name = ''
   const L = c.L
   const [rows, modes, receptionist, selfServe, enr] = await Promise.all([L.rows(), L.modes(), L.receptionist(), L.selfServe(), L.enrollments()])
-  if (!rows) return { source: 'customer records (server/metrics.js customerRows)', error: 'could_not_be_read' }
+  if (!rows) return { source: 'customer records', error: 'could_not_be_read' }
   const enrolled = new Map((enr?.list || []).filter((e) => e.customer && e.stage !== 'claimed').map((e) => [e.customer, e]))
   const real = rows.filter((r) => !r.deleted && !r.testBusiness)
   let list = real
@@ -92,14 +92,15 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
   else if (name) list = rows.filter((r) => !r.deleted && nameMatches(r.name, r.id, name))
   const bill = (r) => billingOf(r, modes, L.live, selfServe)
   if (!name && !given) {
-    if (which === 'paying') list = real.filter((r) => bill(r).paying || bill(r).testPaying)
+    if (which === 'paying') list = real.filter((r) => (bill(r).paying || bill(r).testPaying) && !enrolled.has(r.id))
     else if (which === 'needs_attention') list = real.filter((r) => r.attention.length)
     else if (which === 'not_live') list = real.filter((r) => r.onboarding !== 'live')
     else if (which === 'live') list = real.filter((r) => r.onboarding === 'live')
   }
   const out = (r) => {
     const b = bill(r)
-    const signals = [
+    const flags = enrolled.has(r.id) ? r.attention.filter((a) => !ENROLLMENT_OWNS.includes(a)) : r.attention
+    const signals = enrolled.has(r.id) ? [] : [
       r.attention.includes('past_due') && 'payment failed',
       r.attention.includes('cancel_scheduled') && 'cancellation scheduled',
       r.attention.includes('no_recent_bookings') && 'no bookings in 14 days',
@@ -121,12 +122,12 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
       last_booking: r.lastBooking ? `${ymd(r.lastBooking)} (${agoText(c.now, r.lastBooking)})` : 'none recorded',
       owner_signed_in: r.hasOwner,
       created: ymd(r.createdAt),
-      attention: r.attention.map((a) => ATTENTION_WORDS[a] || a),
+      attention: flags.map((a) => ATTENTION_WORDS[a] || a),
       churn_signals: signals,
     }
   }
   return {
-    source: 'customer records, subscriptions, receptionist settings (the same rows as Admin → Overview)',
+    source: 'customer records, subscriptions, receptionist settings (as on Overview)',
     period: 'inquiries and bookings: last 30 days; flags: as of now',
     billing_mode: L.live ? 'live' : 'Stripe test mode: no business is a paying customer yet; "test mode" subscriptions are not revenue',
     asked: given ? `[${ref || name}]` : name ? `businesses matching "${String(name).slice(0, 40)}"` : which,
@@ -140,9 +141,9 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
 
 async function platformNumbers(c) {
   const g = await c.L.growth()
-  if (!g) return { source: 'server/metrics.js growth()', error: 'could_not_be_read' }
+  if (!g) return { source: 'platform metrics', error: 'could_not_be_read' }
   return {
-    source: 'platform metrics from records (server/metrics.js growth); test businesses and test records excluded',
+    source: 'platform metrics from records; test businesses and test records excluded',
     period: 'last 30 days unless named',
     customers: g.customers,
     activation_rate_percent: g.activationRate,
@@ -186,7 +187,7 @@ async function billing(c, { period = 'this_month' } = {}) {
   }
   const g = await L.growth()
   return {
-    source: 'subscriptions and Stripe webhook records (events), billing reconciliation (audit_log); test businesses excluded',
+    source: 'subscriptions and Stripe payment records, the last billing reconciliation; test businesses excluded',
     period: range.label,
     billing_mode: L.live ? 'live' : 'Stripe test mode (nobody has paid real money; no revenue)',
     stripe_configured: L.billingConfigured,
@@ -203,7 +204,7 @@ async function systemHealth(c) {
   const names = new Map((rows || []).map((r) => [r.id, r.name]))
   const real = (incidents || []).filter((i) => !i.test)
   return {
-    source: 'incident register (ops_incidents) and capability health (server/ops: recorded events and checks)',
+    source: 'open incidents and integration health as recorded',
     period: 'open now; integration failures: last 7 days',
     open_incidents: incidents === null ? 'could not be read' : real.slice(0, 12).map((i) => ({ severity: i.severity, what: i.title, ...(i.customer ? { business: names.has(i.customer) ? c.ref('B', i.customer, names.get(i.customer)) : 'a business' } : { scope: 'platform-wide' }), open_since: ymd(i.firstSeen), last_seen: ymd(i.lastSeen), occurrences: i.occurrences, cause: i.cause === 'unknown' ? 'not known' : `${i.cause}: ${i.causeNote || i.code}`, next: i.next })),
     open_incidents_on_test_businesses: (incidents || []).filter((i) => i.test).length,
@@ -233,7 +234,7 @@ async function aiSpending(c, { period = 'yesterday' } = {}) {
 async function growthActivity(c) {
   const [g, acq] = await Promise.all([c.L.growth(), c.L.acquisition()])
   return {
-    source: 'growth metrics (server/metrics.js) and acquisition activities you recorded (server/acquisition.js)',
+    source: 'growth metrics and the acquisition activities you recorded',
     period: 'signups: last 8 weeks; funnel: last 30 days; activities: as recorded',
     signups_by_week: g?.signupsByWeek ?? 'could not be read',
     sales_funnel_last_30_days: g ? g.sales ?? 'the GetShowUps sales business is not set up' : 'could not be read',
@@ -263,7 +264,7 @@ async function enrollments(c, { stage = 'all', name = '' } = {}) {
   const shown = list.filter((x) => (name ? nameMatches(x.businessName, '', name) : stage === 'all' || stage === 'stuck' ? true : x.stage === stage))
   const rowsOut = shown.map((x) => ({ x, why: stuckWhy(x) })).filter(({ why }) => stage !== 'stuck' || why)
   return {
-    source: 'assisted enrollments (server/enrollment.js); test businesses excluded',
+    source: 'assisted enrollments; test businesses excluded',
     period: 'as of now',
     by_stage: counts,
     stuck_rule: 'unpaid over 14 days, paid but not handed over after 7 days, or an expired ownership invitation',
@@ -279,10 +280,10 @@ async function partners(c, { name = '' } = {}) {
   const byId = new Map((rows || []).map((r) => [r.id, r]))
   const sum = (m) => Object.entries(m || {}).map(([cur, v]) => `${(v.owedCents / 100).toFixed(2)} ${cur.toUpperCase()}`).join(', ') || '0'
   return {
-    source: 'referral partners, attribution and the commission ledger (server/partners.js)',
+    source: 'referral partners, attribution and the commission ledger',
     period: 'since each partner was added',
     billing_mode: c.L.live ? 'live' : 'Stripe test mode: test-mode commissions are never owed',
-    referrals_program: c.env.REFERRALS_ENABLED === 'true' ? 'on' : 'off (nothing accrues until it is switched on)',
+    referrals_program: c.env.REFERRALS_ENABLED === 'true' ? 'on' : 'off: nothing accrues; switching it on is a platform setting that needs your approval (no button)',
     ...(name ? { asked: `partners matching "${String(name).slice(0, 40)}"`, matches: p.partners.filter((x) => nameMatches(x.name, '', name)).length } : {}),
     partners: p.partners.filter((x) => !name || nameMatches(x.name, '', name)).slice(0, 20).map((x) => {
       const real = x.referred.filter((r) => !r.testBusiness)
@@ -318,7 +319,7 @@ async function brief(c) {
     counts: b.counts,
     total_items: b.items.length,
     items_after_the_first_5: Math.max(0, b.items.length - 5),
-    items: b.items.slice(0, 25).map((x) => ({ level: x.level, what: swap(x.title, x), detail: swap(x.detail, x), next: x.next.replace(/\(the assistant can prepare it\)/, '(can be prepared here if the founder asks)'), page: PAGE_OF(x.href) })),
+    items: b.items.slice(0, 25).map((x) => ({ level: x.level, what: swap(x.title, x), detail: swap(x.detail, x), next: x.next, ...(x.prepare ? { can_prepare_if_asked: true } : {}), page: PAGE_OF(x.href) })),
     ...(b.unreadable.length ? { could_not_be_read: b.unreadable } : {}),
   }
 }
@@ -339,8 +340,8 @@ const nope = (why) => ({ prepared: false, reason: why })
 async function target(c, { ref, name }, kinds) {
   const r = ref ? c.resolve(ref) : null
   if (r && kinds.includes(r.kind)) return { one: r }
-  if (!name && !ref) return { error: 'Say which business or enrollment (a reference, or the name the founder used).' }
-  const words = name || ref
+  const words = name || ref || c.question
+  if (!words) return { error: 'Say which business or enrollment (a reference, or the name the founder used).' }
   const db = c.env.ONBOARDING_DB
   const found = []
   if (kinds.includes('E')) {
@@ -404,7 +405,9 @@ async function prepareCodeStatus(c, { code, status }) {
 }
 
 async function prepareTestMark(c, { ref, name, test: raw }) {
-  const test = raw === 'true' ? true : raw === 'false' ? false : raw
+  // true/false from the model, or else from the founder's own words ("it's a real customer", "take off the test mark").
+  const said = String(c.question || '')
+  const test = raw === true || raw === 'true' ? true : raw === false || raw === 'false' ? false : /\b(real|unmark|not a test|take [\w ]{0,12}off|remove)\b/i.test(said) ? false : /\bmark\b[^.?!]*\btest\b/i.test(said) ? true : raw
   if (typeof test !== 'boolean') return nope('Say whether to mark it as a test business (test: true) or remove the mark (test: false).')
   const t = await target(c, { ref, name }, ['B'])
   if (t.error) return nope(t.error)

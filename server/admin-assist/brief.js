@@ -10,7 +10,7 @@ export const STUCK_PAID_DAYS = 7 // paid, but the ownership invitation not sent 
 export const EXPIRING_DAYS = 2 // an unaccepted invitation that expires within this many days
 export const RECONCILE_STALE_DAYS = 2
 export const SPEND_WARN = 0.8 // share of a daily ceiling that is "near"
-const ENROLLMENT_OWNS = ['calendar_disconnected', 'setup_stalled', 'checkout_abandoned', 'no_owner', 'invite_pending']
+export const ENROLLMENT_OWNS = ['calendar_disconnected', 'setup_stalled', 'checkout_abandoned', 'no_owner', 'invite_pending']
 
 const days = (ms) => Math.max(0, Math.floor(ms / DAY))
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
@@ -70,7 +70,7 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
     for (const e of enr.list.filter((x) => x.stage === 'invited')) {
       const i = inv.get(e.id)
       if (!i || i.accepted_at || i.revoked_at) continue
-      if (i.expires_at <= now) out.push({ id: `enrollment_invite_expired:${e.id}`, rule: 'invitation_expiring', level: 'important', title: `Ownership invitation expired: ${e.businessName}`, detail: `Expired ${ago(now, i.expires_at)}; the owner hasn't claimed the business.`, next: 'Resend the ownership invitation (the assistant can prepare it).', href: '/admin/sales', enrollment: { id: e.id, name: e.businessName }, prepare: 'resend_invitation' })
+      if (i.expires_at <= now) out.push({ id: `enrollment_invite_expired:${e.id}`, rule: 'invitation_expiring', level: 'important', title: `Ownership invitation expired: ${e.businessName}`, detail: `Expired ${ago(now, i.expires_at)}; the owner hasn't claimed the business.`, next: 'Resend the ownership invitation in Sales.', href: '/admin/sales', enrollment: { id: e.id, name: e.businessName }, prepare: 'resend_invitation' })
       else if (i.expires_at - now < EXPIRING_DAYS * DAY) out.push({ id: `enrollment_invite_expiring:${e.id}`, rule: 'invitation_expiring', level: 'important', title: `Ownership invitation expires soon: ${e.businessName}`, detail: `Expires in ${Math.max(1, Math.ceil((i.expires_at - now) / 3_600_000))} hours.`, next: 'Remind the owner, or resend it once it expires.', href: '/admin/sales', enrollment: { id: e.id, name: e.businessName } })
     }
   } else if (enr === null) unread.push('enrollments')
@@ -79,7 +79,7 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
     const r = byBiz.get(i.customer)
     if (!r || r.hasOwner || enrolled.has(r.id)) continue
     if (i.expires_at <= now) continue // shown as no_owner / invite_pending by its flags
-    if (i.expires_at - now < EXPIRING_DAYS * DAY) out.push({ id: `invite_expiring:${i.id}`, rule: 'invitation_expiring', level: 'important', title: `Owner invitation expires soon: ${r.name}`, detail: `Sent ${ago(now, i.created_at)}; expires in ${Math.max(1, Math.ceil((i.expires_at - now) / 3_600_000))} hours.`, next: 'Remind the owner, or resend the invitation (the assistant can prepare it).', href: bizHref(r.id), business: { id: r.id, name: r.name }, prepare: 'resend_invitation' })
+    if (i.expires_at - now < EXPIRING_DAYS * DAY) out.push({ id: `invite_expiring:${i.id}`, rule: 'invitation_expiring', level: 'important', title: `Owner invitation expires soon: ${r.name}`, detail: `Sent ${ago(now, i.created_at)}; expires in ${Math.max(1, Math.ceil((i.expires_at - now) / 3_600_000))} hours.`, next: 'Remind the owner, or resend the invitation from the business.', href: bizHref(r.id), business: { id: r.id, name: r.name }, prepare: 'resend_invitation' })
   }
   const expiringIds = new Set(out.filter((x) => x.rule === 'invitation_expiring' && x.business).map((x) => x.business.id))
   perBusiness(out, 'important', 'invite_pending', has('invite_pending').filter((r) => !expiringIds.has(r.id)), 'Owner invitation not accepted after 3 days', { next: 'Follow up with the owner, or resend the invitation.' })
@@ -92,7 +92,7 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
   if (minor.length) out.push({ id: 'incidents:minor', rule: 'incident', level: 'important', title: `${plural(minor.length, 'open incident')} of medium or low severity`, detail: minor.slice(0, 3).map((i) => i.title).join('; '), next: 'Review them in the Control Center.', href: '/admin/control', count: minor.length })
   // Reconciliation's own check fails while it reports a mismatch: that mismatch is already the item above.
   for (const g of integrationsOf(caps).filter((x) => x.state === 'failed' && !(x.id === 'billing.reconcile' && recon?.real > 0))) out.push({ id: `integration:${g.id}`, rule: 'integration_failed', level: 'important', title: `Integration failing: ${g.name}`, detail: g.failures_7d ? `${plural(g.failures_7d, 'failure')} in the last 7 days, no success since.` : 'Its latest automatic check reported a problem.', next: 'Open it in the Control Center → Integrations.', href: '/admin/control' })
-  if (L.billingConfigured && (!recon || now - recon.at > RECONCILE_STALE_DAYS * DAY)) out.push({ id: 'reconciliation:stale', rule: 'reconciliation', level: 'important', title: recon ? `Billing reconciliation last ran ${ago(now, recon.at)}` : 'Billing reconciliation has never run', detail: 'It normally runs every day.', next: 'Run it now (the assistant can prepare it), then check the cron.', href: '/admin#reconciliation', prepare: 'run_reconciliation' })
+  if (L.billingConfigured && (!recon || now - recon.at > RECONCILE_STALE_DAYS * DAY)) out.push({ id: 'reconciliation:stale', rule: 'reconciliation', level: 'important', title: recon ? `Billing reconciliation last ran ${ago(now, recon.at)}` : 'Billing reconciliation has never run', detail: 'It normally runs every day.', next: 'Run it now under Billing reconciliation, then check the scheduler.', href: '/admin#reconciliation', prepare: 'run_reconciliation' })
   if (spend) {
     if (spend.micros >= SPEND_WARN * spend.ceilingMicros || spend.answered >= SPEND_WARN * ADMIN_ANSWERS_PER_DAY) out.push({ id: 'ai:admin', rule: 'ai_spend', level: 'important', title: 'Admin assistant near its daily ceiling', detail: `$${(spend.micros / 1e6).toFixed(2)} of $${(spend.ceilingMicros / 1e6).toFixed(2)} used today (UTC).`, next: 'It stops at the ceiling and resumes at 00:00 UTC; this list keeps working.', href: '/admin' })
     if (spend.ownerAsksToday >= SPEND_WARN * spend.ownerSharedAllowance) out.push({ id: 'ai:owners', rule: 'ai_spend', level: 'important', title: 'Owners’ assistant near its shared daily allowance', detail: `${spend.ownerAsksToday} of ${spend.ownerSharedAllowance} questions used today (UTC).`, next: 'Owners still get answers from their records when it is used up. Raising it needs a decision.', href: '/admin/control' })

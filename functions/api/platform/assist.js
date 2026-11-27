@@ -76,5 +76,5 @@ export async function onRequestPost({ request, env }) {
   await record({ ok: r.ok, tools: r.tools.slice(0, 10), proposals: r.proposals.map((p) => p.type), costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, usage: r.usage, ...(r.ok ? {} : { reason: r.reason }), ...(r.refusals.length ? { refusals: r.refusals } : {}), ms: r.ms })
   if (['quota', 'setup'].includes(r.reason) && !r.costMicros) await unhit(env, 'adminAssistDay', admin.email)
   if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason, r)
-  return json(200, { id, kind: r.proposals.length ? 'prepared' : 'answer', answer: r.answer, raw: r.raw, proposals: r.proposals, refs: r.refs, sources: r.sources.filter((s) => s.tool !== 'weekly_brief' || r.tools.includes('weekly_brief')), evidence: r.evidence, usage: { ...r.usage, costMicros: r.costMicros, ms: r.ms } })
+  return json(200, { id, kind: r.proposals.length ? 'prepared' : 'answer', answer: r.answer, raw: r.raw, proposals: r.proposals, refs: r.refs, sources: r.sources.filter((s) => s.tool !== 'weekly_brief' || r.tools.includes('weekly_brief')), evidence: r.evidence, lookups: r.lookups, usage: { ...r.usage, costMicros: r.costMicros, ms: r.ms } })
 }

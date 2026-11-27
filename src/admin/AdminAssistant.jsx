@@ -30,9 +30,8 @@ function BriefList({ items, limit = 50 }) {
             <p className="row-title">
               <Pill tone={LEVEL[i.level][1]}>{LEVEL[i.level][0]}</Pill> {i.title}
             </p>
-            {i.detail && <p className="row-sub">{i.detail}</p>}
             <p className="row-sub">
-              {i.next}{' '}
+              {[i.detail, i.next].filter(Boolean).join(' ')}{' '}
               <a className="link-btn" href={i.href} onClick={(e) => go(i.href, e)}>
                 Open
               </a>
@@ -54,10 +53,11 @@ export function ThisWeek() {
   if (!s.loaded) return <section className="card" aria-busy="true" data-this-week />
   if (!s.brief) return <section className="card" data-this-week><h2 className="card-title">This week</h2><p className="form-error">Couldn’t load this week’s list.</p></section>
   const { items, counts } = s.brief
-  const shown = all ? items : items.filter((i) => i.level !== 'fyi').slice(0, 8)
+  // Compact on purpose: the headline numbers stay on the first screen (ADM-01); the rest is one click away.
+  const shown = all ? items : items.filter((i) => i.level !== 'fyi').slice(0, 3)
   return (
     <section className="card" aria-labelledby="this-week-title" data-this-week>
-      <div className="page-head">
+      <div className="ui-section-head">
         <h2 className="card-title" id="this-week-title">
           This week
         </h2>

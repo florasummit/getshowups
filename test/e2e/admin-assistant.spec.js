@@ -31,7 +31,7 @@ test('This week on Overview, then the Assistant panel: brief first, an answer fr
   await panel.getByRole('button', { name: 'Is anything broken?' }).click()
   const answer = panel.locator('[data-admin-entry="answer"]')
   await expect(answer).toContainText('Start with the urgent items')
-  await expect(answer.locator('[data-sources]')).toContainText('incident register')
+  await expect(answer.locator('[data-sources]')).toContainText('open incidents')
 
   await panel.getByLabel('Ask the assistant').fill('Refund the last payment for that business')
   await panel.getByRole('button', { name: 'Send question' }).click()
