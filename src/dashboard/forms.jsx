@@ -4,6 +4,7 @@ import { LoadError, SaveBar, SaveStatus } from './ui.jsx'
 import { useSaveState } from './ui-hooks.js'
 import AiWrite from './AiWrite.jsx'
 import { api, browserTimeZone, DAY_SHORT, timeZones } from '../lib/api.js'
+import { referralCandidates } from '../lib/referral.js'
 import { suggestionsFor } from '../content/service-suggestions.js'
 import { plural } from '../lib/format.js'
 import { oddZips, US_ZONES } from './owner-lib.js'
@@ -112,7 +113,7 @@ export function BusinessForm({ customer, submitLabel, onSaved, inline = false })
       } catch {
         source = undefined
       }
-      const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, appointmentMode: mode, source } })
+      const { status, data } = await api('/api/dashboard/business', { method: 'POST', body: { name, timezone, serviceZips: zips, appointmentMode: mode, source, partner: referralCandidates() } })
       if (status === 200 || status === 201) saved()
       else if (data.error !== 'already_exists') return { error: errorText(data.error) }
       onSaved?.(data)

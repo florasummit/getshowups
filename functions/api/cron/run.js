@@ -17,6 +17,7 @@ import { queueOwnerNotices } from '../../../server/notify.js'
 import { founderAlerts } from '../../../server/alerts.js'
 import { syncIncidents } from '../../../server/ops/incidents.js'
 import { purgeExpiredSessions } from '../../../server/sessions-purge.js'
+import { purgeExpiredSignIns } from '../../../server/email-auth.js'
 import { purgeQa } from '../../../server/ops/qa.js'
 import { hitByIp, tooManyJson } from '../../../server/ratelimit.js'
 import { syncMetrics, pauseForOptimizer, verifyLaunched } from '../../../server/ads/campaigns.js'
@@ -107,6 +108,7 @@ export async function onRequestPost({ request, env }) {
     const incidents = await adsStep('incidents', () => syncIncidents(env))
     // QA history retention (migration 0032; no-op before it): automated 90 days, human 365 days.
     const sessions = await adsStep('expired sessions', () => purgeExpiredSessions(env))
+    await adsStep('expired sign-in requests', () => purgeExpiredSignIns(env)) // email sign-in (0046; no-op before it)
     await adsStep('qa retention', () => purgeQa(env.ONBOARDING_DB))
     await adsStep('heartbeat', () => beat(env.ONBOARDING_DB))
     return json(200, { messages, followups, onboardingQueued, ownerNotices, alerts, incidents, outbox: { sent: outbox.sent, failed: outbox.failed }, ads, domains, designerRaw, recovery, deletions, reconcile, changes, audit, sessions })

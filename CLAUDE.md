@@ -41,6 +41,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/admin/         Bearer ADMIN_API_TOKEN routes: google-invites (POST), google-health (GET), customers (POST: link existing business)
   api/google/oauth/  Customer Google Calendar connection: start (GET/POST), callback (GET)
   api/auth/          Dashboard sign-in: google/start, google/callback (openid+email), logout (POST)
+  api/auth/email/    Passwordless email sign-in (server/email-auth.js, 0046): index (GET offered), start (POST), verify (POST code|token)
   api/dashboard/     Session routes: me, calendar, overview (GET); business, hours, connect-link, outcome (POST)
   api/book/[customer]/  Public: index (GET services, brand, slots[?service=]), area (GET ZIP check before times), lead (POST,
                      serviceId + answer), appointment (POST books on Google Calendar), event (POST funnel stage, codes only)
@@ -98,6 +99,10 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      no automatic messages. Enterprise is sold by agreement, never checkout; organizations are design only
                      (docs/ENTERPRISE_ORGANIZATIONS.md). The $499 plan is named Growth in copy; its plan id stays `founding`
   api/invite         Public invitation preview; api/dashboard/{accept-invite,billing} for owners
+  api/sales/         Assisted enrollment (docs/ASSISTED_ENROLLMENT.md, migration 0047): me (roles), roles (admin grant/revoke),
+                     enrollments (GET list/detail; POST create|update|assign|workspace|payment|invite|revoke_invite|abandon).
+                     api/claim (public GET preview / POST claim). Screens: src/admin/Enrollments.jsx (Admin → Sales; reps
+                     see only this), src/claim/Claim.jsx (/claim)
 server/              Shared backend modules imported by functions/ (bundled by Pages)
   google-oauth.js    Config check, crypto (AES-GCM, PKCE, SHA-256), admin auth, token refresh, HTML/JSON responses
   invites.js         Single-use onboarding invites in D1 (atomic UPDATE…RETURNING)
@@ -206,6 +211,28 @@ server/              Shared backend modules imported by functions/ (bundled by P
   site-render.js     The one renderer for business websites (escaped, script-free, CSP).  site-serve.js: public serving
   assets.js          Website images (byte-sniffed, size/count limits, published-only).  testdata.js: test-record rules
   url.js             normalizeWebsiteUrl(): the one rule for website URLs owners type (https default, safe hosts)
+  commercial-attribution.js  One row per business (0048 commercial_attribution, first touch, written once; changed only by
+                     audited admin correction): marketing_source / partner_id / closing_rep_email / channel. recordAttribution
+                     (never throws, no-op before 0048; self-serve route + stream B) + partnerFromCode. Browser keeps ≤3 first-touch
+                     codes (src/lib/referral.js, /r/<code> → /?partner=, or ?ref=); first VALID one wins; refusals recorded as codes
+                     (unknown_code, paused, self_referral: partner = owner/member/rep or same non-public domain, outside_window)
+  partners.js        Referral partners (admin only, POST /api/platform/partners, audited; NO login/access for partners). Random
+                     10-char codes; status invited → onboarding → active ⇄ paused → ended (final); activate/resume needs a terms
+                     version + recorded acceptance of the CURRENT agreement version (partner_agreements/partner_acceptances,
+                     method recorded_by_admin); only active partners gain referrals or earn. Payout details = words only (13–19
+                     digit runs, 8+ digit runs, IBANs refused). Terms: partner-terms.js, append-only versions, NO defaults; a
+                     business earns under the version in effect when it was attributed; a version never starts before the
+                     previous one or the latest accrual; ledger rows keep rule snapshot + terms_version_id (never recalculated)
+  partner-payouts.js Payouts made OUTSIDE GetShowUps, recorded only (no payment code). Live ledger rows only; itemized (settles
+                     accruals at their net) or on account; INSERT guarded by the owed balance; payout_settlements unique
+                     (ledger_id, cycle) = never settled twice; mistakes → one audited reversal row (append-only, never edited)
+  commissions.js     Append-only commission_ledger (triggers; unique (kind, stripe_object_id)). REFERRALS_ENABLED exactly 'true'
+                     or nothing accrues. invoice.paid → accrual from amount_paid − tax (window, recurring once|months:N|lifetime,
+                     partner active, not test business, subscription not ended, re-checked self-referral); charge.refunded
+                     (cumulative, proportional) and charge.dispute.* (once) → reversals, applied even when off, never > accrued.
+                     livemode per row: only live rows (with live billing on) are a liability. NO payout code exists
+  commercial-report.js Growth → Pipeline (GET /api/platform/commercial): customerRows() + attribution + stream B enrollments
+                     (fail-soft); test businesses/test subscriptions never customers or revenue; revenue/commission/retention live only
   testbusiness.js    Admin-marked test businesses (test_businesses): out of metrics; never live Ads/messaging/Stripe
   business-accounts.js Account types (0034, docs/ACCOUNT_TYPES.md): internal_live | sandbox | customer; billing
                      complimentary|stripe, environment production|sandbox, provider_spend allowed|blocked. Complimentary =
@@ -299,6 +326,15 @@ Non-negotiables:
 - Test sessions (server/acceptance.js, docs/INTELLIGENCE.md §8): acceptance runner only, one admin-marked test business, own
   cookie, exact route list, stripped environment + write-guarded database; ACCEPTANCE_SESSIONS_ENABLED=true needs approval.
   Never add a route that calls out, queues or changes accounts to server/acceptance-routes.js.
+- Email sign-in (server/email-auth.js, migration 0046; docs/DESIGN_SYSTEM.md §16; UI src/dashboard/SignIn.jsx, the ONE
+  sign-in panel): start answers identically for every well-formed address (lookup + send run in waitUntil); an email
+  (code + link, one request, 15 min, single use, ≤5 wrong codes, hashes only, code HMAC-keyed) goes only to who may sign in
+  today (signInAllowed: admin, member, open account invite, open sign-up/tester, plus checks wired with addSignInCheck: B's hasCommercialRole / pendingClaimFor).
+  Sent directly (never the outbox). Link = /dashboard/email-sign-in#t= (fragment), POST to consume, only in the browser
+  that asked (HttpOnly sealed cookie); the code works anywhere. Success = createSession + landingFor, same as Google.
+  Gate: AUTH_EMAIL_LIVE (or MESSAGES_LIVE) exactly 'true' or only MESSAGE_TEST_RECIPIENTS (approval); the screens offer
+  email only then (?email=1 = testers' entry). AUTH_EMAIL_MOCK_ORIGIN is a loopback-only test var. Same verified address
+  = same person; nothing else is ever linked.
 - Platform admin access comes only from PLATFORM_ADMIN_EMAILS; customer membership never grants it. Audit every
   privileged write with `audit()`.
 - Permanent audit log (server/auditlog.js, migration 0015 `audit_log`): append-only (SQLite triggers refuse UPDATE/DELETE),
@@ -436,7 +472,8 @@ Non-negotiables:
   ADS_ENABLED=false (Ads tab + /api/dashboard/ads/* + /api/ads/* connect), AI_STUDIO_ENABLED=false (Teach Your AI),
   WEBSITE_STUDIO_ENABLED=false. Seeing a tool never spends or changes anything customer-facing: live use stays behind
   ADS_LIVE_LAUNCH (real campaign create/resume) and AI_RULES_LIVE_BUSINESSES.
-- Release switches (off unless exactly 'true'): ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off).
+- Release switches (off unless exactly 'true'): ADS_LIVE_LAUNCH (real campaign create/resume), GHL_ENABLED (GHL routes, sync and SMS hand-off),
+  REFERRALS_ENABLED (referral commission accruals; needs the founder's approval of partner economics, terms, eligibility).
   Website Studio (server/website-studio.js studioAccess(), owner decision 2026-11-16: every eligible business, no
   allowlist) = own Claude/OpenAI key, AI designer, website import (+ old-address redirects). Eligible: Studio not switched
   off (WEBSITE_STUDIO_ENABLED === 'false' is the emergency off switch; default on), business active (not suspended),
@@ -762,6 +799,20 @@ Non-negotiables:
   a later real webhook still wins); skipped (other_subscription_running) when Stripe lists another running/pending
   subscription for that business; a failed confirming fetch changes nothing. Everything else is report-only. "Resync from Stripe" (admin, confirm, audited) applies
   Stripe's current subscription like a webhook (refused for live mode while live billing is off).
+
+- Assisted enrollment (server/enrollment.js, roles.js, staff-context.js; docs/ASSISTED_ENROLLMENT.md, PHONE_PAYMENTS.md):
+  roles = platform_admin (PLATFORM_ADMIN_EMAILS) | sales_rep (ONLY assigned enrollments) | onboarding (configure/invite,
+  never payment/assignment/roles), from commercial_roles, read every request (revocation = next request), audited; a
+  role never grants membership. Workspace = createCustomer with NO owner + self_signups row → unpaid (not hosted, not
+  bookable, no paid tools, provider spend blocked via assistedUnpaid, no staff AI generation). Payment = createCheckout
+  `assisted` (Stripe-hosted; returns to /claim; STRIPE_CHECKOUT_TERMS=true adds Stripe ToS consent); paid ONLY from the
+  verified webhook (syncEnrollmentFor); no "mark paid". Card-like numbers refused in every field; MOTO not built.
+  Configure mode: staff session + X-GSU-Enrollment header (GET also ?enrollment= / __Host-gsu_staff cookie, ignored
+  when not authorizing) on STAFF_PATHS only, role + assignment + stage per request, writes audited
+  (enrollment.staff_write); finish onboarding, receptionist on, calendar connect = owner's. Ownership invitation =
+  account_invites kind 'claim' (the ?invite= path refuses it: claim_required); /claim: verified email must equal the
+  invited one, terms version recorded, owner + enrollment claimed + invite used in ONE batch, staff access ends.
+  Seams for the lead: server/enrollment-hooks.js (attributeAssisted → stream C, phoneHook → telephony).
 
 ## Business Review and operational events (/admin/review)
 

@@ -7,6 +7,8 @@ import { LoadError, Pill, SaveStatus } from './ui.jsx'
 import { useSaveState } from './ui-hooks.js'
 import { plural } from '../lib/format.js'
 import { scrollToCard } from './owner-lib.js'
+import SignIn from './SignIn.jsx'
+import { useEmailOffered } from './signin-lib.js'
 
 const day = (ms) => new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 const SIGN_IN_AGAIN = '/api/auth/google/start?next=/dashboard/settings'
@@ -34,16 +36,30 @@ const errText = (c) => ERR[c] || (['network_error', 'storage_error', 'failed', '
 // A refused action: the reason, or the way to sign in again (asked for consequential changes only).
 export function ActionError({ code }) {
   if (!code) return null
-  if (code === 'reauth_required')
-    return (
-      <p className="notice-info" role="alert" data-reauth>
-        For your security, sign in again to do this. <a href={SIGN_IN_AGAIN}>Sign in again with Google</a>
-      </p>
-    )
+  if (code === 'reauth_required') return <Reauth />
   return (
     <p className="form-error" role="alert">
       {errText(code)}
     </p>
+  )
+}
+
+// Signing in again: Google, or (once email sign-in is offered) a code sent to the address. Either is a fresh sign-in.
+function Reauth() {
+  const offered = useEmailOffered()
+  const [byEmail, setByEmail] = useState(false)
+  return (
+    <div className="notice-info" role="alert" data-reauth>
+      <p>
+        For your security, sign in again to do this. <a href={SIGN_IN_AGAIN}>Sign in again with Google</a>
+      </p>
+      {offered && !byEmail && (
+        <button type="button" className="btn btn-sm btn-quiet" onClick={() => setByEmail(true)}>
+          Get a code by email instead
+        </button>
+      )}
+      {byEmail && <SignIn compact google={false} next="/dashboard/settings" />}
+    </div>
   )
 }
 
@@ -217,7 +233,7 @@ export function People({ hasPlan = false }) {
           }}
         >
           <label className="field">
-            <span>Invite someone (their Google account email)</span>
+            <span>Invite someone (their email address)</span>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="off" />
           </label>
           <button className="btn btn-quiet" disabled={state.busy}>
@@ -245,6 +261,7 @@ export function People({ hasPlan = false }) {
 export function SignInSecurity() {
   const [d, load] = useLoad('/api/dashboard/people')
   const [state, setState] = useState({})
+  const emailOffered = useEmailOffered()
   if (d === undefined) return <div aria-busy="true" />
   if (d === null) return <LoadError what="your sessions" onRetry={load} />
   const end = async (all) => {
@@ -260,9 +277,14 @@ export function SignInSecurity() {
   return (
     <div className="stack">
       <p>
-        You sign in with Google as <strong>{d.you.email}</strong>.
+        You’re signed in as <strong>{d.you.email}</strong>.
       </p>
-      <p className="fine">GetShowUps has no password. Your name, password and two-step verification are managed in your Google Account. To use another email, invite it above, then leave with this one.</p>
+      <p className="fine">
+        {emailOffered
+          ? 'GetShowUps has no password: you sign in with Google or with a code we email to this address, and both lead to this same account.'
+          : 'GetShowUps has no password. Your name, password and two-step verification are managed in your Google Account.'}{' '}
+        To use another email, invite it above, then leave with this one.
+      </p>
       <p className="fine">
         {plural(d.sessions.length, 'signed-in session')}; each ends within 7 days.
         {d.you.signedInAt ? ` This one started ${whenFull(d.you.signedInAt)}.` : ''}

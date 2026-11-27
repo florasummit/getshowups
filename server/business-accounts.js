@@ -63,7 +63,17 @@ export async function accountsMap(env) {
 }
 export const isComplimentary = async (env, customerId) => (await accountOf(env, customerId)).billing === 'complimentary'
 // Customer-facing paid providers (ads live launch, public receptionist chat/voice) for this business?
-export const providerSpendAllowed = async (env, customerId) => (await accountOf(env, customerId)).providerSpend === 'allowed'
+// An assisted-enrollment workspace (server/enrollment.js, migration 0047) is blocked until Stripe's verified subscription
+// event marked it paid: no paid provider serves customers of a business that hasn't paid.
+export const providerSpendAllowed = async (env, customerId) => (await accountOf(env, customerId)).providerSpend === 'allowed' && !(await assistedUnpaid(env, customerId))
+export async function assistedUnpaid(env, customerId) {
+  try {
+    return Boolean(await env.ONBOARDING_DB.prepare("SELECT 1 FROM assisted_enrollments WHERE customer = ?1 AND paid_at IS NULL AND stage <> 'claimed'").bind(customerId).first())
+  } catch (err) {
+    if (noTable(err)) return false
+    throw err
+  }
+}
 // SQL fragment: businesses billed by Stripe (no complimentary row). Only valid once accountsReady().
 export const stripeBilledSql = (col) => `NOT EXISTS (SELECT 1 FROM business_accounts ba WHERE ba.customer = ${col} AND ba.billing = 'complimentary')`
 

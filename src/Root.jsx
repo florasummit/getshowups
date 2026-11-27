@@ -1,13 +1,16 @@
 import { Suspense } from 'react'
 import { lazyPage } from './lib/lazy.js'
 import App from './App.jsx'
+import { captureReferral } from './lib/referral.js'
 
 // App pages are separate lazy chunks so the marketing page stays small.
 const Dashboard = lazyPage(() => import('./dashboard/Dashboard.jsx'))
+const EmailLink = lazyPage(() => import('./dashboard/EmailLink.jsx'))
 const BookingPage = lazyPage(() => import('./booking/BookingPage.jsx'))
 const Admin = lazyPage(() => import('./admin/Admin.jsx'))
 const Privacy = lazyPage(() => import('./legal/Privacy.jsx'))
 const ChatPage = lazyPage(() => import('./receptionist/ChatPage.jsx'))
+const Claim = lazyPage(() => import('./claim/Claim.jsx'))
 
 // First-touch acquisition source (utm_source or ref), kept on this device for signup attribution.
 try {
@@ -17,6 +20,7 @@ try {
 } catch {
   // storage unavailable: attribution falls back to 'direct'
 }
+captureReferral()
 
 export default function Root() {
   const path = window.location.pathname
@@ -43,10 +47,25 @@ export default function Root() {
       </Suspense>
     )
   }
+  if (path === '/claim' || path === '/claim/') {
+    return (
+      <Suspense fallback={null}>
+        <Claim />
+      </Suspense>
+    )
+  }
   if (path === '/admin' || path.startsWith('/admin/')) {
     return (
       <Suspense fallback={null}>
         <Admin />
+      </Suspense>
+    )
+  }
+  // The link in a sign-in email (before the dashboard: it must not first ask "who is signed in?").
+  if (path === '/dashboard/email-sign-in') {
+    return (
+      <Suspense fallback={null}>
+        <EmailLink />
       </Suspense>
     )
   }

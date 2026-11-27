@@ -2,9 +2,11 @@
 // Progress comes from the server, so setup resumes where the user left off on any device.
 import { useCallback, useEffect, useState } from 'react'
 import Logo from '../components/Logo.jsx'
-import { api, noIndex } from '../lib/api.js'
+import { api, endStaffMode, noIndex, startStaffMode } from '../lib/api.js'
 import { INVITED_HREF, useEnrollmentOpen } from '../lib/enrollment.js'
 import { HelpPanel } from './Help.jsx'
+import SignInPanel from './SignIn.jsx'
+import { useEmailOffered } from './signin-lib.js'
 import Setup from './Setup.jsx'
 import Home, { SignOut } from './Home.jsx'
 import { clearMemory } from './assistant-memory.js'
@@ -18,7 +20,9 @@ const LOGIN_ERRORS = {
 }
 
 // A deep dashboard link (e.g. /dashboard/ads) is where sign-in returns; the server allowlists it.
-const returnTo = () => (/^\/dashboard\/(appointments|followups|receptionist|website|ads|settings)$/.test(window.location.pathname) ? `?next=${encodeURIComponent(window.location.pathname)}` : '')
+const deepPath = () => (/^\/dashboard\/(appointments|followups|receptionist|website|ads|settings)$/.test(window.location.pathname) ? window.location.pathname : '')
+const returnTo = () => (deepPath() ? `?next=${encodeURIComponent(deepPath())}` : '')
+const nextPath = () => deepPath() || '/dashboard'
 
 // An invitation token arrives as ?invite=… and is kept for this tab until sign-in completes.
 const INVITE_KEY = 'gsu_invite'
@@ -44,6 +48,51 @@ function pendingPlan() {
   } catch {
     return null
   }
+}
+
+// Configure mode (assisted enrollment): /dashboard?enrollment=enr_… opened from Admin → Growth → Enrollments. Kept for
+// this tab only. The server decides on every request whether this staff member may act for that enrollment.
+const STAFF_KEY = 'gsu_staff_enrollment'
+const ENROLLMENT_RE = /^enr_[A-Za-z0-9_-]{16}$/
+// → { id, opened } (opened: named in this page's address, not only remembered by the tab).
+function pendingStaff() {
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('enrollment')
+    const opened = Boolean(fromUrl && ENROLLMENT_RE.test(fromUrl))
+    if (opened) {
+      sessionStorage.setItem(STAFF_KEY, fromUrl)
+      window.history.replaceState(null, '', '/dashboard')
+    }
+    const id = sessionStorage.getItem(STAFF_KEY)
+    return id && ENROLLMENT_RE.test(id) ? { id, opened } : null
+  } catch {
+    return null
+  }
+}
+const forgetStaff = () => {
+  endStaffMode()
+  try {
+    sessionStorage.removeItem(STAFF_KEY)
+  } catch {
+    // ignore
+  }
+}
+const exitStaff = (to = '/admin/sales') => {
+  forgetStaff()
+  window.location.assign(to)
+}
+
+function StaffBar({ me }) {
+  return (
+    <div className="signed-out staff-bar" role="status" data-staff-bar>
+      <span>
+        Setting up <strong>{me.customer.name}</strong> for its owner. You’re signed in as {me.email} (staff); nothing here makes you a member.
+      </span>
+      <button type="button" className="btn btn-sm btn-quiet" onClick={() => exitStaff(`/admin/sales#${me.staff.enrollmentId}`)}>
+        Back to the enrollment
+      </button>
+    </div>
+  )
 }
 
 const clearInvite = () => {
@@ -83,66 +132,73 @@ function cameInvited() {
 function SignIn({ invite, plan }) {
   const message = LOGIN_ERRORS[new URLSearchParams(window.location.search).get('login_error')]
   const signup = plan && !invite
-  // Sign-up link while enrollment is closed: say so BEFORE Google sign-in. Sign-in stays available for existing
-  // accounts, invitations, admins and testers (the server decides what they may do after).
+  // Sign-up link while enrollment is closed: say so BEFORE sign-in. Sign-in stays available for existing accounts,
+  // invitations, admins and testers (the server decides what they may do after).
   const enrollment = useEnrollmentOpen()
+  const emailOffered = useEmailOffered()
   const [invited] = useState(cameInvited)
   const closedNow = enrollment === false && signup
   // Someone who came through the invited entry is not shown a page titled "closed": they continue here.
   const expected = closedNow && invited
   const closed = closedNow && !invited
+  const way = emailOffered ? 'with Google or your email' : 'with Google'
   return (
     <main className="center-page">
       <div className="panel panel--narrow enter" data-signin={invite ? 'invite' : expected ? 'invited' : closed ? 'closed' : signup ? 'signup' : 'signin'}>
-        <Logo href="/" />
-        <h1 className="title">{invite ? `Join ${invite.businessName}` : expected ? 'Set up your business' : closed ? 'Online enrollment isn’t open yet' : signup ? 'Create your GetShowUps account' : 'Welcome back'}</h1>
-        <p className="lede">
-          {invite
-            ? `Sign in with the Google account for ${invite.email}.`
-            : expected
-              ? 'Sign in with the Google account we agreed with you, ideally the one with the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
-              : closed
-                ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
-                : signup
-                  ? 'Use the Google account that has the calendar you book appointments on. Next: your business name, then the $499/month Growth plan.'
-                  : 'Sign in to manage your booking page.'}
-        </p>
-        {closed && (
-          <a className="btn btn-primary btn-lg btn-block" href="/#book-demo">
-            Book a call
-          </a>
-        )}
-        {message && (
-          <p className="form-error" role="alert">
-            {message}
-          </p>
-        )}
-        <a className={`btn ${closed ? 'btn-quiet' : 'btn-primary'} btn-lg btn-block`} href={`/api/auth/google/start${returnTo()}`}>
-          Continue with Google
-        </a>
-        {expected && (
-          <p className="fine">
-            Sign-up is by arrangement for now. Not set up with us yet? <a href="/#book-demo">Book a short call</a> and we’ll get you started.
-          </p>
-        )}
-        <p className="fine">We only use your email address to sign you in. Google verifies it, so there’s no password to manage. <a href="/privacy">Privacy policy</a></p>
-        {!invite && (
-          <p className="fine">
-            {signup ? (
-              <>
-                Already have an account? <a href="/dashboard">Sign in</a>
-              </>
-            ) : enrollment === false ? (
-              <>
-                Have an invitation? <a href={INVITED_HREF}>Set up your business</a>
-              </>
-            ) : (
-              <>
-                New to GetShowUps? <a href="/dashboard?plan=founding">Create an account</a>
-              </>
-            )}
-          </p>
-        )}
+        <SignInPanel
+          next={nextPath()}
+          googleHref={`/api/auth/google/start${returnTo()}`}
+          googleQuiet={closed}
+          notice={message}
+          title={invite ? `Join ${invite.businessName}` : expected ? 'Set up your business' : closed ? 'Online enrollment isn’t open yet' : signup ? 'Create your GetShowUps account' : 'Welcome back'}
+          lede={
+            invite
+              ? `Sign in as ${invite.email}, ${way}.`
+              : expected
+                ? `Sign in ${way}, using the address we agreed with you. Next: your business name, then the $499/month Growth plan.`
+                : closed
+                  ? 'We can’t take new sign-ups online yet. Book a short call and we’ll set you up as soon as it opens. Already have an account, an invitation or test access? Sign in below.'
+                  : signup
+                    ? `Sign in ${way}. If you book appointments on a Google Calendar, its Google account is easiest. Next: your business name, then the $499/month Growth plan.`
+                    : 'Sign in to manage your booking page.'
+          }
+          before={
+            closed && (
+              <a className="btn btn-primary btn-lg btn-block" href="/#book-demo">
+                Book a call
+              </a>
+            )
+          }
+          after={
+            <>
+              {expected && (
+                <p className="fine">
+                  Sign-up is by arrangement for now. Not set up with us yet? <a href="/#book-demo">Book a short call</a> and we’ll get you started.
+                </p>
+              )}
+              <p className="fine">
+                {emailOffered ? 'There’s no password: Google, or a code we email you, confirms it’s you.' : 'We only use your email address to sign you in. Google verifies it, so there’s no password to manage.'} <a href="/privacy">Privacy policy</a>
+              </p>
+              {!invite && (
+                <p className="fine">
+                  {signup ? (
+                    <>
+                      Already have an account? <a href="/dashboard">Sign in</a>
+                    </>
+                  ) : enrollment === false ? (
+                    <>
+                      Have an invitation? <a href={INVITED_HREF}>Set up your business</a>
+                    </>
+                  ) : (
+                    <>
+                      New to GetShowUps? <a href="/dashboard?plan=founding">Create an account</a>
+                    </>
+                  )}
+                </p>
+              )}
+            </>
+          }
+        />
       </div>
     </main>
   )
@@ -150,7 +206,7 @@ function SignIn({ invite, plan }) {
 
 const INVITE_ERRORS = {
   invite_invalid: 'This invitation has expired or was already used. Ask GetShowUps for a new one.',
-  already_in_business: 'This Google account already belongs to a business.',
+  already_in_business: 'This account already belongs to a business.',
 }
 
 function InviteProblem({ error, expected, email }) {
@@ -180,12 +236,36 @@ export default function Dashboard() {
   const [inviteError, setInviteError] = useState(null)
   const [admin, setAdmin] = useState(null) // signed in without a business: is this a GetShowUps admin account?
   const [setupChosen, setSetupChosen] = useState(false)
+  const [staff] = useState(() => {
+    const s = pendingStaff()
+    if (s) startStaffMode(s.id)
+    return s
+  })
+  const staffId = staff?.id ?? null
 
   // Resolves the account, accepting a pending invitation first when the user has no business yet.
   const resolve = useCallback(async () => {
+    if (staffId) {
+      const { status, data } = await api('/api/dashboard/me')
+      if (status === 200 && data.staff) return { me: { data } }
+      if (status === 401) return { me: { signedOut: true } }
+      // Only remembered by this tab (someone else signed in here since, or access ended): back to the ordinary dashboard.
+      if (!staff.opened) {
+        forgetStaff()
+        window.location.reload()
+        return { me: { loading: true } }
+      }
+      return { me: { staffDenied: true } }
+    }
     const { status, data } = await api(`/api/dashboard/me${plan ? `?plan=${encodeURIComponent(plan)}` : ''}`)
     if (status === 200 && invite && !data.customer) {
       const r = await api('/api/dashboard/accept-invite', { method: 'POST', body: { token: invite } })
+      // An ownership invitation (assisted enrollment) is claimed on its own page: terms, then the handoff.
+      if (r.data?.error === 'claim_required') {
+        clearInvite()
+        window.location.assign(`/claim?token=${encodeURIComponent(invite)}`)
+        return { me: { loading: true } }
+      }
       if (r.status === 200) {
         clearInvite()
         const again = await api('/api/dashboard/me')
@@ -195,7 +275,7 @@ export default function Dashboard() {
     }
     if (status === 200 && invite) clearInvite()
     return { me: status === 200 ? { data } : status === 401 ? { signedOut: true } : { error: true } }
-  }, [invite, plan])
+  }, [invite, plan, staffId, staff])
 
   const load = useCallback(
     () =>
@@ -253,6 +333,19 @@ export default function Dashboard() {
   }
 
   if (me.loading) return <main className="center-page" aria-busy="true" />
+  if (me.staffDenied)
+    return (
+      <main className="center-page">
+        <div className="panel panel--narrow enter" data-staff-denied>
+          <h1 className="title">You can’t set up this business</h1>
+          <p className="lede">This enrollment isn’t assigned to you, was already handed to its owner, or your access changed.</p>
+          <button type="button" className="btn btn-primary btn-block" onClick={() => exitStaff()}>
+            Back to enrollments
+          </button>
+        </div>
+      </main>
+    )
+  if (me.signedOut && staffId) return <SignIn invite={null} plan={null} />
   if (me.signedOut) return <SignIn invite={invitePreview} plan={plan} />
   if (me.error) {
     return (
@@ -276,7 +369,7 @@ export default function Dashboard() {
         <div className="panel panel--narrow enter" data-admin-account>
           <Logo href="/" />
           <h1 className="title">You’re signed in with an admin account</h1>
-          <p className="lede">This Google account manages GetShowUps and doesn’t belong to a business.</p>
+          <p className="lede">This account manages GetShowUps and doesn’t belong to a business.</p>
           <a className="btn btn-primary btn-lg btn-block" href="/admin">
             Open the admin console
           </a>
@@ -288,12 +381,19 @@ export default function Dashboard() {
         </div>
       </main>
     )
+  if (me.data.staff)
+    return (
+      <>
+        <StaffBar me={me.data} />
+        <Setup me={me.data} reload={load} />
+      </>
+    )
   return (
     <>
       {expired && (
         <div className="signed-out" role="alert" data-signed-out>
           <span>You’ve been signed out. What you typed is still here. {recheck}</span>
-          <a className="btn btn-sm btn-primary" href="/api/auth/google/start" target="_blank" rel="noopener">
+          <a className="btn btn-sm btn-primary" href="/dashboard" target="_blank" rel="noopener">
             Sign in (new tab)
           </a>
           <button type="button" className="btn btn-sm btn-quiet" onClick={check}>
