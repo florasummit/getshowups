@@ -106,7 +106,9 @@ async function claude(env, m, { system, messages, tools, allTools, maxTokens, cu
   if (!budget.ok) throw Object.assign(new Error('ai_budget'), { budget: budget.reason })
   let settled = false
   try {
-  const anthropic = env.ANTHROPIC_CLIENT || new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY.trim(), maxRetries: 1, timeout: ms })
+  // No SDK retries (an SDK retry is an unreported billable attempt): server/operator.js retries once itself, and every
+  // attempt comes back here for its own reservation.
+  const anthropic = env.ANTHROPIC_CLIENT || new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY.trim(), maxRetries: 0, timeout: ms })
   const out = messages.map((x) =>
     x.role === 'tool'
       ? { role: 'user', content: x.results.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.text })) }

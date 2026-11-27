@@ -17,7 +17,7 @@ import { randomToken } from '../google-oauth.js'
 import { toE164 } from '../sms.js'
 import { withinHours } from '../receptionist/routing.js'
 import { getSettings as receptionistSettings, startConversation } from '../receptionist/engine.js'
-import { voiceConfigured, voiceAllowedFor } from '../receptionist/voice.js'
+import { voiceConfigured, voiceAllowedFor, RETELL_MAX_CALL_MS } from '../receptionist/voice.js'
 import { hit } from '../ratelimit.js'
 import { aiOff, retellRoom } from '../ai-budget.js'
 import { recordEvent } from '../auditlog.js'
@@ -180,7 +180,8 @@ export async function registerAiCall(env, customer, { from, to, sid }, now = Dat
     res = await fetch(`${retellBase(env)}/v2/register-phone-call`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, from_number: from, to_number: to, direction: 'inbound', metadata: { business: customer.id, conversation: conv.id, channel: 'phone' } }),
+      // Retell ends the AI leg after 15 minutes (provider-enforced, agent_override.agent.max_call_duration_ms).
+      body: JSON.stringify({ agent_id: env.RETELL_AGENT_ID, from_number: from, to_number: to, direction: 'inbound', metadata: { business: customer.id, conversation: conv.id, channel: 'phone' }, agent_override: { agent: { max_call_duration_ms: RETELL_MAX_CALL_MS } } }),
       signal: AbortSignal.timeout(8_000),
     })
   } catch {

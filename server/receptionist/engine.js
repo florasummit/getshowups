@@ -33,7 +33,7 @@ import { spokenToDigits } from './digits.js'
 import { activeRules, decisionFor, noteAnswer, observe, ruleBlock, NOTE_ANSWER_TOOL } from '../intelligence/runtime.js'
 import { turnNote } from '../intelligence/compile.js'
 import { understand, mergeFacts } from '../intelligence/understand.js'
-import { reserveAi, worstCase } from '../ai-budget.js'
+import { reserveAi, transient, worstCase } from '../ai-budget.js'
 
 export const RECEPTIONIST_TABLES = ['receptionist_settings', 'receptionist_conversations', 'receptionist_events', 'receptionist_calls']
 export const DEFAULT_MODEL = 'claude-opus-5-5'
@@ -676,11 +676,12 @@ function costMicros(u) {
   return Math.round((u.input_tokens || 0) * PRICE.input + (u.output_tokens || 0) * PRICE.output + (u.cache_read_input_tokens || 0) * PRICE.cacheRead + (u.cache_creation_input_tokens || 0) * PRICE.cacheWrite)
 }
 
-// Voice waits at most VOICE_MODEL_TIMEOUT_MS for the model to start answering (one retry): a caller hears silence
-// meanwhile, and Retell's own reminder would talk over a slow answer. Chat keeps the longer budget.
+// Voice waits at most VOICE_MODEL_TIMEOUT_MS for the model to start answering (one retry, made by respond() with its own
+// spending reservation): a caller hears silence meanwhile, and Retell's own reminder would talk over a slow answer. Chat
+// keeps the longer budget. maxRetries 0: an SDK retry would be a second billable attempt the guard never sees.
 function client(env, channel = 'chat') {
   const mock = providerMock(env)
-  return new Anthropic({ apiKey: env.RECEPTIONIST_ANTHROPIC_API_KEY, maxRetries: 1, timeout: channel === 'voice' ? VOICE_MODEL_TIMEOUT_MS : MODEL_TIMEOUT_MS, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
+  return new Anthropic({ apiKey: env.RECEPTIONIST_ANTHROPIC_API_KEY, maxRetries: 0, timeout: channel === 'voice' ? VOICE_MODEL_TIMEOUT_MS : MODEL_TIMEOUT_MS, ...(mock ? { baseURL: `${mock}/anthropic` } : {}) })
 }
 
 // Streams one model call's text sentence by sentence through `emit`, checking each sentence first. Returns the
@@ -893,31 +894,41 @@ async function respondTurn(env, customer, conv, userText, opts, now, hold) {
     const signal = opts.signal && !ctx.committed ? opts.signal : undefined
     // One spending guard (server/ai-budget.js): the call's worst case is reserved against the platform, public, business
     // and receptionist ceilings before it is made; refused → the booking/contact fallback below, no model call.
-    const budget = await reserveAi(env, { entry: 'receptionist', customerId: customer.id, now, micros: worstCase({ chars: JSON.stringify(transcript).length + system[0].text.length + JSON.stringify(tools).length, maxOutput: 4096, inPerToken: PRICE.cacheWrite, outPerToken: PRICE.output }) })
-    if (!budget.ok) {
-      failed = `budget_${budget.reason}`
-      break
+    // At most two attempts per model call, each reserved on its own (the SDK itself never retries: client() maxRetries 0).
+    // A second attempt only after a transient failure (timeout, network, 429, 5xx) while nothing was said or done yet.
+    let budget
+    for (let attempt = 0; attempt < 2; attempt++) {
+      budget = await reserveAi(env, { entry: 'receptionist', customerId: customer.id, now, micros: worstCase({ chars: JSON.stringify(transcript).length + system[0].text.length + JSON.stringify(tools).length, maxOutput: 4096, inPerToken: PRICE.cacheWrite, outPerToken: PRICE.output }) })
+      if (!budget.ok) {
+        failed = `budget_${budget.reason}`
+        break
+      }
+      const tm = Date.now()
+      let startUsage = null // what the stream reported when it began: the known part of an aborted call's bill
+      try {
+        if (speak) {
+          const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, onFirstToken, onUsage: (u) => (startUsage = u), signal })
+          res = s.message
+          emitted = s.emitted
+          if (s.problem) blocked = blocked || s.problem
+        } else res = await anthropic.messages.create(params())
+        timing.modelMs += Date.now() - tm
+        break
+      } catch (err) {
+        timing.modelMs += Date.now() - tm
+        timing.modelCalls++
+        spent += costMicros(startUsage)
+        const aborted = err instanceof Anthropic.APIUserAbortError || signal?.aborted
+        // Accounting: a provider refusal (an HTTP status) generated nothing → settled to 0. An aborted stream or a timeout
+        // may have been billed for output we never saw → it KEEPS its worst-case reservation.
+        if (!aborted && err?.status) pending.push(budget.settle(0))
+        if (aborted && !ctx.committed) return stale()
+        if (attempt === 0 && !aborted && transient(err) && !saidAny && !ctx.committed && !opts.isStale?.()) continue
+        failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
+        break
+      }
     }
-    const tm = Date.now()
-    let startUsage = null // what the stream reported when it began: the known part of an aborted call's bill
-    try {
-      if (speak) {
-        const s = await streamCall(anthropic, params(), { emit: speak, facts, isStale: opts.isStale, onToolStart, onFirstToken, onUsage: (u) => (startUsage = u), signal })
-        res = s.message
-        emitted = s.emitted
-        if (s.problem) blocked = blocked || s.problem
-      } else res = await anthropic.messages.create(params())
-    } catch (err) {
-      timing.modelMs += Date.now() - tm
-      timing.modelCalls++
-      spent += costMicros(startUsage)
-      // An aborted stream may have been billed for output we never saw: it keeps its worst-case reservation.
-      if (!(err instanceof Anthropic.APIUserAbortError || signal?.aborted)) pending.push(budget.settle(costMicros(startUsage)))
-      if ((err instanceof Anthropic.APIUserAbortError || signal?.aborted) && !ctx.committed) return stale()
-      failed = err instanceof Anthropic.RateLimitError ? 'model_rate_limited' : err instanceof Anthropic.APIConnectionTimeoutError ? 'model_timeout' : err instanceof Anthropic.APIConnectionError ? 'model_unreachable' : err instanceof Anthropic.APIError ? `model_http_${err.status || 'error'}` : 'model_error'
-      break
-    }
-    timing.modelMs += Date.now() - tm
+    if (failed) break
     timing.modelCalls++
     spent += costMicros(res.usage)
     pending.push(budget.settle(costMicros(res.usage))) // off the critical path; settled before the turn is saved

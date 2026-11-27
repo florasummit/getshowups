@@ -6,7 +6,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
-import { reserveAi, spendToday, worstCase, aiOff, resetSettingsCache, retellRoom, voiceRoom, setBudgetSetting, DEFAULTS } from '../server/ai-budget.js'
+import { reserveAi, spendToday, worstCase, aiOff, resetSettingsCache, retellRoom, voiceRoom, setBudgetSetting, DEFAULTS, paidCall, voiceReconciliation } from '../server/ai-budget.js'
 import { setRestriction } from '../server/restrictions.js'
 import { sha256Hex } from '../server/google-oauth.js'
 import * as spendApi from '../functions/api/platform/ai-spend.js'
@@ -215,4 +215,73 @@ test('Retell minutes: open calls count their full 15 minutes; a start is allowed
   } finally {
     console.error = errs
   }
+})
+
+test('paidCall: success settles to the reported cost; a lost connection keeps its worst case and retries once; a refusal costs nothing; never more than two attempts', async () => {
+  const biz = () => count('aib:biz:alpha:20261127')
+  const opts = { entry: 'teach', customerId: 'alpha', micros: 100_000, now: NOW }
+  let calls = 0
+  const ok = await paidCall(env, opts, async () => (calls++, { value: 'v', costMicros: 3_000 }))
+  assert.deepEqual([ok.ok, ok.value, ok.attempts, calls, biz()], [true, 'v', 1, 1, 3_000])
+  // Lost connection (no status) then success: the first attempt keeps 100_000, the second settles to 3_000.
+  calls = 0
+  const r = await paidCall(env, opts, async (i) => {
+    calls++
+    if (i === 0) throw new TypeError('fetch failed')
+    return { value: 'ok', costMicros: 3_000 }
+  })
+  assert.deepEqual([r.ok, r.attempts, calls, biz()], [true, 2, 2, 3_000 + 100_000 + 3_000])
+  // 429 twice: both settled to 0, two attempts only.
+  calls = 0
+  const busy = await paidCall(env, opts, async () => {
+    calls++
+    throw Object.assign(new Error('busy'), { status: 429 })
+  })
+  assert.deepEqual([busy.ok, busy.reason, calls, biz()], [false, 'provider', 2, 106_000])
+  // 400 is never retried.
+  calls = 0
+  await paidCall(env, opts, async () => {
+    calls++
+    throw Object.assign(new Error('bad'), { status: 400 })
+  })
+  assert.equal(calls, 1)
+  // Budget exhausted between attempts: the retry is refused, no second call.
+  env.AI_BUSINESS_DAILY_MICROS = String(106_000 + 150_000)
+  calls = 0
+  const cut = await paidCall(env, opts, async () => {
+    calls++
+    throw new TypeError('fetch failed')
+  })
+  assert.deepEqual([cut.ok, cut.reason, calls], [false, 'budget_business', 1])
+})
+
+test('paidCall under concurrency: simultaneous callers can never spend past a ceiling, failures included', async () => {
+  env.AI_BUSINESS_DAILY_MICROS = '1000000'
+  let provider = 0
+  const results = await Promise.all(
+    Array.from({ length: 30 }, (_, k) =>
+      paidCall(env, { entry: 'teach', customerId: 'alpha', micros: 100_000, now: NOW }, async () => {
+        provider++
+        if (k % 3 === 0) throw new TypeError('fetch failed') // lost: keeps 100_000
+        return { value: k, costMicros: 100_000 }
+      }),
+    ),
+  )
+  assert.ok(count('aib:biz:alpha:20261127') <= 1_000_000)
+  assert.ok(provider <= 10, `at most 10 attempts fit in $1 at $0.10 each, got ${provider}`)
+  assert.ok(results.filter((r) => !r.ok).every((r) => r.reason === 'budget_business' || r.reason === 'provider'))
+})
+
+test('provider reconciliation: verified charges next to the estimate; a provider billing >25% over the estimate is flagged', async () => {
+  const day = Date.now() - (Date.now() % 86_400_000)
+  db.sql.prepare("INSERT INTO customers (id, name, timezone, created_at, updated_at) VALUES ('alpha', 'A', 'UTC', 1, 1)").run()
+  const conv = (id, provider, micros, secs) => db.sql.prepare("INSERT INTO receptionist_conversations (id, customer, channel, state, created_at, updated_at) VALUES (?, 'alpha', 'voice', ?, ?, ?)").run(id, JSON.stringify({ voice: { provider, endedAt: 1, ...(micros == null ? {} : { charge: { micros, durationSeconds: secs } }) } }), day + 1000, day + 1000)
+  conv('r1', 'retell', 70_000, 60)
+  conv('r2', 'retell', null, null)
+  conv('e1', 'elevenlabs', 200_000, 60)
+  const r = await voiceReconciliation(env)
+  assert.deepEqual(r.retell, { sessions: 2, priced: 1, verifiedMicros: 70_000, estimatedMicros: 70_000, drift: false })
+  assert.equal(r.elevenlabs.drift, true)
+  const s = await spendToday(env)
+  assert.ok(s.warnings.some((w) => w.scope === 'drift' && w.provider === 'elevenlabs'))
 })

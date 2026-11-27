@@ -877,7 +877,9 @@ function AiSpend() {
           </p>
           {d.warnings.length > 0 && (
             <p className="form-error" data-ai-warnings>
-              {d.warnings.map((w) => `${WARN[w.scope]}${w.customer ? ` ${w.customer}` : ''}: ${w.state === 'reached' ? 'limit reached (AI refused, fallbacks shown)' : 'over 80% of its limit'}`).join(' · ')}
+              {d.warnings
+                .map((w) => (w.scope === 'drift' ? `${VOICE_NAMES[w.provider]}: its own records show more than 25% above our estimate — check its pricing and lower the minutes if needed` : `${WARN[w.scope]}${w.customer ? ` ${w.customer}` : ''}: ${w.state === 'reached' ? 'limit reached (AI refused, fallbacks shown)' : 'over 80% of its limit'}`))
+                .join(' · ')}
             </p>
           )}
           <p className="fine">
@@ -890,6 +892,15 @@ function AiSpend() {
               .join(' · ')}
             . Open calls count their full 15 minutes. Each provider bills these minutes itself; they are not in the dollar figures.
           </p>
+          {d.reconciled && Object.keys(d.reconciled).length > 0 && (
+            <p className="fine" data-voice-reconciled>
+              Provider records today:{' '}
+              {Object.entries(d.reconciled)
+                .map(([p, r]) => `${VOICE_NAMES[p]} ${r.priced} of ${r.sessions} sessions priced, ${usd(r.verifiedMicros)} (our estimate ${usd(r.estimatedMicros)})`)
+                .join(' · ')}
+              . Fetched hourly; OpenAI has no per-session record.
+            </p>
+          )}
           <div className="form" data-ai-limits>
             {AI_LIMITS.map(([key, label, money]) => {
               const current = money ? d.settings[key] / 1e6 : d.settings[key]
