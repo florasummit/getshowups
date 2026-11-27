@@ -484,8 +484,10 @@ async function run() {
   if (qaJson) {
     const report = qaReport(results, provider, startedAt)
     // The definition + dependency hashes of these scenarios, and the commit, so the results can go stale correctly.
-    const { computeHashes } = await import('./qa-inventory.mjs')
-    const hashes = await computeHashes()
+    // Computed in a child process: qa-inventory.mjs imports this script for its scenarios, and importing it back from
+    // here (an entry module waiting on its own top-level await) deadlocks and exits before the report is written.
+    const { execFileSync } = await import('node:child_process')
+    const hashes = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', "const m = await import('./scripts/qa-inventory.mjs'); process.stdout.write(JSON.stringify(await m.computeHashes()))"], { cwd: new URL('..', import.meta.url), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }))
     report.hashes = Object.fromEntries(Object.entries(hashes).filter(([k]) => k.startsWith('eval:admin:')))
     try {
       report.revision = (await import('node:child_process')).execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()

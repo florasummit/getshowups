@@ -501,3 +501,15 @@ test('regression grader: a real "sent" claim fails, the correct "nothing has bee
   for (const ok of ['The resend is ready to approve. Nothing has been sent yet; it goes out only when you press Approve.', 'It hasn’t been sent. Use Approve on the card.', 'The invitation has not been sent yet.']) assert.equal(SENT_CLAIM.test(ok), false, ok)
   for (const bad of ['I’ve resent the invitation.', 'I sent it.', 'The invitation has been resent.', 'It was sent to the owner.', 'Done: the invite is now sent.']) assert.equal(SENT_CLAIM.test(bad), true, bad)
 })
+
+test('eval script run as a command writes the QA import report (no model: fixed-answer scenarios, fake key)', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { mkdtempSync, readFileSync: read } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(`${tmpdir()}/gsu-eval-`)
+  execFileSync(process.execPath, ['scripts/admin-assistant-eval.mjs', 'run', '--provider', 'claude', '--only', 'qa_paid_refuse', '--repeat', '1', '--cap-usd', '0.0001', '--out', dir, '--qa-json', `${dir}/qa-report.json`], { cwd: new URL('..', import.meta.url), env: { ...process.env, EVAL_ANTHROPIC_API_KEY: 'sk-ant-test-not-a-key' }, stdio: 'pipe' })
+  const rep = JSON.parse(read(`${dir}/qa-report.json`, 'utf8'))
+  assert.equal(rep.results.length, 1)
+  assert.equal(rep.results[0].testId, 'eval:admin:qa_paid_refuse')
+  assert.ok(rep.hashes['eval:admin:qa_paid_refuse'], 'change hashes included (computed without the import cycle)')
+})

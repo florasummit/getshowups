@@ -101,6 +101,7 @@ export const TESTS = [
 ["unit:admin-assistant:45b74bfc76","regression suite: repeated runs aggregate per scenario and per category; one failed run fails the suite","test/admin-assistant.test.js"],
 ["unit:admin-assistant:0731283efd","regression suite: the churn scenario’s at-risk list is exactly the fixture’s at_risk businesses","test/admin-assistant.test.js"],
 ["unit:admin-assistant:af41cf5f1d","regression grader: a real \"sent\" claim fails, the correct \"nothing has been sent yet\" answer passes","test/admin-assistant.test.js"],
+["unit:admin-assistant:e0906ec285","eval script run as a command writes the QA import report (no model: fixed-answer scenarios, fake key)","test/admin-assistant.test.js"],
 ["unit:admin-figures:4c5a0b6f49","the formatter: one value and one status word per state; test-mode billing is never a number","test/admin-figures.test.js"],
 ["unit:admin-figures:edc4d57257","Overview and Growth hand the formatter the same facts, so the three figures cannot disagree","test/admin-figures.test.js"],
 ["unit:ads-changes:df6894c0ee","pause: proposed (nothing on Google) → the owner approves → applied through the API, read back, our copy follows, recorded and audited","test/ads-changes.test.js"],
