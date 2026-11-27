@@ -27,6 +27,11 @@ export function recipientAllowed(env, to, { testOnly = false } = {}) {
     .some((r) => r && r === target)
 }
 
+// Sign-in emails (server/email-auth.js) have their own release switch: AUTH_EMAIL_LIVE exactly 'true' lets them reach any
+// address while MESSAGES_LIVE stays off (MESSAGES_LIVE also opens them). Otherwise only MESSAGE_TEST_RECIPIENTS.
+export const authEmailLive = (env) => env.AUTH_EMAIL_LIVE === 'true' || messagesLive(env)
+export const authRecipientAllowed = (env, to) => authEmailLive(env) || recipientAllowed(env, to)
+
 // Returns true if newly queued, false if this dedupe id already exists.
 export async function enqueue(env, { id, to, customer = null, template, subject, body }, now = Date.now()) {
   const res = await env.ONBOARDING_DB.prepare(
@@ -42,13 +47,15 @@ export async function enqueue(env, { id, to, customer = null, template, subject,
 // leads go out as "<Business> via GetShowUps" with replies to the business owner).
 // Returns { ok, providerId } or { ok: false, error } with an allowlisted code.
 // unsubscribeUrl (optional, https only): adds List-Unsubscribe + List-Unsubscribe-Post (RFC 8058 one-click).
-export async function sendEmail(env, { id, to, subject, text, fromName, replyTo, testOnly = false, unsubscribeUrl = null }) {
-  if (!recipientAllowed(env, to, { testOnly })) return { ok: false, error: 'test_mode', permanent: true }
+// signIn: a sign-in email (gate authRecipientAllowed). apiOrigin: loopback-only test stand-in (AUTH_EMAIL_MOCK_ORIGIN).
+export async function sendEmail(env, { id, to, subject, text, fromName, replyTo, testOnly = false, unsubscribeUrl = null, signIn = false, apiOrigin = null }) {
+  if (!(signIn ? authRecipientAllowed(env, to) : recipientAllowed(env, to, { testOnly }))) return { ok: false, error: 'test_mode', permanent: true }
+  const endpoint = typeof apiOrigin === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(apiOrigin) ? `${apiOrigin}/resend/emails` : 'https://api.resend.com/emails'
   const address = String(env.EMAIL_FROM).match(/<([^>]+)>/)?.[1] || String(env.EMAIL_FROM).trim()
   const name = fromName ? String(fromName).replace(/["<>\r\n\\]/g, '').slice(0, 70) : null
   const unsub = typeof unsubscribeUrl === 'string' && /^https:\/\/[^\s<>]+$/.test(unsubscribeUrl) ? unsubscribeUrl : null
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': id },
       body: JSON.stringify({

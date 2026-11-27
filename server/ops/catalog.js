@@ -7,7 +7,7 @@ import { callsOn } from '../ads/calls.js'
 import { feedbackConfigured } from '../email-feedback.js'
 import { registerCapability } from './registry.js'
 import { stripeConfigured, stripeLiveEnabled } from '../stripe.js'
-import { emailConfigured, messagesLive } from '../email.js'
+import { authEmailLive, emailConfigured, messagesLive } from '../email.js'
 import { smsConfigured } from '../sms.js'
 import { modelConfigured } from '../receptionist/engine.js'
 import { voiceBusinesses, voiceConfigured, voiceStatus } from '../receptionist/voice.js'
@@ -155,6 +155,22 @@ registerCapability({
   dependsOn: ['platform.database'],
   state: () => ({ mode: 'live', note: 'openid + email only' }),
   verify: seen('sign-in by a real business member', 30, `SELECT max(s.created_at) AS at FROM sessions s JOIN customer_users u ON u.email = s.email WHERE ${NOT_TEST_BIZ('u.customer', 's.created_at')}`),
+})
+registerCapability({
+  id: 'auth.email_signin',
+  tier: 'operate',
+  name: 'Sign in with an emailed code or link',
+  journey: 'signup',
+  external: 'Resend',
+  dependsOn: ['platform.database'],
+  state: (env) =>
+    !emailConfigured(env)
+      ? { mode: 'disabled', note: 'Resend not configured' }
+      : authEmailLive(env)
+        ? { mode: 'live' }
+        : { mode: 'sandbox', note: 'Sign-in emails go to test recipients only', approval: 'AUTH_EMAIL_LIVE=true (and migration 0046)' },
+  // No verify(): sign-in requests carry no business id, so a test recipient's sign-in could not be told apart from a
+  // real member's and must never make this look live-verified.
 })
 registerCapability({
   id: 'billing.stripe',

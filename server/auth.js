@@ -1,9 +1,10 @@
-// Dashboard authentication: "Sign in with Google" (openid + email). Any Google-verified email may
-// sign in; business access comes only from customer_users, resolved on every request. Session tokens
+// Dashboard authentication: "Sign in with Google" (openid + email) or an emailed code/link (server/email-auth.js). Either
+// way the session's email is a VERIFIED address; business access comes only from customer_users, resolved on every request. Session tokens
 // are opaque and stored only as SHA-256. The customer for a dashboard request always comes from here.
 import { ACCEPTANCE } from './acceptance-env.js'
 import { json, missingConfig, randomToken, readCookie, sha256Hex } from './google-oauth.js'
 import { activeDayHours, withDayHoursColumn } from './day-hours.js'
+import { adminEmails } from './platform.js'
 
 export const LOGIN_COOKIE = '__Host-gsu_login'
 export const SESSION_COOKIE = '__Host-gsu_session'
@@ -103,9 +104,25 @@ export async function requireSession(request, env, { needCustomer = true, write 
   return { session }
 }
 
-// Consequential account actions (closing, deleting, removing people, exporting): the person must have signed in with
-// Google within the last 15 minutes. Protects against a copied or long-open GetShowUps session; not against someone at an
-// unlocked browser that is still signed in to Google (Google asks only for the account). Test sessions never qualify.
+// Where a new session lands (Google and email sign-in alike). A platform admin with no business membership goes to the
+// console even if sign-in started from /dashboard, instead of being shown "create your business". This only changes the
+// landing page: /admin still authorizes every request via PLATFORM_ADMIN_EMAILS. On a lookup error the ordinary landing
+// is kept.
+export async function landingFor(env, email, next) {
+  const want = safeNext(next)
+  if (want === '/admin' || !adminEmails(env).includes(email)) return want
+  try {
+    const member = await env.ONBOARDING_DB.prepare('SELECT 1 FROM customer_users WHERE email = ?1').bind(email).first()
+    return member ? want : '/admin' // admin without a business: the console, never customer onboarding
+  } catch {
+    return want
+  }
+}
+
+// Consequential account actions (closing, deleting, removing people, exporting): the person must have signed in (with
+// Google, or with an emailed code or link, which proves control of the mailbox now) within the last 15 minutes. Protects
+// against a copied or long-open GetShowUps session; not against someone at an unlocked browser that is still signed in
+// to Google or to their mailbox. Test sessions never qualify.
 export const FRESH_MS = 15 * 60 * 1000
 export const isFresh = (session, now = Date.now()) => Number.isFinite(session?.signedInAt) && now - session.signedInAt <= FRESH_MS && session.signedInAt <= now + 60000
 export const needsFresh = (session, now) => (isFresh(session, now) ? null : json(403, { error: 'reauth_required' }))
