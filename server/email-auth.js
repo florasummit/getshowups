@@ -62,18 +62,19 @@ export async function emailSignInOffered(env) {
 // Exactly who may sign in today. Fail closed: a lookup error sends nothing.
 //   platform admins (PLATFORM_ADMIN_EMAILS) · members of a business (customer_users) · an open account invitation ·
 //   new people only where self-serve sign-up is open for them (public enrollment open, or an authorized tester).
-// extraChecks: (db, email, now) → boolean, for other invitation kinds (fail-soft: a missing table counts as no).
-const EXTRA_CHECKS = [
-  // Staff roles and ownership invitations from the commercial enrollment stream (migration 0047). No-op before it.
-  (db, email) => db.prepare('SELECT 1 FROM commercial_roles WHERE lower(email) = ?1 AND revoked_at IS NULL LIMIT 1').bind(email).first(),
-  (db, email, now) => db.prepare('SELECT 1 FROM ownership_invites WHERE lower(email) = ?1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2 LIMIT 1').bind(email, now).first(),
-]
+// Other ways a person may be expected (stream B: hasCommercialRole(db, email) from server/roles.js and
+// pendingClaimFor(db, email, now) from the ownership invitations) are added at integration with addSignInCheck(), never
+// by querying their tables here. Each check is (db, email, now) → truthy; one that throws counts as no (fail-soft).
+const EXTRA_CHECKS = []
+export const addSignInCheck = (check) => {
+  if (typeof check === 'function' && !EXTRA_CHECKS.includes(check)) EXTRA_CHECKS.push(check)
+}
 export async function signInAllowed(env, email, now = Date.now(), { extraChecks = EXTRA_CHECKS } = {}) {
   if (adminEmails(env).includes(email)) return true
   const db = env.ONBOARDING_DB
   if (await db.prepare('SELECT 1 FROM customer_users WHERE email = ?1 LIMIT 1').bind(email).first()) return true
   if (await db.prepare('SELECT 1 FROM account_invites WHERE lower(email) = ?1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2 LIMIT 1').bind(email, now).first()) return true
-  for (const check of extraChecks) if (await check(db, email, now).catch(() => null)) return true
+  for (const check of extraChecks) if (await Promise.resolve().then(() => check(db, email, now)).catch(() => null)) return true
   if (billingMisconfigured(env)) return false
   return (await enrollmentOpen(env)) || (await sandboxCheckoutAllowed(env, null, email))
 }

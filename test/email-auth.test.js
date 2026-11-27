@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { sha256Hex } from '../server/google-oauth.js'
 import { getSession, isFresh } from '../server/auth.js'
-import { EMAIL_LOGIN_TTL_MS, MAX_CODE_ATTEMPTS, issueSignIn, purgeExpiredSignIns, randomCode, signInAllowed } from '../server/email-auth.js'
+import { EMAIL_LOGIN_TTL_MS, addSignInCheck, MAX_CODE_ATTEMPTS, issueSignIn, purgeExpiredSignIns, randomCode, signInAllowed } from '../server/email-auth.js'
 import * as status from '../functions/api/auth/email/index.js'
 import * as start from '../functions/api/auth/email/start.js'
 import * as verify from '../functions/api/auth/email/verify.js'
@@ -198,11 +198,23 @@ test('who may sign in: open sign-up, testers, admins, members, invitees; closed 
   assert.equal(await allowed(INVITED), false)
   db.sql.prepare('UPDATE account_invites SET revoked_at = NULL, expires_at = 1').run()
   assert.equal(await allowed(INVITED), false)
-  // Extra invitation kinds (commercial roles / ownership invitations) are fail-soft before their table exists.
+  // Extra eligibility (stream B's roles / ownership claims) comes only through the seam; a failing check counts as no.
   assert.equal(await allowed('rep@sales.example'), false)
+  const role = async (_db, e) => e === 'rep@sales.example'
+  const claim = async (_db, e, now) => e === 'claimer@new.example' && now > 0
+  const broken = () => {
+    throw new Error('table missing')
+  }
+  const extraChecks = [broken, role, claim]
+  assert.equal(await signInAllowed(env, 'rep@sales.example', Date.now(), { extraChecks }), true)
+  assert.equal(await signInAllowed(env, 'claimer@new.example', Date.now(), { extraChecks }), true)
+  assert.equal(await signInAllowed(env, STRANGER, Date.now(), { extraChecks }), false)
+  addSignInCheck(role)
+  addSignInCheck(role) // registered once
+  assert.equal(await allowed('rep@sales.example'), true)
   // A lookup error fails closed: nothing is sent.
-  const broken = { ...env, ONBOARDING_DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error('db down') }, run: async () => ({}) }) }) } }
-  assert.equal(await issueSignIn(broken, { email: OWNER, next: '/dashboard', browserSecret: 'x' }), 'failed')
+  const brokenDb = { ...env, ONBOARDING_DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error('db down') }, run: async () => ({}) }) }) } }
+  assert.equal(await issueSignIn(brokenDb, { email: OWNER, next: '/dashboard', browserSecret: 'x' }), 'failed')
   assert.equal(mail.length, 0)
 })
 
