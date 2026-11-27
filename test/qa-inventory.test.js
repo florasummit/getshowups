@@ -31,9 +31,10 @@ test('every test file is in the inventory; every mapping names a real area, capa
   for (const j of JOURNEYS) assert.ok(JOURNEY_MAP[j.id], `journey ${j.id} has an area`)
   const { list } = allTests()
   const files = new Set(list.map((t) => t.file).filter(Boolean))
-  for (const f of readdirSync(new URL('./', import.meta.url)).filter((x) => x.endsWith('.test.js'))) assert.ok(files.has(`test/${f}`) || !titlesOf(readFileSync(new URL(f, import.meta.url), 'utf8')).length, `test/${f} missing`)
-  for (const f of readdirSync(new URL('./e2e/', import.meta.url)).filter((x) => x.endsWith('.spec.js'))) assert.ok(files.has(`test/e2e/${f}`), `test/e2e/${f} missing`)
-  // Today every file is mapped: a new unmapped file shows up as Unassigned (a gap), never silently.
+  for (const f of readdirSync(new URL('./', import.meta.url)).filter((x) => x.endsWith('.test.js') && !isPrivatePath(x))) assert.ok(files.has(`test/${f}`) || !titlesOf(readFileSync(new URL(f, import.meta.url), 'utf8')).length, `test/${f} missing`)
+  for (const f of readdirSync(new URL('./e2e/', import.meta.url)).filter((x) => x.endsWith('.spec.js') && !isPrivatePath(x))) assert.ok(files.has(`test/e2e/${f}`), `test/e2e/${f} missing`)
+  // Today every file is mapped (confidential files are deliberately left out, isPrivatePath): a new unmapped file shows
+  // up as Unassigned (a gap), never silently.
   assert.deepEqual(list.filter((t) => t.area === 'unassigned').map((t) => t.file), [])
 })
 
