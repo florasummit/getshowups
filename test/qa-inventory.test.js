@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { AREAS, E2E_MAP, JOURNEY_MAP, OUT, UNIT_MAP, closure, computeHashes, titlesOf, writeGenerated } from '../scripts/qa-inventory.mjs'
+import { AREAS, E2E_MAP, JOURNEY_MAP, OUT, UNIT_MAP, closure, computeHashes, isPrivatePath, titlesOf, writeGenerated } from '../scripts/qa-inventory.mjs'
 import { allTests, matchResult, estimate } from '../server/ops/qa-tests.js'
 import { JOURNEYS } from '../server/ops/journeys.js'
 import { listCapabilities } from '../server/ops/registry.js'
@@ -87,4 +87,13 @@ test('estimates are labelled approximate; paid evaluations carry their worst-cas
   const paid = estimate(list.filter((t) => t.suite === 'admin_eval').slice(0, 3), 'ci')
   assert.equal(paid.usdMicros, 150_000)
   assert.ok(estimate(list.filter((t) => t.kind === 'production'), 'production').ms >= 300_000)
+})
+
+test('confidential paths (Research Vault) never enter the inventory or the published hashes', async () => {
+  for (const p of ['server/research/records.js', 'functions/api/research/index.js', 'src/admin/research/Vault.jsx', 'test/research.test.js', 'test/research-vault.test.js', 'test/e2e/research-vault.spec.js', 'test/vault_models.test.js', 'docs/research/x.md']) assert.equal(isPrivatePath(p), true, p)
+  for (const p of ['test/qa-inventory.test.js', 'test/admin-assistant.test.js', 'test/e2e/qa-center.spec.js', 'server/ops/qa-tests.js', 'test/reconcile.test.js']) assert.equal(isPrivatePath(p), false, p)
+  const hashes = await computeHashes()
+  assert.deepEqual(Object.keys(hashes).filter(isPrivatePath), [])
+  for (const v of Object.values(hashes)) assert.deepEqual(Object.keys(v).sort(), ['def', 'deps'], 'only two short fingerprints per entry')
+  assert.ok(Object.keys(hashes).every((k) => /^(test\/|scripts\/|journey:|eval:)/.test(k)), 'only repository-relative test ids')
 })
