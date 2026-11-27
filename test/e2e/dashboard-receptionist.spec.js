@@ -1,6 +1,6 @@
 // Dashboard → Receptionist: every channel status comes from the server's capability facts and says why. Browser voice
 // is 'Active' only for a business whose active provider really answers customers (here: on the Retell release list),
-// 'Not turned on yet' with the reason otherwise; phone calls are 'Not available yet' (no line exists); team
+// 'Not turned on yet' with the reason otherwise; phone calls are 'Not set up' (no line for this business); team
 // notifications say test mode and why. Owners never see a provider name or provider controls. Plus the layout
 // regression: every dashboard tab reached by a click (no reload), both directions, direct links and a tablet width.
 import { test, expect } from './test.js'
@@ -26,7 +26,7 @@ async function expectFullWidth(page, label) {
 }
 const tile = (page, label) => page.getByRole('list', { name: 'Channels' }).locator(`[data-channel="${label}"]`)
 
-test('owner (voice not released for this business): chat Active, browser voice "Not turned on yet" with the reason, phone "Not available yet", notifications in test mode with the reason; no provider name or control; every tab fills the content column by click, both ways, by direct link and at tablet width @mobile', async ({ page, context }) => {
+test('owner (voice not released for this business): chat Active, browser voice "Not turned on yet" with the reason, phone "Not set up", notifications in test mode with the reason; no provider name or control; every tab fills the content column by click, both ways, by direct link and at tablet width @mobile', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_VOICE_SESSION_TOKEN)
   await page.goto('/dashboard')
   await expectFullWidth(page, 'Overview')
@@ -41,7 +41,7 @@ test('owner (voice not released for this business): chat Active, browser voice "
   expect(settingsY).toBeLessThan(voiceY)
   // The statuses, traced to the API's capability facts.
   const me = await (await page.request.get('/api/dashboard/receptionist')).json()
-  expect(me.capabilities).toMatchObject({ chat: true, voice: false, voiceStatus: 'testing', staffEmail: 'test_mode', phoneLine: false })
+  expect(me.capabilities).toMatchObject({ chat: true, voice: false, voiceStatus: 'testing', staffEmail: 'test_mode', phoneLine: { state: 'not_started', href: '/dashboard/settings#phone' } })
   expect(me.admin).toBeUndefined()
   await expect(page.locator('.ui-page-head')).toContainText('Answering on website chat')
   await expect(page.locator('.ui-page-head')).not.toContainText('Working')
@@ -54,8 +54,8 @@ test('owner (voice not released for this business): chat Active, browser voice "
   await expect(page.locator('#receptionist-voice [data-voice-unheard]')).toContainText('No customer hears this voice yet: browser voice isn’t on for your business')
   await expect(tile(page, 'Browser voice')).not.toContainText('In testing')
   await expect(tile(page, 'Browser voice')).not.toContainText('RECEPTIONIST_VOICE_BUSINESSES')
-  await expect(tile(page, 'Phone calls')).toContainText('Not available yet')
-  await expect(tile(page, 'Phone calls')).toContainText('No phone line can be connected yet')
+  await expect(tile(page, 'Phone calls')).toContainText('Not set up')
+  await expect(tile(page, 'Phone calls')).toContainText('Get a number under Settings → Phone line')
   // REC-05: one plain sentence on whether the owner gets an email right now; no internal terms.
   await expect(tile(page, 'Team notifications')).toContainText('Email off')
   await expect(tile(page, 'Team notifications')).toContainText('You won’t get an email about a callback request or message right now')

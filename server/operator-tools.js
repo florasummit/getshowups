@@ -30,6 +30,8 @@ import { validateHours } from './customers.js'
 import { hoursGroups } from './day-hours.js'
 import { findRequests, NEEDS_OWNER, requestById, UNANSWERED } from './attention.js'
 import { pageState, waitingNow } from './app-state.js'
+import { listCalls } from './telephony/calls.js'
+import { phoneReady } from './telephony/lines.js'
 
 const DAY = 86_400_000
 const LIST = 12
@@ -473,6 +475,19 @@ export const TOOLS = [
     }
   }),
   tool('who_is_waiting', 'Everyone and everything waiting for the owner, by kind, exactly as the Needs your attention card counts it: call-back requests and messages left with the receptionist, conversations needing the owner, people who asked but have not booked, outside-area requests to decide, visits without an outcome. Use before saying who or how many are waiting, or that nobody is.', {}, [], (c) => waitingNow(c)),
+  // Phone calls on the business line (server/telephony/). Never a phone number: who called is a person ref only when the records
+  // tie the call to ONE person (exact number, or the AI conversation's own inquiry). Missed calls with a callback task are open work.
+  tool('list_calls', 'Phone calls to the business line in the last 30 days (or 7/90): outcome (answered by the team, AI receptionist, missed with a call-back task, missed with a hidden number, over the limit), length, where the number is shown, the person when the records tie the call to one, and whether a booking followed. which=missed lists missed calls still waiting for a call back.', { days: { type: 'integer', enum: [7, 30, 90] }, which: { type: 'string', enum: ['all', 'missed'] } }, [], async (c, a) => {
+    if (!(await phoneReady(c.db))) return { calls: [], note: 'No phone line is set up for this business.' }
+    const rows = await listCalls(c.db, c.customer.id, { days: a.days || 30, which: a.which === 'missed' ? 'missed' : 'all', limit: 40 }, c.now)
+    const counts = rows.reduce((m, r) => ({ ...m, [r.outcome]: (m[r.outcome] || 0) + 1 }), {})
+    return {
+      total: rows.length,
+      by_outcome: counts,
+      calls: rows.map((r) => ({ when: whenText(r.at, c.tz), outcome: r.outcomeText, minutes: r.seconds == null ? null : Math.round(r.seconds / 6) / 10, caller: r.callerState === 'known' ? (r.customer ? c.refs.ref('L', r.customer.leadId) : r.shared ? 'a number shared by several people on record' : 'a number not on record') : 'hidden number', shown_on: r.source, call_back_waiting: r.callbackOpen, booking: r.bookedByAi ? 'booked by the AI receptionist on this call' : r.bookedAfter ? 'this person booked after the call' : 'none recorded' })),
+      not_known: 'Calls to numbers other than the GetShowUps line, and what was said on calls the team answered, are not recorded.',
+    }
+  }),
   tool('page_state', 'What a dashboard page shows right now (any page, whichever one the owner is on): its sections, tiles, alerts, statuses and what can be done there.', { page: { type: 'string', enum: PAGE_IDS } }, ['page'], (c, a) => pageState(c, a.page)),
   tool('get_call_back', 'One call-back request or receptionist message in full.', { ref: REF }, ['ref'], async (c, a) => {
     const r = await requestByRef(c, a.ref)
@@ -637,7 +652,7 @@ export async function namesFor(env, customer, refs) {
 }
 
 // Lookups whose results a follow-up question needs again. Only these are ever repeated: reads of our own records.
-export const REPEATABLE = ['list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings', 'page_state', 'get_call_back', 'business_knowledge', 'acquisition_by_source']
+export const REPEATABLE = ['list_calls', 'list_appointments', 'get_appointment', 'list_leads', 'get_lead', 'find_person', 'business_numbers', 'compare_periods', 'explain_funnel', 'business_settings', 'page_state', 'get_call_back', 'business_knowledge', 'acquisition_by_source']
 export async function repeatLookups(c, list) {
   return Promise.all(list.map(async (x) => ({ tool: x.name, args: x.args, result: await runTool(c, x.name, x.args) })))
 }

@@ -16,12 +16,13 @@ test('receptionist journey: real times, honest hand-off to a recorded callback, 
   await page.goto(`/chat/${b.id}`)
   await expect(page.getByText('Chat isn’t available right now.')).toBeVisible()
 
-  // Owner: turn it on. Phone routing is shown as not connected, its choices disabled.
+  // Owner: turn it on. Phone routing lives in Settings → Phone line (linked from here).
   await useSession(context, b.token)
   await page.goto('/dashboard/receptionist')
   await expect(page.getByRole('heading', { name: 'AI receptionist', level: 1 })).toBeVisible()
   const channels = page.getByRole('list', { name: 'Channels' })
-  await expect(channels.getByRole('listitem').filter({ hasText: 'Phone calls' })).toContainText('Not available yet')
+  // PHONE_ENABLED is on in e2e and this business has no line: the tile says so and where to set one up.
+  await expect(channels.getByRole('listitem').filter({ hasText: 'Phone calls' })).toContainText('Not set up')
   await expect(channels.getByRole('listitem').filter({ hasText: 'Website chat' })).toContainText('Off')
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled() // nothing changed yet
   // REC-01: while it is off, "Try it as a customer" is not a link to a closed page: the reason and a one-tap "Turn on"
@@ -64,8 +65,9 @@ test('receptionist journey: real times, honest hand-off to a recorded callback, 
   expect((await (await page.request.get('/api/dashboard/receptionist')).json()).settings.enabled).toBe(true)
   await page.getByLabel('Greeting').fill('Hi! Ask me about pool care or I can find you a time.')
   await page.getByLabel('Notes for the receptionist').fill('We do not service hot tubs.')
-  await page.getByText('Phone calls (not available yet)').click()
-  await expect(page.getByRole('radio', { name: 'AI answers' })).toBeDisabled()
+  // Phone routing has one home: Settings → Phone line (no second set of choices here).
+  await expect(page.getByRole('link', { name: 'Settings → Phone line' })).toHaveAttribute('href', '/dashboard/settings#phone')
+  await expect(page.getByRole('radio', { name: 'AI answers' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: /^Saved\.$/ })).toBeVisible()
   await expect(power).toBeChecked() // saving the greeting keeps the switch as it was saved

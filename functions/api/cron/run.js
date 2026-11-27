@@ -8,6 +8,8 @@ import { retryEventCleanups } from '../../../server/booking.js'
 import { processReplies, sendQueued, purgeOldMessages } from '../../../server/followups/engine.js'
 import { syncPendingRegistrations } from '../../../server/followups/provisioning.js'
 import { purgeOldConversations } from '../../../server/receptionist/engine.js'
+import { purgeOldCalls } from '../../../server/telephony/calls.js'
+import { phoneReady } from '../../../server/telephony/lines.js'
 import { queueFollowUps } from '../../../server/accounts.js'
 import { flushOutbox } from '../../../server/email.js'
 import { purgeDesignerRaw } from '../../../server/ai-designer.js'
@@ -57,6 +59,7 @@ export async function onRequestPost({ request, env }) {
       // Texting registrations with Twilio: read what Twilio reports (hourly per business, read-only).
       registrations: await adsStep('texting registrations', () => syncPendingRegistrations(env)),
       receptionistPurged: await adsStep('receptionist retention', () => purgeOldConversations(env)),
+      phonePurged: await adsStep('phone retention', async () => ((await phoneReady(env.ONBOARDING_DB)) ? purgeOldCalls(env) : 0)),
       // Calendar events left behind by a failed booking whose cleanup failed (open calendar.google failures).
       eventCleanups: await adsStep('event cleanups', () => retryEventCleanups(env)),
     }
