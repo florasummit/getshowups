@@ -60,6 +60,7 @@ export function present(r, { withIds = false } = {}) {
     updatedAt: r.updated_at,
     // Cancellable while active; a recorded report (preset 'report') is finished by its own request.
     cancellable: ACTIVE.includes(r.status) && r.preset !== 'report',
+    durations: parse(r.durations, null),
     unchanged: r.unchanged ? (() => { const u = parse(r.unchanged, null); return u ? { files: u.files?.length || 0, tests: u.tests?.length || 0 } : null })() : null,
   }
 }
@@ -271,7 +272,7 @@ export async function recordedExecution(db, { environment, actor, revision, test
 }
 
 // A report for an execution was stored (qa-ingest.js): progress, final status, cost settlement, unchanged passes.
-export async function executionReported(env, executionId, { runId, stored, costMicros, unchanged = [] }, now = Date.now()) {
+export async function executionReported(env, executionId, { runId, stored, costMicros, unchanged = [], durations = null }, now = Date.now()) {
   const db = env.ONBOARDING_DB
   const r = await getExecutionRow(db, executionId)
   if (!r) return null
@@ -284,10 +285,35 @@ export async function executionReported(env, executionId, { runId, stored, costM
   p.pass += again.length
   if (again.length) p.unchanged = again.length
   if (again.length) await db.prepare('UPDATE qa_executions SET unchanged = ?2 WHERE id = ?1').bind(r.id, JSON.stringify(compactUnchanged(again))).run()
+  if (durations) await db.prepare('UPDATE qa_executions SET durations = ?2 WHERE id = ?1').bind(r.id, JSON.stringify(durations)).run()
   if (r.reserved_micros > 0 && r.cost_micros == null) await settleQa(env, { reserved: r.reserved_micros, at: r.reserved_at, actual: costMicros })
   await db.prepare('UPDATE qa_executions SET run_id = coalesce(run_id, ?2), progress = ?3, cost_micros = coalesce(cost_micros, 0) + ?4, updated_at = ?5 WHERE id = ?1').bind(r.id, runId, JSON.stringify(p), costMicros, now).run()
   if (ACTIVE.includes(r.status)) await transition(db, r.id, r.status, finalStatus(p), 'system:ci', { set: { finished_at: now }, detail: { pass: p.pass, fail: p.fail, done: p.done } }, now)
   return p
+}
+
+// ---------- CI time (engineering health): only durations the runs reported ----------
+export const CI_JOB_LIMIT_MS = 25 * MIN // the CI job time limit the founder tracks against
+export const CI_WARN_SHARE = 0.8
+export async function ciTime(db, limit = 10) {
+  const { results } = await db.prepare("SELECT id, requested_at, finished_at, revision, durations FROM qa_executions WHERE environment = 'ci' AND durations IS NOT NULL ORDER BY coalesce(finished_at, requested_at) DESC LIMIT ?1").bind(limit).all()
+  const runs = results.map((r) => ({ executionId: r.id, at: r.finished_at || r.requested_at, commit: r.revision, ...parse(r.durations, {}) })).filter((r) => Number.isFinite(r.jobMs))
+  const ms = runs.map((r) => r.jobMs).sort((a, b) => a - b)
+  const median = ms.length ? (ms.length % 2 ? ms[(ms.length - 1) / 2] : Math.round((ms[ms.length / 2 - 1] + ms[ms.length / 2]) / 2)) : null
+  const newest = runs[0] || null
+  const warnAt = Math.round(CI_JOB_LIMIT_MS * CI_WARN_SHARE)
+  return {
+    runs: runs.length,
+    of: limit,
+    minMs: ms.length ? ms[0] : null,
+    medianMs: median,
+    maxMs: ms.length ? ms.at(-1) : null,
+    newest,
+    limitMs: CI_JOB_LIMIT_MS,
+    warnAtMs: warnAt,
+    warning: Boolean((newest && newest.jobMs > warnAt) || (median != null && median > warnAt)),
+    note: runs.length ? null : 'No CI run has reported its job time yet (JOB_STARTED_AT in the workflow).',
+  }
 }
 
 // ---------- cron: recovery, production verification, post-deploy queueing ----------

@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { Badge, Empty, Facts, Link, LoadError, Loading, PageHead, Section } from '../ui.jsx'
 import * as qa from '../qa-api.js'
-import { ENV, EXEC_STATUS, who, MANUAL_RESULTS, MAX_REPORT_BYTES, PRESETS, RESULT, SEVERITY, duration, isActive, previewReport, scopeText, sha, stamp, usd } from '../qa-lib.js'
+import { ENV, EXEC_STATUS, who, MANUAL_RESULTS, MAX_REPORT_BYTES, PRESETS, RESULT, SEVERITY, duration, isActive, previewReport, scopeText, sha, stamp, usd, elapsed } from '../qa-lib.js'
 import { ConfirmButton, EnvLabel, ExecPill, ResultPill } from './parts.jsx'
 import { useAreas, useLoad, usePlan } from './hooks.jsx'
 
@@ -422,6 +422,9 @@ export function ExecutionDetail({ id, go }) {
           ['Release', x.commit ? <span key="c" className="cc-code">{sha(x.commit)}</span> : 'Unknown'],
           x.deployment && ['Deployment', <span key="d" className="cc-code">{String(x.deployment).slice(0, 8)}</span>],
           ['Estimated', `${duration(x.estimate?.ms)} · ${usd(qa.usdOf(x.estimate))}`],
+          x.durations?.jobMs != null && ['CI job time', elapsed(x.durations.jobMs)],
+          x.durations?.unitMs != null && ['Unit tests took', elapsed(x.durations.unitMs)],
+          x.durations?.e2eMs != null && ['Browser tests took', elapsed(x.durations.e2eMs)],
           x.costMicros != null && ['Recorded cost', usd(x.costMicros / 1e6, { free: false })],
           x.reservedMicros > 0 && ['Reserved from the QA budget', usd(x.reservedMicros / 1e6, { free: false })],
           x.updatedAt && ['Last update', stamp(x.updatedAt)],

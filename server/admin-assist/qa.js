@@ -120,7 +120,14 @@ async function qaStatus(c) {
     recommended_next: o.recommended.map((r) => ({ what: r.title, why: r.why, ...(r.preset ? { preset: r.preset, can_prepare_if_asked: SAFE_PRESETS.includes(r.preset) } : {}) })),
     coverage_gaps: (inv?.gaps || []).slice(0, 6).map((g) => ({ what: clip(g.title, 80), why: g.why })),
     readiness: readinessOf(o, fresh, failuresAfter, prod),
+    ci_time: ciTimeOut(o.ciTime),
   }
+}
+// CI job time as reported by the runs (never estimated): median of the last runs and the newest, against the job limit.
+const mins = (ms) => (Number.isFinite(ms) ? `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s` : null)
+function ciTimeOut(t) {
+  if (!t || !t.runs) return { reported_runs: 0, note: 'No CI run has reported its job time yet.' }
+  return { reported_runs: t.runs, median: mins(t.medianMs), newest: { time: mins(t.newest?.jobMs), when: day(t.newest?.at) }, fastest: mins(t.minMs), slowest: mins(t.maxMs), job_limit: mins(t.limitMs), near_limit: t.warning }
 }
 
 async function qaItems(c, { group = null, status = null, q = '', similar_to = '' } = {}) {

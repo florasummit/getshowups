@@ -5,7 +5,7 @@ import { AREAS, allTests, getTest } from './qa-tests.js'
 import { countStates, freshness } from './qa-freshness.js'
 import { testHistory } from './qa-results.js'
 import { evidenceFor } from './qa-evidence.js'
-import { listExecutions, present as presentExecution } from './qa-executions.js'
+import { ciTime, listExecutions, present as presentExecution } from './qa-executions.js'
 import { listItems } from './qa-items.js'
 import { qaSettings, spend } from './qa-spend.js'
 import { dispatchConfigured, ingestConfigured } from './qa-dispatch.js'
@@ -76,13 +76,14 @@ export async function overview(env, now = Date.now()) {
   const byClass = {}
   for (const c of ['automated', 'ai_assisted', 'human', 'authorization']) byClass[c] = countStates(tests.filter((t) => t.class === c), statuses)
   const human = tests.filter((t) => t.kind === 'human')
-  const [settings, sp, defects, hist, latestEx, inProgress] = await Promise.all([
+  const [settings, sp, defects, hist, latestEx, inProgress, ci] = await Promise.all([
     qaSettings(db),
     spend(env, now),
     listItems(db, { group: 'defects', limit: 300 }),
     history(db, now),
     listExecutions(db, { limit: 1 }),
     db.prepare("SELECT id, journey, started_at FROM qa_runs WHERE kind = 'human' AND status = 'running' ORDER BY started_at DESC LIMIT 5").all().catch(() => ({ results: [] })),
+    ciTime(db, 10),
   ])
   const blockers = defects.items.filter((i) => ['critical', 'high'].includes(i.severity) && ['open', 'in_progress', 'fixed_pending_qa'].includes(i.status)).map((i) => ({ id: i.id, kind: i.kind, title: i.title, severity: i.severity, priority: i.priority, status: i.status, area: i.area, feature: i.feature, createdAt: i.createdAt, testIds: i.testIds }))
   const runs = []
@@ -110,6 +111,7 @@ export async function overview(env, now = Date.now()) {
     },
     history: hist,
     spend: sp,
+    ciTime: ci,
     setup: setup(env, settings.values),
     settings: settings.values,
   }

@@ -639,3 +639,36 @@ test('every report becomes a finished execution; unchanged passes are listed on 
   assert.deepEqual(await q('severity=high'), [a.executionId])
   assert.deepEqual(await q('severity=low'), [])
 })
+
+test('CI time: only reported durations are stored (invalid ones dropped, never estimated); the overview summarizes the last 10 CI runs', async () => {
+  const c = await admin()
+  const t = unitTests('test/url.test.js')[0]
+  const rep = (key, durations, source = 'ci') => ingestReport(env, { runKey: key, revision: COMMIT, source, provider: 'mocked', results: [{ kind: 'unit', file: t.file, title: t.title, status: 'passed' }], durations })
+  const a = await rep('ci-t-1', { jobMs: 540_000, unitMs: 61_234, e2eMs: 300_000 })
+  const b = await rep('ci-t-2', { jobMs: 1_320_000, e2eMs: -5, bogus: 3 })
+  await rep('ci-t-3', null)
+  await rep('ci-t-4', { jobMs: 999 }, 'local')
+  const dur = (id) => JSON.parse(db.sql.prepare('SELECT durations FROM qa_executions WHERE id = ?').get(id).durations || 'null')
+  assert.deepEqual(dur(a.executionId), { jobMs: 540_000, unitMs: 61_234, e2eMs: 300_000 })
+  assert.deepEqual(dur(b.executionId), { jobMs: 1_320_000 }, 'negative / unknown fields dropped')
+  const ov = (await call(overviewRoute, 'GET', '/api/platform/qa/overview', { c })).json
+  assert.deepEqual({ runs: ov.ciTime.runs, min: ov.ciTime.minMs, median: ov.ciTime.medianMs, max: ov.ciTime.maxMs, newest: ov.ciTime.newest.jobMs, limit: ov.ciTime.limitMs, warning: ov.ciTime.warning }, { runs: 2, min: 540_000, median: 930_000, max: 1_320_000, newest: 1_320_000, limit: 25 * 60_000, warning: true })
+  const ex = (await call(executionRoute, 'GET', `/api/platform/qa/executions/${a.executionId}`, { c, params: { id: a.executionId } })).json.execution
+  assert.deepEqual(ex.durations, { jobMs: 540_000, unitMs: 61_234, e2eMs: 300_000 })
+})
+
+test('qa-report sends measured durations only: node:test total, Playwright stats.duration, the job time file', async () => {
+  const { mkdtempSync, writeFileSync: w, readFileSync: r } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(`${tmpdir()}/qa-dur-`)
+  w(`${dir}/unit.json`, JSON.stringify({ durationMs: 61234, results: [{ kind: 'unit', file: 'test/url.test.js', title: 'x', status: 'passed', durationMs: 3 }] }))
+  w(`${dir}/pw.json`, JSON.stringify({ stats: { duration: 300000.4 }, suites: [] }))
+  w(`${dir}/job.txt`, '540000\n')
+  const run = (...args) => {
+    execFileSync(process.execPath, ['scripts/qa-report.mjs', ...args, '--out', `${dir}/body.json`], { cwd: new URL('..', import.meta.url), env: { ...process.env, JOB_STARTED_AT: '', QA_INGEST_URL: '', QA_INGEST_TOKEN: '' } })
+    return JSON.parse(r(`${dir}/body.json`, 'utf8'))
+  }
+  assert.deepEqual(run(`${dir}/pw.json`, '--unit', `${dir}/unit.json`, '--job-ms', `${dir}/job.txt`).durations, { jobMs: 540000, unitMs: 61234, e2eMs: 300000 })
+  assert.equal(run('--unit', `${dir}/unit.json`).durations.jobMs, undefined, 'no job time reported → none sent')
+})

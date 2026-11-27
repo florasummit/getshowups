@@ -198,6 +198,14 @@ export function stamp(ms) {
   const z = tzLabel(ms)
   return z ? `${t} ${z}` : t
 }
+// A measured duration (what a run reported): exact, never "about". Unknown stays unknown.
+export function elapsed(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return 'Not reported'
+  const s = Math.round(Number(ms) / 1000)
+  if (s < 60) return `${s} s`
+  return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`
+}
+
 export function duration(ms) {
   if (ms == null || !Number.isFinite(Number(ms))) return 'Unknown'
   const s = Math.round(Number(ms) / 1000)

@@ -112,6 +112,7 @@ export function normalizeOverview(d) {
     spend: s && { month: s.month, spent: dollars(s.spentMicros), reserved: dollars(s.reservedMicros), budget: dollars(s.budgetMicros), daily: dollars(s.dailyMicros), available: dollars(s.availableMicros), paidEnabled: !!s.paidEnabled },
     setup: { ciDispatch: false, ingest: false, paidEvals: false, productionChecks: false, ...(d.setup || {}), missing: arr(d.setup?.missing) },
     settings: d.settings || null,
+    ciTime: d.ciTime || null,
   }
 }
 

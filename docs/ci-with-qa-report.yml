@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # CI job time for the QA Command Center (engineering health; only measured values are reported).
+      - name: Record the job start
+        run: echo "JOB_STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -62,6 +66,10 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+      - name: Record the job time
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo $(( $(date +%s%3N) - JOB_STARTED_AT )) > qa-job-ms.txt
+
       # playwright.config.js writes qa-report.json in CI. Kept whether the tests passed or failed.
       - name: Keep the JSON report for the Control Center
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -71,6 +79,7 @@ jobs:
           path: |
             qa-report.json
             qa-unit.json
+            qa-job-ms.txt
             dist/qa-hashes.json
           if-no-files-found: ignore
           retention-days: 14
@@ -104,6 +113,7 @@ jobs:
           ARGS=(--source ci --provider mocked)
           [ -f qa-report.json ] && ARGS=(qa-report.json "${ARGS[@]}")
           [ -f qa-unit.json ] && ARGS+=(--unit qa-unit.json)
+          [ -f qa-job-ms.txt ] && ARGS+=(--job-ms qa-job-ms.txt)
           node scripts/qa-report.mjs "${ARGS[@]}"
         env:
           QA_INGEST_URL: ${{ vars.QA_INGEST_URL }}

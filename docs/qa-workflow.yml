@@ -61,6 +61,8 @@ jobs:
       E2E_FILES: ${{ inputs.e2e_files }}
       E2E_GREP: ${{ inputs.e2e_grep }}
     steps:
+      - name: Record the job start (CI time for the QA Command Center)
+        run: echo "JOB_STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -95,6 +97,9 @@ jobs:
           [ -n "$E2E_GREP" ] && ARGS+=(--grep "$E2E_GREP")
           npx playwright test "${ARGS[@]}"
           cp qa-report.json qa-out/ 2>/dev/null || true
+      - name: Record the job time
+        if: always()
+        run: mkdir -p qa-out && echo $(( $(date +%s%3N) - JOB_STARTED_AT )) > qa-out/qa-job-ms.txt
       - name: Keep the reports for the report job
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -172,6 +177,7 @@ jobs:
           [ -f qa-out/qa-unit.json ] && ARGS+=(--unit qa-out/qa-unit.json)
           [ -f qa-out/qa-hashes.json ] && ARGS+=(--hashes qa-out/qa-hashes.json)
           [ -f qa-out/eval.json ] && ARGS+=(--eval qa-out/eval.json)
+          [ -f qa-out/qa-job-ms.txt ] && ARGS+=(--job-ms qa-out/qa-job-ms.txt)
           [ -f eval.json ] && ARGS+=(--eval eval.json)
           node scripts/qa-report.mjs "${ARGS[@]}"
         env:

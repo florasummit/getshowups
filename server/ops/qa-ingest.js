@@ -12,6 +12,15 @@ import { executionReported, executionStarted, getExecutionRow, recordedExecution
 
 const STATUS = { passed: 'pass', expected: 'pass', flaky: 'pass', pass: 'pass', failed: 'fail', unexpected: 'fail', timedOut: 'fail', fail: 'fail', interrupted: 'blocked', blocked: 'blocked', skipped: 'skipped', todo: 'skipped', cancelled: 'skipped' }
 const HEX = /^[a-f0-9]{8,64}$/
+// Durations the run reported (ms): the CI job's own elapsed time, node:test total, Playwright total. Anything else, or
+// a value outside 0 … 6 h, is dropped: a duration is never estimated or filled in.
+const MAX_MS = 6 * 3600_000
+export function cleanDurations(d) {
+  if (!d || typeof d !== 'object') return null
+  const out = {}
+  for (const k of ['jobMs', 'unitMs', 'e2eMs']) if (Number.isFinite(d[k]) && d[k] >= 0 && d[k] <= MAX_MS) out[k] = Math.round(d[k])
+  return Object.keys(out).length ? out : null
+}
 const cleanHashes = (h) => {
   const out = {}
   if (!h || typeof h !== 'object') return out
@@ -66,6 +75,6 @@ export async function ingestReport(env, body, now = Date.now(), { bodyHash = nul
   const unchanged = []
   const stored = await storeResults(db, [...one.values()], { executionId: ex, runId: legacy.id, environment, revision, provider: body.provider, dedupe: !execution, unchanged }, now)
   const items = await onResults(db, stored, now)
-  await executionReported(env, ex, { runId: legacy.id, stored, costMicros: cost, unchanged }, now)
+  await executionReported(env, ex, { runId: legacy.id, stored, costMicros: cost, unchanged, durations: environment === 'ci' ? cleanDurations(body.durations) : null }, now)
   return { ...legacy, executionId: ex, qa: { matched: one.size, stored: stored.length, unchanged: unchanged.length, unmatched, costMicros: cost, items } }
 }

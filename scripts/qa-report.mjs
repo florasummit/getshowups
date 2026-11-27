@@ -12,6 +12,9 @@
 //   --execution qx_…           the QA Command Center execution this run belongs to (dispatched runs)
 //   --started                  only report that the dispatched run started (GITHUB_RUN_ID, GITHUB_SHA)
 //   --out body.json            write the request body instead of sending it (for Admin → QA → Import)
+// Durations (only what was measured; never estimated): the CI job's elapsed time when the workflow set
+// JOB_STARTED_AT (epoch ms, `date +%s%3N` at job start) in the same job, or `--job-ms <file>` holding the elapsed ms the
+// test job wrote at its end (when posting from a separate job), the node:test total, the Playwright total.
 // The e2e suite runs against MOCKED providers, so --provider defaults to 'mocked'. Nothing is sent unless both
 // QA_INGEST_URL and QA_INGEST_TOKEN are set (off by default). Error text is redacted again on the server.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -22,7 +25,7 @@ const flag = (name, def) => {
   const i = args.indexOf(`--${name}`)
   return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : def
 }
-const VALUED = new Set(['source', 'provider', 'unit', 'eval', 'hashes', 'execution', 'out'])
+const VALUED = new Set(['source', 'provider', 'unit', 'eval', 'hashes', 'execution', 'out', 'job-ms'])
 const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && VALUED.has(args[i - 1].replace(/^--/, ''))))
 const unitFile = flag('unit', null)
 const evalFile = flag('eval', null)
@@ -103,6 +106,13 @@ const body = {
   ...(executionId ? { executionId } : {}),
   ...(Object.keys(hashes).length ? { hashes } : {}),
 }
+const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : undefined)
+const jobStarted = /^\d{13}$/.test(String(process.env.JOB_STARTED_AT || '')) ? Number(process.env.JOB_STARTED_AT) : null
+const jobFile = flag('job-ms', null)
+const jobFromFile = jobFile && existsSync(jobFile) ? num(readFileSync(jobFile, 'utf8').trim()) : undefined
+const durations = { jobMs: jobFromFile ?? (jobStarted && Date.now() >= jobStarted ? Date.now() - jobStarted : undefined), unitMs: num(unit?.durationMs), e2eMs: num(report?.stats?.duration) }
+for (const k of Object.keys(durations)) if (durations[k] === undefined) delete durations[k]
+if (Object.keys(durations).length) body.durations = durations
 const counts = results.reduce((m, r) => ((m[r.status] = (m[r.status] || 0) + 1), m), {})
 console.log(`qa-report: ${results.length} results`, counts, `revision ${String(revision).slice(0, 7)}`, body.provider, executionId ? `execution ${executionId}` : '')
 await send(body)

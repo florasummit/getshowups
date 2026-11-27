@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS qa_executions (
   reserved_micros INTEGER NOT NULL DEFAULT 0,      -- paid evals: worst case reserved against the QA budget before dispatch
   reserved_at     INTEGER,
   cost_micros     INTEGER,                         -- recorded cost (sum of the results' reported costs)
+  durations       TEXT,                            -- JSON { jobMs, unitMs, e2eMs }: durations the CI run REPORTED (never estimated)
   unchanged       TEXT,                            -- JSON { files: [hash keys], tests: [ids] }: tests that passed again with
                                                    -- identical hashes in this run (no row each; "last verified" stays derivable)
   dedupe_key      TEXT,                            -- environment + revision + scope hash: one ACTIVE execution per key

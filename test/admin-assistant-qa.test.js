@@ -302,3 +302,15 @@ test('“is anything broken?” cut off once: 1,600-token room, the shorter-list
   assert.match(calls[2].messages.at(-1).content, /list fewer items\. Give every critical or high item and at most 3 others, one line each under 30 words, then one closing line: "N more in the Control Center\."/)
   assert.match(r.body.answer, /^Two things are failing/)
 })
+
+test('qa_status: CI time is the median and newest REPORTED job time, against the 25-minute limit; none reported = says so', async () => {
+  const none = (await tool('qa_status')).r.ci_time
+  assert.equal(none.reported_runs, 0)
+  const ins = db.sql.prepare("INSERT INTO qa_executions (id, requested_by, requested_at, environment, preset, status, revision, durations, finished_at, updated_at) VALUES (?, 'system:ci', ?, 'ci', 'report', 'passed', 'abcdef1', ?, ?, ?)")
+  const now = Date.now()
+  ins.run('qx_citime00001', now - 3000, JSON.stringify({ jobMs: 600_000 }), now - 3000, now)
+  ins.run('qx_citime00002', now - 2000, JSON.stringify({ jobMs: 720_000, unitMs: 90_000 }), now - 2000, now)
+  ins.run('qx_citime00003', now - 1000, JSON.stringify({ jobMs: 1_260_000 }), now - 1000, now)
+  const t = (await tool('qa_status')).r.ci_time
+  assert.deepEqual({ ...t, newest: { time: t.newest.time } }, { reported_runs: 3, median: '12 min 0 s', newest: { time: '21 min 0 s' }, fastest: '10 min 0 s', slowest: '21 min 0 s', job_limit: '25 min 0 s', near_limit: true })
+})

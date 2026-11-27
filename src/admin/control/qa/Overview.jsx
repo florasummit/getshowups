@@ -4,7 +4,7 @@
 // vs manual progress, what changed in the release and what is stale, blockers, recommended next, history, spending.
 import { Empty, Facts, Link, LoadError, Loading, PageHead, Section, Severity } from '../ui.jsx'
 import * as qa from '../qa-api.js'
-import { CLASS, ENV, PRESETS, countTotal, scopeText, sha, share, stamp, usd } from '../qa-lib.js'
+import { CLASS, ENV, PRESETS, countTotal, elapsed, scopeText, sha, share, stamp, usd } from '../qa-lib.js'
 import { Counts, EnvLabel, ExecPill, ItemStatus } from './parts.jsx'
 import { useLoad, usePlan } from './hooks.jsx'
 import { QaSettings } from './Settings.jsx'
@@ -282,6 +282,26 @@ export function QaOverview({ go }) {
               </ol>
             ) : (
               <p className="cc-status-line">No releases or runs recorded yet.</p>
+            )}
+          </div>
+        </Section>
+        <Section title="CI time" id="qa-ci-time" sub="How long the CI job took, as the runs reported it (last 10 CI runs). Never estimated.">
+          <div className="cc-section-body" data-qa-ci-time data-warning={o.ciTime?.warning ? 'on' : 'off'}>
+            {o.ciTime?.runs ? (
+              <>
+                <Facts
+                  items={[
+                    ['Newest', <span key="n">{elapsed(o.ciTime.newest?.jobMs)}{o.ciTime.newest?.at ? ` · ${stamp(o.ciTime.newest.at)}` : ''}</span>],
+                    ['Median', elapsed(o.ciTime.medianMs)],
+                    ['Fastest · slowest', `${elapsed(o.ciTime.minMs)} · ${elapsed(o.ciTime.maxMs)}`],
+                    ['Runs with a reported time', `${o.ciTime.runs} of the last ${o.ciTime.of}`],
+                    ['Job time limit', elapsed(o.ciTime.limitMs)],
+                  ]}
+                />
+                {o.ciTime.warning && <p className="cc-status-line" role="status">CI is above 80% of its time limit ({elapsed(o.ciTime.warnAtMs)}). Look at what got slower before it starts timing out.</p>}
+              </>
+            ) : (
+              <p className="cc-status-line">No CI run has reported its job time yet.</p>
             )}
           </div>
         </Section>
