@@ -59,6 +59,11 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      functions. Spend: admin_ai_ask events (never ai_ask), ADMIN_DAILY_MICROS + ADMIN_ANSWERS_PER_DAY, rate rules
                      adminAssist*. ADMIN_ASSIST_ENABLED=false = off (brief stays). The owner assistant never imports admin-assist (test).
                      Real-model eval: scripts/admin-assistant-eval.mjs (fictional fixture test/fixtures/admin-assistant-data.js).
+                     QA (server/admin-assist/qa.js, over qa-core's own functions): qa_status (release, changes, tested/untested/stale/failed,
+                     failures after deploy, blockers, readiness as verified / missing / risks: never a verdict, enforced), qa_items
+                     (duplicates, priority SUGGESTIONS), qa_cost, qa_prompt (qa-prompt.js template, attached, no model); prepare a FREE
+                     run (smoke/all_safe/affected/failed/production_verify), a backlog idea (Inbox), a status when asked (never Verified).
+                     Paid evals and "mark verified" are refused by guard.js without the model.
                      Before changing server/admin-assist or its prompts: `node scripts/admin-assistant-eval.mjs run --provider claude --suite regression --cap-usd 0.60 --out <dir>` (key from env, approval for spend); every scenario must pass 5/5.
   api/stripe/webhook Stripe events (signature verified, idempotent)
   api/email/webhook  Resend delivery feedback (Svix signature, 5-min tolerance; 503 until RESEND_WEBHOOK_SECRET)

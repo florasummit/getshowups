@@ -12,7 +12,7 @@ import { track } from '../../../server/events.js'
 import { MIN_CHARGE_MICROS, operatorModel } from '../../../server/operator-model.js'
 import { adminAssistEnabled, adminLimitReached, validateAdminQuestion } from '../../../server/admin-assist/index.js'
 import { weeklyBrief } from '../../../server/admin-assist/brief.js'
-import { confirmAsk, consequentialAsk, ownerDataAsk } from '../../../server/admin-assist/guard.js'
+import { confirmAsk, consequentialAsk, ownerDataAsk, qaAsk } from '../../../server/admin-assist/guard.js'
 import { operateAdmin } from '../../../server/admin-assist/operator.js'
 import { adminContext, namesFor } from '../../../server/admin-assist/tools.js'
 import { loaders } from '../../../server/admin-assist/data.js'
@@ -42,7 +42,7 @@ export async function onRequestPost({ request, env }) {
   const [error, req] = validateAdminQuestion(body)
   if (error) return json(400, { error })
   // Never the model: what it may not do, and owners' private records.
-  const fixed = confirmAsk(req.question) || ownerDataAsk(req.question) || consequentialAsk(req.question)
+  const fixed = confirmAsk(req.question) || qaAsk(req.question) || ownerDataAsk(req.question) || consequentialAsk(req.question)
   if (fixed) return json(200, fixed)
   const now = Date.now()
   const L = loaders(env, now)
@@ -76,5 +76,5 @@ export async function onRequestPost({ request, env }) {
   await record({ ok: r.ok, tools: r.tools.slice(0, 10), proposals: r.proposals.map((p) => p.type), costMicros: model.provider === 'claude' && !r.ok ? Math.max(r.costMicros, MIN_CHARGE_MICROS) : r.costMicros, usage: r.usage, ...(r.ok ? {} : { reason: r.reason }), ...(r.refusals.length ? { refusals: r.refusals } : {}), ms: r.ms })
   if (['quota', 'setup'].includes(r.reason) && !r.costMicros) await unhit(env, 'adminAssistDay', admin.email)
   if (!r.ok) return fallback(r.reason === 'unchecked' ? 422 : 503, r.reason, r)
-  return json(200, { id, kind: r.proposals.length ? 'prepared' : 'answer', answer: r.answer, raw: r.raw, proposals: r.proposals, refs: r.refs, sources: r.sources.filter((s) => s.tool !== 'weekly_brief' || r.tools.includes('weekly_brief')), evidence: r.evidence, lookups: r.lookups, usage: { ...r.usage, costMicros: r.costMicros, ms: r.ms } })
+  return json(200, { id, kind: r.proposals.length ? 'prepared' : 'answer', answer: r.answer, raw: r.raw, proposals: r.proposals, refs: r.refs, sources: r.sources.filter((s) => s.tool !== 'weekly_brief' || r.tools.includes('weekly_brief')), evidence: r.evidence, lookups: r.lookups, ...(r.attachments?.length ? { attachments: r.attachments } : {}), usage: { ...r.usage, costMicros: r.costMicros, ms: r.ms } })
 }

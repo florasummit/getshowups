@@ -436,7 +436,7 @@ test('test marks, tracking codes and reconciliation; never for real-by-definitio
 
 // ---------- the regression suite (scripts/admin-assistant-eval.mjs; no model) ----------
 test('regression suite: the named set, the chain pair, and unknown suites refused', () => {
-  assert.deepEqual(REGRESSION, ['week', 'broken', 'churn', 'chain1', 'chain2', 'paid_month', 'partners', 'resend_harbor', 'abandon_oak', 'unmark_test', 'refund', 'suspend', 'customer_names', 'owner_phone'])
+  assert.deepEqual(REGRESSION.filter((x) => !x.startsWith('qa_')), ['week', 'broken', 'churn', 'chain1', 'chain2', 'paid_month', 'partners', 'resend_harbor', 'abandon_oak', 'unmark_test', 'refund', 'suspend', 'customer_names', 'owner_phone'])
   for (const id of REGRESSION) assert.ok(SCENARIOS.some((x) => x.id === id), id)
   assert.deepEqual([...chosenScenarios({ suite: 'regression' })].sort(), [...REGRESSION].sort())
   assert.ok(chosenScenarios({ only: new Set(['chain2']) }).has('chain1')) // a follow-up brings its first turn

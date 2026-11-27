@@ -10,6 +10,7 @@ import { ATTENTION_WORDS, billingOf, DAY, integrationsOf, loaders, periodRange, 
 import { ENROLLMENT_OWNS, weeklyBrief } from './brief.js'
 import { STATUSES as CODE_STATUSES } from '../acquisition.js'
 import { randomToken } from '../google-oauth.js'
+import { QA_TOOLS } from './qa.js'
 
 // Dates as people write them (never ISO: admin copy rule), UTC.
 const ymd = (t) => (t ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(t) : null)
@@ -20,8 +21,8 @@ const agoText = (now, t) => {
   const d = daysAgo(now, t)
   return d === 0 ? 'today' : d === 1 ? '1 day ago' : `${d} days ago`
 }
-export const REF_RE = /^[BEP]\d{1,3}$/
-const ID_RE = { B: CUSTOMER_RE, E: /^enr_[A-Za-z0-9_-]{16}$/, P: /^prt_[A-Za-z0-9_-]{4,40}$/ }
+export const REF_RE = /^[BEPQ]\d{1,3}$/
+const ID_RE = { B: CUSTOMER_RE, E: /^enr_[A-Za-z0-9_-]{16}$/, P: /^prt_[A-Za-z0-9_-]{4,40}$/, Q: /^qi_[A-Za-z0-9_-]{6,40}$/ }
 // Businesses that are real by definition and are never marked as test businesses (CLAUDE.md).
 const NEVER_TEST = new Set([SALES_BUSINESS, 'poolthru-llc'])
 
@@ -31,7 +32,7 @@ const NEVER_TEST = new Set([SALES_BUSINESS, 'poolthru-llc'])
 export function adminContext(env, given = {}, now = Date.now()) {
   const refs = new Map()
   const byKey = new Map()
-  const next = { B: 1, E: 1, P: 1 }
+  const next = { B: 1, E: 1, P: 1, Q: 1 }
   for (const [ref, id] of Object.entries(given && typeof given === 'object' ? given : {}).slice(0, 120)) {
     if (!REF_RE.test(ref) || typeof id !== 'string' || !ID_RE[ref[0]].test(id) || byKey.has(`${ref[0]}:${id}`)) continue
     refs.set(ref, { kind: ref[0], id, name: null })
@@ -71,7 +72,7 @@ export function adminContext(env, given = {}, now = Date.now()) {
 // ---------- the lookups ----------
 const said = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
 const nameMatches = (name, id, words) => {
-  if (/^\s*\[?[BEP]\d{1,3}\]?\s*$/.test(String(words))) return false // a reference, not words: see byRef
+  if (/^\s*\[?[BEPQ]\d{1,3}\]?\s*$/.test(String(words))) return false // a reference, not words: see byRef
   const w = said(words).split(' ').filter((x) => x.length > 2 && !['the', 'and', 'llc', 'inc', 'business', 'company'].includes(x))
   if (!w.length) return false
   const hay = `${said(name)} ${said(id).replace(/-/g, ' ')}`
@@ -455,6 +456,7 @@ export const TOOLS = [
   { name: 'prepare_run_reconciliation', description: 'Prepare running the billing reconciliation (Stripe vs our records) now. The admin approves it on a card.', parameters: P(), run: prepareReconciliation },
   { name: 'prepare_code_status', description: 'Prepare recording the status of an acquisition tracking code (what the founder did: approved, sent, followed_up, replied, declined). The admin approves it on a card.', parameters: P({ code: { type: 'string' }, status: { type: 'string', enum: CODE_STATUSES } }, ['code', 'status']), run: prepareCodeStatus },
   { name: 'prepare_test_mark', description: 'Prepare marking a business as a test business (test: true) or removing the mark (test: false, i.e. it is a real customer), by reference or name. The admin approves it on a card.', parameters: P({ ref: REF, name: NAME, test: { type: 'boolean' } }, ['test']), run: prepareTestMark },
+  ...QA_TOOLS((c, p) => prep(c, p), (why) => nope(why)),
   { name: 'no_lookup_needed', description: 'Use only when the question needs no records (a greeting, how GetShowUps works in general, or something you cannot do here).', parameters: P({ why: { type: 'string', enum: ['general_question', 'greeting', 'not_possible_here'] } }), run: async () => ({ ok: true }) },
 ]
 export const TOOL_NAMES = TOOLS.map((t) => t.name)
@@ -484,7 +486,7 @@ export async function namesFor(c, refs) {
       out[ref] = r.name
       continue
     }
-    const sql = { B: 'SELECT name FROM customers WHERE id = ?1', E: 'SELECT business_name AS name FROM assisted_enrollments WHERE id = ?1', P: 'SELECT name FROM referral_partners WHERE id = ?1' }[r.kind]
+    const sql = { B: 'SELECT name FROM customers WHERE id = ?1', E: 'SELECT business_name AS name FROM assisted_enrollments WHERE id = ?1', P: 'SELECT name FROM referral_partners WHERE id = ?1', Q: 'SELECT title AS name FROM qa_items WHERE id = ?1' }[r.kind]
     const row = await db.prepare(sql).bind(r.id).first().catch(() => null)
     if (row?.name) out[ref] = r.name = String(row.name).slice(0, 80)
   }

@@ -14,9 +14,9 @@ import { SALES_BUSINESS } from './data.js'
 // tokens: output per call; "what needs me" answers get briefTokens (still reserved in full before each call on Claude).
 export const BOUNDS = { rounds: 4, calls: 7, callMs: 25_000, totalMs: 45_000, tokens: 1200, briefTokens: 1600, answer: 1800, resultChars: 6000 }
 const SPECS = TOOLS.map(({ name, description, parameters }) => ({ name, description, parameters }))
-const REF_IN = /\[([BEP]\d{1,3})\]/g
+const REF_IN = /\[([BEPQ]\d{1,3})\]/g
 // The founder asked for a change (only then may one be prepared).
-export const ASKS_CHANGE = /\b(re-?send|send|mark|unmark|run|record|log|take (it |the \w+ )?off|remove (the )?test|prepare|abandon\w*|reconcile)\b/i
+export const ASKS_CHANGE = /\b(re-?send|send|mark|unmark|run|record|log|take (it |the \w+ )?off|remove (the )?test|prepare|abandon\w*|reconcile|add|create|capture|put|move|defer|set|change|start|verify|retest|plan)\b/i
 
 // The brief as short lines (half the tokens of its JSON): the included model's daily allowance is shared with owners.
 const briefLines = (b) => (b?.items ? [`${b.counts.urgent} urgent, ${b.counts.important} important, ${b.counts.fyi} FYI (${b.total_items} in all).`, ...b.items.slice(0, 16).map((i) => `- ${i.level}: ${i.about ? `${i.about} — ` : ''}${i.issue}.${i.detail ? ` ${i.detail}` : ''} Next: ${i.next} (${i.page})`)].join('\n') : 'could not be read')
@@ -53,6 +53,18 @@ export function tierProblem(text, question) {
   return null
 }
 
+// "Is it ready for customers?": verified facts, missing information and inferred risks, labelled and apart; never a
+// verdict (the records support none: the founder decides).
+export const READY_Q = /\b(ready for (customers|launch|real customers|production|go[- ]live)|readiness|can we (launch|go live)|ok to launch|safe to (launch|release|ship|go live))\b/i
+const VERDICT = /\b(it['’]?s|it is|production is|we['’]?re|we are|(the )?(current )?(production )?version is|you['’]?re|you are|everything is)( not| now)? (ready|good to go|safe to (launch|go live))\b|\b(isn['’]t|is not|not yet) ready\b|^\s*(yes|no)\b/im
+export function readinessProblem(text, question) {
+  if (!READY_Q.test(question)) return null
+  const has = (label) => new RegExp(`^\\s*(?:[-•]\\s*)?\\**${label}\\**\\s*:`, 'im').test(text)
+  if (!has('Verified') || !has('Missing') || !has('Risks?')) return 'Answer in three parts on their own lines, starting "Verified:", "Missing:" and "Risks:", from the readiness facts. Keep them apart.'
+  if (VERDICT.test(text)) return 'No verdict: don’t say it is or isn’t ready, and no yes or no. Give the three parts; the founder decides.'
+  return null
+}
+
 // An answer never retracts or doubts an earlier one by itself (the records behind it were read; see the history note).
 export const SELF_DOUBT = /\b(correct|retract|walk back|take back|fix) (my|the|that) (last|earlier|previous|prior) (message|answer|reply|list)|\bwithout looking (them|it|those|this) up\b|\bI (shouldn['’]t|should not) have (listed|said|named|included)\b|\bmy (last|earlier|previous) (message|answer|reply) (was|is) (wrong|incorrect|mistaken|unchecked|not checked)\b|\bI (made|invented|guessed) (that|those|them)\b/i
 const PROMISE = /\b(guaranteed?|will (definitely |certainly )?(churn|leave|cancel|pay|grow|increase|double))\b/i
@@ -77,6 +89,8 @@ export function adminProblem(text, { facts, shown, live, names = [], prepared = 
   if (!prepared && /\b(ready to approve|ready for (your )?approval|approve it|i('ve| have) prepared|is prepared)\b/i.test(text)) return 'Nothing was prepared in this answer, so nothing is ready to approve. Call the prepare tool first, or say where the founder can do it.'
   const tiers = tierProblem(text, question)
   if (tiers) return tiers
+  const ready = readinessProblem(text, question)
+  if (ready) return ready
   if ((text.match(/^\s*[-•]\s/gm) || []).length > 6) return 'Too many lines. Give the 5 that matter most, most urgent first, and say how many more are on the This week list on Overview.'
   if (SELF_DOUBT.test(text)) return 'It doubts or corrects an earlier answer. Earlier answers were written from lookups of the records. Answer only the question; if a lookup now shows something different, say what the records show now.'
   if (INSIDE.test(text)) return 'It talks about tools, lookups or your instructions. Say only what the records show.'
@@ -114,7 +128,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
   let retries = 0
   let again = false
   const lookups = [] // which tools ran with which arguments (admin-only; for "why?" and review)
-  const base = () => ({ refs: c.book(), proposals: c.proposals, sources: c.sources, evidence: evidence.slice(0, 6), lookups, tools, usage, refusals, costMicros: Math.round(cost), ms: Date.now() - started })
+  const base = () => ({ refs: c.book(), proposals: c.proposals, attachments: c.attachments || [], sources: c.sources, evidence: evidence.slice(0, 6), lookups, tools, usage, refusals, costMicros: Math.round(cost), ms: Date.now() - started })
   for (let round = 0; round <= BOUNDS.rounds; round++) {
     const left = BOUNDS.totalMs - (Date.now() - started)
     if (left < 1500) break
@@ -156,7 +170,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
       messages.push({ role: 'tool', results: out })
       continue
     }
-    const text = String(reply.text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/(?<![[\w])([BEP]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
+    const text = String(reply.text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/(?<![[\w])([BEPQ]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
     // Asked who might churn: every business listed must have a churn signal in the lookup.
     const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
@@ -171,7 +185,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
       return { ok: true, answer, raw: text + note, ...base() }
     }
     trace?.push({ refused: why, text })
-    refusals.push(why.replace(/\[[BEP]\d+\]|\d+/g, '').slice(0, 40))
+    refusals.push(why.replace(/\[[BEPQ]\d+\]|\d+/g, '').slice(0, 40))
     if (++retries > 2) break
     messages.push({ role: 'assistant', text: reply.text || '(empty)' }, { role: 'user', text: `[check by the application] Your draft was not shown. ${why} Now write the whole answer again for the founder, who asked: "${req.question}". Complete, on its own, without mentioning a draft or a check.` })
   }

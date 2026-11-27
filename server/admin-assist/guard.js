@@ -29,7 +29,18 @@ export function confirmAsk(question) {
   return CONFIRM.test(String(question || '')) ? { kind: 'not_here', answer: 'Nothing happens from the chat: press Approve on the card above to do it. If there’s no card, tell me what to prepare.' } : null
 }
 
-export const PREPARABLE = 'I can prepare only: resending an invitation, marking an unpaid enrollment abandoned, running billing reconciliation, recording a tracking code’s status, and marking or unmarking a test business.'
+export const PREPARABLE = 'I can prepare only: resending an invitation, marking an unpaid enrollment abandoned, running billing reconciliation, recording a tracking code’s status, marking or unmarking a test business, and for QA a free test run, a backlog idea or an item’s status.'
+
+// QA: never a paid evaluation (the regression preset includes them), never "Verified" by hand.
+const QA_FIXED = [
+  [/^(run|start|launch|kick off|trigger|do|execute|schedule|begin)\b[^.?!]*(\b(paid|real[- ]?model|claude|haiku|voice|receptionist|model)\b[^.?!]*\b(evals?|evaluations?|suite|regression)\b|\bregression (suite|run|preset)\b|\b(evals?|evaluations?)\b)/, 'I don’t start paid evaluations: they need the QA budget switched on in the QA Command Center, and real-model spend needs your approval. I can prepare a free run instead: smoke, all safe tests, the affected (stale) tests, a retest of failed tests, or production verification.'],
+  [/^(mark|set|move|flag|close|make|call|record)\b[^.?!]*\bverified\b|^verify (the |that |this )?(defect|bug|fix|item)\b/, 'A defect becomes Verified only when its linked tests pass again after the fix; nobody marks it by hand, me included. I can prepare a retest of the failed tests, or set it to “Fixed, waiting for QA” once its fix PR and tests are linked.'],
+]
+export function qaAsk(question) {
+  const q = lead(question)
+  for (const [re, answer] of QA_FIXED) if (re.test(q)) return { kind: 'not_here', answer }
+  return null
+}
 
 // → { answer, kind: 'not_here' } | null
 export function consequentialAsk(question) {

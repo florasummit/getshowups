@@ -48,6 +48,7 @@ export const UNIT_MAP = {
   'account-controls': ['security', 'account.controls'],
   acquisition: ['ads', 'results.attribution'],
   'admin-assistant': ['admin_assistant', 'platform.admin', 'admin-assistant'],
+  'admin-assistant-qa': ['admin_assistant', 'platform.admin', 'admin-assistant'],
   'admin-figures': ['platform_admin', 'platform.admin'],
   'ads-changes': ['ads', 'ads.google'],
   'ads-gbp': ['ads', 'ads.google'],
@@ -239,6 +240,7 @@ export const JOURNEY_MAP = {
   receptionist: ['receptionist', ['server/receptionist', 'server/voice', `${F}receptionist`]],
   'website-studio': ['website', ['src/dashboard/SiteStudio.jsx', 'server/ai-designer.js', 'server/site-render-v2.js', `${F}dashboard/website`]],
   'admin-assistant': ['admin_assistant', ['server/admin-assist', `${F}platform/assist.js`]],
+  'admin-assistant-qa': ['admin_assistant', ['server/admin-assist', `${F}platform/assist.js`, 'server/ops']],
 }
 
 const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8')
