@@ -48,7 +48,7 @@ export const CLASS = {
   authorization: ['warn', 'Needs approval'],
 }
 
-export const ENV = { ci: 'CI (test copy)', production: 'Production (read-only)', manual: 'Manual', local: 'Local' }
+export const ENV = { ci: 'CI (test copy)', production: 'Production (read-only)', manual: 'Manual', local: 'Local or imported' }
 
 export const PRESETS = [
   ['all_safe', 'Run all safe tests', 'Every automated test that costs nothing and changes nothing real.'],
@@ -308,4 +308,13 @@ export function previewReport(report) {
     startedAt: Number.isFinite(report.startedAt) ? report.startedAt : null,
     hashes: report.hashes && typeof report.hashes === 'object' ? Object.keys(report.hashes).length : 0,
   }
+}
+
+// People are stored as references, never emails ("ref:<hash>"); automatic actors as "system:<name>".
+export const who = (ref) => {
+  const r = String(ref || '')
+  if (!r) return 'unknown'
+  if (r.startsWith('system:')) return 'automatic'
+  if (r.startsWith('ref:')) return `admin ${r.slice(4, 12)}`
+  return r
 }

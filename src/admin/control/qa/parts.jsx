@@ -51,7 +51,9 @@ export function Counts({ counts, go, area }) {
 // when the server says the plan is runnable; otherwise it says exactly what is missing.
 export function PlanPanel({ scope, title, onClose, go }) {
   const env = scope.environment || (scope.preset === 'production_verify' ? 'production' : 'ci')
-  const body = { ...scope, environment: env }
+  // Paid AI / voice checks are only in scope when the admin ticks them in (they cost QA budget and need approval).
+  const [includePaid, setIncludePaid] = useState(!!scope.includePaid)
+  const body = { ...scope, environment: env, ...(includePaid ? { includePaid: true } : {}) }
   const key = JSON.stringify(body)
   const [planned, setPlanned] = useState({ key: null, data: undefined })
   const [rerun, setRerun] = useState(false)
@@ -74,12 +76,19 @@ export function PlanPanel({ scope, title, onClose, go }) {
     setBusy(false)
     const id = r.data?.execution?.id
     if (r.ok && id) return go({ view: 'qa', exec: id })
+    if (r.data?.error === 'plan_changed' && r.data.plan) {
+      setPlanned({ key, data: r.data.plan })
+      setRerun(false)
+      return setErr({ text: 'The plan changed since it was shown (new results or a new release). Review it and start again.' })
+    }
     setErr({ text: r.error || 'The run didn’t start. Nothing was recorded.', executionId: r.data?.error === 'already_running' ? r.data.executionId : null })
   }
   const s = p?.scope || {}
   const nTests = Array.isArray(s.tests) ? s.tests.length : Number(s.tests) || 0
   const sample = qa.arr(s.sample)
   const excluded = qa.arr(s.excluded)
+  const excludedCount = Number.isFinite(s.excludedCount) ? s.excludedCount : excluded.length
+  const paidLeftOut = excluded.filter((x) => x.why === 'authorization_required').length
   const dup = p?.duplicate
   const approvals = qa.arr(p?.approvals).map(qa.setupText).filter(Boolean)
   const prereq = qa.arr(p?.prerequisites)
@@ -112,7 +121,7 @@ export function PlanPanel({ scope, title, onClose, go }) {
               <dt>Scope</dt>
               <dd data-plan-scope={nTests}>
                 {nTests} {nTests === 1 ? 'test' : 'tests'}
-                {qa.arr(s.journeys).length ? ` · ${s.journeys.length} ${s.journeys.length === 1 ? 'journey' : 'journeys'}` : ''}
+                {qa.arr(s.journeys).length ? ` · from ${s.journeys.length} ${s.journeys.length === 1 ? 'journey' : 'journeys'}` : ''}
               </dd>
             </div>
             <div>
@@ -156,17 +165,24 @@ export function PlanPanel({ scope, title, onClose, go }) {
               </ul>
             </details>
           )}
-          {excluded.length > 0 && (
-            <details className="cc-details" data-plan-excluded={excluded.length}>
+          {(paidLeftOut > 0 || includePaid) && (
+            <label className="qa-check" data-plan-include-paid>
+              <input type="checkbox" checked={includePaid} onChange={(e) => setIncludePaid(e.target.checked)} />
+              <span>Include paid AI and voice checks{paidLeftOut ? ` (${paidLeftOut} left out)` : ''}: they use the QA budget and need it authorized</span>
+            </label>
+          )}
+          {excludedCount > 0 && (
+            <details className="cc-details" data-plan-excluded={excludedCount}>
               <summary>
-                Left out ({excluded.length}): {excluded.length === 1 ? 'it needs' : 'they need'} a person or an approval
+                Left out ({excludedCount}): {excludedCount === 1 ? 'it needs' : 'they need'} a person or an approval
               </summary>
               <ul className="qa-plain-list">
                 {excluded.map((x) => (
                   <li key={x.id}>
-                    <span className="cc-code">{x.id}</span> · {EXCLUDED[x.why] || x.why}
+                    <span className="cc-code">{x.id}</span> · {EXCLUDED[x.why] || (/^human/.test(x.why) ? EXCLUDED.human_required : x.why)}
                   </li>
                 ))}
+                {excludedCount > excluded.length && <li>…and {excludedCount - excluded.length} more</li>}
               </ul>
             </details>
           )}
@@ -247,7 +263,7 @@ export function PlanPanel({ scope, title, onClose, go }) {
     </div>
   )
 }
-const EXCLUDED = { authorization_required: 'needs approval (paid AI or voice)', human_required: 'needs a person: record it under Manual' }
+const EXCLUDED = { authorization_required: 'needs approval (paid AI or voice)', human_required: 'needs a person: record it under Manual', production_only: 'runs only as a production check', ci_only: 'runs only in CI', local_only: 'runs only locally (imported reports)' }
 
 // ---------- "Note an idea": on every QA screen ----------
 // Saves a backlog entry in the Inbox. Recording an idea never starts work; the founder decides what is planned.
@@ -334,6 +350,13 @@ export function EvidenceList({ items }) {
     <ul className="qa-evidence" data-evidence-list>
       {list.map((e) => (
         <li key={e.id} data-evidence={e.kind}>
+          {/^AI assessment\b/.test(e.text || '') && (
+            <span>
+              <Badge tone="info" plain>
+                AI assessment, not a verified result
+              </Badge>
+            </span>
+          )}
           <span className="cc-label">{e.kind === 'screenshot' ? 'Screenshot' : e.kind === 'transcript' ? 'Transcript' : e.kind === 'link' ? 'Link' : e.kind === 'record' ? 'Record' : 'Log'}</span>
           {e.purged ? (
             <span className="cc-status-line">Removed by the retention policy (the record that it existed is kept).</span>
@@ -355,7 +378,6 @@ export function EvidenceList({ items }) {
           <small className="cc-status-line">
             {stamp(e.createdAt || e.at)}
             {e.expiresAt ? ` · kept until ${stamp(e.expiresAt)}` : ''}
-            {e.aiAssessment ? ' · AI assessment, not a verified result' : ''}
           </small>
         </li>
       ))}

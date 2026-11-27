@@ -8,7 +8,7 @@ import { Badge, Empty, Facts, Link, LoadError, Loading, PageHead, Section, Sever
 import { SaveStatus } from '../../../dashboard/ui.jsx'
 import { useSaveState } from '../../../dashboard/ui-hooks.js'
 import * as qa from '../qa-api.js'
-import { BACKLOG_KINDS, BACKLOG_STATUS, DEFECT_CHOICES, DEFECT_KINDS, DEFECT_STATUS, KINDS, PRIORITY, RESULT, SEVERITY, isDefect, sha, stamp, statusMap, toggleSelection } from '../qa-lib.js'
+import { BACKLOG_KINDS, BACKLOG_STATUS, DEFECT_CHOICES, DEFECT_KINDS, DEFECT_STATUS, KINDS, PRIORITY, RESULT, SEVERITY, isDefect, sha, stamp, statusMap, toggleSelection, who } from '../qa-lib.js'
 import { CopyBlock, EvidenceList, EvidenceUpload, ItemStatus, ResultPill, TestStatus } from './parts.jsx'
 import { useAreas, useLoad, usePlan } from './hooks.jsx'
 
@@ -445,7 +445,7 @@ export function ItemDetail({ id, go }) {
           i.feature && ['Feature', i.feature],
           i.priority && ['Priority', PRIORITY[i.priority] || i.priority],
           i.customerImpact && ['Customer impact', i.customerImpact],
-          ['Recorded', `${stamp(i.createdAt)}${i.createdBy ? ` by ${i.createdBy}` : ''}`],
+          ['Recorded', `${stamp(i.createdAt)}${i.createdBy ? ` by ${who(i.createdBy)}` : ''}`],
           i.refs?.pr && ['Pull request', `#${i.refs.pr}`],
           i.refs?.commit && ['Fix commit', <span key="c" className="cc-code">{sha(i.refs.commit)}</span>],
           i.refs?.release && ['Release', i.refs.release],
@@ -580,7 +580,7 @@ export function ItemDetail({ id, go }) {
                     {e.detail?.status ? `: ${RESULT[e.detail.status]?.[1] || e.detail.status}` : ''}
                     {e.detail?.text || e.detail?.note ? ` · ${e.detail.text || e.detail.note}` : ''}
                     {e.detail?.pr ? ` · PR #${e.detail.pr}` : ''}
-                    {e.actor ? ` · ${String(e.actor).startsWith('system:') ? 'automatic' : e.actor}` : ''}
+                    {e.actor ? ` · ${who(e.actor)}` : ''}
                   </span>
                 </li>
               ))}

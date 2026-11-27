@@ -6,9 +6,9 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Badge, Empty, Facts, Link, LoadError, Loading, PageHead, Section } from '../ui.jsx'
 import * as qa from '../qa-api.js'
-import { CLASS, ENV, TEST_STATUS, countTotal, countsLine, duration, isTest, selectionState, sha, stamp, testIdsUnder, toggleSelection, usd } from '../qa-lib.js'
+import { CLASS, ENV, RESULT, TEST_STATUS, who, countTotal, countsLine, duration, isTest, selectionState, sha, stamp, testIdsUnder, toggleSelection, usd } from '../qa-lib.js'
 import { ClassPill, Counts, EnvLabel, EvidenceList, ItemStatus, ResultPill, TestStatus } from './parts.jsx'
-import { useLoad, usePlan } from './hooks.jsx'
+import { useAreas, useLoad, usePlan } from './hooks.jsx'
 import { ManualCard } from './Manual.jsx'
 
 const crumbs = [
@@ -36,7 +36,8 @@ function Check({ state, onChange, label, busy }) {
 }
 
 function Leaf({ t, go, ctx }) {
-  const last = t.last
+  // lastAny: the latest result of ANY status (e.g. skipped while a feature is switched off); never counted as verified.
+  const last = t.lastAny || t.last
   return (
     <li className="qa-leaf" data-test-id={t.id} data-status={TEST_STATUS[t.status] ? t.status : 'untested'}>
       <Check state={ctx.selected.has(t.id) ? 'all' : 'none'} onChange={(on) => ctx.setSelected((s) => toggleSelection(s, [t.id], on))} label={`Select ${t.title}`} />
@@ -45,7 +46,7 @@ function Leaf({ t, go, ctx }) {
           {t.title}
         </Link>
         <span className="cc-item-sub">
-          {last ? `Last result ${stamp(last.at)} on ${sha(last.revision || last.commit)} · ${ENV[last.environment] || last.environment}` : 'No result recorded'}
+          {last ? `Last result ${RESULT[last.status]?.[1]?.toLowerCase() || last.status}, ${stamp(last.at)} on ${sha(last.revision || last.commit)} · ${ENV[last.environment] || last.environment}` : 'No result recorded'}
           {t.impact === 'uncertain' ? ' · impact of changes unknown' : ''}
           {t.mobile ? ' · phone' : ''}
         </span>
@@ -86,7 +87,8 @@ function Branch({ node, depth, go, ctx, areaId }) {
     }
     ctx.setSelected((s) => toggleSelection(s, ids, on))
   }
-  const state = unloaded && !ids.length ? 'none' : selectionState(ctx.selected, ids)
+  // While its tests load, a just-ticked branch already shows as ticked (and waits, disabled).
+  const state = busy ? 'all' : unloaded && !ids.length ? 'none' : selectionState(ctx.selected, ids)
   return (
     <li className={`qa-branch qa-branch--${node.kind}`} data-node={node.key} data-kind={node.kind}>
       <div className="qa-branch-row">
@@ -275,6 +277,7 @@ export function TestsView({ params, go }) {
 export function TestDetail({ id, go }) {
   const [d, reload] = useLoad(() => qa.getTest(id), [id])
   const [openPlan, plan] = usePlan(go)
+  const areas = useAreas()
   if (d === undefined) return <Loading label="Loading the test…" />
   if (d.error) return d.status === 404 ? <Empty title="Test not found.">It may have been removed or renamed in the code. Open Tests to find it.</Empty> : <LoadError what="this test" onRetry={reload} />
   const t = d.test || {}
@@ -296,11 +299,16 @@ export function TestDetail({ id, go }) {
             ? `Last passed ${stamp(lastPass.at)} on ${sha(lastPass.revision)}${lastPass.deployment ? ` (deployment ${String(lastPass.deployment).slice(0, 8)})` : ''}, ${ENV[lastPass.environment] || lastPass.environment}.`
             : 'It has never passed.'}
         </span>
+        {t.lastAny && t.lastAny.status !== 'pass' && t.lastAny.status !== 'fail' && (
+          <span data-last-any>
+            Latest result: {RESULT[t.lastAny.status]?.[1] || t.lastAny.status}, {stamp(t.lastAny.at)}. It doesn’t count as verified.
+          </span>
+        )}
         {t.impact === 'uncertain' && <span>We can’t tell which code this test depends on, so recent changes may affect it. A broader regression run is recommended.</span>}
       </div>
       <Facts
         items={[
-          t.area && ['Area', t.areaTitle || t.area],
+          t.area && ['Area', t.areaTitle || areas.find((a) => a.id === t.area)?.title || t.area],
           t.journey && ['Journey', t.journeyTitle || t.journey],
           t.feature && ['Feature', t.featureTitle || t.feature],
           t.file && ['File', <span key="f" className="cc-code">{t.file}</span>],
@@ -323,7 +331,7 @@ export function TestDetail({ id, go }) {
           </button>
         )}
         {t.class === 'authorization' && (
-          <button type="button" className="btn btn-quiet btn-sm" onClick={() => openPlan({ tests: [t.id] }, t.title || t.id)}>
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => openPlan({ tests: [t.id], includePaid: true }, t.title || t.id)}>
             Plan a run (needs approval)
           </button>
         )}
@@ -341,7 +349,26 @@ export function TestDetail({ id, go }) {
       <Section title="History" id="qa-t-hist" sub="Every recorded result, newest first, with the release it was recorded against. A retest adds a row; earlier failures are kept.">
         {history.length ? (
           <ul className="cc-list" data-qa-history-rows>
-            {history.map((h) => (
+            {history.map((h) =>
+              h.source === 'unchanged' ? (
+                // A pass recorded compactly on its run: the test passed again with identical code and dependencies.
+                <li key={h.id} className="cc-item qa-row qa-row--compact" data-result-id={h.id} data-result="pass" data-unchanged>
+                  <span className="cc-item-main">
+                    <span className="cc-item-sub">
+                      {stamp(h.at)} · <span className="cc-code">{sha(h.revision)}</span> · passed again, code unchanged
+                    </span>
+                  </span>
+                  <span className="cc-item-meta">
+                    <ResultPill s="pass" />
+                    <EnvLabel e={h.environment} />
+                    {h.executionId && (
+                      <Link to={{ view: 'qa', exec: h.executionId }} go={go} className="cc-more">
+                        Run →
+                      </Link>
+                    )}
+                  </span>
+                </li>
+              ) : (
               <li key={h.id} className="cc-item qa-row" data-result-id={h.id} data-result={h.status}>
                 <span className="cc-item-main">
                   <span className="cc-item-title">
@@ -349,12 +376,19 @@ export function TestDetail({ id, go }) {
                     {h.deployment ? ` · deployment ${String(h.deployment).slice(0, 8)}` : ''}
                   </span>
                   <span className="cc-item-sub">
-                    {[h.reviewer ? `Recorded by ${h.reviewer}${h.confirmedAt ? ` at ${stamp(h.confirmedAt)}` : ''}` : h.source === 'legacy' ? 'Earlier CI run' : 'Automated', h.provider === 'real' ? 'real providers' : h.provider === 'mocked' ? 'stand-in providers' : null, h.ms != null ? duration(h.ms) : null, h.costMicros ? `cost ${usd(h.costMicros / 1e6)}` : null, h.model ? `model ${h.model}` : null, h.retestOf ? 'retest' : null]
+                    {[h.reviewer ? `Recorded by ${who(h.reviewer)}${h.confirmedAt ? ` at ${stamp(h.confirmedAt)}` : ''}` : h.source === 'legacy' ? 'Earlier CI run' : 'Automated', h.provider === 'real' ? 'real providers' : h.provider === 'mocked' ? 'stand-in providers' : null, h.ms != null ? duration(h.ms) : null, h.costMicros ? `cost ${usd(h.costMicros / 1e6)}` : null, h.model ? `model ${h.model}` : null, h.retestOf ? 'retest' : null]
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
                   {h.expected && <span className="cc-item-sub">Expected: {h.expected}</span>}
                   {h.actual && <span className="cc-item-sub">Actual: {h.actual}</span>}
+                  {/^in-process, not through the edge/.test(h.actual || '') && (
+                    <span>
+                      <Badge tone="warn" plain>
+                        In-process, not through the live site: doesn’t count as production verification
+                      </Badge>
+                    </span>
+                  )}
                   {h.aiAssessment && (
                     <span className="cc-item-sub">
                       <Badge tone="info" plain>
@@ -383,7 +417,8 @@ export function TestDetail({ id, go }) {
                   )}
                 </span>
               </li>
-            ))}
+              ),
+            )}
           </ul>
         ) : (
           <Empty title="Untested.">No result has been recorded for this test.</Empty>

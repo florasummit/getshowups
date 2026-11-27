@@ -211,3 +211,10 @@ test('import preview: says exactly what a report will record, refuses what is no
   assert.match(previewReport([]).error, /JSON object/)
   assert.match(previewReport({ results: [] }).error, /no results/)
 })
+
+test('people show as short references, never emails; automatic actors say so', async () => {
+  const { who } = await import('../src/admin/control/qa-lib.js')
+  assert.equal(who('ref:3f9a1c2b4d5e6f708192'), 'admin 3f9a1c2b')
+  assert.equal(who('system:cron'), 'automatic')
+  assert.equal(who(null), 'unknown')
+})

@@ -18,6 +18,10 @@ const DONE = ['verified', 'verified_ci_only']
 export function ManualCard({ t, onSaved, executionId, go }) {
   const [status, setStatus] = useState('')
   const [actual, setActual] = useState('')
+  // AI-assisted checks: an AI's assessment may be pasted alongside; it is stored as labelled evidence and is never the
+  // result (the result is always the person's choice below).
+  const [aiText, setAiText] = useState('')
+  const [aiModel, setAiModel] = useState('')
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState(null)
   const save = useSaveState()
@@ -35,11 +39,13 @@ export function ManualCard({ t, onSaved, executionId, go }) {
     }
     setErr('')
     save.run(async () => {
-      const r = await qa.recordResult({ testId: t.id, executionId: executionId || undefined, status, actual: actual.trim() || undefined, expected: t.steps?.expected || undefined })
+      const r = await qa.recordResult({ testId: t.id, executionId: executionId || undefined, status, actual: actual.trim() || undefined, expected: t.steps?.expected || undefined, ...(aiText.trim() ? { aiAssessment: { text: aiText.trim(), model: aiModel.trim() || undefined } } : {}) })
       if (!r.ok) return { error: r.error }
       const res = r.data?.result || {}
       const verified = qa.arr(r.data?.items).filter((i) => i.status === 'verified')
       setSaved({ id: res.id, status, at: res.at || Date.now(), revision: res.revision, verified })
+      setAiText('')
+      setAiModel('')
       onSaved?.(r.data)
       return { saved: `Recorded: ${RESULT[status][1]}.` }
     })
@@ -90,8 +96,26 @@ export function ManualCard({ t, onSaved, executionId, go }) {
           Last recorded {stamp(t.last.at)}: {RESULT[t.last.status]?.[1] || t.last.status}.
         </p>
       )}
+      {t.class === 'ai_assisted' && (
+        <details className="cc-details" data-ai-paste>
+          <summary>Add the AI’s assessment (optional, labelled, never the result)</summary>
+          <div className="stack">
+            <label className="field" htmlFor={`${id}-ai`}>
+              <span>AI assessment</span>
+              <textarea id={`${id}-ai`} rows={3} maxLength={4000} value={aiText} onChange={(e) => setAiText(e.target.value)} placeholder="e.g. the factual check of the transcript: which statements matched the business records." />
+            </label>
+            <label className="field" htmlFor={`${id}-aim`}>
+              <span>
+                Model <em>optional</em>
+              </span>
+              <input id={`${id}-aim`} maxLength={80} value={aiModel} onChange={(e) => setAiModel(e.target.value)} placeholder="claude-opus-5-5" />
+            </label>
+            <p className="cc-status-line">It is saved as evidence marked “AI assessment”. Your own result below is what counts; subjective things like voice quality are yours to judge.</p>
+          </div>
+        </details>
+      )}
       <fieldset className="qa-group">
-        <legend>Result</legend>
+        <legend>{t.class === 'ai_assisted' ? 'Your result' : 'Result'}</legend>
         <div className="qa-options" role="radiogroup" aria-label={`Result for ${t.title}`}>
           {MANUAL_RESULTS.map((s) => (
             <label key={s} className={`qa-option qa-option--${s}`}>

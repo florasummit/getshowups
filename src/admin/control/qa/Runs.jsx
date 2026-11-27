@@ -4,18 +4,21 @@
 import { useEffect, useState } from 'react'
 import { Badge, Empty, Facts, Link, LoadError, Loading, PageHead, Section } from '../ui.jsx'
 import * as qa from '../qa-api.js'
-import { ENV, EXEC_STATUS, MAX_REPORT_BYTES, PRESETS, duration, isActive, previewReport, scopeText, sha, stamp, usd } from '../qa-lib.js'
+import { ENV, EXEC_STATUS, who, MANUAL_RESULTS, MAX_REPORT_BYTES, PRESETS, RESULT, SEVERITY, duration, isActive, previewReport, scopeText, sha, stamp, usd } from '../qa-lib.js'
 import { ConfirmButton, EnvLabel, ExecPill, ResultPill } from './parts.jsx'
-import { useLoad, usePlan } from './hooks.jsx'
+import { useAreas, useLoad, usePlan } from './hooks.jsx'
 
 const crumbs = [
   ['Control Center', {}],
   ['QA', { view: 'qa' }],
 ]
 const POLL_MS = 4000
+// Production checks that couldn't reach the live site ran in the server instead (qa-core: actual starts with this).
+const isInProcess = (r) => /^in-process, not through the edge/.test(r?.actual || '')
 const dayStart = (d) => (d ? new Date(`${d}T00:00:00`).getTime() : undefined) // the viewer's own midnight
+const dayEnd = (d) => (d ? new Date(`${d}T23:59:59.999`).getTime() : undefined)
 const progressText = (p) => (p ? `${p.done ?? 0} of ${p.total ?? '?'} done · ${p.pass ?? 0} passed · ${p.fail ?? 0} failed${p.blocked ? ` · ${p.blocked} blocked` : ''}${p.skipped ? ` · ${p.skipped} skipped` : ''}` : '')
-const REASON = { cancelled_by_admin: 'Cancelled by an admin.', ci_not_configured: 'Automated runs aren’t connected yet.', dispatch_failed: 'CI didn’t accept the run.', timed_out: 'No result arrived in time.', budget_entry: 'No QA budget for paid checks.' }
+const REASON = { workflow_missing: 'CI has no QA workflow yet (a setup step on the QA overview).', cancelled_by_admin: 'Cancelled by an admin.', ci_not_configured: 'Automated runs aren’t connected yet.', dispatch_failed: 'CI didn’t accept the run.', timed_out: 'No result arrived in time.', budget_entry: 'No QA budget for paid checks.' }
 const reasonOf = (r) => (r ? REASON[r] || r.replace(/_/g, ' ') : '')
 
 function ExecRow({ x, go }) {
@@ -71,7 +74,7 @@ function ImportReport({ go, onImported }) {
     const r = await qa.importReport(file.report)
     setBusy(false)
     if (!r.ok || !r.data?.run) return setErr(r.error || 'Nothing was recorded. Try again.')
-    setDone(r.data.run)
+    setDone({ ...r.data.run, executionId: r.data.executionId || null })
     setFile(null)
     onImported?.()
   }
@@ -153,14 +156,14 @@ function ImportReport({ go, onImported }) {
         </div>
       )}
       {done && (
-        <div className="cc-callout cc-callout--ok" role="status" data-import-done={done.id}>
+        <div className="cc-callout cc-callout--ok" role="status" data-import-done={done.executionId || done.id}>
           <strong>{done.duplicate ? 'Already imported: nothing new was recorded.' : `Recorded ${done.stored} ${done.stored === 1 ? 'result' : 'results'}.`}</strong>
           <span>
             {done.unmatched ? `${done.unmatched} didn’t match a test in the inventory and were left out. ` : ''}
             Recorded cost {usd((done.costMicros || 0) / 1e6, { free: false })}. Each result is on its test’s history.
           </span>
-          {done.id && (
-            <Link to={{ run: done.id }} go={go} className="cc-more">
+          {(done.executionId || done.id) && (
+            <Link to={done.executionId ? { view: 'qa', exec: done.executionId } : { run: done.id }} go={go} className="cc-more" data-import-link>
               Open the imported run →
             </Link>
           )}
@@ -171,26 +174,94 @@ function ImportReport({ go, onImported }) {
 }
 
 export function RunsView({ params, go }) {
-  const [d, reload] = useLoad(() => qa.listExecutions({ status: params.status, environment: params.env, preset: params.kind, commit: params.release, from: dayStart(params.since) }), [params.status, params.env, params.kind, params.release, params.since])
+  const f = { status: params.status, environment: params.env, preset: params.kind, commit: params.release, from: dayStart(params.since), to: dayEnd(params.until), area: params.area, test: params.tid, result: params.result, severity: params.sev }
+  const [d, reload] = useLoad(() => qa.listExecutions(f), [JSON.stringify(f)])
+  const areas = useAreas()
+  const [testText, setTestText] = useState(params.tid || '')
   const [legacy, reloadLegacy] = useLoad(qa.getLegacy, [])
   const [release, setRelease] = useState(params.release || '')
   const set = (k, v) => go({ ...params, view: 'qa', tab: 'runs', [k]: v || null }, { replace: true })
   const list = d && !d.error ? qa.arr(d.executions) : []
-  const earlier = legacy && !legacy.error ? qa.arr(legacy.automated) : []
-  const filtered = !!(params.status || params.env || params.kind || params.release || params.since)
-  return (
+  const filtered = Object.values(f).some((v) => v != null && v !== '')
+  // Browser-report run records (older ones included): they carry related incidents and per-test retest history.
+  const earlier = legacy && !legacy.error && !filtered ? qa.arr(legacy.automated) : []
+    return (
     <div className="cc-main" data-qa-runs>
-      <PageHead go={go} crumbs={[crumbs[0]]} title="Runs" lede="Every run, automated or manual: who started it, against which release, and what it found. Results by test, area or severity are under Tests and Defects." />
+      <PageHead go={go} crumbs={[crumbs[0]]} title="Runs" lede="Every run, automated, production, manual or imported: who started it, against which release, and what it found." />
       <ImportReport go={go} onImported={() => (reload(true), reloadLegacy(true))} />
       <form
         className="cc-toolbar qa-filters"
+        aria-label="Filter runs"
         onSubmit={(e) => {
           e.preventDefault()
-          set('release', release.trim())
+          go({ ...params, view: 'qa', tab: 'runs', release: release.trim() || null, tid: testText.trim() || null }, { replace: true })
         }}
       >
+        <label className="field qa-filter" htmlFor="qa-r-release">
+          <span>Release (commit)</span>
+          <input id="qa-r-release" value={release} placeholder="e.g. 8ea75f9" onChange={(e) => setRelease(e.target.value)} onBlur={() => release.trim() !== (params.release || '') && set('release', release.trim())} />
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-since">
+          <span>From</span>
+          <input id="qa-r-since" type="date" value={params.since || ''} onChange={(e) => set('since', e.target.value)} />
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-until">
+          <span>To</span>
+          <input id="qa-r-until" type="date" value={params.until || ''} onChange={(e) => set('until', e.target.value)} />
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-env">
+          <span>Environment</span>
+          <select id="qa-r-env" value={params.env || ''} onChange={(e) => set('env', e.target.value)}>
+            <option value="">Any</option>
+            {['ci', 'production', 'manual', 'local'].map((k) => (
+              <option key={k} value={k}>
+                {ENV[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <details className="qa-more-filters" open={!!(params.area || params.tid || params.result || params.sev || params.status || params.kind)}>
+          <summary>More filters: area, test, result, severity, status, kind</summary>
+          <div className="cc-toolbar">
+        <label className="field qa-filter" htmlFor="qa-r-area">
+          <span>Product area</span>
+          <select id="qa-r-area" value={params.area || ''} onChange={(e) => set('area', e.target.value)}>
+            <option value="">Any area</option>
+            {areas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-test">
+          <span>Test</span>
+          <input id="qa-r-test" value={testText} placeholder="Test id, e.g. unit:booking:…" onChange={(e) => setTestText(e.target.value)} onBlur={() => testText.trim() !== (params.tid || '') && set('tid', testText.trim())} />
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-result">
+          <span>Has a result</span>
+          <select id="qa-r-result" value={params.result || ''} onChange={(e) => set('result', e.target.value)}>
+            <option value="">Any</option>
+            {MANUAL_RESULTS.map((k) => (
+              <option key={k} value={k}>
+                {RESULT[k][1]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field qa-filter" htmlFor="qa-r-sev">
+          <span>Defect severity</span>
+          <select id="qa-r-sev" value={params.sev || ''} onChange={(e) => set('sev', e.target.value)}>
+            <option value="">Any</option>
+            {SEVERITY.map((k) => (
+              <option key={k} value={k}>
+                {k[0].toUpperCase() + k.slice(1)}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field qa-filter" htmlFor="qa-r-status">
-          <span>Status</span>
+          <span>Run status</span>
           <select id="qa-r-status" value={params.status || ''} onChange={(e) => set('status', e.target.value)}>
             <option value="">Any status</option>
             {Object.entries(EXEC_STATUS).map(([k, [, l]]) => (
@@ -200,36 +271,24 @@ export function RunsView({ params, go }) {
             ))}
           </select>
         </label>
-        <label className="field qa-filter" htmlFor="qa-r-env">
-          <span>Environment</span>
-          <select id="qa-r-env" value={params.env || ''} onChange={(e) => set('env', e.target.value)}>
-            <option value="">Any</option>
-            {['ci', 'production', 'manual'].map((k) => (
-              <option key={k} value={k}>
-                {ENV[k]}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="field qa-filter" htmlFor="qa-r-kind">
           <span>Kind of run</span>
           <select id="qa-r-kind" value={params.kind || ''} onChange={(e) => set('kind', e.target.value)}>
             <option value="">Any</option>
-            {PRESETS.map(([k, l]) => (
+            {[...PRESETS, ['report', 'CI or imported report']].map(([k, l]) => (
               <option key={k} value={k}>
                 {l}
               </option>
             ))}
           </select>
         </label>
-        <label className="field qa-filter" htmlFor="qa-r-release">
-          <span>Release (commit)</span>
-          <input id="qa-r-release" value={release} placeholder="e.g. 8ea75f9" onChange={(e) => setRelease(e.target.value)} onBlur={() => release.trim() !== (params.release || '') && set('release', release.trim())} />
-        </label>
-        <label className="field qa-filter" htmlFor="qa-r-since">
-          <span>Since</span>
-          <input id="qa-r-since" type="date" value={params.since || ''} onChange={(e) => set('since', e.target.value)} />
-        </label>
+          </div>
+        </details>
+        {filtered && (
+          <button type="button" className="link-btn" onClick={() => (setRelease(''), setTestText(''), go({ view: 'qa', tab: 'runs' }, { replace: true }))}>
+            Clear filters
+          </button>
+        )}
       </form>
       <Section title="Runs" id="qa-r-list">
         {d === undefined ? (
@@ -249,7 +308,7 @@ export function RunsView({ params, go }) {
         )}
       </Section>
       {earlier.length > 0 && (
-        <Section title="Earlier CI runs" id="qa-r-earlier" sub="Recorded before the QA Command Center: browser tests against stand-in providers.">
+        <Section title="Browser report records" id="qa-r-earlier" sub="The record each browser-test report keeps (including reports from before the QA Command Center), with related incidents and per-test retest history.">
           <ul className="cc-list">
             {earlier.map((r) => (
               <li key={r.id}>
@@ -321,9 +380,16 @@ export function ExecutionDetail({ id, go }) {
           <span>{reasonOf(x.reason)}</span>
         </div>
       )}
+      {p?.mode === 'in_process' && (
+        <div className="cc-callout cc-callout--warn" data-exec-in-process>
+          <strong>Checked in-process, not through the live site.</strong>
+          <span>The production address couldn’t be reached{p.modeReason ? ` (${p.modeReason})` : ''}, so these checks ran inside the server. They are recorded as unverified and don’t count as production verification.</span>
+        </div>
+      )}
       <div className="qa-progress-block">
         <p className="cc-status-line" data-exec-progress>
           {p ? progressText(p) : `${results.length} recorded`}
+          {x.unchanged?.tests ? ` · ${x.unchanged.tests} more passed again with identical code (recorded on the run, not as separate rows)` : ''}
         </p>
         {p?.total ? (
           <div className="qa-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={p.total} aria-valuenow={p.done ?? 0}>
@@ -334,7 +400,7 @@ export function ExecutionDetail({ id, go }) {
       <Facts
         items={[
           ['Requested', stamp(x.requestedAt)],
-          x.requestedBy && ['By', x.requestedBy],
+          x.requestedBy && ['By', who(x.requestedBy)],
           x.startedAt && ['Started', stamp(x.startedAt)],
           x.finishedAt && ['Finished', stamp(x.finishedAt)],
           ['Environment', ENV[x.environment] || x.environment],
@@ -342,16 +408,23 @@ export function ExecutionDetail({ id, go }) {
           x.deployment && ['Deployment', <span key="d" className="cc-code">{String(x.deployment).slice(0, 8)}</span>],
           ['Estimated', `${duration(x.estimate?.ms)} · ${usd(qa.usdOf(x.estimate))}`],
           x.costMicros != null && ['Recorded cost', usd(x.costMicros / 1e6, { free: false })],
+          x.reservedMicros > 0 && ['Reserved from the QA budget', usd(x.reservedMicros / 1e6, { free: false })],
+          x.updatedAt && ['Last update', stamp(x.updatedAt)],
           x.attempts > 1 && ['Attempts', String(x.attempts)],
         ]}
       />
       <div className="cc-actions">
+        {x.runId && (
+          <Link to={{ run: x.runId }} go={go} className="btn btn-quiet btn-sm" data-exec-record>
+            Report record and related incidents
+          </Link>
+        )}
         {x.runUrl && /^https:/.test(x.runUrl) && (
           <a className="btn btn-quiet btn-sm" href={x.runUrl} target="_blank" rel="noreferrer">
             Open in CI ↗
           </a>
         )}
-        {active && <ConfirmButton label="Cancel run" question="Cancel this run?" detail="Tests that already finished keep their results." confirmLabel="Cancel run" onConfirm={cancel} data-exec-cancel />}
+        {active && x.cancellable !== false && <ConfirmButton label="Cancel run" question="Cancel this run?" detail="Tests that already finished keep their results." confirmLabel="Cancel run" onConfirm={cancel} data-exec-cancel />}
         {!active && failed.length > 0 && (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => openPlan({ tests: failed.map((r) => r.testId) }, `Retest ${failed.length} failed ${failed.length === 1 ? 'test' : 'tests'}`)} data-retest-failed>
             Retest failed
@@ -383,6 +456,11 @@ export function ExecutionDetail({ id, go }) {
                   </span>
                   <span className="cc-item-meta">
                     <ResultPill s={r.status} />
+                    {isInProcess(r) && (
+                      <Badge tone="warn" plain>
+                        In-process, not through the live site
+                      </Badge>
+                    )}
                     {r.status === 'fail' && (
                       <Link to={{ view: 'qa', tab: 'defects', from: r.testId, result: r.id }} go={go} className="btn btn-quiet btn-sm" data-defect-from={r.id}>
                         Record defect
@@ -405,7 +483,7 @@ export function ExecutionDetail({ id, go }) {
                   <time>{stamp(e.at)}</time>
                   <span>
                     {EXEC_STATUS[e.to]?.[1] || e.to}
-                    {e.actor ? ` · ${String(e.actor).startsWith('system:') ? 'automatic' : e.actor}` : ''}
+                    {e.actor ? ` · ${who(e.actor)}` : ''}
                     {e.detail?.done != null ? ` · ${e.detail.done} done` : ''}
                   </span>
                 </li>

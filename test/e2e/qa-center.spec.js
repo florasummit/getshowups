@@ -78,8 +78,11 @@ test('verify production: plan → start → close the browser → reopen the sam
   await expect(exec.locator('[data-exec-progress]')).toContainText(/of \d+ done/)
   // Closing the browser loses nothing: the work runs on the server (cron), and a new browser sees the same run.
   await page.close()
-  const r = await request.post('/api/cron/run', { headers: { Authorization: `Bearer ${fixtures.E2E_CRON_SECRET}` } })
-  expect(r.status()).toBe(200)
+  // The cron works through ≤ 25 checks per call: call it a few times.
+  for (let k = 0; k < 4; k++) {
+    const r = await request.post('/api/cron/run', { headers: { Authorization: `Bearer ${fixtures.E2E_CRON_SECRET}` } })
+    expect(r.status()).toBe(200)
+  }
   const ctx2 = await browser.newContext()
   await useSession(ctx2, fixtures.E2E_ADMIN_SESSION_TOKEN)
   const p2 = await ctx2.newPage()
@@ -88,8 +91,22 @@ test('verify production: plan → start → close the browser → reopen the sam
   await expect(p2.locator('[data-exec-progress]')).toContainText(/[1-9]\d* of \d+ done|of \d+ done/)
   await expect(p2.locator('[data-exec-events] li').first()).toBeVisible()
   // The run is listed under Runs, filterable by environment.
-  await p2.goto('/admin/control?view=qa&tab=runs&env=production')
-  await expect(p2.locator(`[data-exec="${execUrl.match(/exec=([^&]+)/)[1]}"]`)).toBeVisible()
+  const execId = execUrl.match(/exec=([^&]+)/)[1]
+  // Finished, with every check recorded (through the local "live" site or, if unreachable, labelled in-process).
+  await expect(p2.locator('[data-qa-exec]')).toHaveAttribute('data-exec-status', /passed|failed|partial/)
+  const inProcess = await p2.locator('[data-exec-in-process]').count()
+  if (inProcess) await expect(p2.locator('[data-result="unverified"]').first()).toContainText('In-process, not through the live site')
+  // Runs: filterable by environment, release and date (all in the URL, kept on reload).
+  await p2.goto('/admin/control?view=qa&tab=runs')
+  await p2.getByLabel('Environment').selectOption('production')
+  await expect(p2).toHaveURL(/env=production/)
+  await expect(p2.locator(`[data-exec="${execId}"]`)).toBeVisible()
+  await p2.getByLabel('Environment').selectOption('ci')
+  await expect(p2.locator(`[data-exec="${execId}"]`)).toHaveCount(0)
+  await p2.goto('/admin/control?view=qa&tab=runs&env=production&result=pass')
+  await expect(p2.locator('.qa-more-filters')).toHaveAttribute('open', '')
+  await expect(p2.getByLabel('Has a result')).toHaveValue('pass')
+  await expect(p2.locator('[data-qa-exec-list], [data-qa-runs] .cc-empty').first()).toBeVisible()
   await ctx2.close()
 })
 
@@ -120,6 +137,8 @@ test('tests: hierarchy, filters, one test, one journey, several branches at once
   // 4. Several branches at once (not the whole platform): two areas → one selection → one plan.
   await areas.nth(0).locator('.qa-tree-check').first().check()
   await areas.nth(1).locator('.qa-tree-check').first().check()
+  // A ticked branch loads its tests first (disabled meanwhile), then selects exactly them.
+  for (const k of [0, 1]) await expect(areas.nth(k).locator('.qa-tree-check').first()).toBeEnabled()
   const bar = page.locator('[data-qa-selection]')
   await expect(bar).toBeVisible()
   const n = Number(await bar.getAttribute('data-qa-selection'))
@@ -139,11 +158,11 @@ test('tests: hierarchy, filters, one test, one journey, several branches at once
   await plan.getByRole('button', { name: 'Close' }).click()
 
   // Filters are server-side and in the URL (reload keeps them).
-  await page.getByLabel('Status').selectOption('untested')
+  await page.getByRole('combobox', { name: 'Status' }).selectOption('untested')
   await expect(page).toHaveURL(/status=untested/)
   await expect(page.locator('[data-qa-matching]')).toContainText('match')
   await page.reload()
-  await expect(page.getByLabel('Status')).toHaveValue('untested')
+  await expect(page.getByRole('combobox', { name: 'Status' })).toHaveValue('untested')
   for (const s of await page.locator('[data-test-id]').evaluateAll((els) => els.slice(0, 20).map((e) => e.getAttribute('data-status')))) expect(s).toBe('untested')
 
   // 3 + 9. One test's page: what it is, its status against the current release, its full history.
@@ -154,7 +173,7 @@ test('tests: hierarchy, filters, one test, one journey, several branches at once
   await expect(detail.getByRole('heading', { name: 'History' })).toBeVisible()
   if (await detail.locator('[data-run-test]').count()) {
     await detail.locator('[data-run-test]').click()
-    await expect(page.locator('[data-plan]').locator('[data-plan-scope]')).toHaveText('1 test')
+    await expect(page.locator('[data-plan]').locator('[data-plan-scope]')).toHaveAttribute('data-plan-scope', '1')
   }
   await page.goBack()
   await expect(page.locator('[data-qa-tests]')).toBeVisible()
@@ -204,11 +223,11 @@ test('manual check → defect with evidence → fixed → retest passes → veri
   await expect(item.locator('[data-prompt-text]')).toHaveValue(/\S/)
 
   // Fixed (a PR is linked): still NOT verified; "verified" is not offered by hand.
-  await item.getByLabel('Pull request').fill('204')
+  await item.getByRole('textbox', { name: 'Pull request' }).fill('204')
   await item.getByRole('button', { name: 'Save links' }).click()
   await expect(item.locator('[data-item-links]').getByRole('status')).toContainText('Links saved.')
-  await expect(item.getByLabel('Status').locator('option[value="verified"]:not([disabled])')).toHaveCount(0)
-  await item.getByLabel('Status').selectOption('fixed_pending_qa')
+  await expect(item.locator('#qa-it-status option[value="verified"]:not([disabled])')).toHaveCount(0)
+  await item.getByRole('combobox', { name: 'Status' }).selectOption('fixed_pending_qa')
   await item.getByRole('button', { name: 'Save status' }).click()
   await expect(item.locator('[data-item-status-form]').getByRole('status')).toContainText('Status: Fixed, awaiting retest.')
   const itemUrl = page.url()
@@ -251,7 +270,7 @@ test('backlog: "Note an idea" from any QA screen lands in the Inbox; status chan
   await row.click()
   const item = page.locator('[data-qa-item]')
   await expect(item).toContainText('Nothing starts automatically.')
-  await item.getByLabel('Status').selectOption('planned')
+  await item.getByRole('combobox', { name: 'Status' }).selectOption('planned')
   await item.getByRole('button', { name: 'Save status' }).click()
   await expect(item.locator('[data-item-status-form]').getByRole('status')).toContainText('Status: Planned.')
   await expect(page.locator('[data-item-history]')).toContainText('Planned')
@@ -284,6 +303,9 @@ test('import a report: preview what it will record (results, environment, releas
   const done = box.locator('[data-import-done]')
   await expect(done).toContainText(/Recorded \d+ results?\.|Already imported/)
   await expect(done).toContainText('Recorded cost')
+  // The import is a run of its own: the link opens it.
+  await done.locator('[data-import-link]').click()
+  await expect(page).toHaveURL(/exec=qx_|run=/)
 })
 
 test('QA at phone width: overview, tests, manual and a plan fit with no sideways scroll @mobile', async ({ page, context }) => {

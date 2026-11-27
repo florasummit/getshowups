@@ -48,7 +48,7 @@ export const getOverview = () => call(`${BASE}/overview`)
 // No filter → the tree stops at features (counts + testCount); area/q/status/class/detail → tests included.
 export const getInventory = ({ area, q: text, status, cls, detail } = {}) => call(`${BASE}/inventory${q({ area, q: text, status, class: cls, detail: detail ? 'tests' : undefined })}`)
 export const getTest = (id) => call(`${BASE}/tests/${seg(id)}`)
-export const listExecutions = ({ environment, status, preset, from, to, commit, before } = {}) => call(`${BASE}/executions${q({ environment, status, preset, from, to, commit, before, limit: 50 })}`)
+export const listExecutions = ({ environment, status, preset, from, to, commit, area, test, result, severity, before } = {}) => call(`${BASE}/executions${q({ environment, status, preset, from, to, commit, area, test, result, severity, before, limit: 50 })}`)
 export const getExecution = (id) => call(`${BASE}/executions/${seg(id)}`)
 export const listItems = ({ group, kind, status, area, severity, q: text } = {}) => call(`${BASE}/items${q({ group, kind, status, area, severity, q: text, limit: 100 })}`)
 export const getItem = (id) => call(`${BASE}/items/${seg(id)}`)
