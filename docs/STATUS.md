@@ -2,7 +2,24 @@
 
 _Update at the end of every task. Newest first._
 
-## Business phone lines (2026-11-27, branch feat/phone-lines; NOT released, needs founder approval)
+## Spending gaps (2026-11-27, PR #201, live; founder approved at cc6fe2e)
+**Release record:** main 0e387a2, deployment 568f1148-c59d-4f28-b971-eefd86d1625a, rollback 05abb6e8 (main 7b3df87). No
+migration (120 tables). Backup ~/getshowups-backups/prod-20261127T181633Z-pre-201.sql (integrity ok, 120 tables).
+scripts/release.sh: HEALTHY (0 exceptions, records and secret names unchanged).
+- maxRetries 0 on every paid Anthropic client. paidCall() and the receptionist loop make at most 2 attempts, each
+  reserved. Lost or timed-out attempts keep their worst case; refusals settle to 0.
+- Retell ends every call at 15 minutes (agent_override.agent.max_call_duration_ms, provider-enforced). OpenAI client
+  secrets last 60 s. The chat page ends OpenAI and ElevenLabs calls at 15 minutes.
+- Cron fetches provider charge records hourly. Admin shows verified next to estimated cost, with a warning above 25% drift.
+- Verified in production (read-only): live build, admin AI routes refuse signed-out (401) and cross-site (403) requests,
+  enrollment closed, phone off. Retry accounting, concurrency and the 15-minute cap are covered by tests; there is no live
+  model or voice call, by design. docs/AI_SPENDING.md lists the remaining exposure and the provider-side backstops.
+
+## Business phone lines (2026-11-27, PR #192, live; founder approved; every phone switch off)
+**Release record:** main 73589dc, deployment 3fd98ed8-2798-4cf5-94ef-1c2d1d4637f2, rollback c082cc2b. Migration 0049
+applied alone (109 tables then). Backup ~/getshowups-backups/prod-20261127T032156Z-pre-0049.sql. Time Travel bookmark
+before 0049: 0000152b-00000008-00005130-989fd6cf2b19c46f100f9de6fbce0ada. /api/dashboard/phone answers 404 (switch off);
+the webhook refuses unsigned calls (403).
 Twilio numbers in each business's own subaccount; ring verified team phones (press-1 screening), then the AI receptionist
 (Retell custom telephony over SIP, same engine) or a callback task in Needs attention. Call records with caller (or hidden),
 outcome, length, where the number is shown, a person only on evidence. Settings → Phone line; Receptionist tile + Setup
@@ -10,12 +27,15 @@ check + owner assistant (list_calls) read the same state. docs/TELEPHONE.md (arc
 - **Verified (simulated only):** 27 unit tests (test/phone.test.js: signatures, tenant isolation, idempotency, screening,
   fallbacks, AI registration, loops, limits, toll-fraud refusals, verification, purchase gates, test businesses, assistant,
   retention, deletion) + test/e2e/phone.spec.js (Settings card). Nothing ran against real Twilio or Retell.
-- **Migration 0049** (phone_lines, phone_settings, phone_destinations, phone_calls; additive). Number order: 0046–0048 are
-  claimed by the commercial-enrollment work (Claude 2); whichever releases first applies only its own file.
+- **Migration 0049** (phone_lines, phone_settings, phone_destinations, phone_calls; additive), applied.
 - **Off until approved:** PHONE_ENABLED (privacy policy must name call records first), PHONE_NUMBER_PURCHASE (paid numbers).
-- **Next:** founder decisions (provider, privacy wording, usage model), then release, then the first live PoolThru line.
+- **Next:** founder decisions (privacy wording, usage model), then the first live PoolThru line.
 
-## AI spending guard (2026-11-27, branch fix/ai-budget; NOT released, needs founder approval)
+## AI spending guard (2026-11-27, PR #197, live; founder approved)
+**Release record:** main cb1a3c7, deployment c082cc2b-a67e-4ffe-95bc-d2606c72078f, rollback 82cae9f6. Migration 0050
+applied alone. Backup ~/getshowups-backups/prod-20261127T025016Z-pre-0050.sql. Time Travel bookmark before 0050:
+00001520-00000000-00005130-2ebd57c1e899686db1be81b4fb637a3d. Settings table empty, so the defaults apply (OpenAI and
+ElevenLabs voice 30 min each). Homepage chat panel #195 released before it (main 5fea6a0, deployment 82cae9f6).
 One reservation layer (server/ai-budget.js) before every GetShowUps-paid model call. Founder defaults (pre-revenue):
 platform $5, public chat + voice $3, business $1 per UTC day, Retell 60 min/day platform-wide (open calls counted at
 their full 15 min); stricter endpoint limits kept. Atomic, fails closed, settled to the reported cost. Limits, warnings
