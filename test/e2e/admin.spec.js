@@ -149,8 +149,9 @@ test('admin sees customers, metrics, and customer detail without lead contact da
       return box.y + box.height + (await page.evaluate(() => window.scrollY))
     }
     expect(await bottom(page.getByRole('region', { name: 'Metrics' }).locator('.stats')), 'metrics on the first screen').toBeLessThanOrEqual(900)
-    const attention = page.getByRole('heading', { name: 'Needs attention' })
-    if (await attention.count()) expect(await bottom(attention), '"Needs attention" within the first 900 px').toBeLessThanOrEqual(900)
+    // What needs attention comes first as "This week" (server/admin-assist/brief.js: prioritized, each item linked); the
+    // full per-business "Needs attention" list follows the metrics.
+    expect(await bottom(page.getByRole('heading', { name: 'This week' })), '"This week" within the first 900 px').toBeLessThanOrEqual(900)
     await expect(page.locator('details[data-sales-setup]')).not.toHaveAttribute('open', '')
     await expect(page.locator('details[data-create-business]')).not.toHaveAttribute('open', '')
   }
