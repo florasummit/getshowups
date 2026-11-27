@@ -1090,6 +1090,7 @@ export const TESTS = [
 ["unit:security-headers:df8de4e0fe","dashboard and admin can’t be framed by another site; HSTS everywhere on our host","test/security-headers.test.js"],
 ["unit:security-headers:66dc44cd73","an existing Content-Security-Policy is never replaced; status and body are kept; WebSocket upgrades pass through untouched","test/security-headers.test.js"],
 ["unit:security-headers:3588a24831","the QA build fingerprints (/qa-hashes.json) are never served publicly; the server reads them through env.ASSETS","test/security-headers.test.js"],
+["unit:security-headers:2dae2ef3c0","the QA fingerprints are refused under every spelling the asset server would serve (encoded, case, slashes)","test/security-headers.test.js"],
 ["unit:sessions-purge:6c018cfc65","expired sessions are purged narrowly","test/sessions-purge.test.js"],
 ["unit:setup-rules:f1a1d8e8c3","a trade that goes to the customer preselects \"At the customer’s home or site\"; others leave \"At my location\"","test/setup-rules.test.js"],
 ["unit:setup-rules:7c7d1fb33f","Back from step N and Continue walks forward through the same steps, never skipping to the first unfinished one","test/setup-rules.test.js"],
