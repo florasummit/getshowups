@@ -11,7 +11,8 @@ import { ADMIN_INSTRUCTIONS, PAGES } from './instructions.js'
 import { adminContext, namesFor, runAdminTool, TOOLS } from './tools.js'
 import { SALES_BUSINESS } from './data.js'
 
-// tokens: output per call; "what needs me" answers get briefTokens (still reserved in full before each call on Claude).
+// tokens: output per call; "what needs me" and "is anything broken" answers get briefTokens (reserved in full before each
+// call on Claude). A retry after a held draft always gets its full callMs (see the loop).
 export const BOUNDS = { rounds: 4, calls: 7, callMs: 25_000, totalMs: 45_000, tokens: 1200, briefTokens: 1600, answer: 1800, resultChars: 6000 }
 const SPECS = TOOLS.map(({ name, description, parameters }) => ({ name, description, parameters }))
 const REF_IN = /\[([BEPQ]\d{1,3})\]/g
@@ -40,6 +41,11 @@ const NOT_DONE = /\b(not|never|no|nothing|none|once|if|until|when|after you|read
 const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups|function)\b|\b(weekly_brief|business_health|platform_numbers|system_health|ai_spending|growth_activity|prepare_\w+|no_lookup_needed)\b|\bTHIS WEEK\b/
 // "What needs me": every listed item carries its tier, one brief item per line, and a stated urgent count matches.
 export const BRIEF_Q = /\b(what needs (me|my attention|attention)|this week|anything urgent|what('s| is) urgent|what should i (do|work on|look at)|my to-?do)\b/i
+// "Is anything broken / what's wrong / any problems": a list too, with the same room and the same shorter-list retry
+// (tiers stay a "what needs me" rule only).
+export const BROKEN_Q = /\b(anything (broken|wrong|failing|down|off)|what('s| is) (broken|wrong|failing|down)|any (problems?|issues?|incidents?|errors?|failures?)|(is )?(everything|it all) (ok|okay|working|fine|running))\b/i
+export const CUT_BROKEN = 'It was cut off: list fewer items. Give every critical or high item and at most 3 others, one line each under 30 words, then one closing line: "N more in the Control Center."'
+export const listQuestion = (q) => BRIEF_Q.test(q) || BROKEN_Q.test(q)
 export const CUT_BRIEF = 'It was cut off: list fewer items. Give every urgent item and at most the 3 most important others, one line each under 30 words, then one closing line: "N more on Overview\'s This week list."'
 const TIER = /^\s*[-•]\s*(urgent|important|fyi)\s*[:—–-]/i
 const COUNT_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
@@ -190,13 +196,15 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
   const base = () => ({ refs: c.book(), proposals: c.proposals, attachments: c.attachments || [], sources: c.sources, evidence: evidence.slice(0, 6), lookups, tools, usage, refusals, costMicros: Math.round(cost), ms: Date.now() - started })
   for (let round = 0; round <= BOUNDS.rounds; round++) {
     const left = BOUNDS.totalMs - (Date.now() - started)
-    if (left < 1500) break
+    // A rewrite asked for by a check (cut off, too many lines, …) always gets its full callMs, past totalMs if need be:
+    // never a retry squeezed into the last seconds and then shown as records.
+    if (left < 1500 && !retries) break
     const last = round >= BOUNDS.rounds - 1 || calls >= BOUNDS.calls
     // On Claude every call reserves budget first (server/ai-budget.js): its own entry, booked on the GetShowUps business.
-    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BRIEF_Q.test(req.question) ? BOUNDS.briefTokens : BOUNDS.tokens, entry: 'admin_assistant', customerId: SALES_BUSINESS }
+    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: listQuestion(req.question) ? BOUNDS.briefTokens : BOUNDS.tokens, entry: 'admin_assistant', customerId: SALES_BUSINESS }
     let reply
     try {
-      reply = await chat(env, model, req1, Math.min(BOUNDS.callMs, left)).catch(async (err) => {
+      reply = await chat(env, model, req1, retries ? BOUNDS.callMs : Math.min(BOUNDS.callMs, left)).catch(async (err) => {
         if (again || model.provider !== 'workers' || !['busy', 'unavailable'].includes(providerReason(err))) throw err
         again = true
         await new Promise((r) => setTimeout(r, 300))
@@ -237,7 +245,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
     const names = [...c.refs.values()].map((r) => r.name).filter(Boolean)
-    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : 'It was cut off. Shorter, and finish the sentence.') : restated ? restated : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, items: new Set(results.flatMap((x) => [...JSON.stringify(x.result ?? null).matchAll(/"ref":"([BEPQ]\d{1,3})"/g)].map((m) => m[1]))).size, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
+    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : BROKEN_Q.test(req.question) ? CUT_BROKEN : 'It was cut off. Shorter, and finish the sentence.') : restated ? restated : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, items: new Set(results.flatMap((x) => [...JSON.stringify(x.result ?? null).matchAll(/"ref":"([BEPQ]\d{1,3})"/g)].map((m) => m[1]))).size, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)

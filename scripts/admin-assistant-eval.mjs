@@ -299,7 +299,10 @@ async function claudeTarget(capUsd) {
       create: async (params) => {
         // Before each call: the worst case of this call must fit under the cap (input ≈ chars / 3.5, all output tokens).
         const worst = (JSON.stringify(params).length / 3.5) * CAP_PRICE.write + params.max_tokens * CAP_PRICE.out
-        if (spent.micros + worst > capMicros) throw Object.assign(new Error('eval_cap_reached'), { status: 402 })
+        if (spent.micros + worst > capMicros) {
+          spent.capHit = true
+          throw Object.assign(new Error('eval_cap_reached'), { status: 402 })
+        }
         const res = await real.messages.create(params)
         const u = res.usage || {}
         spent.calls++
@@ -373,14 +376,16 @@ async function runOnce(T, chosen, k) {
       return { results, brief: meta.brief, stopped: true }
     }
     T.reset()
+    if (T.spent) T.spent.capHit = false
     const spentBefore = T.spent ? T.spent.micros : 0
     const res = await T.post({ question: s.q, history, refs })
     const body = res.body
     const r = { run: k, id: s.id, q: s.q, history, status: res.status, body, ms: Date.now() - t0, costMicros: T.spent ? Math.ceil(T.spent.micros - spentBefore) : (body?.usage?.costMicros ?? 0) }
-    r.checks = checks(s, r, briefText, meta.brief)
+    // The eval's own cost cap refused a call mid-scenario: the harness stopped it (shown as such), not an assistant answer.
+    r.checks = T.spent?.capHit ? [{ cat: 'facts', why: 'stopped by the eval cost cap mid-scenario (not an assistant failure; rerun with a higher --cap-usd)' }] : checks(s, r, briefText, meta.brief)
     r.fail = r.checks.map((x) => `${x.cat}: ${x.why}`)
     r.pass = r.fail.length === 0
-    r.route = ['not_here', 'private'].includes(body.kind) ? 'fixed (no model)' : body.usage ? 'model' : body.kind === 'records' ? 'records fallback' : 'other'
+    r.route = T.spent?.capHit ? 'eval cost cap' : ['not_here', 'private'].includes(body.kind) ? 'fixed (no model)' : body.usage ? 'model' : body.kind === 'records' ? 'records fallback' : 'other'
     done.set(s.id, r)
     results.push(r)
     console.log(`${k ? `[run ${k}] ` : ''}${r.pass ? 'PASS' : 'FAIL'} ${s.id.padEnd(16)} ${String(r.ms).padStart(6)} ms  ${r.route}${r.pass ? '' : `  ← ${r.fail.join('; ')}`}`)

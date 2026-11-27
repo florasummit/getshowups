@@ -70,6 +70,7 @@ export const TESTS = [
 ["unit:admin-assistant-qa:9868a5a80f","an item’s title is never filled in twice in one sentence; the grader fails a repeated title","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant-qa:e0f6dbc3f1","an item is never restated after its reference: such a sentence goes back to the model; the fill never eats words or punctuation","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant-qa:2e78ace97d","a backlog summary keeps its own bullets (no tiers, even with “urgent”), may list every item, and a restatement retry keeps the rest","test/admin-assistant-qa.test.js"],
+["unit:admin-assistant-qa:7b016ba02c","“is anything broken?” cut off once: 1,600-token room, the shorter-list retry, then accepted","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant:ced02777d1","only platform admins reach the admin assistant: owner, sales rep, signed out and cross-origin are refused","test/admin-assistant.test.js"],
 ["unit:admin-assistant:b152f40d80","the owner assistant never gains platform tools, and the admin assistant never runs owner tools","test/admin-assistant.test.js"],
 ["unit:admin-assistant:11a89f3703","every lookup names its source and period and never returns contact details or customer text","test/admin-assistant.test.js"],

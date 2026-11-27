@@ -289,3 +289,16 @@ test('a backlog summary keeps its own bullets (no tiers, even with “urgent”)
   // The restatement retry asks to keep every other line.
   assert.match(restatedTitle('[Q1], the booking page shows no open times after a calendar reconnect', { Q1: 'Booking page shows no open times after a calendar reconnect' }), /Keep every other line as it is\.$/)
 })
+
+test('“is anything broken?” cut off once: 1,600-token room, the shorter-list retry, then accepted', async () => {
+  const cut = { choices: [{ message: { content: '- Coastal Electric calendar\n- Email confirmations\n- Homepage' }, finish_reason: 'length' }], usage: { prompt_tokens: 3000, completion_tokens: 1600 } }
+  script.push(
+    (b) => (assert.equal(b.max_tokens, 1600), callTool('system_health')()),
+    (b) => (assert.equal(b.max_tokens, 1600), cut),
+    () => say('Two things are failing: the homepage production check and the settings browser test. Both are in the Control Center.'),
+  )
+  const r = await ask({ question: 'Is anything broken?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.match(calls[2].messages.at(-1).content, /list fewer items\. Give every critical or high item and at most 3 others, one line each under 30 words, then one closing line: "N more in the Control Center\."/)
+  assert.match(r.body.answer, /^Two things are failing/)
+})
