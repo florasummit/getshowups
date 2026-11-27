@@ -64,7 +64,7 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
   perBusiness(out, 'urgent', 'ads_running_on_hold', has('ads_running_on_hold'), 'Ads still running while on hold', { next: 'Open the business and check the ads safety stop now.' })
   perBusiness(out, 'urgent', 'deletion_stuck', has('deletion_stuck'), 'Account deletion stuck', { next: 'Open the deletion record on the business.' })
   const cal = has('calendar_disconnected')
-  perBusiness(out, 'urgent', 'calendar_disconnected', cal.filter(serving), 'Calendar disconnected on a serving business', { detail: () => "Customers can't see open times until the owner reconnects Google Calendar.", next: 'Ask the owner to reconnect Google Calendar (Dashboard → Settings).' })
+  perBusiness(out, 'urgent', 'calendar_disconnected', cal.filter(serving), 'Calendar disconnected', { detail: () => "Customers can't see open times until the owner reconnects Google Calendar.", next: 'Ask the owner to reconnect Google Calendar (Dashboard → Settings).' })
   const real = (incidents || []).filter((i) => !i.test)
   const names = new Map((rows0 || []).map((r) => [r.id, r.name]))
   for (const i of real.filter((x) => ['critical', 'high'].includes(x.severity)).slice(0, 5)) {

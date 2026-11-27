@@ -285,6 +285,20 @@ test('“what needs me”: every listed item is tier-labelled, one per line, and
   assert.equal(tierProblem('- FYI: one\n- Important: two', 'what needs me'), null)
 })
 
+test('“what needs me” cut off: the retry asks for fewer items (urgent + top 3 important + one count line), then it is accepted', async () => {
+  const cut = { choices: [{ message: { content: '- Urgent: one\n- Urgent: two\n- Important: three' }, finish_reason: 'length' }], usage: { prompt_tokens: 3000, completion_tokens: 1600 } }
+  script.push(
+    (b) => (assert.equal(b.max_tokens, 1600), cut),
+    () => say('- Urgent: [B2]’s calendar is disconnected; ask the owner to reconnect it (Overview).\n- Important: Oak Tree Cleaning’s payment link is unpaid (Sales).'),
+  )
+  const r = await ask('admin', { question: 'What needs me this week?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.match(calls[1].messages.at(-1).content, /list fewer items\. Give every urgent item and at most the 3 most important others, one line each under 30 words, then one closing line/)
+  // The brief in front of the model names the business apart from the issue (no "…: Coastal Electric" titles).
+  assert.match(calls[0].messages[0].content, /- urgent: \[B\d+\] — Calendar disconnected\./)
+  assert.doesNotMatch(calls[0].messages[0].content, /serving business/)
+})
+
 test('the grader reads tiers from the labels: unlabelled fails, Urgent test-mode billing fails, a mismatched count fails', () => {
   const week = SCENARIOS.find((x) => x.id === 'week')
   const g = (answer) => grade(week, { status: 200, body: { kind: 'answer', answer, evidence: [], proposals: [] } }, '')

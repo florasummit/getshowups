@@ -329,8 +329,15 @@ async function brief(c) {
     period: 'as of now',
     counts: b.counts,
     total_items: b.items.length,
-    items_after_the_first_5: Math.max(0, b.items.length - 5),
-    items: b.items.slice(0, 25).map((x) => ({ level: x.level, what: swap(x.title, x), detail: swap(x.detail, x), next: x.next, ...(x.prepare ? { can_prepare_if_asked: true } : {}), page: PAGE_OF(x.href) })),
+    // The closing line's N when an answer lists every urgent item and the 3 most important others.
+    more_after_urgent_and_top_3_important: Math.max(0, b.items.length - b.counts.urgent - Math.min(3, b.counts.important)),
+    // `about` (the reference) and `issue` (the title without the name) apart, so an answer reads "[B2]'s calendar is
+    // disconnected" rather than repeating the title with the name glued on.
+    items: b.items.slice(0, 25).map((x) => {
+      const one = x.enrollment || x.business
+      const ref = one ? c.ref(one === x.enrollment ? 'E' : 'B', one.id, one.name) : null
+      return { level: x.level, ...(ref ? { about: `[${ref}]` } : {}), issue: one ? x.title.replace(`: ${one.name}`, '').replace(` (${one.name})`, '') : swap(x.title, x), detail: swap(x.detail, x), next: x.next, ...(x.prepare ? { can_prepare_if_asked: true } : {}), page: PAGE_OF(x.href) }
+    }),
     ...(b.unreadable.length ? { could_not_be_read: b.unreadable } : {}),
   }
 }

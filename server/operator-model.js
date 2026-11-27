@@ -79,7 +79,8 @@ export function readWorkers(res) {
   })
   const text = m?.content ?? (typeof res?.response === 'string' ? res.response : '')
   const u = res?.usage || {}
-  return { calls, text: String(text || '').replace(/<think>[^]*?<\/think>/g, '').trim(), usage: { in: u.prompt_tokens || 0, out: u.completion_tokens || 0, read: 0, write: 0 } }
+  // Cut at the output limit (OpenAI-style finish_reason): the caller asks again for a shorter answer, as with Claude.
+  return { cut: res?.choices?.[0]?.finish_reason === 'length', calls, text: String(text || '').replace(/<think>[^]*?<\/think>/g, '').trim(), usage: { in: u.prompt_tokens || 0, out: u.completion_tokens || 0, read: 0, write: 0 } }
 }
 
 async function workers(env, m, { system, messages, tools, mustLook, maxTokens }, ms) {
