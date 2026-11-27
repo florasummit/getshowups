@@ -2,7 +2,7 @@
 // HTTPS is required by browsers (HSTS), and a WebSocket upgrade (voice receptionist) passes through untouched.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { onRequest, withAppHeaders, FRAME_PROTECTED } from '../functions/_middleware.js'
+import { onRequest, withAppHeaders, FRAME_PROTECTED, isQaHashesPath } from '../functions/_middleware.js'
 
 const env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', GOOGLE_REDIRECT_URI: 'https://getshowups.com/api/google/oauth/callback', TOKEN_ENCRYPTION_KEY: 'k'.repeat(44), ADMIN_API_TOKEN: 'a'.repeat(40), ONBOARDING_DB: {}, GOOGLE_TOKENS: {} }
 const run = async (path, res = new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } })) =>
@@ -41,4 +41,13 @@ test('the QA build fingerprints (/qa-hashes.json) are never served publicly; the
     assert.equal(res.headers.get('cache-control'), 'no-store')
     assert.doesNotMatch(await res.text(), /hashes/)
   }
+})
+
+test('the QA fingerprints are refused under every spelling the asset server would serve (encoded, case, slashes)', async () => {
+  for (const p of ['/qa-hashes.json', '/qa%2Dhashes.json', '/qa%2dhashes.json', '/%71a-hashes.json', '/qa%252Dhashes.json', '/QA-HASHES.JSON', '/qa-hashes.json/', '//qa-hashes.json', '/./qa-hashes.json', '/qa%2Dhashes%2Ejson']) {
+    assert.equal(isQaHashesPath(p), true, p)
+    const res = await onRequest({ request: new Request(`https://getshowups.com${p}`), env: {}, next: async () => new Response('{"hashes":{}}') })
+    assert.equal(res.status, 404, p)
+  }
+  for (const p of ['/', '/build.json', '/qa', '/admin/control', '/assets/qa-hashes.js', '/qa-hashes.json.html']) assert.equal(isQaHashesPath(p), false, p)
 })

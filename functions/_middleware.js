@@ -59,12 +59,26 @@ export async function withAppHeaders(res, url) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }
 
+// The asset server decodes percent-escapes (/qa%2Dhashes.json is the same file) and its file names aren't the only
+// spelling that reaches it, so compare the decoded, lower-cased path; an undecodable path is refused too.
+export function isQaHashesPath(pathname) {
+  let p = String(pathname)
+  for (let i = 0; i < 3 && /%[0-9a-f]{2}/i.test(p); i++) {
+    try {
+      p = decodeURIComponent(p)
+    } catch {
+      return /qa.?hashes/i.test(p)
+    }
+  }
+  return /^\/+qa-hashes\.json\/*$/i.test(p.replace(/\/\.\//g, '/'))
+}
+
 export async function onRequest(context) {
   const { request, env, next } = context
   const url = new URL(request.url)
   // Build metadata for the QA Command Center only: the server reads it through env.ASSETS (which never passes through
   // this middleware); it is never served to the public (founder decision 2026-11-27).
-  if (url.pathname === '/qa-hashes.json') return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } })
+  if (isQaHashesPath(url.pathname)) return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } })
   // A test session (server/acceptance.js) reaches its short list and nothing else, on our own address only.
   if (url.pathname.startsWith('/api/') && carriesTestSession(request) && !/^\/api\/acceptance\/(pair|session)$/.test(url.pathname)) return withAppHeaders(missingConfig(env).length || !isOwnHost(url.hostname, env) ? new Response(null, { status: 403 }) : await dispatch(request, env, ROUTES), url)
   // Preview deployments have no bindings: nothing to route.
