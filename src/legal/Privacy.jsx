@@ -26,6 +26,11 @@ export default function Privacy() {
           to sign you in and to connect you to your business.
         </li>
         <li>
+          <strong>Business owners who sign in by email:</strong> your email address, used only to send you a sign-in code
+          and link and to connect you to your business. The code and link work once, expire after 15 minutes and are
+          stored only in a form that can’t be turned back into them.
+        </li>
+        <li>
           <strong>Google Calendar, when a business connects it:</strong> the connected Google account’s email address and
           account identifier, and permission to see when the calendar is busy (free/busy only, not event details) and to
           create and manage the appointment events GetShowUps adds to calendars the business owns.
@@ -81,8 +86,8 @@ export default function Privacy() {
 
       <h2>Cookies and browser storage</h2>
       <p>
-        We use essential, secure cookies to keep you signed in and to protect the Google sign-in and calendar connection
-        steps. Your browser also stores the campaign source of your first visit and a pending invitation link. We do not
+        We use essential, secure cookies to keep you signed in and to protect the Google sign-in, email sign-in and calendar
+        connection steps. Your browser also stores the campaign source of your first visit and a pending invitation link. We do not
         use advertising or cross-site tracking cookies.
       </p>
 
