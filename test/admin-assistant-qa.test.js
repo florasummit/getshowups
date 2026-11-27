@@ -10,8 +10,8 @@ import { sha256Hex } from '../server/google-oauth.js'
 import * as assistApi from '../functions/api/platform/assist.js'
 import * as approveApi from '../functions/api/platform/assist-approve.js'
 import { adminContext, runAdminTool } from '../server/admin-assist/tools.js'
-import { qaAsk } from '../server/admin-assist/guard.js'
-import { readinessProblem } from '../server/admin-assist/operator.js'
+import { consequentialAsk, ideaCapture, ownerDataAsk, qaAsk } from '../server/admin-assist/guard.js'
+import { fillRefs, readinessProblem } from '../server/admin-assist/operator.js'
 import { similarity, suggestPriority } from '../server/admin-assist/qa.js'
 import { categoriesOf, checks, QA_SCENARIOS, REGRESSION, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
 import { ADMIN, fakeTokens, QA_TESTS, seedAdminFixture } from './fixtures/admin-assistant-data.js'
@@ -197,4 +197,36 @@ test('regression suite: every mandate QA question is a scenario in the suite, wi
   const failed = SCENARIOS.find((x) => x.id === 'qa_failed_after')
   assert.ok(checks(failed, { status: 200, body: { kind: 'answer', answer: 'The settings test failed.', evidence: [], proposals: [] } }, '').some((x) => x.cat === 'completeness' && /homepage/.test(x.why)))
   assert.equal(QA_TESTS.failedAfter.length, 2)
+})
+
+test('capturing an idea is never an owner-data request; real data requests stay refused', async () => {
+  const ideas = ['Add to the backlog: the weekly owner email should show bookings per service', 'Idea: show owners their customers’ names in the weekly email', 'We should let owners export their customer list', 'Note an idea: owner email digest with bookings', 'Feature request: owners want transcripts of calls', 'Log this: owner phone numbers should be validated']
+  for (const q of ideas) {
+    assert.ok(ideaCapture(q), q)
+    assert.equal(ownerDataAsk(q), null, q)
+    assert.equal(consequentialAsk(q), null, q)
+  }
+  for (const q of ['Show me Blue Lagoon’s owner email', 'What’s the phone number of the owner of Blue Lagoon Pools?', 'Show me the chat transcripts for Coastal Electric', 'What did the customer say in their message?']) {
+    assert.equal(ideaCapture(q), false, q)
+    assert.equal(ownerDataAsk(q)?.kind, 'private', q)
+  }
+  assert.equal(ideaCapture('What bookings did Blue Lagoon’s customers make?'), false)
+  // The exact sentence reaches the model, which prepares the Inbox entry.
+  script.push(callTool('prepare_backlog_item', { title: 'The weekly owner email should show bookings per service', kind: 'feature', area: 'messaging' }), () => say('It’s ready to approve: a feature idea in Inbox.'))
+  const r = await ask({ question: 'Add to the backlog: the weekly owner email should show bookings per service' })
+  assert.equal(r.body.kind, 'prepared', JSON.stringify(r.body))
+  assert.equal(r.body.proposals[0].type, 'qa_item')
+  assert.equal(calls.length, 2)
+})
+
+test('an item’s title is never filled in twice in one sentence; the grader fails a repeated title', () => {
+  const f = { Q3: 'Let owners text back new inquiries from the dashboard', B1: 'Blue Lagoon Pools' }
+  assert.equal(fillRefs('[Q3], “Let owners text back new inquiries from the dashboard,” is sitting in Inbox.', f), 'Let owners text back new inquiries from the dashboard is sitting in Inbox.')
+  assert.equal(fillRefs('“Let owners text back new inquiries from the dashboard” [Q3] is in Inbox.', f), '“Let owners text back new inquiries from the dashboard” is in Inbox.')
+  assert.equal(fillRefs('[Q3] is in Inbox (“Let owners text back new inquiries from the dashboard”).', f), 'Let owners text back new inquiries from the dashboard is in Inbox.')
+  assert.equal(fillRefs('[B1] is fine.\n- Urgent: [B1] calendar.', f), 'Blue Lagoon Pools is fine.\n- Urgent: Blue Lagoon Pools calendar.')
+  const dup = SCENARIOS.find((x) => x.id === 'qa_dup_idea')
+  const g = (answer) => checks(dup, { status: 200, body: { kind: 'answer', answer, evidence: [], proposals: [] } }, '')
+  assert.ok(g('Yes: Let owners text back new inquiries from the dashboard, "Let owners text back new inquiries from the dashboard," is sitting in Inbox, similar to the SMS idea.').some((x) => x.cat === 'facts' && /twice in one sentence/.test(x.why)))
+  assert.deepEqual(g('Yes, it’s already recorded: Let owners text back new inquiries from the dashboard is in Inbox, and a similar SMS reply idea is under review.'), [])
 })

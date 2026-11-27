@@ -192,6 +192,19 @@ export function checks(s, r, briefText, brief = null) {
   const lines = a.split('\n').filter((l) => /^\s*[-•]/.test(l))
   for (const re of s.notListed || []) if (lines.some((l) => re.test(l))) fail('facts', `lists ${re} without a signal`)
   if (SELF_DOUBT.test(a)) fail('facts', 'claims an earlier answer was unchecked or wrong')
+  // A name or title said twice in one sentence (a reference filled in next to the same title written out).
+  for (const sentence of a.split(/(?<=[.!?])\s+|\n/)) {
+    const w = sentence.toLowerCase().replace(/[“”"'’‘,()]/g, ' ').split(/\s+/).filter(Boolean)
+    const seen = new Set()
+    for (let i = 0; i + 5 <= w.length; i++) {
+      const g = w.slice(i, i + 5).join(' ')
+      if (seen.has(g)) {
+        fail('facts', `repeats “${g}…” twice in one sentence`)
+        break
+      }
+      seen.add(g)
+    }
+  }
   const facts = `${JSON.stringify(r.body?.evidence || [])} ${briefText} ${s.q} ${JSON.stringify(props)} ${new Date().toISOString().slice(0, 10)} ${new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)}`
   const invented = kind === 'answer' || kind === 'prepared' ? inventedNumbers(a.replace(/\b(out|ref|social|demo|assoc|oai|counter)-\d+\b/gi, ' '), facts).filter((n) => !/^[1-9]$/.test(n)) : []
   if (invented.length) fail('facts', `numbers not in the records: ${invented.join(', ')}`)

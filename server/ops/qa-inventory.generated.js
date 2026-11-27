@@ -66,6 +66,8 @@ export const TESTS = [
 ["unit:admin-assistant-qa:09f64c9c7c","prepare + approve a backlog idea (Inbox, similar entries named) and a status change (never Verified, stale refused)","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant-qa:61177728f2","a QA change nobody asked for is never prepared, even when the model tries","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant-qa:29d8e5e5fc","regression suite: every mandate QA question is a scenario in the suite, with its categories","test/admin-assistant-qa.test.js"],
+["unit:admin-assistant-qa:069838d1bd","capturing an idea is never an owner-data request; real data requests stay refused","test/admin-assistant-qa.test.js"],
+["unit:admin-assistant-qa:9868a5a80f","an item’s title is never filled in twice in one sentence; the grader fails a repeated title","test/admin-assistant-qa.test.js"],
 ["unit:admin-assistant:ced02777d1","only platform admins reach the admin assistant: owner, sales rep, signed out and cross-origin are refused","test/admin-assistant.test.js"],
 ["unit:admin-assistant:b152f40d80","the owner assistant never gains platform tools, and the admin assistant never runs owner tools","test/admin-assistant.test.js"],
 ["unit:admin-assistant:11a89f3703","every lookup names its source and period and never returns contact details or customer text","test/admin-assistant.test.js"],

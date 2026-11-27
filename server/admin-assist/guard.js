@@ -45,7 +45,7 @@ export function qaAsk(question) {
 // → { answer, kind: 'not_here' } | null
 export function consequentialAsk(question) {
   const q = lead(question)
-  if (ALLOWED.test(q)) return null
+  if (ALLOWED.test(q) || ideaCapture(question)) return null
   for (const [re, where] of WHERE) if (re.test(q)) return { kind: 'not_here', answer: `I can’t do that from here, and I don’t prepare it either. ${where} ${PREPARABLE}` }
   return null
 }
@@ -53,7 +53,13 @@ export function consequentialAsk(question) {
 // Owners' or their customers' details, messages or conversations.
 const OWNER_DATA = /\b(phone numbers?|(their|his|her|owner['’]?s?|customer['’]?s?) phone|e-?mail (address(es)?|of)|emails? of|(owner|their|his|her|customer)['’]?s? e-?mails?|contact (details?|info\w*)|home address|street address|addresses of|transcripts?|recordings?|what (did|does|do) [^?]{1,60}\b(say|said|write|wrote|ask|asked|type|typed)\b|read (me )?(the |their |his |her )?(messages?|chats?|conversations?|texts?)|show (me )?(the |their |his |her )?(messages?|chats?|conversations?|texts?|leads?|customer list|customers['’]? names)|names? of (their|its|the business['’]?s?) (customers|leads|clients)|(customer|client|lead)['’]?s? names|who (are|were) (their|its) (customers|leads|clients))\b/i
 
+// Capturing an idea for the backlog is not a request for anyone's records, even when the idea mentions emails, owners or
+// bookings ("Add to the backlog: the weekly owner email should show bookings per service"). Only the CAPTURE phrasing at
+// the start counts; "show me X's owner email" stays refused.
+const IDEA = /^\s*(?:please\s+|can you\s+|could you\s+)?(?:add (?:this |that |it |an idea )?(?:to|in(?:to)?) (?:the )?(?:improvement )?(?:backlog|ideas?(?: list)?)|(?:note|log|capture|record|save) (?:an |this |that |the |a )?(?:idea|feature request|suggestion|improvement)|(?:log|capture|note) this\b|(?:new )?(?:idea|feature request|suggestion|improvement|backlog(?: item)?)\s*[:—–-]|feature request\b|we should\b|it would be (?:nice|good|great) if\b)/i
+export const ideaCapture = (question) => IDEA.test(String(question || ''))
+
 export function ownerDataAsk(question) {
-  if (!OWNER_DATA.test(String(question || ''))) return null
+  if (ideaCapture(question) || !OWNER_DATA.test(String(question || ''))) return null
   return { kind: 'private', answer: 'I can’t show that: the admin views show counts and statuses only, never owners’ or their customers’ contact details, messages or conversations. The owner sees their own records in their dashboard.' }
 }

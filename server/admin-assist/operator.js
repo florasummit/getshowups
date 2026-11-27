@@ -65,6 +65,39 @@ export function readinessProblem(text, question) {
   return null
 }
 
+// References → names for the page, never the same name twice in one sentence. When the model also spelled the name out
+// (it quoted an item's title next to its reference): a name written BEFORE the reference makes the reference disappear;
+// a name written AFTER it (usually in quotes or brackets) is removed, the reference being the subject. Tidied after.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function fillSentence(sentence, filled) {
+  let out = ''
+  let rest = sentence
+  for (let m = REF_IN.exec(rest); m; m = REF_IN.exec(rest)) {
+    const name = filled[m[1]]
+    const before = out + rest.slice(0, m.index)
+    let after = rest.slice(m.index + m[0].length)
+    REF_IN.lastIndex = 0
+    if (!name) {
+      out = `${before}${m[0].startsWith('[B') ? 'that business' : 'that item'}`
+    } else if (before.toLowerCase().includes(name.toLowerCase())) {
+      out = before
+    } else {
+      out = `${before}${name}`
+      after = after.replace(new RegExp(`,?\\s*[(\\[]?\\s*[“"‘']?${esc(name)}[,.]?[”"’']?\\s*[)\\]]?,?`, 'i'), ' ')
+    }
+    rest = after
+  }
+  REF_IN.lastIndex = 0
+  return (out + rest).replace(/\(\s*\)|\[\s*\]|“\s*”|""/g, '').replace(/[ \t]+([,.;:!?])/g, '$1').replace(/,\s*,/g, ',').replace(/[ \t]{2,}/g, ' ')
+}
+export function fillRefs(text, filled) {
+  return text
+    .split('\n')
+    .map((line) => line.split(/(?<=[.!?]) +/).map((s) => fillSentence(s, filled)).join(' '))
+    .join('\n')
+    .trim()
+}
+
 // An answer never retracts or doubts an earlier one by itself (the records behind it were read; see the history note).
 export const SELF_DOUBT = /\b(correct|retract|walk back|take back|fix) (my|the|that) (last|earlier|previous|prior) (message|answer|reply|list)|\bwithout looking (them|it|those|this) up\b|\bI (shouldn['’]t|should not) have (listed|said|named|included)\b|\bmy (last|earlier|previous) (message|answer|reply) (was|is) (wrong|incorrect|mistaken|unchecked|not checked)\b|\bI (made|invented|guessed) (that|those|them)\b/i
 const PROMISE = /\b(guaranteed?|will (definitely |certainly )?(churn|leave|cancel|pay|grow|increase|double))\b/i
@@ -181,7 +214,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
       const filled = await namesFor(c, used)
       // Test mode is said whenever money or paying customers come up, by the application, not left to the model.
       const note = !c.L.live && MONEYISH.test(`${req.question} ${text}`) && !/\btest\b/i.test(text) ? ` ${TEST_NOTE}` : ''
-      const answer = text.replace(REF_IN, (m, r) => filled[r] || 'that business') + note
+      const answer = fillRefs(text, filled) + note
       return { ok: true, answer, raw: text + note, ...base() }
     }
     trace?.push({ refused: why, text })
