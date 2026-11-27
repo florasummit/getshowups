@@ -48,6 +48,17 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
   api/dashboard/booking  Owner: "Other / Not sure" option + last-30-days booking funnel (services save via /profile)
   api/platform/      Platform admin (Google session + PLATFORM_ADMIN_EMAILS): me, overview, customer, invites,
                      invite-action, status, plans, test-business, alerts (founder alert status + TEST email). Every write is same-origin and audited.
+  api/platform/assist  Platform-admin assistant (server/admin-assist/, PLATFORM_ADMIN_EMAILS only; owners/staff roles 403):
+                     GET = { enabled, brief } ("This week": brief.js, deterministic rules, NO model, top of Admin → Overview and
+                     the panel's first message); POST question → operator.js (operatorModel(env), same loop/limits pattern as the
+                     owner assistant, own tools in tools.js: read-only aggregates by reference [B1]/[E1]/[P1], each with source +
+                     period; data.js drops every contact detail). guard.js answers consequential actions and owner data WITHOUT
+                     the model. prepare_* = closed allowlist (resend invitation, mark enrollment abandoned, run reconciliation,
+                     tracking-code status, test mark/unmark; never PoolThru/getshowups), only when the question asks for a change;
+                     assist-approve applies after Approve + confirm, re-checks `before` (409 stale), via the existing audited
+                     functions. Spend: admin_ai_ask events (never ai_ask), ADMIN_DAILY_MICROS + ADMIN_ANSWERS_PER_DAY, rate rules
+                     adminAssist*. ADMIN_ASSIST_ENABLED=false = off (brief stays). The owner assistant never imports admin-assist (test).
+                     Real-model eval: scripts/admin-assistant-eval.mjs (fictional fixture test/fixtures/admin-assistant-data.js).
   api/stripe/webhook Stripe events (signature verified, idempotent)
   api/email/webhook  Resend delivery feedback (Svix signature, 5-min tolerance; 503 until RESEND_WEBHOOK_SECRET)
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records); &do=cancel: customer cancels

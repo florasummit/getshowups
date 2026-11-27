@@ -72,6 +72,9 @@ export const RULES = {
   aiAskBurst: { limit: 5, windowSec: 60 }, //       POST /api/dashboard/assist (per business)
   aiAttempt: { limit: 60, windowSec: 86400 }, //    POST /api/dashboard/assist attempts that may reach a model (per business and day; abuse ceiling: the 20 answers a day are counted from successful ones)
   aiAskAll: { limit: 25, windowSec: 86400 }, //     the same, all businesses together: the included model shares one small daily allowance (docs/ASSISTANT_PROGRESS.md)
+  adminAssist: { limit: 8, windowSec: 60 }, //      POST /api/platform/assist questions that may reach the model (per platform admin)
+  adminAssistDay: { limit: 150, windowSec: 86400 }, // the same, per admin and day (abuse ceiling; money: server/admin-assist/data.js ADMIN_DAILY_MICROS)
+  adminAssistApprove: { limit: 30, windowSec: 600 }, // POST /api/platform/assist-approve (per platform admin)
   acceptancePair: { limit: 5, windowSec: 600 }, //   POST /api/acceptance/pair (per IP)
   acceptancePairAll: { limit: 20, windowSec: 600 }, // the same, everyone together
   acceptanceSession: { limit: 90, windowSec: 600 }, // POST /api/acceptance/session (per IP; the runner polls while it waits)

@@ -510,6 +510,14 @@ createServer(async (req, res) => {
     if (/^You answer text messages/.test(JSON.parse(raw).messages[0].content)) {
       return send(res, 200, { response: { intent: 'question', answerable: true, reply: 'Yes, we can help with that in Charleston.' }, usage: { prompt_tokens: 500, completion_tokens: 20 } })
     }
+    // Platform-admin assistant (server/admin-assist/operator.js), scripted: one lookup, then an answer without numbers.
+    if (/^You work inside GetShowUps for its founder/.test(JSON.parse(raw).messages[0].content)) {
+      events.push({ type: 'ai.admin_assist' })
+      const { messages } = JSON.parse(raw)
+      const seen = messages.some((m) => m.role === 'tool')
+      if (!seen) return send(res, 200, { choices: [{ message: { content: '', tool_calls: [{ id: 'a1', type: 'function', function: { name: 'system_health', arguments: '{}' } }] } }], usage: { prompt_tokens: 3000, completion_tokens: 20 } })
+      return send(res, 200, { choices: [{ message: { content: 'Start with the urgent items on the This week list, then check incidents in the Control Center.' } }], usage: { prompt_tokens: 3500, completion_tokens: 30 } })
+    }
     // Dashboard assistant (server/operator.js), scripted: a lookup first, then words that use its references. "secret" →
     // an invented number and a claimed action (refused twice, so the records are shown instead).
     if (/^You work inside GetShowUps for the owner/.test(JSON.parse(raw).messages[0].content)) {
