@@ -465,16 +465,29 @@ async function withRevenue(db, customerId, list) {
   return list.map((a) => (a.status === 'showed' ? { ...a, invoicedCents: by.get(a.id)?.invoiced ?? null, paidCents: by.get(a.id)?.paid ?? null } : a))
 }
 
-// `since`: where "the last 30 days" begins. The route passes the start of the business's own calendar day 29 days ago
-// (operator-tools.js last30Start), the same window the assistant counts with, so the two can never show different numbers.
-export async function overview(db, customerId, now = Date.now(), internal = '[]', since = now - 30 * DAY) {
+// `since`: where "the last 30 days" begins; `until`: where it ends. The route passes the business's own calendar days
+// (operator-tools.js rangeOf 'last_30_days'), the same window the assistant counts with (rangeStats), so the two can never
+// show different numbers. DASH-08: ONE date per label: bookings (and confirmations, booking rate) by when the booking
+// was MADE (appointments.created_at); visits, no-shows, jobs completed and recorded values by when the visit was
+// SCHEDULED (appointments.start_at), with the outcome as recorded.
+export async function overview(db, customerId, now = Date.now(), internal = '[]', since = now - 30 * DAY, until = now + DAY) {
   const one = (sql, ...args) => db.prepare(sql).bind(customerId, ...args).first()
   const leads = await one(`SELECT count(*) AS n FROM leads l WHERE l.customer = ?1 AND l.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`, since, internal)
-  const counts = await one(
+  const made = await one(
     `SELECT
        sum(CASE WHEN a.status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS booked,
        sum(CASE WHEN a.status IN ('booked','showed','no_show') AND ac.appointment_id IS NOT NULL THEN 1 ELSE 0 END) AS confirmed,
-       count(DISTINCT CASE WHEN a.status IN ('booked','showed','no_show') THEN a.lead_id END) AS booked_leads,
+       count(DISTINCT CASE WHEN a.status IN ('booked','showed','no_show') THEN a.lead_id END) AS booked_leads
+     FROM appointments a
+     JOIN leads l ON l.id = a.lead_id
+     LEFT JOIN appointment_confirmations ac ON ac.appointment_id = a.id
+     WHERE a.customer = ?1 AND a.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`,
+    since,
+    internal,
+  )
+  const visits = await one(
+    `SELECT
+       sum(CASE WHEN a.status IN ('booked','showed','no_show') THEN 1 ELSE 0 END) AS scheduled,
        sum(CASE WHEN a.status = 'showed' THEN 1 ELSE 0 END) AS showed,
        sum(CASE WHEN a.status = 'no_show' THEN 1 ELSE 0 END) AS no_show,
        sum(CASE WHEN a.status = 'showed' AND ao.work = 'completed' THEN 1 ELSE 0 END) AS completed,
@@ -483,12 +496,13 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
        sum(CASE WHEN a.status = 'showed' AND ao.value_cents IS NOT NULL THEN 1 ELSE 0 END) AS valued
      FROM appointments a
      JOIN leads l ON l.id = a.lead_id
-     LEFT JOIN appointment_confirmations ac ON ac.appointment_id = a.id
      LEFT JOIN appointment_outcomes ao ON ao.appointment_id = a.id AND ao.customer = a.customer
-     WHERE a.customer = ?1 AND a.created_at >= ?2 AND NOT ${isTestLead('l', '?3')}`,
+     WHERE a.customer = ?1 AND a.start_at >= ?2 AND a.start_at < ?4 AND NOT ${isTestLead('l', '?3')}`,
     since,
     internal,
+    until,
   )
+  const counts = { ...made, ...visits }
   const list = async (sql, ...args) => (await db.prepare(sql).bind(customerId, ...args).all()).results
   const apptCols = `a.id, a.start_at, a.end_at, a.status, (SELECT confirmed_at FROM appointment_confirmations ac WHERE ac.appointment_id = a.id) AS confirmed_at,
     l.id AS lead_id, l.name, l.phone, l.email, l.need, la.street, la.unit, la.city, la.state, la.zip AS address_zip, ao.work, ao.value_cents`
@@ -554,17 +568,19 @@ export async function overview(db, customerId, now = Date.now(), internal = '[]'
       leads: leadCount,
       booked,
       confirmed: counts?.confirmed ?? 0,
+      // Visits scheduled in the window (by start date; cancelled left out), and of those, what was recorded.
+      visitsScheduled: counts?.scheduled ?? 0,
       showed,
       noShow,
       // Share of leads (last 30 days) that booked; capped because a rebooking or an older lead can book in the window.
       bookingRate: leadCount ? Math.min(100, Math.round(((counts?.booked_leads ?? 0) / leadCount) * 100)) : null,
-      // Share of appointments/visits with a recorded outcome that happened.
+      // Share of visits scheduled in the window with a recorded outcome that happened.
       showRate: showed + noShow ? Math.round((showed / (showed + noShow)) * 100) : null,
-      // Jobs done, out of visits where the owner recorded whether work was completed (not all arrivals).
+      // Jobs done, out of visits scheduled in the window where the owner recorded whether work was completed (not all arrivals).
       completed,
       notCompleted,
       completionRate: completed + notCompleted ? Math.round((completed / (completed + notCompleted)) * 100) : null,
-      // Self-reported value of jobs booked through GetShowUps. Association, not attribution.
+      // Self-reported value of visits scheduled in the window. Association, not attribution.
       reportedValueCents: counts?.valued ? (counts?.value_cents ?? 0) : null,
       valuedJobs: counts?.valued ?? 0,
     },

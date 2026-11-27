@@ -3,6 +3,7 @@ import { CUSTOMER_RE } from './invites.js'
 import { isValidTimeZone } from './calendar.js'
 import { track } from './events.js'
 import { onboardingSteps } from './onboarding.js'
+import { withDayHoursColumn } from './day-hours.js'
 
 const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 const ZIP_RE = /^[A-Za-z0-9 -]{3,10}$/
@@ -130,15 +131,18 @@ export async function progress(env, customer) {
   return { business: true, calendar, hours, complete: o.steps.every((s) => s.done), ...o }
 }
 
+// The business row with its settings and its per-day booking hours (server/day-hours.js; before 0045: none).
 export async function getCustomer(db, id) {
-  return db
-    .prepare(
-      `SELECT c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode
-         FROM customers c
-         LEFT JOIN customer_settings cs ON cs.customer = c.id
-         LEFT JOIN service_settings ss ON ss.customer = c.id
-        WHERE c.id = ?1`,
-    )
-    .bind(id)
-    .first()
+  return withDayHoursColumn((dayHours) =>
+    db
+      .prepare(
+        `SELECT c.*, coalesce(cs.automations, 1) AS automations, ss.appointment_mode, ${dayHours}
+           FROM customers c
+           LEFT JOIN customer_settings cs ON cs.customer = c.id
+           LEFT JOIN service_settings ss ON ss.customer = c.id
+          WHERE c.id = ?1`,
+      )
+      .bind(id)
+      .first(),
+  )
 }

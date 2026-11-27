@@ -60,6 +60,15 @@ test('owner edits the website on the website itself: text in place, button panel
   await page.keyboard.type('$300+')
   await page.keyboard.press('Enter')
   await expect(frame.getByText('$300+')).toBeVisible()
+  // One catalog (WEB-14): the saved price IS Settings → Services, so the booking page offers it at once (no publish).
+  await expect(saved).toBeVisible()
+  const booking = await context.newPage()
+  await expect(async () => {
+    await booking.goto(`/book/${customerFor(info)}`)
+    await expect(booking.getByText('$300+').first()).toBeVisible({ timeout: 3000 })
+  }).toPass({ timeout: 20_000 })
+  await expect(booking.getByText('$280+')).toHaveCount(0)
+  await booking.close()
 
   // Sections: compact controls on the selected section (name · ↑ ↓ · ⋯); add, hide/show, duplicate, move.
   await studio.getByRole('tab', { name: 'Sections' }).click()

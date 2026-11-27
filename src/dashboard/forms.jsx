@@ -19,6 +19,12 @@ const ERRORS = {
   invalid_workdays: 'Choose at least one day.',
   invalid_slot_minutes: 'Choose an appointment length.',
   invalid_mode: 'Choose where appointments happen.',
+  day_hours_unavailable: 'Different hours on some days can’t be saved yet. Use the same hours for every day for now.',
+  address_unavailable: 'The business address can’t be saved yet.',
+  invalid_street: 'Enter the street address with its number.',
+  invalid_city: 'Enter the city.',
+  invalid_state: 'Use the two-letter state, like SC.',
+  invalid_zip: 'Enter a 5-digit ZIP code.',
   already_exists: 'Your business was just created. Refreshing…',
 }
 // The setup check re-reads after any save on this page.
@@ -176,24 +182,51 @@ export function BusinessForm({ customer, submitLabel, onSaved, inline = false })
 }
 
 const LENGTHS = [30, 45, 60, 90, 120]
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAY_ERRORS = {
+  invalid_day_hours: (day) => `On ${day}, the end time must be after the start time.`,
+  day_too_short: (day) => `On ${day}, at least one appointment has to fit between the start and end time.`,
+}
 
+// `inline` (Settings) also offers "Different hours on some days" (server/day-hours.js) once the business's records
+// support it (customer.dayHoursReady); onboarding keeps one range for every day.
 export function HoursForm({ customer, submitLabel, onSaved, inline = false }) {
   const [workdays, setWorkdays] = useState(customer.workdays)
   const [dayStart, setDayStart] = useState(customer.dayStart)
   const [dayEnd, setDayEnd] = useState(customer.dayEnd)
   const [slotMinutes, setSlotMinutes] = useState(customer.slotMinutes)
+  // Days with their own hours: { [weekday]: { start, end } }. A day not listed follows From/To above.
+  const [own, setOwn] = useState(() => ({ ...(customer.dayHours || {}) }))
+  const perDay = inline && customer.dayHoursReady === true
   const save = useSaveState()
   // The saved hours this form started from: sent as `base` (a change made elsewhere meanwhile → 409, nothing replaced).
-  const base = useRef({ workdays: customer.workdays, dayStart: customer.dayStart, dayEnd: customer.dayEnd, slotMinutes: customer.slotMinutes })
+  const base = useRef({ workdays: customer.workdays, dayStart: customer.dayStart, dayEnd: customer.dayEnd, slotMinutes: customer.slotMinutes, ...(perDay ? { dayHours: customer.dayHours || {} } : {}) })
 
   const toggle = (d) => setWorkdays((w) => (w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort()))
+  const days = [...workdays].sort((a, b) => a - b)
+  const rangeOf = (d) => own[d] || { start: dayStart, end: dayEnd }
+  const setDay = (d, field, value) => setOwn((o) => ({ ...o, [d]: { ...rangeOf(d), [field]: value } }))
+  const resetDay = (d) =>
+    setOwn((o) => {
+      const next = { ...o }
+      delete next[d]
+      return next
+    })
+  const differs = (d) => Boolean(own[d]) && (own[d].start !== dayStart || own[d].end !== dayEnd)
 
   const submit = (e) => {
     e.preventDefault()
     save.run(async () => {
-      const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes, base: base.current } })
-      if (status !== 200) return { error: status === 409 ? CHANGED_ELSEWHERE : errorText(data.error) }
-      base.current = data.hours || base.current
+      const dayHours = perDay ? Object.fromEntries(days.filter((d) => own[d]).map((d) => [d, own[d]])) : undefined
+      const { status, data } = await api('/api/dashboard/hours', { method: 'POST', body: { workdays, dayStart, dayEnd, slotMinutes, dayHours, base: base.current } })
+      if (status !== 200) {
+        if (DAY_ERRORS[data.error] && Number.isInteger(data.day)) return { error: DAY_ERRORS[data.error](DAY_NAMES[data.day]) }
+        return { error: status === 409 && data.error === 'conflict' ? CHANGED_ELSEWHERE : errorText(data.error) }
+      }
+      if (data.hours) {
+        base.current = perDay ? data.hours : { workdays: data.hours.workdays, dayStart: data.hours.dayStart, dayEnd: data.hours.dayEnd, slotMinutes: data.hours.slotMinutes }
+        if (perDay) setOwn({ ...(data.hours.dayHours || {}) })
+      }
       saved()
       onSaved?.()
       return undefined
@@ -223,8 +256,36 @@ export function HoursForm({ customer, submitLabel, onSaved, inline = false }) {
         </label>
       </div>
       <p className="fine" data-hours-note>
-        These times apply to every day you select. A different time on one day (closing early on Fridays, for example) isn’t available.{inline ? ' To close a whole date, use “Closed dates” in the next card.' : ''}
+        {perDay
+          ? 'These times apply to every day you select, unless you give a day its own hours below (closing early on Fridays, for example).'
+          : 'These times apply to every day you select. A different time on one day (closing early on Fridays, for example) isn’t available.'}
+        {inline ? ' To close a whole date, use “Closed dates” in the next card.' : ''}
       </p>
+      {perDay && (
+        <details className="more-options" data-day-hours open={days.some(differs) || undefined}>
+          <summary>Different hours on some days</summary>
+          <p className="fine">Each day starts with the times above. Change a day to give it its own hours.</p>
+          {days.map((d) => (
+            <div className="day-hours-row" key={d} data-day={d}>
+              <div className="field-row">
+                <label className="field">
+                  <span>{DAY_NAMES[d]} from</span>
+                  <input type="time" value={rangeOf(d).start} onChange={(e) => setDay(d, 'start', e.target.value)} required step={900} />
+                </label>
+                <label className="field">
+                  <span>{DAY_NAMES[d]} to</span>
+                  <input type="time" value={rangeOf(d).end} onChange={(e) => setDay(d, 'end', e.target.value)} required step={900} />
+                </label>
+              </div>
+              {differs(d) && (
+                <button type="button" className="btn btn-sm btn-quiet" onClick={() => resetDay(d)}>
+                  Same as other days
+                </button>
+              )}
+            </div>
+          ))}
+        </details>
+      )}
       <label className="field">
         <span>{customer.appointmentMode === 'at_customer' ? 'Visit length' : 'Appointment length'}</span>
         <select value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))}>
@@ -238,6 +299,89 @@ export function HoursForm({ customer, submitLabel, onSaved, inline = false }) {
       <SaveBar save={save} block={!inline}>
         {submitLabel}
       </SaveBar>
+    </form>
+  )
+}
+
+// The business's own address (Settings → Business; server/business-address.js). Optional; customers see it on the
+// booking page only when "Show this address to customers" is on AND they come to the business. Hidden until the
+// business's records support it (GET ready: false).
+const EMPTY_ADDRESS = { street: '', unit: '', city: '', state: '', zip: '' }
+export function BusinessAddressForm({ mode }) {
+  const [data, setData] = useState(undefined)
+  const [a, setA] = useState(EMPTY_ADDRESS)
+  const [show, setShow] = useState(false)
+  const save = useSaveState()
+  const base = useRef(null)
+  const take = (d) => {
+    const addr = d.address ? { street: d.address.street, unit: d.address.unit, city: d.address.city, state: d.address.state, zip: d.address.zip } : null
+    base.current = { address: addr, public: Boolean(d.address?.public) }
+    setA(addr || EMPTY_ADDRESS)
+    setShow(Boolean(d.address?.public))
+    setData(d)
+  }
+  const load = () => api('/api/dashboard/address').then(({ status, data: d }) => (status === 200 ? take(d) : setData(null)))
+  useEffect(() => {
+    load()
+  }, [])
+  if (data === undefined) return null
+  if (data === null) return <LoadError what="your business address" onRetry={load} />
+  if (!data.ready) return null
+  const set = (k) => (e) => setA((x) => ({ ...x, [k]: e.target.value }))
+  const blank = Object.values(a).every((v) => !String(v).trim())
+  const submit = (e) => {
+    e.preventDefault()
+    save.run(async () => {
+      const { status, data: d } = await api('/api/dashboard/address', { method: 'POST', body: { address: blank ? null : a, public: blank ? false : show, base: base.current } })
+      if (status !== 200) return { error: status === 409 && d.error === 'conflict' ? CHANGED_ELSEWHERE : errorText(d.error) }
+      take(d)
+      saved()
+      return d.shown ? { saved: 'Saved. Customers see this address when they book.' } : undefined
+    })
+  }
+  return (
+    <form className="form" onSubmit={submit} data-business-address-form>
+      <fieldset className="field">
+        <legend>
+          Business address <em>optional</em>
+        </legend>
+        <label className="field">
+          <span>Street</span>
+          <input value={a.street} onChange={set('street')} maxLength={100} autoComplete="address-line1" />
+        </label>
+        <div className="field-row">
+          <label className="field">
+            <span>
+              Suite or unit <em>optional</em>
+            </span>
+            <input value={a.unit} onChange={set('unit')} maxLength={20} autoComplete="address-line2" />
+          </label>
+          <label className="field">
+            <span>City</span>
+            <input value={a.city} onChange={set('city')} maxLength={60} autoComplete="address-level2" />
+          </label>
+        </div>
+        <div className="field-row">
+          <label className="field">
+            <span>State</span>
+            <input value={a.state} onChange={set('state')} maxLength={2} autoComplete="address-level1" placeholder="SC" />
+          </label>
+          <label className="field">
+            <span>ZIP code</span>
+            <input value={a.zip} onChange={set('zip')} maxLength={10} inputMode="numeric" autoComplete="postal-code" />
+          </label>
+        </div>
+      </fieldset>
+      <label className="check">
+        <input type="checkbox" checked={show && !blank} disabled={blank} onChange={(e) => setShow(e.target.checked)} />
+        <span>Show this address to customers</span>
+      </label>
+      <p className="fine" data-address-note>
+        {mode === 'at_customer'
+          ? 'You visit your customers, so this address is never shown to them, even with this on.'
+          : 'When this is on, the booking page shows it with the appointment time and on the confirmation. Off: it stays in your records only.'}
+      </p>
+      <SaveBar save={save}>Save address</SaveBar>
     </form>
   )
 }

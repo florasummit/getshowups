@@ -2,7 +2,7 @@
 // server/services.js), its published brand, and real open slots for the chosen service's length (no service = one slot).
 // Exposes no customer details, no settings beyond what a visitor needs and no calendar contents. The one contact detail
 // is the business's own phone on record (the number its chat page and website already show), so a customer who has
-// booked can reach the business.
+// booked can reach the business; and its address when the owner chose to show it to customers who come to it.
 import { json } from '../../../../server/google-oauth.js'
 import { bookableCustomer } from '../../../../server/public.js'
 import { openSlots, recordAvailability } from '../../../../server/booking.js'
@@ -13,6 +13,7 @@ import { getProfile } from '../../../../server/onboarding.js'
 import { bookingOptions, bookingServices } from '../../../../server/services.js'
 import { publicBrand } from '../../../../server/public-brand.js'
 import { reachFor } from '../../../../server/site-serve.js'
+import { publicAddress } from '../../../../server/business-address.js'
 
 export async function onRequestGet({ request, env, params, waitUntil }) {
   const { customer, response } = await bookableCustomer(env, params)
@@ -25,7 +26,7 @@ export async function onRequestGet({ request, env, params, waitUntil }) {
   const wanted = new URL(request.url).searchParams.get('service')
   const chosen = wanted ? services.find((x) => x.id === wanted) : null
   const span = chosen ? Math.min(4, Math.max(1, Math.round(chosen.minutes / customer.slotMinutes))) : 1
-  const [result, policies] = await Promise.all([openSlots(env, customer, Date.now(), { span }), policiesOrEmpty(db, customer.id)])
+  const [result, policies, address] = await Promise.all([openSlots(env, customer, Date.now(), { span }), policiesOrEmpty(db, customer.id), publicAddress(db, customer)])
   // A lookup that failed for an integration reason (never "no free time") → Business Review (throttled; never throws).
   const recorded = recordAvailability(env, customer.id, result)
   if (typeof waitUntil === 'function') waitUntil(recorded)
@@ -38,6 +39,9 @@ export async function onRequestGet({ request, env, params, waitUntil }) {
     // No phone on record: the business's live website, else its chat page when that would open (both already public),
     // so the confirmation still offers one real way to reach it. null when there is neither.
     reach: typeof profile?.phone === 'string' && profile.phone ? null : await reachFor(env, customer).catch(() => null),
+    // Where to come (server/business-address.js): only when the owner chose to show it AND customers come to the business;
+    // null otherwise (a visiting business's address is never sent).
+    address,
     slotMinutes: customer.slotMinutes,
     // 'at_customer': the business comes to the lead, so the page asks for a service address.
     appointmentMode: customer.appointmentMode,

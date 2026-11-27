@@ -189,8 +189,7 @@ export default function ReceptionistVoice({ voice, admin, providers, reload, hea
           <legend>Personality</legend>
           <p className="ui-hint">How it comes across, in chat and voice. Your prices, service area and booking rules never change with the personality.</p>
           <p className="ui-hint" data-also="teach-tone">
-            <a href="/dashboard/teach#ta-how">Teach Your AI → Tone</a> is a second setting for its wording. Once your published rules are used with customers, your AI is given both and neither replaces the other, so pick two that
-            agree (for example Professional & Polished here with Polite and formal there).
+            Published <a href="/dashboard/teach#ta-how">Teach Your AI → Tone</a> takes priority over this for wording. The personality applies where your rules say nothing, and the voice and pace here always apply.
           </p>
           <div className="rx-choice-grid" role="radiogroup" aria-label="Personality">
             {voice.personalities.map((p) => (

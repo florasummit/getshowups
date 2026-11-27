@@ -183,6 +183,38 @@ test('DASH-08: Overview and the assistant count the last 30 days the same way, a
   assert.equal(calls, 0)
 })
 
+test('DASH-08: bookings count by the day they were made, visits and jobs by the day they were scheduled; Overview and the assistant agree', async () => {
+  const done = (id, work) => sql.prepare('INSERT INTO appointment_outcomes (appointment_id, customer, work, reported_at) VALUES (?, ?, ?, ?)').run(id, 'alpha', work, Date.now())
+  // Booked before the window, visited inside it (completed): a visit and a job, not a booking.
+  done(appt('alpha', { created: Date.now() - 40 * DAY, start: Date.now() - 10 * DAY, status: 'showed' }), 'completed')
+  // Booked inside the window, visit still to come: a booking, not a visit.
+  appt('alpha', { created: Date.now() - 5 * DAY, start: Date.now() + 5 * DAY })
+  // Booked and scheduled inside the window, did not come: a booking and a no-show.
+  appt('alpha', { created: Date.now() - 2 * DAY, start: Date.now() - DAY, status: 'no_show' })
+  // Booked and visited before the window: neither.
+  done(appt('alpha', { created: Date.now() - 45 * DAY, start: Date.now() - 35 * DAY, status: 'showed' }), 'completed')
+  // Another business's visit never counts.
+  appt('beta', { created: Date.now() - 40 * DAY, start: Date.now() - 10 * DAY, status: 'showed' })
+  const before = sql.prepare('SELECT * FROM appointments ORDER BY id').all()
+  const o = (await (await overviewApi.onRequestGet(req('alpha'))).json()).stats
+  assert.deepEqual([o.booked, o.visitsScheduled, o.showed, o.noShow, o.completed], [2, 2, 1, 1, 1])
+  const a = (await ask('Compare the last 30 days with the 30 before', { view: 'overview' })).body.answer
+  assert.equal(Number(/(\d+) bookings? made/.exec(a)[1]), o.booked, a)
+  assert.equal(Number(/(\d+) visits? scheduled in that time and marked as happened/.exec(a)[1]), o.showed, a)
+  const n = (await ask('How many no-shows did I have?', { topic: 'show_rate', view: 'overview' })).body.answer
+  assert.match(n, /by the day the visit was scheduled: 1 no-show, 1 visit marked as happened/)
+  assert.deepEqual(sql.prepare('SELECT * FROM appointments ORDER BY id').all(), before, 'stored data never changes')
+  // The tiles and their help say which date each counts by.
+  const home = readFileSync(new URL('../src/dashboard/Home.jsx', import.meta.url), 'utf8')
+  assert.match(home, /'bookings made these 30 days/)
+  assert.match(home, /'scheduled these 30 days, marked as happened'/)
+  const { HELP } = await import('../src/content/help.js')
+  assert.match(HELP.booked.what, /by the day the booking was made/)
+  assert.match(HELP.showed.what, /counted by the day of the visit/)
+  assert.match(HELP.completed.what, /visits scheduled in the last 30 days/)
+  assert.equal(calls, 0)
+})
+
 test('DASH-03: a cancelled visit is listed (this business only) and never counted as booked', async () => {
   appt('alpha', { status: 'cancelled', name: 'Cora Cancelled' })
   appt('beta', { status: 'cancelled', name: 'Beta Secret' })

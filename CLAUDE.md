@@ -108,6 +108,12 @@ server/              Shared backend modules imported by functions/ (bundled by P
                      booking book|request|off, one question. Old {name, price} rows stay valid. Booking page = bookingServices;
                      receptionist/assistant = offeredServices (hidden dropped). The lead keeps a lead_services snapshot (0042);
                      book() takes the length from it (never the browser), checks overlap, and isOfferedSlot uses the span
+  website-catalog.js Websites + the ONE catalog (WEB-14, no migration): a website service LINKED (content.services[].catalogId,
+                     else exactly one catalog name match) renders the catalog's name/price (+ description when it has one) at
+                     request time in all three renderers (biz.catalog from siteBusinessInfo); hidden there = not shown (v2:
+                     item dropped, emptied section hidden); unlinked = its own copy, unchanged. Editor GET shows linked values;
+                     a save writes only fields the owner CHANGED vs the stored draft (never a stale value back) via
+                     validateServices; 'addService' adds to the catalog; removing from the website never touches it
   booking-funnel.js  Booking-page stages per visit (events 'booking_stage', codes only) and the owner's 30-day funnel
   public-brand.js    A business's published logo + accent for its booking/chat pages (never a draft)
   public.js          Guard for the public booking API (only fully set-up businesses)
@@ -315,6 +321,9 @@ Non-negotiables:
 - Never store card data or invent prices
   (plans reference Stripe Price ids). No automatic suspension; suspension is a manual, audited admin action.
 - Metrics must be computed from real records; return null (shown as unavailable) when data is missing.
+- One date per label (DASH-08): bookings by appointments.created_at ("bookings made"), visits / no-shows / jobs completed /
+  recorded values by appointments.start_at (outcome as recorded). Overview (booking.js overview, window = rangeOf
+  'last_30_days') and the assistant (operator-tools.js rangeStats, assist-plain countsLine) share it; labels say which.
 - Revenue metrics (MRR/ARR/paying/revenue/churn) only when live billing is on (`stripeLiveEnabled`); in Stripe test mode
   they are null with `billing.mode: 'test'` (a count of test subscriptions), never shown as revenue. In live mode only
   subscriptions recorded live in `subscription_modes` (webhook `event.livemode`, migration 0013) and payments with
@@ -462,11 +471,23 @@ Non-negotiables:
   (arrival is never completion). value_cents is self-reported booking value: never call it revenue caused by
   GetShowUps. Service addresses never go to logs, events, or platform admin views. Booked times are start times
   (no arrival windows).
+- Business details (migration 0045, fail-soft: before it exactly today's behaviour). Per-day booking hours
+  (server/day-hours.js, booking_day_hours JSON {weekday: {start, end}}): customers.day_start/day_end/workdays stay the
+  default and are never rewritten by it; an override applies only to a listed booking day. ONE rule, hoursFor /
+  hoursGroups, for every reader (computeSlots, receptionist withinHours + knowledge, assistant hoursText/proposals,
+  follow-ups businessFacts, website hoursText + JSON-LD, export); no override = byte-identical text. The customer object
+  carries dayHours/dayHoursReady (getCustomer/getSession subquery, retried without it on no such table). Saved only by
+  Settings → Booking hours ("Different hours on some days", same batch as the default, base-checked); onboarding and
+  pages without dayHours leave it untouched. Business address (server/business-address.js, business_addresses, lead
+  address rules): Settings → Business, "Show this address to customers" off by default; public ONLY when public = 1 AND
+  at_business (GET /api/book/<id> `address`, else null; booking page summary + confirmation "Where:"). Not on websites yet.
 - Google ties one user's refresh tokens for a client to ONE grant: never revoke a token that a stored connection for the
   same Google account + client may still use. Use `revokeUnlessInUse()`; `revokeToken()` directly only when unshared.
 - OAuth client migration: stored connections carry `clientId`; `oauthClient()` refreshes with the issuing client
   (GOOGLE_LEGACY_CLIENT_ID/SECRET for the previous one). Cross-client reconnects archive, never revoke.
 - `GOOGLE_API_MOCK_ORIGIN` is test-only and honored only for http://127.0.0.1:port. Never set it in production.
+- Calendar OAuth callback success (ONB-10): a dashboard session of the invite's business → 303 to a fixed path
+  (/dashboard, or /dashboard/settings#google-calendar on reconnect) after every check; otherwise the confirmation page.
 - State-changing dashboard routes (POST) must check `isSameOrigin()`; GET routes must be read-only.
 - Validate customer IDs with `CUSTOMER_RE` before any storage lookup.
 - Website URLs typed by owners go through `normalizeWebsiteUrl()` (server/url.js): example.com → https://example.com,
@@ -657,6 +678,9 @@ Non-negotiables:
   when the receptionist is off), AI_RULES_LIVE_BUSINESSES (receptionist uses the PUBLISHED version; chat + Retell
   voice through the same engine), AI_RULES_ENABLED=false kill switch; live list empty = exactly the pre-rules behaviour.
   Retell needs no agent change (custom LLM served by our engine; providers.js is the adapter boundary).
+  Precedence (TEACH-04): with live rules, systemPrompt(k, channel, { rules }) (chat, Retell, OpenAI/ElevenLabs instructions)
+  ends with the rules block + ONE ordered block (knowledge.js soundOrder): published Tone first, the receptionist
+  Personality only where the rules say nothing; voice + pace are session settings, unaffected. Not live = byte-identical.
 - Follow-ups / texting (server/followups/, migration 0024; owner decision 2026-11-16, build 49): one engine for every
   eligible business, no allowlist. A text leaves only if: MESSAGING_KILL_SWITCH isn't 'true', Twilio credentials exist,
   the business has its OWN active Twilio subaccount (sms_accounts; sent at /Accounts/<sub>/Messages.json, never the

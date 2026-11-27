@@ -88,7 +88,8 @@ export function customerActions(who) {
       await page.goto('/dashboard')
       await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
       await page.getByRole('button', { name: 'Connect Google Calendar' }).click()
-      await expect(page.getByRole('heading', { name: 'Google Calendar connected' })).toBeVisible()
+      // ONB-10: back from Google straight on to the hours step, which shows the live connection.
+      await expect(page.locator('[data-calendar-connected]')).toBeVisible()
     },
     setup_hours: async (page) => {
       const r = await json(page, '/api/dashboard/hours', { data: { workdays: [1, 2, 3, 4, 5, 6], dayStart: '08:00', dayEnd: '18:00', slotMinutes: 60 } })
@@ -119,7 +120,9 @@ export function customerActions(who) {
       await page.goto('/dashboard/settings')
       await expect(page.getByText('Needs reconnecting')).toBeVisible()
       await page.getByRole('button', { name: 'Reconnect Google Calendar' }).click()
-      await expect(page.getByRole('heading', { name: 'Google Calendar connected' })).toBeVisible()
+      // ONB-10: a reconnect returns straight to Settings → Google Calendar, now connected.
+      await expect(page).toHaveURL(/\/dashboard\/settings#google-calendar$/)
+      await expect(page.locator('[data-status="healthy"]')).toBeVisible()
     },
   }
 }

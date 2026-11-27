@@ -6121,3 +6121,6 @@ html.help-open .app {
     animation: none;
   }
 }
+/* Settings → Booking hours → "Different hours on some days": one row per booking day. */
+.day-hours-row { margin-top: 10px; display: grid; gap: 6px; justify-items: start; }
+.day-hours-row > .field-row { width: 100%; }

@@ -29,6 +29,7 @@ import { recordEvent } from '../auditlog.js'
 import { hit } from '../ratelimit.js'
 import { classify, helpText, startText, humanText, cancelText, fallbackText, aiReply, assistantConfigured } from './assistant.js'
 import { send } from './transport.js'
+import { hoursGroups } from '../day-hours.js'
 import { followupsReady, getSettings, inQuietHours, killSwitch, followupAiOn, registrationOf, smsLive, smsReadiness } from './settings.js'
 
 const MIN = 60_000
@@ -96,7 +97,8 @@ export async function businessFacts(env, customer, { profile: given, role = 'fol
     const [h, m] = String(t).split(':').map(Number)
     return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
   }
-  const hours = customer.hoursConfirmed && customer.workdays?.length ? `${customer.workdays.map((d) => days[d]).join(', ')} ${hm(customer.dayStart)}–${hm(customer.dayEnd)}` : ''
+  // Days with their own hours are their own group (server/day-hours.js); without any: one line, as before.
+  const hours = customer.hoursConfirmed && customer.workdays?.length ? hoursGroups(customer).map((g) => `${g.days.map((d) => days[d]).join(', ')} ${hm(g.start)}–${hm(g.end)}`).join('; ') : ''
   return {
     name: customer.name,
     phone: profile?.phone || '',

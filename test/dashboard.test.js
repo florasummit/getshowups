@@ -488,7 +488,8 @@ test('booking page: only fully set-up businesses are bookable', async () => {
 
 test('booking page: real open slots exclude Google busy time and booked appointments; no private data', async () => {
   const first = (await book.info('alpha')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['allowOther', 'appointmentMode', 'areaCheck', 'askZip', 'brand', 'minutes', 'name', 'offerSms', 'phone', 'policies', 'reach', 'services', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.deepEqual(Object.keys(first).sort(), ['address', 'allowOther', 'appointmentMode', 'areaCheck', 'askZip', 'brand', 'minutes', 'name', 'offerSms', 'phone', 'policies', 'reach', 'services', 'slotMinutes', 'slots', 'status', 'timezone'])
+  assert.equal(first.address, null, 'no address on record → none (the business address only when the owner shows it, BOOK-08)')
   assert.equal(first.reach, null, 'no phone: the live website or open chat page only, never anything else (none here)')
   assert.equal(first.phone, '', 'the only contact detail is the business’s own phone on record (BOOK-03); none on record → empty')
   assert.deepEqual(first.brand, { product: false, logo: null, accent: null }, 'brand only from a published website; nothing else about the business')
@@ -612,7 +613,7 @@ test('results: outcomes only on past appointments; show rate and follow-up list'
   assert.equal((await post(outcome, '/api/dashboard/outcome', { id: ids[1], outcome: 'no_show' }, { cookie })).status, 200)
   assert.equal((await post(outcome, '/api/dashboard/outcome', { id: ids[1], outcome: 'cancelled' }, { cookie })).status, 400)
   ov = (await call(overviewApi, 'GET', '/api/dashboard/overview', { cookie })).json()
-  assert.deepEqual(ov.stats, { leads: 3, booked: 2, confirmed: 0, showed: 1, noShow: 1, bookingRate: 67, showRate: 50, completed: 0, notCompleted: 0, completionRate: null, reportedValueCents: null, valuedJobs: 0 })
+  assert.deepEqual(ov.stats, { leads: 3, booked: 2, confirmed: 0, visitsScheduled: 2, showed: 1, noShow: 1, bookingRate: 67, showRate: 50, completed: 0, notCompleted: 0, completionRate: null, reportedValueCents: null, valuedJobs: 0 })
   assert.equal(ov.needsOutcome.length, 0)
   assert.equal(ov.recent.length, 2)
   // The no-show reopens its lead: it is back on the follow-up list (and can rebook from a message link).

@@ -17,7 +17,7 @@ import { currentApproval } from './ads/budget.js'
 import { importedTotals } from './ads/imports.js'
 import { listRecommendations } from './ads/recommend.js'
 import { NEEDS_OWNER } from './attention.js'
-import { apptRefs, leadByRefId, requestOut, runTool } from './operator-tools.js'
+import { apptRefs, leadByRefId, rangeOf, requestOut, runTool } from './operator-tools.js'
 import { isTestLead } from './testdata.js'
 
 const DAY = 86_400_000
@@ -60,7 +60,7 @@ export async function waitingNow(c) {
 const PAGES = {
   async overview(c) {
     const [o, next, ins, ads, site] = await Promise.all([
-      part(overview(c.db, c.customer.id, c.now, c.internal)),
+      part(((w) => overview(c.db, c.customer.id, c.now, c.internal, w.from, w.to))(rangeOf({ period: 'last_30_days' }, c.tz, c.now))),
       part(setup(c)),
       part(insights(c.env, c.customer, c.now)),
       part(adsAccess(c.env, c.customer).then((ok) => (ok ? adSummary(c.db, c.customer.id, c.now, c.internal) : null))),
@@ -71,7 +71,7 @@ const PAGES = {
       ...(o === UNREAD
         ? { last_30_days_tiles: UNREAD }
         : {
-            last_30_days_tiles: { new_inquiries: o.stats.leads, booked: o.stats.booked, visits_marked_as_happened: o.stats.showed, no_shows: o.stats.noShow, jobs_completed: o.stats.completed, rate_tile: 'shown only after 5 recorded outcomes' },
+            last_30_days_tiles: { counted_by: 'inquiries and bookings by the day they were made; visits, no-shows and jobs completed by the day the visit was scheduled', new_inquiries: o.stats.leads, booked: o.stats.booked, visits_scheduled: o.stats.visitsScheduled, visits_marked_as_happened: o.stats.showed, no_shows: o.stats.noShow, jobs_completed: o.stats.completed, rate_tile: 'shown only after 5 recorded outcomes' },
             upcoming_section: { total: real(o.upcoming).length, first: await apptRefs(c, real(o.upcoming).slice(0, 3)), test_visits_also_listed_with_a_test_tag: o.upcoming.length - real(o.upcoming).length },
             how_did_it_go_section: { total: real(o.needsOutcome).length, first: await apptRefs(c, real(o.needsOutcome).slice(0, 3)), test_visits_also_listed_with_a_test_tag: o.needsOutcome.length - real(o.needsOutcome).length },
           }),

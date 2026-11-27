@@ -119,7 +119,7 @@ export async function applyHours(env, session, body, now = Date.now()) {
     .run()
   if (!r.meta.changes) return { ok: false, error: 'stale', status: 409 }
   await recordEvent(env.ONBOARDING_DB, { type: 'business.hours', actor: `owner:${session.email}`, customer: session.customer.id, capability: 'assist.ask', outcome: 'success', resource: { type: 'customer', id: session.customer.id }, details: { via: 'assistant' } })
-  return { ok: true, state: hoursText(after) }
+  return { ok: true, state: hoursText({ ...after, dayHours: session.customer.dayHours }) }
 }
 
 // Marks a call-back request or message as dealt with, like Mark done on the Receptionist page.

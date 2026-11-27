@@ -22,6 +22,7 @@ import { propose, applyOps, OP_KINDS } from '../../../server/intelligence/teach.
 import { simulate, SIM_LIMITS } from '../../../server/intelligence/simulate.js'
 import { recommendations } from '../../../server/intelligence/recommend.js'
 import { voiceAdapter } from '../../../server/intelligence/providers.js'
+import { getVoiceSettings, PERSONALITIES } from '../../../server/voice/style.js'
 
 // Labels in the business's own trade words (a pool business is never asked about a "system type").
 const choicesFor = (industry) => ({ intake: Object.fromEntries(Object.entries(INTAKE).map(([id, i]) => [id, { label: intakeLabel(id, industry), platform: Boolean(i.platform), visitOnly: Boolean(i.visitOnly) }])), afterHours: AFTER_HOURS, pricing: PRICING, emergencyActions: EMERGENCY_ACTIONS, escalationWhen: ESCALATION_WHEN, escalationActions: ESCALATION_ACTIONS, styles: STYLES })
@@ -32,6 +33,9 @@ async function state(env, customer, now = Date.now()) {
   const records = await recordsFor(env, customer, now)
   const rules = await loadRules(db, customer.id, records)
   const receptionist = (await receptionistReady(db)) ? await getSettings(db, customer.id) : { enabled: false }
+  // TEACH-04: the Receptionist page's Personality, shown beside Tone (published Tone wins; Personality fills the rest).
+  const voice = await getVoiceSettings(db, customer.id)
+  const personality = PERSONALITIES[voice.personality] ? voice.personality : 'standard'
   return {
     records: { name: records.name, industry: records.industry, services: records.services, towns: records.towns, zipCount: records.zips.length, zips: records.zips.slice(0, 60), visit: records.visit, hoursConfirmed: records.hoursConfirmed },
     ...rules,
@@ -39,7 +43,7 @@ async function state(env, customer, now = Date.now()) {
     choices: choicesFor(rules.draft.industry),
     // Example wording for this kind of business; every `teach` example is understood by the fixed patterns (no model).
     words: (({ excluded, urgent, teach }) => ({ excluded, urgent, teach }))(tradeWords(rules.draft.industry)),
-    status: { receptionistOn: Boolean(receptionist.enabled), rulesLive: rulesLiveFor(env, customer.id), provider: voiceAdapter().plan(env, { customerId: customer.id, version: rules.liveVersion }) },
+    status: { receptionistOn: Boolean(receptionist.enabled), rulesLive: rulesLiveFor(env, customer.id), provider: voiceAdapter().plan(env, { customerId: customer.id, version: rules.liveVersion }), personality: { id: personality, name: PERSONALITIES[personality].name } },
     suggestions: await recommendations(db, customer.id, rules.live || rules.draft, records, now),
     limits: SIM_LIMITS,
   }

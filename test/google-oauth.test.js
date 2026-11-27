@@ -325,6 +325,44 @@ test('the calendar-connected page uses the product header, card and button; same
   assert.match(await oauth.productPage(200, '<b>', '"x" & <i>').text(), /<h1>&lt;b&gt;<\/h1><p>&quot;x&quot; &amp; &lt;i&gt;<\/p>/)
 })
 
+// ONB-10: the signed-in owner of THIS business goes straight on (303 to a fixed path, no page, no script); every check
+// still ran first; anyone else keeps the confirmation page.
+test('a signed-in owner of the invite business is sent straight on; others see the page; a failed check never redirects', async () => {
+  const env = makeEnv()
+  const raw = env.ONBOARDING_DB.raw
+  const { readdirSync } = await import('node:fs')
+  for (const f of readdirSync(new URL('../migrations/', import.meta.url)).sort()) raw.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'))
+  for (const id of ['acme-dental', 'other-biz']) {
+    raw.prepare("INSERT INTO customers (id, name, timezone, created_at, updated_at) VALUES (?, ?, 'America/New_York', 1, 1)").run(id, id)
+    raw.prepare('INSERT INTO customer_users (email, customer, created_at) VALUES (?, ?, 1)').run(`o@${id}.example`, id)
+    raw.prepare('INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)').run(await oauth.sha256Hex(`tok_${id}`.padEnd(43, 'x')), `o@${id}.example`, Date.now(), Date.now() + 864e5)
+  }
+  const withSession = (id, startRes) => `${cookieFrom(startRes)}; __Host-gsu_session=${`tok_${id}`.padEnd(43, 'x')}`
+  mockGoogle()
+  let s = await begin(env, await issue(env, 'acme-dental'))
+  const r = await finish(env, s, { cookie: withSession('acme-dental', s) })
+  assert.equal(r.status, 303)
+  assert.equal(r.headers.get('Location'), '/dashboard', 'first connection: on with setup')
+  assert.match(r.headers.get('Set-Cookie'), /^__Host-gsu_google_oauth=; .*Max-Age=0/)
+  assert.equal(r.headers.get('Cache-Control'), 'no-store')
+  assert.equal(await r.text(), '', 'nothing in the body')
+  assert.ok(env.GOOGLE_TOKENS.m.has('google:acme-dental'), 'stored before redirecting')
+  s = await begin(env, await issue(env, 'acme-dental', 'reconnect'))
+  const re = await finish(env, s, { cookie: withSession('acme-dental', s) })
+  assert.equal(re.status, 303)
+  assert.equal(re.headers.get('Location'), '/dashboard/settings#google-calendar', 'reconnect: back to Settings')
+  // Another business's session, or none: the confirmation page, as before.
+  s = await begin(env, await issue(env, 'acme-dental', 'reconnect'))
+  const other = await finish(env, s, { cookie: withSession('other-biz', s) })
+  assert.equal(other.status, 200)
+  assert.match(await other.text(), /<h1>Google Calendar connected<\/h1>/)
+  // A failed check with a valid owner session is still the error page, never a redirect.
+  s = await begin(env, await issue(env, 'acme-dental', 'reconnect'))
+  const forged = await finish(env, s, { cookie: withSession('acme-dental', s), state: 'A'.repeat(43) })
+  assert.equal(forged.status, 400)
+  assert.equal(forged.headers.get('Location'), null)
+})
+
 test('replayed callback is rejected; the new grant is revoked unless it would end the stored connection', async () => {
   const env = makeEnv()
   mockGoogle({ refresh: 'rt-first' })

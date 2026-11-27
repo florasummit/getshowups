@@ -136,14 +136,10 @@ test('new customer: get started → pay → onboard → publish → book → man
   // Calendar (real OAuth handlers, mock Google) → hours with a live connection check.
   await expect(page.getByRole('heading', { name: 'Connect Google Calendar' })).toBeVisible()
   await page.getByRole('button', { name: 'Connect Google Calendar' }).click()
-  await expect(page.getByRole('heading', { name: 'Google Calendar connected' })).toBeVisible()
-  // ONB-10: the page between the two steps carries the product's header and its ink button (it was a black page).
-  await expect(page.getByRole('link', { name: 'GetShowUps dashboard' })).toBeVisible()
-  expect(await page.getByRole('button', { name: 'Continue' }).evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(10, 11, 15)')
-  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(248, 250, 252)')
-  await noOverflow()
-  await page.getByRole('button', { name: 'Continue' }).click()
+  // ONB-10: the signed-in owner comes back from Google straight to the next step (a 303, no page in between to click).
   await expect(page.getByRole('heading', { name: 'When can customers book?' })).toBeVisible()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await noOverflow()
   await expect(page.getByText('Google Calendar connected')).toBeVisible()
   // ONB-11: the connected line (with a 29-character address) stays inside its box at this width.
   const badge = page.locator('[data-calendar-connected]')

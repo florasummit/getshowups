@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { lazyPage } from '../lib/lazy.js'
 import Logo from '../components/Logo.jsx'
 import { api, fmt } from '../lib/api.js'
-import { AvailabilityForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
+import { AvailabilityForm, BusinessAddressForm, BusinessForm, HoursForm, PoliciesForm, ProfileForm, ServicesForm } from './forms.jsx'
 import { CalendarDisconnect, CloseBusiness, Notices, People, Services, SetupCheck, SignInSecurity, YourAccount, YourData } from './AccountSettings.jsx'
 import PlanDetails from './PlanCard.jsx'
 import { connectCalendar } from '../lib/connect.js'
@@ -237,9 +237,10 @@ function WebsiteCard({ me, site, go }) {
 function Stats({ stats, visit, upcoming }) {
   const recorded = stats.showed + stats.noShow
   const rows = [
-    ['New inquiries', stats.leads, 'inquiries', 'people who left details'],
-    ['Booked', stats.booked, 'booked', 'cancelled ones left out'],
-    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed', 'you marked as happened'],
+    // DASH-08: each tile says which date it counts by (the assistant counts the same way: operator-tools.js rangeStats).
+    ['New inquiries', stats.leads, 'inquiries', 'came in these 30 days'],
+    ['Booked', stats.booked, 'booked', 'bookings made these 30 days, cancelled left out'],
+    [visit ? 'Visits' : 'Show-ups', stats.showed, 'showed', 'scheduled these 30 days, marked as happened'],
   ]
   if (!visit && recorded >= 5) rows.push(['Show-up rate', `${stats.showRate}%`, 'show_rate'])
   if (visit && stats.completed + stats.notCompleted >= 5) rows.push(['Jobs completed', `${stats.completionRate}%`, 'completed'])
@@ -590,6 +591,7 @@ function Settings({ me, reload, billing, reloadBilling, go }) {
       <section className="card" id="business">
         <TitleHelp help="service_area">Business</TitleHelp>
         <BusinessForm customer={c} submitLabel="Save business" onSaved={reload} inline />
+        <BusinessAddressForm mode={c.appointmentMode} />
       </section>
       <section className="card" id="services">
         <h2 className="card-title">Services and prices</h2>

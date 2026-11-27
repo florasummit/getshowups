@@ -12,6 +12,7 @@ import { renderSite } from '../server/site-render.js'
 import { starterSite } from '../server/site-starter.js'
 import { presetDesigns } from '../server/site-design.js'
 import { validateContent } from '../server/website.js'
+import { readServices } from '../server/services.js'
 
 const DIR = new URL('./fixtures/render/', import.meta.url)
 const UPDATE = process.env.UPDATE_RENDER_GOLDEN === '1'
@@ -111,4 +112,19 @@ test('render goldens cover every content system, both appointment modes and a mu
   assert.ok(all.some((f) => f.content.site), 'content.site v2')
   assert.ok(all.some((f) => (f.content.site?.pages || []).length > 1), 'multi-page')
   assert.deepEqual(new Set(all.map((f) => f.biz.appointmentMode)), new Set(['at_customer', 'at_business']))
+})
+
+// One service catalog (server/website-catalog.js, WEB-14): a live site whose services equal Settings → Services renders
+// byte-identical HTML with the catalog applied (also when the catalog has no descriptions, as setup creates it).
+test('published sites whose services equal the catalog render exactly as before with the catalog applied', () => {
+  for (const name of Object.keys(CASES)) {
+    const { biz, content } = fixture(name)
+    const catalog = readServices((content.services || []).map((s) => ({ name: s.name, price: s.price, description: s.description })))
+    const bare = readServices((content.services || []).map((s) => ({ name: s.name, price: s.price })))
+    for (const page of content.site ? content.site.pages.map((p) => p.slug) : ['']) {
+      const golden = renderSite(biz, content, OPTS(biz.id, page))
+      assert.equal(renderSite({ ...biz, catalog }, content, OPTS(biz.id, page)), golden, `${name} ${page}`)
+      assert.equal(renderSite({ ...biz, catalog: bare }, content, OPTS(biz.id, page)), golden, `${name} ${page} (no descriptions)`)
+    }
+  }
 })

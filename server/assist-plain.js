@@ -207,8 +207,9 @@ const zoneWords = (tz) => {
   }
 }
 const sentence = (s) => s.charAt(0).toUpperCase() + s.slice(1)
-// One wording for the three counts, wherever the assistant gives them (the same counts Overview shows for 30 days).
-const countsLine = (r) => `${plural(r.new_inquiries, 'new inquiry', 'new inquiries')}, ${plural(r.bookings_made, 'booking')} made, ${plural(r.visits_happened, 'visit')} marked as happened`
+// One wording for the three counts, wherever the assistant gives them (the same counts and the same dates as Overview's
+// tiles, DASH-08): bookings by the day they were made, visits by the day they were scheduled.
+const countsLine = (r) => `${plural(r.new_inquiries, 'new inquiry', 'new inquiries')}, ${plural(r.bookings_made, 'booking')} made, ${plural(r.visits_happened, 'visit')} scheduled in that time and marked as happened`
 
 // The panel's own suggestions (src/content/assistant-ideas.js) and the countable follow-ups under a number
 // (src/content/help.js `ask`) are offered by the product, so each must return the fact it asks for. These are answered
@@ -248,7 +249,7 @@ export async function offeredAnswer(env, customer, req) {
   if (has(w, /\b(inquiries became bookings|no shows did i have)\b/)) {
     const r = await run('business_numbers', { period: span })
     if (!r) return null
-    return { kind: 'records', answer: has(w, /\bno shows\b/) ? `${sentence(r.period)}: ${plural(r.no_shows, 'no-show')}, ${plural(r.visits_happened, 'visit')} marked as happened${r.past_visits_without_outcome ? `, ${plural(r.past_visits_without_outcome, 'past visit')} not marked yet` : ''}.` : `${sentence(r.period)}: ${plural(r.new_inquiries, 'new inquiry', 'new inquiries')} and ${plural(r.bookings_made, 'booking')} made. A booking can come from an earlier inquiry, so this isn’t a rate.` }
+    return { kind: 'records', answer: has(w, /\bno shows\b/) ? `${sentence(r.period)}, by the day the visit was scheduled: ${plural(r.no_shows, 'no-show')}, ${plural(r.visits_happened, 'visit')} marked as happened${r.past_visits_without_outcome ? `, ${plural(r.past_visits_without_outcome, 'past visit')} not marked yet` : ''}.` : `${sentence(r.period)}: ${plural(r.new_inquiries, 'new inquiry', 'new inquiries')} and ${plural(r.bookings_made, 'booking')} made. A booking can come from an earlier inquiry, so this isn’t a rate.` }
   }
   if (has(w, /\bzip codes do i list\b/)) {
     const r = await run('business_settings')
