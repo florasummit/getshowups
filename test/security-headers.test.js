@@ -33,3 +33,12 @@ test('an existing Content-Security-Policy is never replaced; status and body are
   // Local http (tests, dev): no HSTS.
   assert.equal((await withAppHeaders(new Response('x'), new URL('http://127.0.0.1:8788/dashboard'))).headers.get('Strict-Transport-Security'), null)
 })
+
+test('the QA build fingerprints (/qa-hashes.json) are never served publicly; the server reads them through env.ASSETS', async () => {
+  for (const host of ['getshowups.com', 'www.someowner.example']) {
+    const res = await onRequest({ request: new Request(`https://${host}/qa-hashes.json`), env: {}, next: async () => new Response('{"hashes":{}}') })
+    assert.equal(res.status, 404, host)
+    assert.equal(res.headers.get('cache-control'), 'no-store')
+    assert.doesNotMatch(await res.text(), /hashes/)
+  }
+})

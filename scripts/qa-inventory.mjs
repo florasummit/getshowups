@@ -290,18 +290,24 @@ async function evalScenarios(strict) {
   }
 }
 
+// Confidential areas never enter the QA inventory or the published hashes (founder decision 2026-11-27): the Research
+// Vault (server/research, functions/api/research, src/admin/research and its tests) and anything named research/vault.
+// Their own tests still run in CI; they are simply not listed, mapped or fingerprinted here.
+export const PRIVATE_PATH = /(^|\/|-|_)(research|vault)(\/|-|_|\.|$)/i
+export const isPrivatePath = (p) => PRIVATE_PATH.test(String(p))
+
 export async function buildInventory({ strict = true } = {}) {
   const { JOURNEYS } = await import('../server/ops/journeys.js')
   const tests = []
   const files = {}
-  for (const f of readdirSync(path.join(ROOT, 'test')).filter((x) => x.endsWith('.test.js')).sort()) {
+  for (const f of readdirSync(path.join(ROOT, 'test')).filter((x) => x.endsWith('.test.js') && !isPrivatePath(x)).sort()) {
     const base = f.replace(/\.test\.js$/, '')
     const map = UNIT_MAP[base] || ['unassigned', null, null]
     const rel = `test/${f}`
     files[rel] = { kind: 'unit', area: map[0], feature: map[1] ?? null, journey: map[2] ?? null, impact: 'deps' }
     tests.push(...testsOfFile('unit', rel, base, map, { impact: 'deps' }))
   }
-  for (const f of readdirSync(path.join(ROOT, 'test/e2e')).filter((x) => x.endsWith('.spec.js')).sort()) {
+  for (const f of readdirSync(path.join(ROOT, 'test/e2e')).filter((x) => x.endsWith('.spec.js') && !isPrivatePath(x)).sort()) {
     const base = f.replace(/\.spec\.js$/, '')
     const map = E2E_MAP[base] || ['unassigned', null, null, null]
     const rel = `test/e2e/${f}`
@@ -428,6 +434,8 @@ export async function computeHashes() {
   const evalDeps = depsHash(['scripts/admin-assistant-eval.mjs', 'functions/api/platform/assist.js', 'test/fixtures/admin-assistant-data.js'])
   for (const s of S) out[`eval:admin:${s.id}`] = { def: short(JSON.stringify(s, (k, v) => (v instanceof RegExp ? String(v) : v))), deps: evalDeps }
   out['scripts/receptionist-eval.mjs'] = { def: hashFile('scripts/receptionist-eval.mjs'), deps: depsHash(['scripts/receptionist-eval.mjs']) }
+  // Belt and braces: whatever produced a key, a confidential one is never published.
+  for (const k of Object.keys(out)) if (isPrivatePath(k)) delete out[k]
   return out
 }
 
