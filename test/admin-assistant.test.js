@@ -281,7 +281,9 @@ test('“what needs me”: every listed item is tier-labelled, one per line, and
   assert.match(backs[1], /says Two urgent but lists 1 line/)
   // Pure rule: a follow-up that isn't about the list may use plain bullets; any answer that mentions "urgent" may not.
   assert.equal(tierProblem('- one\n- two', 'Which enrollments are stuck?'), null)
-  assert.match(tierProblem('The urgent one:\n- one', 'Is anything broken?'), /Label every listed item/)
+  // The QUESTION decides: an answer that merely says “urgent” keeps its own bullets.
+  assert.equal(tierProblem('The urgent one:\n- one', 'Is anything broken?'), null)
+  assert.match(tierProblem('The urgent one:\n- one', 'What needs me this week?'), /Label every listed item/)
   assert.equal(tierProblem('- FYI: one\n- Important: two', 'what needs me'), null)
 })
 

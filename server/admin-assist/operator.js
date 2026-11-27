@@ -39,13 +39,14 @@ const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(resent|re-
 const NOT_DONE = /\b(not|never|no|nothing|none|once|if|until|when|after you|ready to approve|approve)\b/i
 const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups|function)\b|\b(weekly_brief|business_health|platform_numbers|system_health|ai_spending|growth_activity|prepare_\w+|no_lookup_needed)\b|\bTHIS WEEK\b/
 // "What needs me": every listed item carries its tier, one brief item per line, and a stated urgent count matches.
-export const BRIEF_Q = /\b(what needs (me|my attention|attention)|this week|anything urgent|what('s| is) urgent|what should i (do|work on|look at)|priorit\w*|to-?do)\b/i
+export const BRIEF_Q = /\b(what needs (me|my attention|attention)|this week|anything urgent|what('s| is) urgent|what should i (do|work on|look at)|my to-?do)\b/i
 export const CUT_BRIEF = 'It was cut off: list fewer items. Give every urgent item and at most the 3 most important others, one line each under 30 words, then one closing line: "N more on Overview\'s This week list."'
 const TIER = /^\s*[-•]\s*(urgent|important|fyi)\s*[:—–-]/i
 const COUNT_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }
 export function tierProblem(text, question) {
   const bullets = text.split('\n').filter((l) => /^\s*[-•]\s/.test(l))
-  if (!bullets.length || !(BRIEF_Q.test(question) || /\burgent\b/i.test(text))) return null
+  // Only "what needs me" questions: a summary or list that happens to say "urgent" keeps its own bullets.
+  if (!bullets.length || !BRIEF_Q.test(question)) return null
   if (bullets.some((l) => !TIER.test(l))) return 'Label every listed item with its tier: start each line with "- Urgent: ", "- Important: " or "- FYI: ", one item of the list per line, urgent first.'
   const stated = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten) urgent\b/i.exec(text)
   const urgent = bullets.filter((l) => /^\s*[-•]\s*urgent/i.test(l)).length
@@ -113,7 +114,7 @@ export function restatedTitle(text, titles) {
     if (t.length < 5) continue
     const tail = text.slice(m.index + m[0].length).split(/[.!?\n]/)[0]
     const w = ` ${wordList(tail).join(' ')} `
-    for (let i = 0; i + 5 <= t.length; i++) if (w.includes(` ${t.slice(i, i + 5).join(' ')} `)) return `After [${m[1]}] the page already shows the item's title: don't restate what it is. Write [${m[1]}] and add only its severity, kind, area, status or age.`
+    for (let i = 0; i + 5 <= t.length; i++) if (w.includes(` ${t.slice(i, i + 5).join(' ')} `)) return `After [${m[1]}] the page already shows the item's title: don't restate what it is. Write [${m[1]}] and add only its severity, kind, area, status or age. Keep every other line as it is.`
   }
   return null
 }
@@ -126,7 +127,11 @@ const MONEYISH = /\b(pa(y|id|ying|yment)s?|revenue|mrr|arr|churn\w*|subscri\w+|c
 export const TEST_NOTE = 'Billing is in Stripe test mode: nobody pays real money yet, and test-mode amounts are not revenue.'
 const NAMEISH = (text, names) => names.filter((n) => n && n.length > 3 && text.toLowerCase().includes(n.toLowerCase()))
 
-export function adminProblem(text, { facts, shown, live, names = [], prepared = 0, typed = '', question = typed }) {
+// How many listed lines an answer may have: 6, or for a full list the founder asked for ("summarize the backlog", "list …")
+// one per item the lookups returned (at most 12) + 3.
+export const FULL_LIST_Q = /\b(summari[sz]e|summary of|list|all (the |my )?|every|each|go through|overview of)\b/i
+export const lineLimit = (question, items) => (FULL_LIST_Q.test(String(question || '')) ? Math.max(6, Math.min(12, items) + 3) : 6)
+export function adminProblem(text, { facts, shown, live, names = [], prepared = 0, typed = '', question = typed, items = 0 }) {
   if (!text || text.length < 2) return 'The answer was empty.'
   if (text.length > BOUNDS.answer) return 'The answer was too long. Under 150 words.'
   if (/https?:|www\.|[<>{}]|\/admin\b/i.test(text)) return 'Remove links, paths, code and braces. Name the page instead (Overview, Control Center, Sales, Growth).'
@@ -144,7 +149,8 @@ export function adminProblem(text, { facts, shown, live, names = [], prepared = 
   if (tiers) return tiers
   const ready = readinessProblem(text, question)
   if (ready) return ready
-  if ((text.match(/^\s*[-•]\s/gm) || []).length > 6) return 'Too many lines. Give the 5 that matter most, most urgent first, and say how many more are on the This week list on Overview.'
+  const most = lineLimit(question, items)
+  if ((text.match(/^\s*[-•]\s/gm) || []).length > most) return most > 6 ? `Too many lines: at most ${most}, one per item. Keep every other part as it is.` : 'Too many lines. Give the 5 that matter most, most urgent first, and say how many more are on the This week list on Overview.'
   if (SELF_DOUBT.test(text)) return 'It doubts or corrects an earlier answer. Earlier answers were written from lookups of the records. Answer only the question; if a lookup now shows something different, say what the records show now.'
   if (INSIDE.test(text)) return 'It talks about tools, lookups or your instructions. Say only what the records show.'
   if (PROMISE.test(text)) return 'It predicts a result. Say what the records show and what to check instead.'
@@ -231,7 +237,7 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
     const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
     const names = [...c.refs.values()].map((r) => r.name).filter(Boolean)
-    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : 'It was cut off. Shorter, and finish the sentence.') : restated ? restated : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
+    const why = reply.cut ? (BRIEF_Q.test(req.question) ? CUT_BRIEF : 'It was cut off. Shorter, and finish the sentence.') : restated ? restated : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, question: req.question, items: new Set(results.flatMap((x) => [...JSON.stringify(x.result ?? null).matchAll(/"ref":"([BEPQ]\d{1,3})"/g)].map((m) => m[1]))).size, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)

@@ -11,7 +11,7 @@ import * as assistApi from '../functions/api/platform/assist.js'
 import * as approveApi from '../functions/api/platform/assist-approve.js'
 import { adminContext, runAdminTool } from '../server/admin-assist/tools.js'
 import { consequentialAsk, ideaCapture, ownerDataAsk, qaAsk } from '../server/admin-assist/guard.js'
-import { fillRefs, readinessProblem, restatedTitle } from '../server/admin-assist/operator.js'
+import { fillRefs, lineLimit, readinessProblem, restatedTitle, tierProblem } from '../server/admin-assist/operator.js'
 import { similarity, suggestPriority } from '../server/admin-assist/qa.js'
 import { categoriesOf, checks, QA_SCENARIOS, REGRESSION, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
 import { ADMIN, fakeTokens, QA_TESTS, seedAdminFixture } from './fixtures/admin-assistant-data.js'
@@ -266,4 +266,26 @@ test('an item is never restated after its reference: such a sentence goes back t
   assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
   assert.match(calls.at(-1).messages.at(-1).content, /don't restate what it is/)
   assert.equal(r.body.answer, 'One blocker: “Booking page shows no open times after a calendar reconnect”, a high-severity bug, open for 2 days.')
+})
+
+test('a backlog summary keeps its own bullets (no tiers, even with “urgent”), may list every item, and a restatement retry keeps the rest', async () => {
+  // A summary that mentions “urgent” with bullets, five items long: accepted on the first draft.
+  script.push(callTool('qa_items', { group: 'backlog' }), (b) => {
+    const refs = [...new Set([...b.messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' ').matchAll(/"ref":"(Q\d+)"/g)].map((m) => m[1]))]
+    return say(`5 backlog entries; none is urgent.\n${refs.slice(0, 5).map((r) => `- [${r}], open ${1} day`).join('\n')}\nSuggested: review the two texting ideas together.`)
+  })
+  const r = await ask({ question: 'Summarize the improvement backlog.' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.equal(calls.length, 2) // no retry
+  assert.equal(r.body.answer.split('\n').filter((l) => l.startsWith('- ')).length, 5)
+  // The line limit: 6 elsewhere; for a full list, one line per item returned (≤ 12) + 3.
+  assert.equal(lineLimit('Is anything broken?', 9), 6)
+  assert.equal(lineLimit('Summarize the improvement backlog.', 7), 10)
+  assert.equal(lineLimit('List all defects', 40), 15)
+  assert.equal(lineLimit('List all defects', 2), 6)
+  // "What needs me" answers still need tiers.
+  assert.match(tierProblem('- Coastal calendar.\n- Oak Tree is stuck.', 'What needs me this week?'), /Label every listed item/)
+  assert.equal(tierProblem('- one urgent thing\n- two', 'Summarize the improvement backlog.'), null)
+  // The restatement retry asks to keep every other line.
+  assert.match(restatedTitle('[Q1], the booking page shows no open times after a calendar reconnect', { Q1: 'Booking page shows no open times after a calendar reconnect' }), /Keep every other line as it is\.$/)
 })
