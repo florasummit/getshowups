@@ -5,6 +5,7 @@
 // Messages: { role: 'user', text } | { role: 'assistant', text, calls, native } | { role: 'tool', results: [{ id, name, text }] }.
 import Anthropic from '@anthropic-ai/sdk'
 import { ASSISTANT_MODEL, PRICE } from './followups/assistant.js'
+import { reserveAi, worstCase } from './ai-budget.js'
 
 const MOCK_RE = /^http:\/\/127\.0\.0\.1:\d+$/
 const mockOf = (env) => (typeof env.AI_API_MOCK_ORIGIN === 'string' && MOCK_RE.test(env.AI_API_MOCK_ORIGIN) ? env.AI_API_MOCK_ORIGIN : null)
@@ -98,7 +99,13 @@ async function workers(env, m, { system, messages, tools, mustLook, maxTokens },
   return readWorkers(await withTimeout(env.AI.run(m.model, body), ms))
 }
 
-async function claude(env, m, { system, messages, tools, allTools, maxTokens }, ms) {
+async function claude(env, m, { system, messages, tools, allTools, maxTokens, customerId }, ms) {
+  // One spending guard (server/ai-budget.js): the call's worst case is reserved first; refused → treated like the
+  // provider's own limit (the assistant answers from records without a model).
+  const budget = await reserveAi(env, { entry: 'assistant', customerId, micros: worstCase({ chars: JSON.stringify([system, messages, allTools]).length, maxOutput: maxTokens, inPerToken: m.price.write, outPerToken: m.price.out }) })
+  if (!budget.ok) throw Object.assign(new Error('ai_budget'), { budget: budget.reason })
+  let settled = false
+  try {
   const anthropic = env.ANTHROPIC_CLIENT || new Anthropic({ apiKey: env.OPERATOR_ANTHROPIC_API_KEY.trim(), maxRetries: 1, timeout: ms })
   const out = messages.map((x) =>
     x.role === 'tool'
@@ -117,8 +124,15 @@ async function claude(env, m, { system, messages, tools, allTools, maxTokens }, 
   })
   const u = res.usage || {}
   const usage = { in: u.input_tokens || 0, out: u.output_tokens || 0, read: u.cache_read_input_tokens || 0, write: u.cache_creation_input_tokens || 0 }
+  await budget.settle(costOf(m, usage))
+  settled = true
   if (res.stop_reason === 'refusal') return { calls: [], text: '', usage, native: res.content }
   return { cut: res.stop_reason === 'max_tokens', calls: res.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input })), text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim(), usage, native: res.content }
+  } catch (err) {
+    // A request the provider refused (HTTP status) cost nothing; a timeout keeps its worst case (it may have been billed).
+    if (!settled && err?.status) await budget.settle(0)
+    throw err
+  }
 }
 
 // Why the provider refused, as a code (its message is never shown or stored):
@@ -128,6 +142,7 @@ async function claude(env, m, { system, messages, tools, allTools, maxTokens }, 
 export function providerReason(err) {
   const m = String(err?.message || '')
   if (/^4006\b|daily free allocation/i.test(m)) return 'quota'
+  if (m === 'ai_budget') return 'quota'
   if (m === 'ai_timeout' || /Timeout/.test(err?.name || '')) return 'timeout'
   if ([401, 402, 403].includes(err?.status) || /credit balance|billing|spend(ing)? limit|usage limit/i.test(m) || /^(10000|5018)\b/.test(m)) return 'setup'
   if (err?.status === 429 || err?.status === 529 || /^3040\b|capacity/i.test(m)) return 'busy'

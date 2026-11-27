@@ -104,6 +104,29 @@ test('auth routing: /admin round trip, admin-only at /dashboard, customer at /ad
   await ctx.close()
 })
 
+test('AI spending: today’s use against the limits, Retell minutes, and a limit change needs a reason and is audited', async ({ page, context }) => {
+  await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
+  await page.goto('/admin')
+  const card = page.locator('[data-ai-spend]')
+  await expect(card.getByRole('heading', { name: 'AI spending today (UTC)' })).toBeVisible()
+  await expect(card).toContainText('All AI: on')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('Retell')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('OpenAI')
+  await expect(card.locator('[data-voice-minutes]')).toContainText('ElevenLabs')
+  // The e2e server seeds generous limits (serve.sh); 999 of 1,000 Retell minutes changes nothing for parallel specs.
+  const row = card.locator('[data-ai-limit="retell_minutes"]')
+  await row.getByRole('textbox').fill('999')
+  await row.getByRole('button', { name: 'Change Retell minutes per day' }).click()
+  const save = row.getByRole('button', { name: 'Save the new limit' })
+  await expect(save).toBeDisabled() // a reason is required
+  await row.getByLabel(/Reason/).fill('e2e: raise for a test day')
+  await save.click()
+  await expect(card).toContainText('Saved and audited')
+  const s = await (await page.request.get('/api/platform/ai-spend')).json()
+  expect(s.settings.retell_minutes).toBe(999)
+  expect(s.changed.retell_minutes).toBeTruthy()
+})
+
 test('admin sees customers, metrics, and customer detail without lead contact data', async ({ page, context }) => {
   await useSession(context, fixtures.E2E_ADMIN_SESSION_TOKEN)
   await page.goto('/admin')

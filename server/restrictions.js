@@ -1,7 +1,7 @@
 // Per-business feature restrictions set by a platform admin (migration 0041). A row = off for that business. They only
 // ever take away: no row can turn something on that a switch, plan or approval keeps off. Before 0041: none. Any other
 // read error counts as restricted (the same fail-closed rule as eligibility).
-export const FEATURES = { ads: 'Running ads', teach_ai: 'Teach Your AI', website_studio: 'Website Studio and AI design', receptionist: 'AI receptionist', assistant: 'Dashboard assistant' }
+export const FEATURES = { ads: 'Running ads', teach_ai: 'Teach Your AI', website_studio: 'Website Studio and AI design', receptionist: 'AI receptionist', assistant: 'Dashboard assistant', ai: 'All AI' } // 'ai' = every GetShowUps-paid model call and voice start (server/ai-budget.js aiOff)
 export async function restricted(env, customerId, feature, { onError = 'restricted' } = {}) {
   try {
     return Boolean(await env.ONBOARDING_DB.prepare('SELECT 1 AS x FROM business_restrictions WHERE customer = ?1 AND feature = ?2').bind(customerId, feature).first())

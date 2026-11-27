@@ -306,6 +306,14 @@ INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$
 npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
   -c test/e2e/wrangler.e2e.toml >/dev/null
 
+# AI spending limits for this TEST server only (server/ai-budget.js): the production defaults ($1 per business, 60 Retell
+# minutes, open calls counted at 15 min) would refuse mocked voice and chat calls of parallel specs during one run.
+d1 "
+INSERT INTO ai_budget_settings (key, value, updated_by, updated_at) VALUES
+  ('platform_micros', 100000000, 'e2e', $NOW), ('public_micros', 100000000, 'e2e', $NOW), ('business_micros', 100000000, 'e2e', $NOW), ('retell_minutes', 1000, 'e2e', $NOW),
+  ('openai_minutes', 1000, 'e2e', $NOW), ('elevenlabs_minutes', 1000, 'e2e', $NOW);
+"
+
 # Business details (business-details.spec.js): per-day hours saved in Settings, and a public address on the booking page.
 d1 "
 INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES

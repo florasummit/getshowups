@@ -154,7 +154,7 @@ export async function operate(env, customer, req, { now = Date.now(), model = op
     if (left < 1500) break
     const last = round >= BOUNDS.rounds - 1 || calls >= BOUNDS.calls
     let reply
-    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens }
+    const req1 = { system, messages, tools: last ? null : SPECS, allTools: SPECS, mustLook: round === 0, maxTokens: BOUNDS.tokens, customerId: customer.id }
     try {
       // One short retry, once per question, only for a refusal that can pass (Anthropic's client retries by itself). Never
       // for a used-up allowance, a refused account or a timeout.
