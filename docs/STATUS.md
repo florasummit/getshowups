@@ -18,9 +18,12 @@ existing table unchanged; 0040 still NOT applied. Backup ~/getshowups-backups/pr
   no business address exposed; PoolThru's services ([]), hours, minimum notice and closures unchanged. Not verifiable in
   production without an owner session or model calls: Settings per-day hours and address forms, Overview/Assistant
   numbers, Teach precedence in prompts, the calendar-connect redirect (all covered by CI).
-- **Ledger, final:** 82 resolved (some in part with the remainder documented), ONB-01 homepage sign-up retained while
-  enrollment is closed (founder decision), ONB-14 step-card widths retained, DASH-01 production-model behaviour blocked
-  (needs paid model calls).
+- **Ledger, final (docs/quality/USABILITY_FINDINGS.md):** 80 fully resolved. 4 resolved in part, remainder retained by
+  decision: ONB-01 (invited entry on the sign-in page; homepage sign-up entry retained while enrollment is closed, founder
+  decision), ONB-14 (step-card widths retained: the website preview and domain records need the room), SET-04 (a warning
+  with "Save anyway", not a hard error, so non-US codes keep working), WEB-08 (the included change help edits copy, colours,
+  lettering and the first photo, not pages, sections or legal pages). 1 resolved in part, remainder blocked: DASH-01
+  (deterministic answers resolved; production-model behaviour unmeasured without paid model calls).
 - **PoolThru:** its website keeps its own service copy until the founder saves services in Settings; then the site shows
   the Settings values (names matched ignoring punctuation). A price is at most 40 characters.
 
