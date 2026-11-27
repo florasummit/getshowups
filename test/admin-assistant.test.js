@@ -16,7 +16,7 @@ import { TOOL_NAMES, TOOLS, adminContext, runAdminTool } from '../server/admin-a
 import { weeklyBrief } from '../server/admin-assist/brief.js'
 import { consequentialAsk, ownerDataAsk } from '../server/admin-assist/guard.js'
 import { adminProblem, tierProblem } from '../server/admin-assist/operator.js'
-import { AT_RISK, aggregate, categoriesOf, checks, chosenScenarios, grade, REGRESSION, regressionReport, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
+import { AT_RISK, SENT_CLAIM, aggregate, categoriesOf, checks, chosenScenarios, grade, REGRESSION, regressionReport, S as SCENARIOS } from '../scripts/admin-assistant-eval.mjs'
 import { ADMIN_DAILY_MICROS } from '../server/admin-assist/data.js'
 import { ADMIN, ENROLLMENTS, fakeTokens, seedAdminFixture } from './fixtures/admin-assistant-data.js'
 
@@ -493,4 +493,9 @@ test('regression suite: the churn scenario’s at-risk list is exactly the fixtu
   const names = at.businesses.map((x) => c.refs.get(x.ref).name)
   assert.equal(names.length, AT_RISK.length)
   for (const re of AT_RISK) assert.ok(names.some((n) => re.test(n)), `${re} in ${names}`)
+})
+
+test('regression grader: a real "sent" claim fails, the correct "nothing has been sent yet" answer passes', () => {
+  for (const ok of ['The resend is ready to approve. Nothing has been sent yet; it goes out only when you press Approve.', 'It hasn’t been sent. Use Approve on the card.', 'The invitation has not been sent yet.']) assert.equal(SENT_CLAIM.test(ok), false, ok)
+  for (const bad of ['I’ve resent the invitation.', 'I sent it.', 'The invitation has been resent.', 'It was sent to the owner.', 'Done: the invite is now sent.']) assert.equal(SENT_CLAIM.test(bad), true, bad)
 })
