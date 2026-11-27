@@ -10,6 +10,8 @@ export const STUCK_PAID_DAYS = 7 // paid, but the ownership invitation not sent 
 export const EXPIRING_DAYS = 2 // an unaccepted invitation that expires within this many days
 export const RECONCILE_STALE_DAYS = 2
 export const SPEND_WARN = 0.8 // share of a daily ceiling that is "near"
+// Flags that only describe money moving (or not) through Stripe.
+export const BILLING_FLAGS = ['past_due', 'cancel_scheduled', 'subscription_ended', 'recovery_ending', 'recovery_ended']
 export const ENROLLMENT_OWNS = ['calendar_disconnected', 'setup_stalled', 'checkout_abandoned', 'no_owner', 'invite_pending']
 
 const days = (ms) => Math.max(0, Math.floor(ms / DAY))
@@ -45,20 +47,31 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
   // Businesses in an assisted enrollment that the owner hasn't claimed yet: their setup, calendar, payment and invitation
   // are the enrollment's (one item there), never repeated as account flags.
   const enrolled = new Set((enr?.list || []).filter((e) => e.stage !== 'claimed').map((e) => e.customer).filter(Boolean))
-  const has = (a) => rows.filter((r) => r.attention.includes(a) && !(enrolled.has(r.id) && ENROLLMENT_OWNS.includes(a)))
+  const has0 = (a) => rows.filter((r) => r.attention.includes(a) && !(enrolled.has(r.id) && ENROLLMENT_OWNS.includes(a)))
+  // A subscription that is not live (Stripe test mode) moves no real money: its payment failures, cancellations and
+  // endings are never items of their own (never urgent); they are counted once in the "Billing is in test mode" item.
+  const testBilled = (r) => bill(r).state === 'test' || (!L.live && Boolean(r.subscription))
+  const testOnly = new Map()
+  const has = (a) =>
+    has0(a).filter((r) => {
+      if (!BILLING_FLAGS.includes(a) || !testBilled(r)) return true
+      testOnly.set(a, (testOnly.get(a) || 0) + 1)
+      return false
+    })
 
   // ---------- urgent ----------
   perBusiness(out, 'urgent', 'past_due', has('past_due'), 'Payment failed', { detail: (r) => bill(r).words, next: 'Check billing with the owner. Payment retries and refunds happen in Stripe.', group: 5 })
   perBusiness(out, 'urgent', 'ads_running_on_hold', has('ads_running_on_hold'), 'Ads still running while on hold', { next: 'Open the business and check the ads safety stop now.' })
   perBusiness(out, 'urgent', 'deletion_stuck', has('deletion_stuck'), 'Account deletion stuck', { next: 'Open the deletion record on the business.' })
   const cal = has('calendar_disconnected')
-  perBusiness(out, 'urgent', 'calendar_disconnected', cal.filter(serving), 'Calendar disconnected on a serving business', { detail: (r) => `${bill(r).words}. Customers can't see open times until the owner reconnects Google Calendar.`, next: 'Ask the owner to reconnect Google Calendar (Dashboard → Settings).' })
+  perBusiness(out, 'urgent', 'calendar_disconnected', cal.filter(serving), 'Calendar disconnected on a serving business', { detail: () => "Customers can't see open times until the owner reconnects Google Calendar.", next: 'Ask the owner to reconnect Google Calendar (Dashboard → Settings).' })
   const real = (incidents || []).filter((i) => !i.test)
   const names = new Map((rows0 || []).map((r) => [r.id, r.name]))
   for (const i of real.filter((x) => ['critical', 'high'].includes(x.severity)).slice(0, 5)) {
     out.push({ id: `incident:${i.id}`, rule: 'incident', level: 'urgent', title: `${i.severity === 'critical' ? 'Critical' : 'High'} incident: ${i.title}${i.customer && names.get(i.customer) ? ` (${names.get(i.customer)})` : ''}`, detail: `Opened ${ago(now, i.firstSeen)}, last seen ${ago(now, i.lastSeen)}; ${plural(i.occurrences, 'occurrence')}.`, next: i.next || i.recovery || 'Open it in the Control Center.', href: `/admin/control?incident=${encodeURIComponent(i.id)}`, incident: i.id, ...(i.customer ? { business: { id: i.customer, name: names.get(i.customer) || i.customer } } : {}) })
   }
-  if (recon?.real > 0) out.push({ id: 'reconciliation:mismatch', rule: 'reconciliation', level: 'urgent', title: `Billing records don't match Stripe: ${plural(recon.real, 'issue')} on real businesses`, detail: `Last reconciliation ${ago(now, recon.at)}.`, next: 'Open Billing reconciliation on Overview and resync the business from Stripe if Stripe is right.', href: '/admin#reconciliation' })
+  // In test mode no money is behind the records: a mismatch is worth fixing, never urgent.
+  if (recon?.real > 0) out.push({ id: 'reconciliation:mismatch', rule: 'reconciliation', level: L.live ? 'urgent' : 'important', title: `Billing records don't match Stripe: ${plural(recon.real, 'issue')} on real businesses`, detail: `Last reconciliation ${ago(now, recon.at)}.${L.live ? '' : ' Stripe is in test mode, so no real money is affected.'}`, next: 'Open Billing reconciliation on Overview and resync the business from Stripe if Stripe is right.', href: '/admin#reconciliation' })
 
   // ---------- important ----------
   perBusiness(out, 'important', 'booking_failures', has('booking_failures'), 'Booking failures in the last 7 days', { next: 'Open the business; the Control Center shows the failure codes.' })
@@ -100,16 +113,20 @@ export async function weeklyBrief(env, now = Date.now(), L = loaders(env, now)) 
 
   // ---------- FYI ----------
   perBusiness(out, 'fyi', 'cancel_scheduled', has('cancel_scheduled'), 'Cancellation scheduled', { next: 'Ask why, if you want to keep them.' })
-  perBusiness(out, 'fyi', 'subscription_ended', has('subscription_ended').filter((r) => !has('recovery_ending').includes(r)), 'Subscription ended', { next: 'Nothing is deleted automatically; they can come back within the recovery period.' })
+  const ending = has('recovery_ending')
+  perBusiness(out, 'fyi', 'subscription_ended', has('subscription_ended').filter((r) => !ending.includes(r)), 'Subscription ended', { next: 'Nothing is deleted automatically; they can come back within the recovery period.' })
   perBusiness(out, 'fyi', 'no_recent_bookings', has('no_recent_bookings'), 'No bookings in 14 days', { next: 'Worth a check-in: are they still using GetShowUps?' })
   perBusiness(out, 'fyi', 'domain_activation', has('domain_activation'), 'Own domain waiting to activate', { next: 'Open the business’s domain settings.' })
   perBusiness(out, 'fyi', 'suspended', has('suspended'), 'Suspended', { next: 'Suspension is lifted from the business page.' })
   const due = acq?.totals?.followUpsDue || 0
   if (due) out.push({ id: 'acquisition:followups', rule: 'followups_due', level: 'fyi', title: `${plural(due, 'outreach follow-up')} due`, detail: 'Outreach you recorded as sent at least 4 days ago without a follow-up.', next: 'Follow up, then record it in Growth → Activities.', href: '/admin/growth', count: due })
-  if (!L.live) {
+  const TEST_WORDS = { past_due: 'failed payment', cancel_scheduled: 'scheduled cancellation', subscription_ended: 'ended subscription', recovery_ending: 'recovery period ending', recovery_ended: 'recovery period over' }
+  const testFacts = [...testOnly].map(([a, k]) => plural(k, TEST_WORDS[a]))
+  if (!L.live || testFacts.length) {
     const g = await L.growth()
     const n = g?.billing?.testSubscriptions || 0
-    out.push({ id: 'billing:test_mode', rule: 'billing_mode', level: 'fyi', title: 'Billing is in Stripe test mode', detail: n ? `${plural(n, 'test subscription')}; none of it is revenue.` : 'No revenue is counted until live billing is switched on.', next: 'Switching on live billing needs your approval.', href: '/admin' })
+    const also = testFacts.length ? ` Recorded in test mode only (not real money): ${testFacts.join(', ')}.` : ''
+    out.push({ id: 'billing:test_mode', rule: 'billing_mode', level: 'fyi', title: L.live ? 'Some subscriptions are in Stripe test mode' : 'Billing is in Stripe test mode', detail: `${n ? `${plural(n, 'test subscription')}; none of it is revenue.` : 'No revenue is counted until live billing is switched on.'}${also}`, next: L.live ? 'Nothing to do for real customers.' : 'Switching on live billing needs your approval.', href: '/admin' })
   }
   out.sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level))
   return { generatedAt: now, items: out, counts: Object.fromEntries(LEVELS.map((l) => [l, out.filter((x) => x.level === l).length])), unreadable: unread }

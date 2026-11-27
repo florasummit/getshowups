@@ -144,9 +144,9 @@ test('the brief: urgent → important → FYI, each with the page that resolves 
   const b = await weeklyBrief(env)
   const ids = b.items.map((i) => i.id)
   assert.deepEqual(b.items.map((i) => i.level), [...b.items.map((i) => i.level)].sort((x, y) => ['urgent', 'important', 'fyi'].indexOf(x) - ['urgent', 'important', 'fyi'].indexOf(y)))
-  for (const id of ['past_due:sunny-side-spa', 'calendar_disconnected:coastal-electric', 'incident:inc_coastal_cal', 'reconciliation:mismatch']) assert.equal(b.items.find((i) => i.id === id)?.level, 'urgent', id)
-  for (const id of [`enrollment_stale:${ENROLLMENTS.oak}`, `enrollment_paid:${ENROLLMENTS.lakeside}`, `enrollment_invite_expired:${ENROLLMENTS.harbor}`, 'invite_expiring:invRiverbend0001', 'setup_stalled:maple-street-hvac', 'incidents:minor']) assert.equal(b.items.find((i) => i.id === id)?.level, 'important', id)
-  for (const id of ['cancel_scheduled:pine-ridge-plumbing', 'no_recent_bookings:pine-ridge-plumbing', 'acquisition:followups', 'billing:test_mode']) assert.equal(b.items.find((i) => i.id === id)?.level, 'fyi', id)
+  for (const id of ['calendar_disconnected:coastal-electric', 'incident:inc_coastal_cal']) assert.equal(b.items.find((i) => i.id === id)?.level, 'urgent', id)
+  for (const id of ['reconciliation:mismatch', `enrollment_stale:${ENROLLMENTS.oak}`, `enrollment_paid:${ENROLLMENTS.lakeside}`, `enrollment_invite_expired:${ENROLLMENTS.harbor}`, 'invite_expiring:invRiverbend0001', 'setup_stalled:maple-street-hvac', 'incidents:minor']) assert.equal(b.items.find((i) => i.id === id)?.level, 'important', id)
+  for (const id of ['no_recent_bookings:pine-ridge-plumbing', 'acquisition:followups', 'billing:test_mode']) assert.equal(b.items.find((i) => i.id === id)?.level, 'fyi', id)
   // One item per problem: an unclaimed enrollment's setup, payment and invitation flags are the enrollment's item only.
   assert.ok(!ids.some((i) => /^(calendar_disconnected|setup_stalled|checkout_abandoned|no_owner):(harbor|oak|lakeside)/.test(i)), ids.join(' '))
   assert.ok(!ids.some((i) => i.startsWith('setup_stalled:coastal') || i.startsWith('setup_stalled:riverbend')))
@@ -154,9 +154,22 @@ test('the brief: urgent → important → FYI, each with the page that resolves 
   for (const i of b.items) assert.match(i.href, /^\/admin(\/(control|sales|growth))?([?#].*)?$/, i.id)
   for (const re of PRIVATE) assert.doesNotMatch(JSON.stringify(b), re)
   assert.equal(calls.length, 0) // no model
+  // Test-mode billing moves no money: never an item of its own, never urgent; counted once in the test-mode item.
+  assert.ok(!ids.some((i) => /^(past_due|cancel_scheduled|subscription_ended):/.test(i)), ids.join(' '))
+  assert.ok(!b.items.some((i) => i.level === 'urgent' && /test/i.test(`${i.title} ${i.detail}`)))
+  assert.match(b.items.find((i) => i.id === 'billing:test_mode').detail, /test mode only \(not real money\): 1 failed payment, 1 scheduled cancellation/)
   // Spend near the ceiling is an item of its own.
   db.sql.prepare("INSERT INTO events (id, type, customer, at, props) VALUES ('x1', 'admin_ai_ask', NULL, ?, ?)").run(Date.now(), JSON.stringify({ ok: true, costMicros: ADMIN_DAILY_MICROS * 0.85 }))
   assert.ok((await weeklyBrief(env)).items.some((i) => i.id === 'ai:admin' && i.level === 'important'))
+})
+
+test('in live billing, a live subscription’s failed payment is urgent; a test-mode one still is not', async () => {
+  env.STRIPE_LIVE_ENABLED = 'true'
+  db.sql.prepare("UPDATE subscription_modes SET livemode = 1 WHERE customer = 'sunny-side-spa'").run()
+  const b = await weeklyBrief(env)
+  assert.equal(b.items.find((i) => i.id === 'past_due:sunny-side-spa')?.level, 'urgent')
+  assert.ok(!b.items.some((i) => i.id === 'cancel_scheduled:pine-ridge-plumbing')) // Pine Ridge's subscription is test mode
+  assert.match(b.items.find((i) => i.id === 'billing:test_mode').detail, /1 scheduled cancellation/)
 })
 
 test('GET returns the brief with the assistant off; POST and approve are 404 when off', async () => {
@@ -222,6 +235,34 @@ test('a checked answer: invented numbers, typed names, claims of having done som
   assert.match(adminProblem('The resend is ready to approve.', { facts, shown, live: false, prepared: 0 }), /Nothing was prepared/)
   assert.match(adminProblem(Array.from({ length: 8 }, (_, i) => `- line ${i + 1}`).join('\n'), { facts: '1 2 3 4 5 6 7 8', shown, live: false }), /Too many lines/)
   assert.match(adminProblem('Use weekly_brief next time.', { facts, shown, live: false }), /tools/)
+})
+
+test('follow-ups: earlier answers are replayed with their lookups, and an answer that doubts them is refused', async () => {
+  script.push(callTool('business_health', { ref: 'B1' }), () => say('[B1] is waiting on its calendar. I also need to correct my last message: I listed those without looking them up.'), () => say('[B1] is waiting on its calendar.'))
+  const r = await ask('admin', { question: 'What’s holding the first one up?', refs: { B1: 'maple-street-hvac' }, history: [{ q: 'Which businesses haven’t finished setup?', a: '- [B1]: calendar not connected.', looked: ['business_health', 'not_a_tool', 'prepare_test_mark'] }] })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.equal(r.body.answer, 'Maple Street HVAC is waiting on its calendar.')
+  const replay = calls[0].messages.find((m) => m.role === 'assistant').content
+  assert.match(replay, /written from these lookups, read from the records at the time: business_health\.\)$/) // unknown and prepare tools never replayed
+  assert.match(calls.at(-1).messages.at(-1).content, /doubts or corrects an earlier answer/)
+})
+
+test('churn: only businesses with a churn signal may be listed', async () => {
+  script.push(callTool('business_health', { which: 'paying' }), (b) => {
+    const tool = b.messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' ')
+    const busy = /"ref":"(B\d+)"[^}]*?"churn_signals":\[\]/.exec(tool)[1]
+    const risky = /"ref":"(B\d+)"[^}]*?"churn_signals":\["payment failed"/.exec(tool)[1]
+    return say(`- [${risky}]: payment failed, in test mode.\n- [${busy}]: no signals.`)
+  }, (b) => {
+    const tool = b.messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' ')
+    return say(`- [${/"ref":"(B\d+)"[^}]*?"churn_signals":\["payment failed"/.exec(tool)[1]}]: payment failed, in test mode. The others show no signal.`)
+  })
+  const r = await ask('admin', { question: 'Which paying customers might churn?' })
+  assert.equal(r.body.kind, 'answer', JSON.stringify(r.body))
+  assert.doesNotMatch(r.body.answer, /Blue Lagoon/)
+  assert.match(calls.at(-1).messages.at(-1).content, /has no churn signal/)
+  const at = await runAdminTool(adminContext(env, {}), 'business_health', { which: 'at_risk' })
+  assert.ok(at.businesses.length && at.businesses.every((x) => x.churn_signals.length), JSON.stringify(at.businesses.map((x) => x.churn_signals)))
 })
 
 test('the model failing or failing its checks: the records are shown, never a guess', async () => {

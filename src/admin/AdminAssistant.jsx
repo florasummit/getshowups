@@ -218,7 +218,7 @@ export function AdminAssistantPanel() {
       const text = question.trim()
       if (text.length < 2) return
       setQ('')
-      const history = talk.filter((e) => e.kind === 'answer' || e.kind === 'prepared').slice(-6).map((e) => ({ q: e.q, a: e.raw || e.answer }))
+      const history = talk.filter((e) => e.kind === 'answer' || e.kind === 'prepared').slice(-6).map((e) => ({ q: e.q, a: e.raw || e.answer, looked: (e.lookups || []).map((l) => l.tool) }))
       setTalk((t) => [...t, { q: text }])
       const { status, data } = await api('/api/platform/assist', { method: 'POST', body: { question: text, history, refs: refs.current } })
       const entry = status === 200 && data?.kind ? { q: text, ...data } : { q: text, error: status === 0 ? 'network' : status === 429 ? 'rate_limited' : data?.error || 'failed' }

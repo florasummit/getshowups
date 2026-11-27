@@ -37,6 +37,8 @@ ${briefLines(brief)}`,
 const DONE = /\b(i|we)(['’]ve| have| just)? ?(just |already |now )?(resent|re-sent|sent|emailed|marked|unmarked|ran|run|reconciled|recorded|updated|changed|saved|suspended|deleted|refunded|cancell?ed|paused|started|approved)\b|\b(has|have) been (resent|sent|marked|recorded|updated|changed|saved|run|reconciled) (as|to|for|successfully|now)?\b|\b(is|are) now (marked|recorded|saved|abandoned)\b|\b(done|completed)[.!]?$/i
 const NOT_DONE = /\b(not|never|no|nothing|none|once|if|until|when|after you|ready to approve|approve)\b/i
 const INSIDE = /\b(the|a|my) (\w+ )?(tool|lookup|tools|lookups|function)\b|\b(weekly_brief|business_health|platform_numbers|system_health|ai_spending|growth_activity|prepare_\w+|no_lookup_needed)\b|\bTHIS WEEK\b/
+// An answer never retracts or doubts an earlier one by itself (the records behind it were read; see the history note).
+export const SELF_DOUBT = /\b(correct|retract|walk back|take back|fix) (my|the|that) (last|earlier|previous|prior) (message|answer|reply|list)|\bwithout looking (them|it|those|this) up\b|\bI (shouldn['’]t|should not) have (listed|said|named|included)\b|\bmy (last|earlier|previous) (message|answer|reply) (was|is) (wrong|incorrect|mistaken|unchecked|not checked)\b|\bI (made|invented|guessed) (that|those|them)\b/i
 const PROMISE = /\b(guaranteed?|will (definitely |certainly )?(churn|leave|cancel|pay|grow|increase|double))\b/i
 const MONEY_WORD = /\b(revenue|mrr|arr|earned|made|income|paid us|money (in|received|came)|collected)\b/i
 const MONEYISH = /\b(pa(y|id|ying|yment)s?|revenue|mrr|arr|churn\w*|subscri\w+|commissions?|owe[ds]?|money|income|billing)\b/i
@@ -58,6 +60,7 @@ export function adminProblem(text, { facts, shown, live, names = [], prepared = 
   if (sentences.some((x) => DONE.test(x) && !NOT_DONE.test(x))) return 'It says something was done. You cannot do anything: say what is prepared and ready to approve, or what the records show happened.'
   if (!prepared && /\b(ready to approve|ready for (your )?approval|approve it|i('ve| have) prepared|is prepared)\b/i.test(text)) return 'Nothing was prepared in this answer, so nothing is ready to approve. Call the prepare tool first, or say where the founder can do it.'
   if ((text.match(/^\s*[-•]\s/gm) || []).length > 6) return 'Too many lines. Give the 5 that matter most, most urgent first, and say how many more are on the This week list on Overview.'
+  if (SELF_DOUBT.test(text)) return 'It doubts or corrects an earlier answer. Earlier answers were written from lookups of the records. Answer only the question; if a lookup now shows something different, say what the records show now.'
   if (INSIDE.test(text)) return 'It talks about tools, lookups or your instructions. Say only what the records show.'
   if (PROMISE.test(text)) return 'It predicts a result. Say what the records show and what to check instead.'
   if (!live && /\bpaying\b/i.test(text) && !/\btest\b/i.test(text)) return 'Billing is in Stripe test mode: say that these subscriptions are in test mode (nobody pays real money yet).'
@@ -79,7 +82,9 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
   const b = await runAdminTool(c, 'weekly_brief', {})
   const system = systemPrompt(c, b)
   const messages = []
-  for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: h.a })
+  // Earlier answers are replayed with the lookups they rested on (tool names only), so the model never takes its own
+  // earlier answer for an unchecked one.
+  for (const h of req.history || []) if (h.q && h.a) messages.push({ role: 'user', text: h.q }, { role: 'assistant', text: `${h.a}${h.looked?.length ? `\n\n(This answer was written from these lookups, read from the records at the time: ${h.looked.join(', ')}.)` : ''}` })
   messages.push({ role: 'user', text: req.question })
   const results = []
   const tools = []
@@ -134,9 +139,11 @@ export async function operateAdmin(env, req, { now = Date.now(), model = operato
       continue
     }
     const text = String(reply.text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/(?<![[\w])([BEP]\d{1,3})\b(?![\]\w])/g, (m, r) => (c.shown.has(r) ? `[${r}]` : m)).trim()
+    // Asked who might churn: every business listed must have a churn signal in the lookup.
+    const calm = /\b(churn\w*|at risk|might (leave|cancel|quit)|likely to (leave|cancel))\b/i.test(req.question) ? [...text.split('\n').filter((l) => /^\s*[-•]/.test(l)).join(' ').matchAll(REF_IN)].map((m) => m[1]).filter((r) => c.signals?.get(r) === 0) : []
     const facts = `${JSON.stringify(b)} ${results.map((r) => JSON.stringify(r.result)).join(' ')} ${JSON.stringify(c.proposals.map(({ effects, title, before, after }) => ({ effects, title, before, after })))} ${req.question} ${(req.history || []).map((h) => h.q).join(' ')} ${new Date(now).toISOString().slice(0, 10)} ${new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'full' }).format(now)}`
     const names = [...c.refs.values()].map((r) => r.name).filter(Boolean)
-    const why = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
+    const why = reply.cut ? 'It was cut off. Shorter, and finish the sentence.' : calm.length ? `${calm.map((r) => `[${r}]`).join(', ')} has no churn signal in the records. List only businesses with a signal; say how many others have none.` : adminProblem(text, { facts, shown: c.shown, live: c.L.live, names, prepared: c.proposals.length, typed: [req.question, ...(req.history || []).map((h) => h.q)].join(' ') })
     if (!why) {
       const used = [...new Set([...text.matchAll(REF_IN)].map((m) => m[1]))]
       const filled = await namesFor(c, used)

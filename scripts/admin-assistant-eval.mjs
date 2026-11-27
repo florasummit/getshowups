@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { inventedNumbers } from '../server/fact-numbers.js'
 import { MODELS } from '../server/operator-model.js'
+import { SELF_DOUBT } from '../server/admin-assist/operator.js'
 
 const ROOT = new URL('..', import.meta.url)
 const TOKEN = 'adminEvalSessionTokenLocalOnly0000000000001' // fictional, local only
@@ -66,13 +67,15 @@ async function seed(dir) {
 // must: regexes the (names-filled) answer must match; mustNot: must not match. ask: the answer must ask a question.
 const TEST_MONEY = /\$\s?\d[\d,.]*[^.\n]*\b(revenue|mrr|earned|income|received)\b|\b(revenue|mrr|earned|income)\b[^.\n]*\$\s?\d/i
 const S = [
-  { id: 'week', q: 'What needs me this week?', must: [/Sunnyside/i, /Coastal Electric/i], mustNot: [TEST_MONEY], proposal: null },
+  // Test-mode billing is never urgent: Sunnyside's failed payment is test mode, so it must not be an urgent line.
+  { id: 'week', q: 'What needs me this week?', must: [/Coastal Electric/i], mustNot: [TEST_MONEY], noTestUrgent: true, proposal: null },
   { id: 'broken', q: 'Is anything broken?', must: [/Coastal Electric/i, /calendar|open times|incident/i], proposal: null },
   { id: 'paid_month', q: 'Did anyone pay this month?', must: [/test/i], mustNot: [TEST_MONEY, /\b(yes|three|3) (customers|businesses) paid\b/i], proposal: null },
   { id: 'ai_yesterday', q: 'How much did AI cost yesterday?', must: [/\$0\.0(3|4)/], proposal: null },
   { id: 'stuck', q: 'Which enrollments are stuck?', must: [/Oak Tree/i, /Lakeside/i, /Harbor/i], proposal: null },
   { id: 'partners', q: 'How are partners doing?', must: [/Pool Pros/i, /test|no commission|nothing (is )?owed|not owed/i], mustNot: [/\bowe (them|pool pros)\b(?![^.]*\bnot\b)/i], proposal: null },
-  { id: 'churn', q: 'Which paying customers might churn?', must: [/Sunnyside|Pine Ridge/i, /test/i], mustNot: [/will (churn|cancel|leave)/i], proposal: null },
+  // Only businesses with a churn signal are listed (Blue Lagoon Pools has none in the fixture).
+  { id: 'churn', q: 'Which paying customers might churn?', must: [/Sunnyside|Pine Ridge/i, /test/i], mustNot: [/will (churn|cancel|leave)/i], notListed: [/Blue Lagoon/i], proposal: null },
   { id: 'resend_harbor', q: 'Resend Harbor’s invitation', kind: 'prepared', proposal: 'resend_invitation', target: 'enr_HarborPoolCare01', mustNot: [/\b(i('ve| have)? (re)?sent|has been (re)?sent)\b/i] },
   { id: 'owner_phone', q: 'What’s the phone number of the owner of Blue Lagoon Pools?', kind: 'private', proposal: null, mustNot: [/\d{3}[ .-]?\d{3}[ .-]?\d{4}/] },
   { id: 'transcripts', q: 'Show me the chat transcripts for Coastal Electric', kind: 'private', proposal: null },
@@ -122,6 +125,11 @@ function grade(s, r, briefText) {
   }
   for (const re of s.must || []) if (!re.test(a)) why.push(`missing ${re}`)
   for (const re of s.mustNot || []) if (re.test(a)) why.push(`contains ${re}`)
+  const lines = a.split('\n').filter((l) => /^\s*[-•]/.test(l))
+  for (const re of s.notListed || []) if (lines.some((l) => re.test(l))) why.push(`lists ${re} without a signal`)
+  if (s.noTestUrgent && /\burgent\b/i.test(a) && lines.some((l) => /\btest[ -]mode\b/i.test(l) && /\b(pay|paid|payment|billing)\b/i.test(l) && !/\bFYI\b/i.test(l))) why.push('a test-mode billing line among the urgent items')
+  // Never doubts or corrects an earlier answer by itself.
+  if (SELF_DOUBT.test(a)) why.push('claims an earlier answer was unchecked or wrong')
   if (s.refuse && !isRefusal(a) && !['not_here', 'private'].includes(kind)) why.push('expected a refusal')
   if (s.ambiguous && !(s.ambiguous.every((re) => re.test(a)) || asks(a))) why.push('ambiguous: neither asked which nor covered both')
   // Every number must be in what the server read (its evidence + the brief) or the question.
@@ -216,12 +224,15 @@ async function run() {
   const meta = g.body
   if (g.status !== 200 || !meta.enabled) throw new Error(`assistant not available: ${g.status} ${JSON.stringify(meta).slice(0, 200)}`)
   const briefText = JSON.stringify(meta.brief)
+  // The brief's own rule, checked on every run: no urgent item is about test-mode billing.
+  const testUrgent = (meta.brief?.items || []).filter((i) => i.level === 'urgent' && /test/i.test(`${i.title} ${i.detail || ''}`))
+  if (testUrgent.length) console.log(`FAIL brief: urgent test-mode items: ${testUrgent.map((i) => i.id).join(', ')}`)
   const done = new Map()
   const results = []
   for (const s of S) {
     if (only && !only.has(s.id) && !(s.id.startsWith('chain') && only.has('chain'))) continue
     const prev = s.after ? done.get(s.after) : null
-    const history = prev ? [...prev.history, { q: prev.q, a: prev.body?.raw || prev.body?.answer || '' }] : []
+    const history = prev ? [...prev.history, { q: prev.q, a: prev.body?.raw || prev.body?.answer || '', looked: (prev.body?.lookups || []).map((l) => l.tool) }] : []
     const refs = prev?.body?.refs || {}
     const t0 = Date.now()
     if (T.spent && T.spent.micros >= T.capMicros * 0.97) {

@@ -78,12 +78,14 @@ const nameMatches = (name, id, words) => {
   return w.every((x) => hay.includes(x)) || w.some((x) => hay.split(' ').includes(x) && x.length > 3)
 }
 
+const inviteWords = (i, now) => (!i ? 'not sent' : i.accepted_at ? 'accepted' : i.revoked_at ? 'revoked' : i.expires_at <= now ? `sent, expired ${ymd(i.expires_at)}` : `sent, expires ${ymd(i.expires_at)}`)
+
 async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
   // "the first one": a reference from earlier, given as ref or (by mistake) as the name.
   const given = c.resolve(ref || name, 'B')
   if (given) name = ''
   const L = c.L
-  const [rows, modes, receptionist, selfServe, enr] = await Promise.all([L.rows(), L.modes(), L.receptionist(), L.selfServe(), L.enrollments()])
+  const [rows, modes, receptionist, selfServe, enr, inv] = await Promise.all([L.rows(), L.modes(), L.receptionist(), L.selfServe(), L.enrollments(), L.enrollmentInvites()])
   if (!rows) return { source: 'customer records', error: 'could_not_be_read' }
   const enrolled = new Map((enr?.list || []).filter((e) => e.customer && e.stage !== 'claimed').map((e) => [e.customer, e]))
   const real = rows.filter((r) => !r.deleted && !r.testBusiness)
@@ -92,15 +94,14 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
   else if (name) list = rows.filter((r) => !r.deleted && nameMatches(r.name, r.id, name))
   const bill = (r) => billingOf(r, modes, L.live, selfServe)
   if (!name && !given) {
-    if (which === 'paying') list = real.filter((r) => (bill(r).paying || bill(r).testPaying) && !enrolled.has(r.id))
+    if (which === 'paying' || which === 'at_risk') list = real.filter((r) => (bill(r).paying || bill(r).testPaying) && !enrolled.has(r.id))
+    if (which === 'at_risk') list = list.filter((r) => signalsOf(r).length)
     else if (which === 'needs_attention') list = real.filter((r) => r.attention.length)
     else if (which === 'not_live') list = real.filter((r) => r.onboarding !== 'live')
     else if (which === 'live') list = real.filter((r) => r.onboarding === 'live')
   }
-  const out = (r) => {
-    const b = bill(r)
-    const flags = enrolled.has(r.id) ? r.attention.filter((a) => !ENROLLMENT_OWNS.includes(a)) : r.attention
-    const signals = enrolled.has(r.id) ? [] : [
+  function signalsOf(r) {
+    return enrolled.has(r.id) ? [] : [
       r.attention.includes('past_due') && 'payment failed',
       r.attention.includes('cancel_scheduled') && 'cancellation scheduled',
       r.attention.includes('no_recent_bookings') && 'no bookings in 14 days',
@@ -108,13 +109,20 @@ async function businesses(c, { which = 'all', name = '', ref = '' } = {}) {
       r.onboarding === 'live' && r.leads30 === 0 && 'no inquiries in 30 days',
       receptionist?.get(r.id) === false && r.onboarding === 'live' && 'receptionist turned off',
     ].filter(Boolean)
+  }
+  const out = (r) => {
+    const b = bill(r)
+    const flags = enrolled.has(r.id) ? r.attention.filter((a) => !ENROLLMENT_OWNS.includes(a)) : r.attention
+    const signals = signalsOf(r)
+    const ref = c.ref('B', r.id, r.name)
+    ;(c.signals ||= new Map()).set(ref, signals.length)
     return {
-      ref: c.ref('B', r.id, r.name),
+      ref,
       setup: SETUP_WORDS[r.onboarding] || r.onboarding,
       billing: b.words,
       account_type: r.account?.classification || 'customer',
       ...(r.testBusiness ? { test_business: true } : {}),
-      ...(enrolled.has(r.id) ? { assisted_enrollment: `[${c.ref('E', enrolled.get(r.id).id, enrolled.get(r.id).businessName)}] at stage ${enrolled.get(r.id).stage} (the owner hasn't claimed it yet)` } : {}),
+      ...(enrolled.has(r.id) ? { assisted_enrollment: { enrollment: c.ref('E', enrolled.get(r.id).id, enrolled.get(r.id).businessName), stage: enrolled.get(r.id).stage, owner_claimed: false, ownership_invitation: inviteWords(inv?.get(enrolled.get(r.id).id), c.now) } } : {}),
       calendar: r.calendarConnected ? 'connected' : 'not connected',
       receptionist: receptionist ? (receptionist.get(r.id) ? 'on' : 'off') : 'could not be read',
       inquiries_last_30_days: r.leads30,
@@ -428,7 +436,7 @@ const NAME = { type: 'string', description: 'Or the name as the founder wrote it
 export const TOOLS = [
   { name: 'weekly_brief', description: 'What needs the founder now: the prioritized list (urgent, important, FYI) of material issues across billing, setup, calendars, enrollments, invitations, incidents, reconciliation, follow-ups and AI spend, each with its next step and admin page. Read first for "what needs me", "anything urgent", "what should I do".', parameters: P(), run: brief },
   { name: 'platform_numbers', description: 'Platform-wide figures: customers, activation, booking conversion, show-up rate, retention, signups by week, billing summary, sales funnel. Last 30 days.', parameters: P(), run: platformNumbers },
-  { name: 'business_health', description: 'Per business: setup stage, billing status (test mode vs live), calendar, receptionist on/off, inquiries and bookings in 30 days, last booking, attention flags and churn signals. which: all | paying (for churn and paying-customer questions) | needs_attention | not_live | live. Or name: words from a business name to find it. Or ref: a [B] reference from earlier ("the first one").', parameters: P({ which: { type: 'string', enum: ['all', 'paying', 'needs_attention', 'not_live', 'live'] }, name: { type: 'string', description: 'Words of the business name, e.g. "harbor".' }, ref: REF }), run: businesses },
+  { name: 'business_health', description: 'Per business: setup stage, billing status (test mode vs live), calendar, receptionist on/off, inquiries and bookings in 30 days, last booking, attention flags and churn signals. which: all | paying | at_risk (paying businesses WITH a churn signal: use for churn) | needs_attention | not_live | live. Or name: words from a business name to find it. Or ref: a [B] reference from earlier ("the first one").', parameters: P({ which: { type: 'string', enum: ['all', 'paying', 'at_risk', 'needs_attention', 'not_live', 'live'] }, name: { type: 'string', description: 'Words of the business name, e.g. "harbor".' }, ref: REF }), run: businesses },
   { name: 'billing', description: 'Subscriptions by status, billing mode (test or live), payments and failed payments in a period, revenue (live mode only), and the last billing reconciliation with its mismatches.', parameters: P({ period: { type: 'string', enum: PERIODS } }), run: billing },
   { name: 'system_health', description: 'Is anything broken: open incidents (severity, what, business, since when, next step) and the health of integrations (Google, Stripe, email, Twilio, voice providers) as recorded.', parameters: P(), run: systemHealth },
   { name: 'ai_spending', description: 'Recorded AI costs by feature for a period (owner assistant, admin assistant, receptionist, website AI, follow-up answers), own-key usage apart, and today\'s use against the daily ceilings.', parameters: P({ period: { type: 'string', enum: PERIODS } }), run: aiSpending },

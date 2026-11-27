@@ -8,7 +8,7 @@
 // Off switch: ADMIN_ASSIST_ENABLED === 'false' (the brief keeps working; it needs no model). Platform admins only.
 import { operatorConfigured } from '../operator-model.js'
 import { ADMIN_ANSWERS_PER_DAY, ADMIN_DAILY_MICROS, DAY } from './data.js'
-import { REF_RE } from './tools.js'
+import { REF_RE, TOOL_NAMES } from './tools.js'
 
 export const adminAssistOn = (env) => env.ADMIN_ASSIST_ENABLED !== 'false'
 export const adminAssistEnabled = (env) => adminAssistOn(env) && operatorConfigured(env)
@@ -23,7 +23,7 @@ export function validateAdminQuestion(b) {
   if (question.length > LIMITS.question) return ['too_long']
   const h = b.history === undefined ? [] : b.history
   if (!Array.isArray(h) || h.length > 20) return ['invalid_request']
-  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, LIMITS.question), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, LIMITS.answer) }))
+  const history = h.slice(-LIMITS.history).map((x) => ({ q: clean(x?.q).slice(0, LIMITS.question), a: String(x?.a ?? '').replace(/[^\P{Cc}\n]/gu, ' ').trim().slice(0, LIMITS.answer), looked: [...new Set((Array.isArray(x?.looked) ? x.looked : []).filter((t) => TOOL_NAMES.includes(t) && !t.startsWith('prepare_') && t !== 'no_lookup_needed'))].slice(0, 6) }))
   const refs = b.refs && typeof b.refs === 'object' && !Array.isArray(b.refs) ? Object.fromEntries(Object.entries(b.refs).filter(([k, v]) => REF_RE.test(k) && typeof v === 'string').slice(0, 120)) : {}
   return [null, { question, history, refs }]
 }
