@@ -84,6 +84,6 @@ test('the page heading starts at the same x in every admin section', async ({ pa
   await page.goto('/admin/control?view=incidents')
   expect(Math.abs((await headingX('Control Center')) - first), 'Control Center → Incidents (direct link)').toBeLessThanOrEqual(1)
   // The Control Center's own first page is "Summary": only one thing in the console is called Overview (ADM-01).
-  await expect(page.getByRole('navigation', { name: 'Control Center' }).getByRole('link')).toHaveText([/^Summary/, /^Incidents/, /^Accounts/, /^Integrations/, /^Testing/])
+  await expect(page.getByRole('navigation', { name: 'Control Center' }).getByRole('link')).toHaveText([/^Summary/, /^Incidents/, /^Accounts/, /^Integrations/, /^QA/]) // Testing became QA (QA Command Center)
   await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveCount(1)
 })

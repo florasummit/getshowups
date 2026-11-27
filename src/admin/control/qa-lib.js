@@ -241,7 +241,7 @@ export function ideaContext(params = {}) {
 
 // ---------- QA screens (URL → screen) ----------
 export const QA_TABS = [
-  ['overview', 'Overview'],
+  ['overview', 'Readiness'], // never "Overview": the console has ONE Overview, the first admin tab (ADM-01)
   ['tests', 'Tests'],
   ['runs', 'Runs'],
   ['manual', 'Manual'],
