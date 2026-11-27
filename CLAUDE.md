@@ -662,6 +662,19 @@ Non-negotiables:
   the one status (enrollment checklist, Setup check, tile); operator tool list_calls returns refs, never numbers. Costs are
   labelled estimates (COST_ESTIMATES). Switches (approval): PHONE_ENABLED (needs privacy wording naming call records),
   PHONE_NUMBER_PURCHASE. Call rows purged after 365 days; tables in ERASED_TABLES.
+- Research Vault (server/research/, migration 0052, docs/RESEARCH_VAULT.md): /admin/research-vault, its own lazy chunk, in
+  no navigation. requireResearcher: the founder (RESEARCH_FOUNDER_EMAIL, who must also be a platform admin) or a
+  research_members role; every refusal is the same 404; writes need a sign-in from the last 12 h. One versioned store
+  (research_nodes + append-only research_versions/research_edges, triggers); required fields per kind are refused, never
+  defaulted. Formulas, derivations and checks live ONLY in server/research/math.js (the browser draws points the server
+  returns; params are clamped numbers, never code). Numeric checks are never called proof; "formal" is never claimed. KPIs
+  come from growthMeasure/funnel/spendToday (no second definition); only internal_live businesses are read; cross-account
+  research is off (CROSS_ACCOUNT) until a legal basis exists. No cron, no model calls. Customer-facing code and assistants
+  never import server/research (a test enforces it). THE REPOSITORY IS PUBLIC: program definitions, research records,
+  proprietary formulas and discoveries live ONLY in the vault's D1 tables (a model the founder develops is a `model`
+  record, stored as text, never executed) or in git-ignored local files (research-programs*.json, research-private/).
+  Built-in code models are limited to published textbook results with references. A test fails if any repository file
+  contains a research record.
 - Customer-facing voice on every provider (server/voice/customer.js, public routes api/receptionist/[customer]/voice,
   voice-connect, voice-tool, voice-session): the provider comes from receptionist_voice_settings (never the browser),
   sessions are pinned to their provider, tools run through runVoiceTool bound to the session's business (dry run only

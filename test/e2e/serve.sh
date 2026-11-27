@@ -404,6 +404,7 @@ exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --binding RECEPTIONIST_ANTHROPIC_API_KEY=sk-ant-e2e-fake-key-not-a-secret \
   --binding ACCOUNT_DELETION_ENABLED=true \
   --binding PLATFORM_ADMIN_EMAILS="$E2E_PLATFORM_ADMIN,$E2E_VOICE_ADMIN_EMAIL" \
+  --binding RESEARCH_FOUNDER_EMAIL="$E2E_PLATFORM_ADMIN" \
   --binding RETELL_API_KEY=retell_e2e_fake_key_not_a_secret_0123456789 \
   --binding RETELL_AGENT_ID=agent_e2efake000001 \
   --binding RETELL_WS_SECRET=e2e_ws_secret_not_a_secret_0123456789abcdef \
