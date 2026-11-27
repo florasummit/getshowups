@@ -23,6 +23,8 @@ export const onRequestPost = qaPost(async ({ env, body, admin, actor }) => {
   const t = getTest(String(body.testId || ''))
   if (!t) return json(404, { error: 'not_found' })
   if (!STATUSES.includes(body.status)) return json(400, { error: 'invalid_status' })
+  // A blocked step (functionality not available) can't be passed; recording that it is still blocked is allowed.
+  if (t.blocked && !['blocked', 'fail', 'skipped', 'unverified'].includes(body.status)) return json(409, { error: 'test_blocked', reason: t.blocked })
   const evidence = Array.isArray(body.evidence) ? body.evidence.slice(0, 5) : []
   // Checked before anything is stored (a result is never left half-recorded).
   if (evidence.some((e) => !e || !['log', 'transcript', 'link', 'record'].includes(e.kind) || (e.kind === 'link' ? !/^https:\/\/[^\s<>"']{3,500}$/.test(String(e.url || e.text || '')) : !String(e.text || '').trim()))) return json(400, { error: 'invalid_evidence' })

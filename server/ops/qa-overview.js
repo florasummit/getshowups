@@ -127,7 +127,7 @@ export async function inventory(env, { area = null, q = null, status = null, cls
   const caps = new Map(listCapabilities().map((c) => [c.id, c.name]))
   const leaf = (t) => {
     const s = statuses.get(t.id) || { status: 'untested', last: null, lastPass: null }
-    return { id: t.id, title: t.title, kind: t.kind, file: t.file, class: t.class, area: t.area, journey: t.journey, feature: t.feature, mobile: Boolean(t.mobile), impact: t.impact, status: s.status, last: s.last, lastPass: s.lastPass, lastAny: s.lastAny ?? null, ...(t.steps ? { steps: t.steps } : {}) }
+    return { id: t.id, title: t.title, kind: t.kind, file: t.file, class: t.class, area: t.area, journey: t.journey, feature: t.feature, mobile: Boolean(t.mobile), impact: t.impact, ...(t.blocked ? { blocked: t.blocked } : {}), status: s.status, last: s.last, lastPass: s.lastPass, lastAny: s.lastAny ?? null, ...(t.steps ? { steps: t.steps } : {}) }
   }
   const areas = []
   for (const a of AREAS) {

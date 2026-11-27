@@ -24,7 +24,7 @@ export const EVAL_COST = { admin_eval: 50_000, receptionist_eval: 1_500_000 } //
 let cache = null
 export function allTests() {
   if (cache) return cache
-  const steps = new Map(JOURNEYS.flatMap((j) => j.steps.map((s) => [`human:${j.id}.${s.id}`, { action: s.action, expected: s.expected, ask: s.ask || [], assisted: s.assisted || null }])))
+  const steps = new Map(JOURNEYS.flatMap((j) => j.steps.map((s) => [`human:${j.id}.${s.id}`, { action: s.action, expected: s.expected, ask: s.ask || [], assisted: s.assisted || null, ...(s.blocked ? { blocked: s.blocked } : {}) }])))
   const list = TESTS.map(([id, title, group, over]) => {
     const g = GROUPS[group] || {}
     const t = { id, title, mobile: false, ...g, ...(over || {}) }

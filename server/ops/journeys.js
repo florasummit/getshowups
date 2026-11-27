@@ -155,6 +155,28 @@ export const JOURNEYS = [
     ],
     tests: [],
   },
+  // Affiliate / referral (existing functionality only; 2026-11-27). A step with `blocked` names functionality that does
+  // not exist or can't run in production today: it is shown as Blocked with that reason and can never be recorded as a
+  // pass (server/ops/qa-freshness.js, /api/platform/qa/result).
+  {
+    id: 'affiliate-referral',
+    title: 'A referral partner brings a customer and is paid',
+    purpose: 'Can the founder set up a partner, does a referral link attribute the right business once, and do commissions accrue, reverse and get paid exactly as recorded?',
+    audience: 'admin',
+    note: 'Test mode only: an admin-marked test business, Stripe test events. Commissions on test data are tagged test and never owed.',
+    steps: [
+      { id: 'partner', title: 'Set up a partner', action: 'Admin → Growth → Partners: add a partner, type its terms, record the agreement version and the partner’s acceptance, activate it, copy its link.', expected: 'Active partner with terms and an accepted agreement; the link is /r/<code>.', feature: 'commercial.commissions', ask: [q.clarity, q.effort] },
+      { id: 'link', title: 'Open the referral link', action: 'In a private window open /r/<code>, then the homepage it lands on.', expected: 'Redirected home with the code kept for sign-up (an unknown code gives the same redirect).', feature: 'commercial.attribution', ask: [q.trust] },
+      { id: 'attribution', title: 'Attribution at self-serve sign-up', action: 'Create a test business through self-serve after the link (also: an invalid code, a paused partner, the partner’s own email, two partner links).', expected: 'Attributed once to the first valid partner; invalid, inactive and self-referrals are refused.', feature: 'commercial.attribution', ask: [q.trust] },
+      { id: 'accrual', title: 'Commission accrues and reverses', action: 'With REFERRALS_ENABLED, pay a test invoice; then refund part of it and open a dispute.', expected: 'One accrual on invoice.paid from the collected amount; the refund and the dispute reverse it, never below zero.', feature: 'commercial.commissions', ask: [q.trust] },
+      { id: 'payout', title: 'Record a payout', action: 'Record a payout made outside GetShowUps, then reverse it.', expected: 'Owed balance falls by the payout and returns after the reversal; ledger rows are never edited.', feature: 'commercial.commissions', ask: [q.clarity] },
+      { id: 'referred-signup', title: 'A referred customer signs up in production', action: 'Blocked: nothing to do until enrollment opens.', expected: 'Not possible today.', feature: 'commercial.attribution', blocked: 'Enrollment is closed in production, and assisted enrollment never passes a partner code (server/enrollment.js: attributeAssisted records only the founder or sales rep), so no referred sign-up can happen yet.', ask: [] },
+    ],
+    tests: [
+      { spec: 'commercial.spec.js', title: 'Growth → Partners: add a partner with typed terms' },
+      { spec: 'commercial.spec.js', title: 'Growth → Partners: agreement version, acceptance recorded by the admin' },
+    ],
+  },
 ]
 
 // Retired ids keep their meaning for stored results: { id: { title, replacedBy } }.

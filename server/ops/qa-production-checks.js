@@ -16,6 +16,8 @@ export const UA = 'GetShowUps-QA'
 const TIMEOUT_MS = 5000
 const NEVER = new Set(['poolthru-llc', 'getshowups'])
 export const IN_PROCESS = 'in-process, not through the edge'
+// A code no partner can have (made-up, never issued: issued codes are random; the route stores and looks up nothing).
+export const REFERRAL_PROBE = 'qaprobe000000'
 
 export function productionOrigin(env) {
   const o = String(env.QA_PRODUCTION_ORIGIN || '')
@@ -79,6 +81,15 @@ export const PROD_CHECKS = [
     fallback: async () => ({ status: 'blocked', actual: 'needs the edge (middleware headers can’t be checked in process)' }),
   }),
   http({ id: 'prod:homepage', title: 'Homepage loads', area: 'commercial', feature: 'platform.admin', expected: 'HTTP 200', edge: async (ctx) => expect(200)(await edgeGet(ctx.origin, '/')), fallback: async () => ({ status: 'blocked', actual: 'needs the edge' }) }),
+  http({
+    id: 'prod:referral-link', title: 'A referral link redirects home with its code', area: 'partners', feature: 'commercial.attribution', expected: 'HTTP 302 to /?partner=<code> (a made-up code: the answer is the same whether or not it exists)', rateLimited: true,
+    edge: async (ctx) => {
+      const res = await edgeGet(ctx.origin, `/r/${REFERRAL_PROBE}`)
+      const loc = res.headers.get('Location') || ''
+      return res.status === 302 && loc.endsWith(`/?partner=${REFERRAL_PROBE}`) ? { status: 'pass', actual: `HTTP 302 → ${loc}`, rateLimited: true } : { status: 'fail', actual: `HTTP ${res.status}${loc ? ` → ${loc}` : ''} (expected 302 to /?partner=${REFERRAL_PROBE})`, rateLimited: true }
+    },
+    fallback: async () => ({ status: 'blocked', actual: 'needs the edge' }),
+  }),
   http({ id: 'prod:dashboard-signed-out', title: 'Dashboard refuses a signed-out visitor', area: 'security', feature: 'auth.google_signin', expected: 'HTTP 401', edge: async (ctx) => expect(401)(await edgeGet(ctx.origin, '/api/dashboard/me')), fallback: inProcess(() => import('../../functions/api/dashboard/me.js'), 'GET', '/api/dashboard/me', 401) }),
   http({ id: 'prod:platform-signed-out', title: 'Platform console refuses a signed-out visitor', area: 'security', feature: 'platform.admin', expected: 'HTTP 401', edge: async (ctx) => expect(401)(await edgeGet(ctx.origin, '/api/platform/me')), fallback: inProcess(() => import('../../functions/api/platform/me.js'), 'GET', '/api/platform/me', 401) }),
   http({ id: 'prod:qa-signed-out', title: 'QA Command Center refuses a signed-out visitor', area: 'security', feature: 'platform.qa', expected: 'HTTP 401', edge: async (ctx) => expect(401)(await edgeGet(ctx.origin, '/api/platform/qa/overview')), fallback: inProcess(() => import('../../functions/api/platform/qa/overview.js'), 'GET', '/api/platform/qa/overview', 401) }),

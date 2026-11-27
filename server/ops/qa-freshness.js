@@ -39,6 +39,8 @@ export const resetHashCache = () => (hashCache = { key: null, value: null, at: 0
 
 // The status of one test. ctx: { commit, releaseAt, hashes (map|null), prodPassed: Set of features }
 export function statusOf(t, decisive, pass, ctx) {
+  // Functionality that doesn't exist / can't run yet (journeys.js `blocked`): Blocked with its reason, whatever is recorded.
+  if (t.blocked) return 'blocked'
   if (!decisive) return 'untested'
   if (decisive.status === 'fail') return 'failed'
   if (decisive.status === 'blocked') return 'blocked'

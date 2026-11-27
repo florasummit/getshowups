@@ -71,7 +71,8 @@ test('qa_status: release, changes, counts, failures after the deployment, blocke
   assert.ok(rd.verified_facts.length && rd.missing_information.length && rd.inferred_risks.length)
   assert.match(rd.verified_facts.join(' '), /verified on the deployed version/)
   assert.match(rd.missing_information.join(' '), /no recorded result/)
-  assert.match(rd.inferred_risks.join(' '), /2 failed and 0 blocked tests.*2 of them after this deployment/)
+  // 1 blocked: the affiliate journey's referred production sign-up (journeys.js `blocked`: enrollment closed).
+  assert.match(rd.inferred_risks.join(' '), /2 failed and 1 blocked tests.*2 of them after this deployment/)
   assert.match(rd.rule, /No overall ready or not-ready verdict/)
   assert.doesNotMatch(JSON.stringify(r), /\b(is|are) ready\b/)
   assert.ok(JSON.stringify(r).length < 6000, 'fits one tool result')

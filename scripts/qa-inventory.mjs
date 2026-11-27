@@ -77,7 +77,7 @@ export const UNIT_MAP = {
   'business-accounts': ['billing', 'billing.lifecycle'],
   'business-details': ['business_settings', 'onboarding.selfserve'],
   'commercial-integration': ['commercial', 'commercial.attribution'],
-  commercial: ['partners', 'commercial.commissions'],
+  commercial: ['partners', 'commercial.commissions', 'affiliate-referral'],
   'control-center': ['platform_admin', 'platform.incidents', 'calendar-recovery'],
   coverage: ['booking', 'lead.qualify', 'booking'],
   'customer-zero-journey': ['commercial', 'lead.capture', 'booking'],
@@ -187,7 +187,7 @@ export const E2E_MAP = {
   'booking-excellence': ['booking', 'calendar.google', 'booking', ['src/booking', `${F}book`]],
   booking: ['booking', 'calendar.google', 'booking', ['src/booking', `${F}book`, 'server/booking.js']],
   'business-details': ['business_settings', 'onboarding.selfserve', null, [`${F}dashboard/profile.js`, `${F}dashboard/hours.js`]],
-  commercial: ['partners', 'commercial.commissions', null, ['src/admin/Commercial.jsx', `${F}platform/partners.js`, `${F}platform/commercial.js`]],
+  commercial: ['partners', 'commercial.commissions', 'affiliate-referral', ['src/admin/Commercial.jsx', `${F}platform/partners.js`, `${F}platform/commercial.js`]],
   'control-center': ['platform_admin', 'platform.incidents', 'calendar-recovery', ['src/admin/Control.jsx', 'src/admin/control', `${F}platform/control.js`]],
   coverage: ['booking', 'lead.qualify', 'booking', ['server/coverage.js', 'server/zipcode.js', `${F}book`]],
   'dashboard-excellence': ['layouts', null, null, ['src/dashboard/Home.jsx']],
@@ -241,6 +241,7 @@ export const JOURNEY_MAP = {
   'admin-console': ['platform_admin', ['src/admin', 'server/ops']],
   receptionist: ['receptionist', ['server/receptionist', 'server/voice', `${F}receptionist`]],
   'website-studio': ['website', ['src/dashboard/SiteStudio.jsx', 'server/ai-designer.js', 'server/site-render-v2.js', `${F}dashboard/website`]],
+  'affiliate-referral': ['partners', ['server/commercial-attribution.js', 'server/commissions.js', 'functions/r', `${F}platform/partners.js`, 'src/admin/Commercial.jsx', 'src/lib/referral.js']],
   'admin-assistant': ['admin_assistant', ['server/admin-assist', `${F}platform/assist.js`]],
   'admin-assistant-qa': ['admin_assistant', ['server/admin-assist', `${F}platform/assist.js`, 'server/ops']],
 }
@@ -322,7 +323,7 @@ export async function buildInventory({ strict = true } = {}) {
   // Guided human steps.
   for (const j of JOURNEYS) {
     const [area] = JOURNEY_MAP[j.id] || ['unassigned']
-    for (const s of j.steps) tests.push({ id: `human:${j.id}.${s.id}`, title: s.title, kind: 'human', file: null, area, journey: j.id, feature: s.feature, class: s.assisted ? 'ai_assisted' : 'human', h: `journey:${j.id}`, impact: JOURNEY_MAP[j.id] ? 'declared' : 'uncertain' })
+    for (const s of j.steps) tests.push({ id: `human:${j.id}.${s.id}`, title: s.title, kind: 'human', file: null, area, journey: j.id, feature: s.feature, class: s.assisted ? 'ai_assisted' : 'human', h: `journey:${j.id}`, impact: JOURNEY_MAP[j.id] ? 'declared' : 'uncertain', ...(s.blocked ? { blocked: s.blocked } : {}) })
   }
   // Paid evaluations: never automatic (class authorization; the QA budget + QA_PAID_EVALS gate them).
   const S = await evalScenarios(strict)
