@@ -264,6 +264,9 @@ test('QA at phone width: overview, tests, manual and a plan fit with no sideways
   await noSideScroll(page)
   await page.locator('[data-preset="smoke"]').click()
   await expect(page.locator('[data-plan-facts]')).toBeVisible()
+  // The plan's footer is sticky: Start (or the reason it can't start) is on screen without hunting for it.
+  await page.locator('#qa-plan-h').scrollIntoViewIfNeeded()
+  await expect(page.locator('[data-plan-start]')).toBeInViewport()
   await noSideScroll(page)
   await page.locator('[data-qa-subnav="tests"]').click()
   await expect(page.locator('.qa-tree--root')).toBeVisible()

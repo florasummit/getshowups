@@ -254,7 +254,7 @@ export function TestsView({ params, go }) {
           )}
         </>
       )}
-      {selected.size > 0 && (
+      {selected.size > 0 && !plan && (
         <div className="qa-selbar" role="region" aria-label="Selected tests" data-qa-selection={selected.size}>
           <span>
             <b>{selected.size}</b> {selected.size === 1 ? 'test' : 'tests'} selected

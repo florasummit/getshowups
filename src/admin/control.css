@@ -1398,14 +1398,37 @@ button.cc-item:hover {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
+.qa-plain-list.qa-checklist {
+  padding-left: 0;
+  list-style: none;
+}
 .qa-checklist li {
   display: flex;
-  gap: 8px;
-  list-style: none;
-  margin-left: -20px;
+  gap: var(--s-2);
+  align-items: baseline;
 }
 .qa-check-mark {
   flex: none;
-  width: 16px;
+  width: 1.25em;
+  text-align: center;
   font-weight: 700;
+}
+.qa-plan-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 -18px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--cc-line);
+  background: var(--white);
+}
+@media (max-width: 560px) {
+  .qa-plan-actions {
+    margin: 0 -14px;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+/* A section that holds the plan dialog must not clip it, or the dialog's sticky footer cannot stick. */
+.cc-section:has(.qa-plan) {
+  overflow: visible;
 }

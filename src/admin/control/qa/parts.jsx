@@ -233,7 +233,8 @@ export function PlanPanel({ scope, title, onClose, go }) {
           )}
         </div>
       )}
-      <div className="cc-actions">
+      {/* Sticky footer: Start (or the reason it can't start) stays on screen while the plan scrolls, on a phone too. */}
+      <div className="cc-actions qa-plan-actions" data-plan-actions>
         <button type="button" className="btn btn-primary btn-sm" onClick={start} disabled={busy || !canStart} data-plan-start>
           {busy ? 'Starting…' : 'Start run'}
         </button>
