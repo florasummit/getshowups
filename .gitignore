@@ -37,6 +37,12 @@ client_secret*.json
 *.pem
 *.key
 
+# Confidential research (docs/RESEARCH_VAULT.md): program lists, research exports and private notes live in the vault's
+# database or in local files, never in this public repository.
+research-programs*.json
+research-private/
+*.research.json
+
 # Playwright output
 test-results/
 playwright-report/

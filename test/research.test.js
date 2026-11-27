@@ -250,3 +250,13 @@ test('isolation: no customer-facing code or assistant imports research; no brows
   assert.deepEqual(offenders, [], 'only the research route and modules import server/research')
   for (const f of walk('../src/')) assert.ok(!readFileSync(new URL(f, import.meta.url), 'utf8').includes('v·a·√x'), `formula text in browser code: ${f}`)
 })
+
+test('no research records in the public repository: no file contains program or other research records (they belong in the vault)', () => {
+  const skip = new Set(['node_modules', 'dist', '.git', '.wrangler', 'test-results', 'playwright-report'])
+  const walk = (dir) =>
+    readdirSync(new URL(dir, import.meta.url), { withFileTypes: true }).flatMap((e) => (skip.has(e.name) ? [] : e.isDirectory() ? walk(`${dir}${e.name}/`) : /\.(js|jsx|json|md|sql|mjs|txt|csv)$/.test(e.name) ? [`${dir}${e.name}`] : []))
+  // A research record in JSON form ({"kind": "program", "record": …}) is what the founder imports from a local file.
+  const record = /"kind"\s*:\s*"(program|question|thesis|hypothesis|recommendation|evidence|experiment)"\s*,\s*"record"/
+  const offenders = walk('../').filter((f) => !f.endsWith('research.test.js') && record.test(readFileSync(new URL(f, import.meta.url), 'utf8')))
+  assert.deepEqual(offenders, [], 'research records must live in the vault (D1) or local ignored files, never in the repository')
+})
