@@ -59,6 +59,7 @@ functions/           Cloudflare Pages Functions. FILE PATH = ROUTE. Keep handler
                      functions. Spend: admin_ai_ask events (never ai_ask), ADMIN_DAILY_MICROS + ADMIN_ANSWERS_PER_DAY, rate rules
                      adminAssist*. ADMIN_ASSIST_ENABLED=false = off (brief stays). The owner assistant never imports admin-assist (test).
                      Real-model eval: scripts/admin-assistant-eval.mjs (fictional fixture test/fixtures/admin-assistant-data.js).
+                     Before changing server/admin-assist or its prompts: `node scripts/admin-assistant-eval.mjs run --provider claude --suite regression --cap-usd 0.40 --out <dir>` (key from env, approval for spend); every scenario must pass 5/5.
   api/stripe/webhook Stripe events (signature verified, idempotent)
   api/email/webhook  Resend delivery feedback (Svix signature, 5-min tolerance; 503 until RESEND_WEBHOOK_SECRET)
   api/appointment/confirm  Public signed "I'll be there" link (GET read-only page, POST records); &do=cancel: customer cancels
