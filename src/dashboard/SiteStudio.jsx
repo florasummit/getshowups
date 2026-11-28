@@ -835,9 +835,13 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
                   danger={asking.danger !== false}
                   busy={Boolean(asking.busy)}
                   onConfirm={async () => {
+                    // Close THIS question when its action settles, never one asked in the meantime (CI flake
+                    // 2026-11-27: a restore finishing after "Remove unused photos" was asked cleared that new
+                    // question, so its confirm button vanished before it could be pressed).
+                    const run = asking.run
                     setAsking((a) => ({ ...a, busy: true }))
-                    await asking.run()
-                    setAsking(null)
+                    await run()
+                    setAsking((a) => (a && a.run === run ? null : a))
                   }}
                   onCancel={() => setAsking(null)}
                 />
