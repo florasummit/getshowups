@@ -13,10 +13,17 @@ VITE_GHL_BOOKING_URL= npx vite build --outDir "$OUT" --emptyOutDir --logLevel wa
 node scripts/build-info.mjs "$OUT" >/dev/null
 
 rm -rf "$STATE"
+# Every wrangler call starts a new process (seconds each), so the migrations go in ONE call (same files, same order)
+# and the seed below is collected and applied once, just before the site starts. Startup grew with every migration.
+SEED_SQL="$STATE.seed.sql"
+SEED_KV="$STATE.kv.tsv"
+: > "$SEED_SQL"
+: > "$SEED_KV"
 for migration in migrations/*.sql; do
-  npx wrangler d1 execute ONBOARDING_DB --local --persist-to "$STATE" \
-    -c test/e2e/wrangler.e2e.toml --file "$migration" >/dev/null
-done
+  cat "$migration"
+  printf '\n'
+done > "$STATE.migrations.sql"
+npx wrangler d1 execute ONBOARDING_DB --local --persist-to "$STATE" -c test/e2e/wrangler.e2e.toml --file "$STATE.migrations.sql" >/dev/null
 
 # Seed fake data (hashes only for sessions):
 #   e2e-pool  — fully set up, Google "connected" (encrypted fake token for the mock), one past booking
@@ -26,7 +33,14 @@ hash() { node -e "process.stdout.write(require('crypto').createHash('sha256').up
 NOW=$(node -e 'process.stdout.write(String(Date.now()))')
 FAR=$((NOW + 86400000))
 PAST=$((NOW - 172800000))
-d1() { npx wrangler d1 execute ONBOARDING_DB --local --persist-to "$STATE" -c test/e2e/wrangler.e2e.toml --command "$1" >/dev/null; }
+d1() {
+  local q="$1"
+  q="${q%"${q##*[![:space:]]}"}" # trailing whitespace off; then end the block with exactly one semicolon
+  [[ "$q" == *";" ]] || q="$q;"
+  printf '%s\n' "$q" >> "$SEED_SQL"
+}
+# Fake Google token records for the GOOGLE_TOKENS KV namespace: collected (key, base64 value) and written in one bulk call.
+kvput() { printf '%s\t%s\n' "$1" "$(printf '%s' "$2" | base64 | tr -d '\n')" >> "$SEED_KV"; }
 d1 "
   INSERT INTO customers (id, name, timezone, day_start, day_end, workdays, hours_confirmed_at, created_at, updated_at) VALUES
     ('$E2E_CUSTOMER', '$E2E_CUSTOMER_NAME', 'America/New_York', '06:00', '22:00', '0,1,2,3,4,5,6', $NOW, $NOW, $NOW),
@@ -273,8 +287,7 @@ d1 "$VOICE_SQL
   INSERT INTO receptionist_calls (call_id, customer, conversation_id, provider, created_at, ended_at) VALUES ('call_seed_$VS', '$VS', 'conv-$VS-test', 'retell', $((NOW - 120000)), $((NOW - 60000)));"
 
 for C in "$E2E_CUSTOMER" "$E2E_SPARE_CUSTOMER" "$E2E_HOME_CUSTOMER" "$E2E_AUTO_CUSTOMER" "$E2E_ADS_CUSTOMER" "$E2E_AREA_CUSTOMER" "$E2E_IMPORT_CUSTOMER" "$E2E_OPENAI_CUSTOMER" "$E2E_ADVERTISER_CUSTOMER" "$E2E_ADVERTISER_M_CUSTOMER" "$E2E_STARTER_CUSTOMER" "$E2E_STARTER_M_CUSTOMER" "$E2E_DELETE_CUSTOMER" e2e-acct e2e-acct-m "$E2E_DESIGN_CUSTOMER" "$E2E_DESIGN_M_CUSTOMER" "$E2E_EDITOR_CUSTOMER" "$E2E_EDITOR_M_CUSTOMER" "$E2E_TEXTS_CUSTOMER" "$E2E_TEXTS_M_CUSTOMER" "$E2E_TOUR_CUSTOMER" "$E2E_FLOW_CUSTOMER" "$E2E_FLOW_M_CUSTOMER" "$E2E_PUBLISH_CUSTOMER" "$E2E_TEACH_CUSTOMER" "$E2E_TEACH_M_CUSTOMER" "$E2E_VOICE_CUSTOMER" "$E2E_VOICE_M_CUSTOMER" "$E2E_VOICE_SWITCH_CUSTOMER"; do
-  npx wrangler kv key put "google:$C" "$(record "$C")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-    -c test/e2e/wrangler.e2e.toml >/dev/null
+  kvput "google:$C" "$(record "$C")"
 done
 
 # studio-hardening seeds (Agent A): one business per browser project with the editor's AI-designed draft (no AI call)
@@ -291,8 +304,7 @@ for E in "$E2E_STUDIO_H_CUSTOMER:$E2E_STUDIO_H_SESSION_TOKEN" "$E2E_STUDIO_H_M_C
     ('$HC', '(843) 555-0112', 'Pool service', '', '[{\"name\":\"Weekly pool care\",\"price\":\"\$280+\"}]', '[\"Charleston\"]', $NOW);
   INSERT INTO websites (customer, draft, live_version, published_at, updated_at) VALUES ('$HC', '$EDITOR_DRAFT', NULL, NULL, $NOW);
   "
-  npx wrangler kv key put "google:$HC" "$(record "$HC")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-    -c test/e2e/wrangler.e2e.toml >/dev/null
+  kvput "google:$HC" "$(record "$HC")"
 done
 
 # Assisted enrollment (enrollment.spec.js): two sales representatives and one whose access the spec revokes (roles as a
@@ -318,8 +330,7 @@ INSERT INTO customers (id, name, timezone, service_zips, day_start, day_end, wor
 INSERT INTO customer_users (email, customer, created_at) VALUES ('owner@$E2E_CC_CUSTOMER.example', '$E2E_CC_CUSTOMER', $NOW);
 INSERT INTO test_businesses (customer, is_test, marked_by, marked_at) VALUES ('$E2E_CC_CUSTOMER', 1, '$E2E_PLATFORM_ADMIN', $NOW);
 "
-npx wrangler kv key put "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
+kvput "google:$E2E_CC_CUSTOMER" "$(record "$E2E_CC_CUSTOMER")"
 
 # AI spending limits for this TEST server only (server/ai-budget.js): the production defaults ($1 per business, 60 Retell
 # minutes, open calls counted at 15 min) would refuse mocked voice and chat calls of parallel specs during one run.
@@ -338,8 +349,7 @@ INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES ('$(hash
 INSERT INTO business_addresses (customer, street, unit, city, state, zip, public, updated_at) VALUES
   ('$E2E_DETAILS_CUSTOMER', '12 Harbor St', 'Suite 2', 'Charleston', 'SC', '29401', 1, $NOW);
 "
-npx wrangler kv key put "google:$E2E_DETAILS_CUSTOMER" "$(record "$E2E_DETAILS_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
+kvput "google:$E2E_DETAILS_CUSTOMER" "$(record "$E2E_DETAILS_CUSTOMER")"
 
 # Email sign-in (email-signin.spec.js): a member's business, and one sign-in link that expired a minute ago.
 d1 "
@@ -364,8 +374,7 @@ INSERT INTO phone_calls (call_sid, customer, line_id, caller, caller_state, sour
   ('CA00000000000000000000000000000e2e', '$E2E_PHONE_CUSTOMER', 'pl_e2e', '+18435550162', 'known', 'website', 'team', 'callback', 31, 'rq_e2e_call', $((NOW - 600000)), $((NOW - 569000)), $NOW);
 "
 # A connected calendar, so the dashboard opens on its tabs (Settings) instead of onboarding.
-npx wrangler kv key put "google:$E2E_PHONE_CUSTOMER" "$(record "$E2E_PHONE_CUSTOMER")" --binding GOOGLE_TOKENS --local --persist-to "$STATE" \
-  -c test/e2e/wrangler.e2e.toml >/dev/null
+kvput "google:$E2E_PHONE_CUSTOMER" "$(record "$E2E_PHONE_CUSTOMER")"
 
 # Global default history (voice-rollout.spec.js, promotion): version 1 staged ElevenLabs and pinned every business of
 # the time to Retell (a settings row, no inherit row); version 2 rolled the default back to Retell but the pins were
@@ -379,6 +388,15 @@ INSERT INTO receptionist_voice_defaults (version, provider, previous, mode, pinn
   (1, 'elevenlabs', 'retell', 'staged', (SELECT json_group_array(json_object('customer', id, 'version', 1, 'provider', 'retell')) FROM customers WHERE id != '$E2E_VOICE_SWITCH_CUSTOMER'), '[]', 'ref:seed', $((NOW - 7200000))),
   (2, 'retell', 'elevenlabs', 'rollback', '[]', '[]', 'ref:seed', $((NOW - 3600000)));
 "
+
+# Apply the collected seed (one D1 call) and the token records (one KV bulk call).
+npx wrangler d1 execute ONBOARDING_DB --local --persist-to "$STATE" -c test/e2e/wrangler.e2e.toml --file "$SEED_SQL" >/dev/null
+node -e "
+const fs = require('fs')
+const rows = fs.readFileSync(process.argv[1], 'utf8').split('\\n').filter(Boolean).map((l) => { const [key, b64] = l.split('\\t'); return { key, value: Buffer.from(b64, 'base64').toString('utf8') } })
+fs.writeFileSync(process.argv[2], JSON.stringify(rows))
+" "$SEED_KV" "$STATE.kv.json"
+npx wrangler kv bulk put "$STATE.kv.json" --binding GOOGLE_TOKENS --local --persist-to "$STATE" -c test/e2e/wrangler.e2e.toml >/dev/null
 
 exec npx wrangler pages dev "$OUT" --ip 127.0.0.1 --port "$E2E_PORT" \
   --compatibility-date 2026-11-08 --persist-to "$STATE" --show-interactive-dev-session=false \
