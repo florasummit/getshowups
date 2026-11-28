@@ -9,9 +9,14 @@ import { useSession } from './helpers.js'
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const tokenFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_SESSION_TOKEN : fixtures.E2E_EDITOR_SESSION_TOKEN)
 const customerFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_CUSTOMER : fixtures.E2E_EDITOR_CUSTOMER)
-// The draft serve.sh seeds for both editor businesses. The first test starts from it every time (through the owner's
-// own routes: save the seeded draft, take the website offline), so a CI retry checks the same things from the same
-// start as the first attempt instead of failing on the first attempt's edits. A first-attempt failure still fails.
+// The draft serve.sh seeds for both editor businesses. Every test here starts from it (through the owner's own routes:
+// save the seeded draft, take the website offline): the tests share one business per project and run in order, so
+// without this a CI retry (or a test after a failed one) started from the earlier attempt's edits and failed for that
+// reason alone. A first-attempt failure still fails; uploaded photos and earlier drafts stay, as they would for an owner.
+test.beforeEach(async ({ page, context }, info) => {
+  await useSession(context, tokenFor(info))
+  await restoreSeededWebsite(page)
+})
 const SEEDED = JSON.parse(readFileSync(new URL('./editor-draft.json', import.meta.url), 'utf8'))
 async function restoreSeededWebsite(page) {
   await page.goto('/dashboard/website')
@@ -23,7 +28,6 @@ async function restoreSeededWebsite(page) {
 
 test('owner edits the website on the website itself: text in place, button panel, section controls, colours, pages, preview mode; autosave survives a reload; publish, republish, restore @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
-  await restoreSeededWebsite(page)
   const aiCalls = []
   page.on('request', (r) => /\/api\/dashboard\/website\/designer|\/api\/dashboard\/website$/.test(new URL(r.url()).pathname) && r.method() === 'POST' && /"action":"(generate|revise|message|different)"/.test(r.postData() || '') && aiCalls.push(r.url()))
   await page.goto('/dashboard/website')
@@ -288,7 +292,8 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   // Use it in the opening and frame it: square crop, focus point by keyboard.
   await frame.locator('.hero-media').click()
   const photoGroup = studio.getByRole('dialog', { name: 'Edit' })
-  await photoGroup.locator('.studio-thumb:not([data-stock])').last().click()
+  // The photo just uploaded: the owner's photos are listed newest first (a retry finds the first attempt's uploads too).
+  await photoGroup.locator('button.studio-thumb:not([data-stock])').first().click()
   await photoGroup.getByLabel('Shape').selectOption('1x1')
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
   await expect(frame.locator('.hero-media img')).toHaveAttribute('srcset', /800w/)
@@ -328,10 +333,14 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   await versions.last().getByRole('button', { name: /^Restore/ }).click()
   await expect(confirm).toContainText('Everything in your draft goes back to how it was then')
   await expect(confirm).toContainText('Your live website doesn’t change')
+  // A restore keeps the draft it replaces as exactly one new "Before a restore" copy (counted from here, so a retry that
+  // finds the first attempt's copies checks the same thing).
+  const beforeRestore = versions.filter({ hasText: 'Before a restore' })
+  const copies = await beforeRestore.count()
   await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(studio.locator('[data-save="saved"]')).toBeVisible()
-  await expect(versions.filter({ hasText: 'Before a restore' })).toHaveCount(1)
-  await versions.filter({ hasText: 'Before a restore' }).getByRole('button', { name: /^Restore/ }).click()
+  await expect(beforeRestore).toHaveCount(copies + 1)
+  await beforeRestore.first().getByRole('button', { name: /^Restore/ }).click()
   await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
 
@@ -416,8 +425,6 @@ test('logo: upload → replace → remove from website (stays removed after a re
     await saved()
     await status.getByRole('button', { name: /^Publish/ }).first().click()
     await page.getByRole('checkbox', { name: /details are accurate/ }).check()
-    // The Terms page added above is a legal page: publishing asks the owner to confirm they read it, every time.
-    await page.getByRole('checkbox', { name: /read my terms page/ }).check()
     await page.getByRole('button', { name: /^Publish/ }).last().click()
     await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(status.getByText('aren’t published yet')).toHaveCount(0, { timeout: 15_000 })
