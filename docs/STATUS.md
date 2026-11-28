@@ -2,7 +2,19 @@
 
 _Update at the end of every task. Newest first._
 
-## Studio editor CI flake: two product bugs fixed (2026-11-28, branch fix/studio-editor-flake)
+## Releases #211 and #210 (2026-11-28, live; development cycle closed)
+**#211 studio editor fixes:** main 5dcb22b, deployment f6650f56-93a8-4ddd-9182-6d61386d227a, rollback 1f1ceb51-0ee1-4ce2-a686-9a314386c909.
+**#210 e2e seed-once (CI startup ≈ 8 s instead of ~2.5 min; updated with main first):** main c22fa93, deployment
+55b10706-4916-458b-b1c4-e902a3e64991, rollback f6650f56-93a8-4ddd-9182-6d61386d227a.
+No migration (132 tables). Backup ~/getshowups-backups/prod-20261128T062539Z-pre-211.sql (integrity ok, 132 tables).
+scripts/release.sh HEALTHY for both: live customer pages byte-identical, refusals 401/403/404 as expected, 0 exceptions,
+records and secret names unchanged. Main CI on c22fa93: success. PR CI: #211 413 passed / 0 flaky (after one more fix: the republish step's headline
+click landed during the preview refresh; it now clicks until editable and checks the edit landed), #210 413 passed.
+Production read-only checks after deploy: build.json c22fa93; /, /dashboard, /admin/control (QA tab) 200; QA API 401
+signed out; website save cross-site 403. Owner-side legal-page behaviour is covered by the route unit test and the
+browser suite (mocked providers); it was not exercised against production data.
+
+## Studio editor CI flake: two product bugs fixed (2026-11-28, PR #211, live)
 studio-editor.spec.js failed intermittently in CI (desktop and mobile, also on main). Root causes were in the product:
 - **Legal pages lost their flag on the first save.** The save guard (2026-11-17) kept `legal` only on pages that were
   already legal, but Studio's "Add a page → Terms / Privacy" (2026-11-21) makes new ones. A Terms page added in the
