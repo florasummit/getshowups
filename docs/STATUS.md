@@ -2,6 +2,22 @@
 
 _Update at the end of every task. Newest first._
 
+## Studio editor CI flake: two product bugs fixed (2026-11-28, branch fix/studio-editor-flake)
+studio-editor.spec.js failed intermittently in CI (desktop and mobile, also on main). Root causes were in the product:
+- **Legal pages lost their flag on the first save.** The save guard (2026-11-17) kept `legal` only on pages that were
+  already legal, but Studio's "Add a page → Terms / Privacy" (2026-11-21) makes new ones. A Terms page added in the
+  editor silently became an ordinary page (its text then went through the marketing filters; every section type was
+  offered). The guard now also accepts the Studio's legal types as NEW pages at their fixed addresses (privacy, terms;
+  source starter); it never turns an existing page or any other address legal. Production (read-only check by the lead):
+  no live business lost a flag; PoolThru's imported privacy page is legal in its draft and all versions.
+- **A confirm question could vanish.** When an action finished, the editor closed whatever question was open, including
+  one asked meanwhile ("Remove unused photos" after a slow draft restore). It now closes only its own question.
+- Section ⋯ menu on a legal page offers Text only (as the panel does).
+- Test: every studio-editor test starts from the seeded website (save + unpublish via the owner's routes), so a CI retry
+  starts clean; the photos test picks its own upload and counts "Before a restore" from before the restore.
+- Evidence: route unit test fails on the old guard; repros 10/10 and 5/5 fail before, pass after; studio-editor
+  --repeat-each 10 on fresh servers: desktop 60/60, mobile 40/40. No migration, no renderer change (live sites unchanged).
+
 ## Research Vault, Stage A (2026-11-27, branch feat/research-vault; NOT released, needs founder approval)
 Founder-only research workspace at /admin/research-vault (docs/RESEARCH_VAULT.md).
 - **What it contains:** one versioned, append-only knowledge store; 5 built-in models with derivations, server-side

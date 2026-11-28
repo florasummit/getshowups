@@ -237,3 +237,42 @@ test('WEB-08: a change request on a multi-page website is ONE included-model req
   const gen = (await call(website, 'POST', { cookie: c, body: { action: 'template' } })).json.generation
   assert.equal((await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: gen.id, option: 0 } })).json.error, 'designed_site')
 })
+
+// Root cause of the studio-editor e2e flake (CI 2026-11-27): a Terms page added in the editor lost its legal flag on its
+// first save (the save guard only kept pages that were legal before), so the page silently became an ordinary page and
+// the editor, which takes the server's copy after a save, then offered every section type on it.
+test('owner-added legal pages: the Studio\'s Terms / Privacy types stay legal through a save; no other page can be made legal by a save', async () => {
+  const { pageTemplate } = await import('../src/dashboard/site-templates.js')
+  const c = await cookieFor('pools')
+  const gen = (await call(website, 'POST', { cookie: c, body: { action: 'template' } })).json.generation
+  const applied = (await call(website, 'POST', { cookie: c, body: { action: 'apply', generationId: gen.id, option: 0, studio: true } })).json.website
+  const draft = structuredClone(applied.draft)
+  const biz = { name: 'Pools', services: draft.services, photos: [], area: '' }
+  // "Add a page" → Terms of Service (a NEW page at its fixed address, from the Studio's template).
+  draft.site.pages.push(pageTemplate('terms', biz, draft.site))
+  // Attempts to make other text legal: an existing ordinary page, and a new page at another address.
+  draft.site.pages.find((p) => p.slug === 'contact').legal = true
+  draft.site.pages.push({ ...pageTemplate('terms', biz, draft.site), slug: 'offers', navLabel: 'Offers' })
+  const r = await call(website, 'POST', { cookie: c, body: { action: 'save', content: draft, baseUpdatedAt: applied.updatedAt } })
+  assert.equal(r.status, 200)
+  const pages = Object.fromEntries(r.json.website.draft.site.pages.map((p) => [p.slug, p]))
+  assert.equal(pages.terms.legal, true, 'the Studio\'s Terms page is still a legal page after its first save')
+  assert.equal(pages.terms.source?.kind, 'starter')
+  assert.ok(pages.terms.sections.every((s) => s.type === 'text'))
+  assert.equal(pages.contact.legal, undefined, 'an existing page is never turned legal by a save')
+  assert.equal(pages.offers.legal, undefined, 'a page at any other address is never legal')
+  // And it stays legal on the next save (kept, as before).
+  const again = await call(website, 'POST', { cookie: c, body: { action: 'save', content: r.json.website.draft, baseUpdatedAt: r.json.website.updatedAt } })
+  assert.equal(again.json.website.draft.site.pages.find((p) => p.slug === 'terms').legal, true)
+  // A page that was ordinary at /terms can't be flipped to legal later either.
+  const plain = structuredClone(again.json.website.draft)
+  plain.site.pages = plain.site.pages.filter((p) => p.slug !== 'terms')
+  const removed = await call(website, 'POST', { cookie: c, body: { action: 'save', content: plain, baseUpdatedAt: again.json.website.updatedAt } })
+  const ordinary = structuredClone(removed.json.website.draft)
+  ordinary.site.pages.push({ slug: 'terms', navLabel: 'Terms', sections: [{ type: 'text', id: 't-1', heading: 'Terms', body: 'Ordinary words.' }] })
+  const saved1 = await call(website, 'POST', { cookie: c, body: { action: 'save', content: ordinary, baseUpdatedAt: removed.json.website.updatedAt } })
+  const flipped = structuredClone(saved1.json.website.draft)
+  Object.assign(flipped.site.pages.find((p) => p.slug === 'terms'), { legal: true, source: { kind: 'starter' } })
+  const saved2 = await call(website, 'POST', { cookie: c, body: { action: 'save', content: flipped, baseUpdatedAt: saved1.json.website.updatedAt } })
+  assert.equal(saved2.json.website.draft.site.pages.find((p) => p.slug === 'terms').legal, undefined, 'an ordinary page is never turned legal')
+})

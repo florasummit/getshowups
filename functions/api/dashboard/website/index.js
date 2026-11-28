@@ -42,13 +42,20 @@ async function guardStudioFields(env, customer, content) {
   return { ...rest, ...(current.site ? { site: current.site } : {}), ...(current.redirects ? { redirects: current.redirects } : {}) }
 }
 
-// Legal pages (exempt from the claims filter) are created only by the server (import word for word, or the starter).
-// A save from the page may keep a page legal that already was, never mark a new one: otherwise any text could be
-// published unfiltered by calling it a policy. A page whose flag is dropped goes through the normal filters.
+// Legal pages (exempt from the claims filter): a save from the page may keep a page legal that already was, and may add
+// the Studio's own legal page types (owner decision 2026-11-21: "Add a page" → Privacy Policy / Terms of Service, from
+// src/dashboard/site-templates.js) as NEW pages at their fixed addresses. It can never turn an existing page, or a page
+// at any other address, into a legal one: otherwise any text could be published unfiltered by calling it a policy. A
+// page whose flag is dropped goes through the normal filters. (Before this allowed the Studio's types, a Terms page
+// added in the editor lost its legal flag on its first save: the page silently became an ordinary page.)
+const LEGAL_SLUGS = new Set(['privacy', 'terms'])
 function guardLegalPages(content, saved) {
   if (!content?.site?.pages) return content
-  const legal = new Set((saved?.site?.pages || []).filter((p) => p.legal).map((p) => p.slug))
-  return { ...content, site: { ...content.site, pages: content.site.pages.map((p) => (p?.legal && !legal.has(p.slug) ? (({ legal: _l, source: _s, ...rest }) => rest)(p) : p)) } }
+  const before = saved?.site?.pages || []
+  const legal = new Set(before.filter((p) => p.legal).map((p) => p.slug))
+  const existing = new Set(before.map((p) => p.slug))
+  const allowed = (p) => legal.has(p.slug) || (LEGAL_SLUGS.has(p.slug) && !existing.has(p.slug) && p.source?.kind === 'starter')
+  return { ...content, site: { ...content.site, pages: content.site.pages.map((p) => (p?.legal && !allowed(p) ? (({ legal: _l, source: _s, ...rest }) => rest)(p) : p)) } }
 }
 
 // Pre-publish check: every page of the content renders (no exception) with this business's details. A content that
