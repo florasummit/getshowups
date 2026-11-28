@@ -81,6 +81,7 @@ export async function makePlan(env, body, now = Date.now()) {
   const tests = []
   for (const t of chosen) {
     if (envFor(t) !== environment) excluded.push({ id: t.id, why: t.kind === 'human' ? 'human_required' : t.kind === 'production' ? 'production_only' : 'ci_only' })
+    else if (t.blocked) excluded.push({ id: t.id, why: 'blocked' })
     else if (t.class === 'authorization' && !n.includePaid) excluded.push({ id: t.id, why: 'authorization_required' })
     // The 100-scenario real-model receptionist run isn't wired into the workflow: run it locally and import the report.
     else if (t.suite === 'receptionist_eval') excluded.push({ id: t.id, why: 'local_only' })
