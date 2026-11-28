@@ -2,7 +2,31 @@
 
 _Update at the end of every task. Newest first._
 
-## Studio editor CI flake: two product bugs fixed (2026-11-28, branch fix/studio-editor-flake)
+## Releases #211 and #210 (2026-11-28, live; ratified by the founder; development cycle closed)
+**Authorization:** released by qa-ui on the founder's direct instruction in that session (#211 merged 07:08:40Z, #210
+07:24:42Z), without clearance through the team lead; the founder ratified both the same day (no rollback over the
+coordination conflict). From now on the team lead is the sole coordinator of production releases: every agent obtains
+release clearance through the lead.
+**#211 studio editor fixes:** main 5dcb22b, deployment f6650f56-93a8-4ddd-9182-6d61386d227a, rollback 1f1ceb51-0ee1-4ce2-a686-9a314386c909.
+**#210 e2e seed-once (updated with main first):** test-site startup ≈ 8 s locally (was ≈ 75 s); the CI webServer
+timeouts are gone. Main c22fa93, deployment 55b10706-4916-458b-b1c4-e902a3e64991, rollback f6650f56-93a8-4ddd-9182-6d61386d227a.
+No migration (132 tables). Backup taken 06:25Z before the releases: ~/getshowups-backups/prod-20261128T062539Z-pre-211.sql
+(integrity ok, 132 tables).
+scripts/release.sh HEALTHY for both: live customer pages byte-identical, refusals 401/403/404 as expected, 0 exceptions,
+records and secret names unchanged. Main CI on c22fa93: success (5dcb22b's run was cancelled, superseded by the c22fa93
+push). PR CI: #211 413 passed / 0 flaky (after one more fix: the republish step's headline click landed during the
+preview refresh; it now clicks until editable and checks the edit landed), #210 413 passed.
+Changed in production code: only the website save rule (functions/api/dashboard/website/index.js) and the Studio editor
+(src/dashboard/SiteStudio.jsx); the rest is tests, test harness, the generated inventory and docs. No renderer change.
+Production read-only checks after deploy and again after ratification: build.json c22fa93; /, /p/poolthru-llc,
+/book/poolthru-llc, booking times, enrollment 200; dashboard, platform and QA APIs 401 signed out; cross-site website
+save and chat 403. Owner-side legal-page behaviour is covered by the route unit test and the browser suite (mocked
+providers); it was not exercised against production data. The lead's read-only check: no live business lost a legal flag.
+**Follow-ups:**
+- release.sh starts `wrangler pages deployment tail` and its perl alarm doesn't stop the node child: tails keep running
+  (49 found on the lead's machine; this release's two ran ≈ 45 min until stopped by PID at ≈ 07:53Z, read-only); fix later.
+
+## Studio editor CI flake: two product bugs fixed (2026-11-28, PR #211, live)
 studio-editor.spec.js failed intermittently in CI (desktop and mobile, also on main). Root causes were in the product:
 - **Legal pages lost their flag on the first save.** The save guard (2026-11-17) kept `legal` only on pages that were
   already legal, but Studio's "Add a page → Terms / Privacy" (2026-11-21) makes new ones. A Terms page added in the
