@@ -1,6 +1,7 @@
 // Website Studio editor in the browser (real local server, real routes): edit an AI-designed website directly, without
 // AI. Each browser project edits its own seeded business (e2e-editor / e2e-editor-m, test/e2e/editor-draft.json), so the
 // desktop and phone runs never touch the same website.
+import { readFileSync } from 'node:fs'
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
@@ -8,6 +9,22 @@ import { useSession } from './helpers.js'
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const tokenFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_SESSION_TOKEN : fixtures.E2E_EDITOR_SESSION_TOKEN)
 const customerFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_CUSTOMER : fixtures.E2E_EDITOR_CUSTOMER)
+// The draft serve.sh seeds for both editor businesses. Every test here starts from it (through the owner's own routes:
+// save the seeded draft, take the website offline): the tests share one business per project and run in order, so
+// without this a CI retry (or a test after a failed one) started from the earlier attempt's edits and failed for that
+// reason alone. A first-attempt failure still fails; uploaded photos and earlier drafts stay, as they would for an owner.
+test.beforeEach(async ({ page, context }, info) => {
+  await useSession(context, tokenFor(info))
+  await restoreSeededWebsite(page)
+})
+const SEEDED = JSON.parse(readFileSync(new URL('./editor-draft.json', import.meta.url), 'utf8'))
+async function restoreSeededWebsite(page) {
+  await page.goto('/dashboard/website')
+  const origin = new URL(page.url()).origin
+  const post = (data) => page.request.post('/api/dashboard/website', { data, headers: { Origin: origin } })
+  expect((await post({ action: 'save', content: SEEDED, force: true })).status()).toBe(200)
+  expect((await post({ action: 'unpublish' })).status()).toBe(200)
+}
 
 test('owner edits the website on the website itself: text in place, button panel, section controls, colours, pages, preview mode; autosave survives a reload; publish, republish, restore @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
@@ -22,8 +39,11 @@ test('owner edits the website on the website itself: text in place, button panel
   await expect(h1).toHaveText('Clear water, every week.')
 
   // Click the headline ON the website and type: it changes in place (no form), autosaves, and undo/redo work.
-  await h1.click()
-  await expect(h1).toHaveAttribute('contenteditable', /true|plaintext-only/)
+  // (A click before the preview is wired for editing is ignored; click until it is, as a person would.)
+  await expect(async () => {
+    await h1.click()
+    await expect(h1).toHaveAttribute('contenteditable', /true|plaintext-only/, { timeout: 1000 })
+  }).toPass({ timeout: 20_000 })
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('Pools, handled with care')
   await page.keyboard.press('Enter')
@@ -172,6 +192,8 @@ test('owner edits the website on the website itself: text in place, button panel
     await expect(saved).toBeVisible()
     await status.getByRole('button', { name: /^Publish/ }).first().click()
     await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+    // The Terms page added above is a legal page: publishing asks the owner to confirm they read it, every time.
+    await page.getByRole('checkbox', { name: /read my terms page/ }).check()
     await page.getByRole('button', { name: /^Publish/ }).last().click()
     await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
   }
@@ -182,11 +204,17 @@ test('owner edits the website on the website itself: text in place, button panel
   const home = await (await page.request.get(site)).text()
   expect(home).toMatch(/<link rel="canonical"/)
   expect(home).toMatch(/href="[^"]*\/book\//)
-  await h1.click()
+  // Publishing refreshes the preview; a click that lands during that refresh is ignored (CI run 46116527410: the
+  // typing went nowhere, so there was nothing to republish). Click until the headline is editable, as a person would.
+  await expect(async () => {
+    await h1.click()
+    await expect(h1).toHaveAttribute('contenteditable', /.+/, { timeout: 1000 })
+  }).toPass({ timeout: 20_000 })
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('Pools, published twice')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(1300)
+  await expect(h1).toHaveText('Pools, published twice')
+  await expect(status.getByText('You have changes that aren’t published yet')).toBeVisible({ timeout: 15_000 })
   await publishNow()
   await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, published twice')).toBe(true)
   // Published versions are listed in the editor's History tab (one place for every earlier version); restoring one
@@ -273,7 +301,8 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   // Use it in the opening and frame it: square crop, focus point by keyboard.
   await frame.locator('.hero-media').click()
   const photoGroup = studio.getByRole('dialog', { name: 'Edit' })
-  await photoGroup.locator('.studio-thumb:not([data-stock])').last().click()
+  // The photo just uploaded: the owner's photos are listed newest first (a retry finds the first attempt's uploads too).
+  await photoGroup.locator('button.studio-thumb:not([data-stock])').first().click()
   await photoGroup.getByLabel('Shape').selectOption('1x1')
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
   await expect(frame.locator('.hero-media img')).toHaveAttribute('srcset', /800w/)
@@ -313,10 +342,14 @@ test('photos: upload makes a phone version; frame a photo (shape + focus); draft
   await versions.last().getByRole('button', { name: /^Restore/ }).click()
   await expect(confirm).toContainText('Everything in your draft goes back to how it was then')
   await expect(confirm).toContainText('Your live website doesn’t change')
+  // A restore keeps the draft it replaces as exactly one new "Before a restore" copy (counted from here, so a retry that
+  // finds the first attempt's copies checks the same thing).
+  const beforeRestore = versions.filter({ hasText: 'Before a restore' })
+  const copies = await beforeRestore.count()
   await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(studio.locator('[data-save="saved"]')).toBeVisible()
-  await expect(versions.filter({ hasText: 'Before a restore' })).toHaveCount(1)
-  await versions.filter({ hasText: 'Before a restore' }).getByRole('button', { name: /^Restore/ }).click()
+  await expect(beforeRestore).toHaveCount(copies + 1)
+  await beforeRestore.first().getByRole('button', { name: /^Restore/ }).click()
   await confirm.getByRole('button', { name: 'Restore this draft' }).click()
   await expect(frame.locator('.hero-media img')).toHaveAttribute('style', /aspect-ratio:1\/1/)
 
