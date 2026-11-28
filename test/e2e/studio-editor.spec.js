@@ -39,8 +39,11 @@ test('owner edits the website on the website itself: text in place, button panel
   await expect(h1).toHaveText('Clear water, every week.')
 
   // Click the headline ON the website and type: it changes in place (no form), autosaves, and undo/redo work.
-  await h1.click()
-  await expect(h1).toHaveAttribute('contenteditable', /true|plaintext-only/)
+  // (A click before the preview is wired for editing is ignored; click until it is, as a person would.)
+  await expect(async () => {
+    await h1.click()
+    await expect(h1).toHaveAttribute('contenteditable', /true|plaintext-only/, { timeout: 1000 })
+  }).toPass({ timeout: 20_000 })
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('Pools, handled with care')
   await page.keyboard.press('Enter')
@@ -201,11 +204,17 @@ test('owner edits the website on the website itself: text in place, button panel
   const home = await (await page.request.get(site)).text()
   expect(home).toMatch(/<link rel="canonical"/)
   expect(home).toMatch(/href="[^"]*\/book\//)
-  await h1.click()
+  // Publishing refreshes the preview; a click that lands during that refresh is ignored (CI run 46116527410: the
+  // typing went nowhere, so there was nothing to republish). Click until the headline is editable, as a person would.
+  await expect(async () => {
+    await h1.click()
+    await expect(h1).toHaveAttribute('contenteditable', /.+/, { timeout: 1000 })
+  }).toPass({ timeout: 20_000 })
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('Pools, published twice')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(1300)
+  await expect(h1).toHaveText('Pools, published twice')
+  await expect(status.getByText('You have changes that aren’t published yet')).toBeVisible({ timeout: 15_000 })
   await publishNow()
   await expect.poll(async () => (await (await page.request.get(site)).text()).includes('Pools, published twice')).toBe(true)
   // Published versions are listed in the editor's History tab (one place for every earlier version); restoring one
