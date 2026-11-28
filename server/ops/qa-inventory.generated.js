@@ -1293,6 +1293,7 @@ export const TESTS = [
 ["unit:website-one-editor:2aef9dfd1d","WEB-06: what is missing is derived on every load, with a services section that is hidden or absent reported as such","test/website-one-editor.test.js"],
 ["unit:website-one-editor:f83ed39930","WEB-07 / WEB-09: the editor is offered its industry’s own licensed photos only, and its preview frame carries no \"Only you can see this\" strip","test/website-one-editor.test.js"],
 ["unit:website-one-editor:d50525eb2d","WEB-08: a change request on a multi-page website is ONE included-model request → a pending version; only what changed is written onto the owner’s pages; legal pages, sections and hand-made colours stay","test/website-one-editor.test.js"],
+["unit:website-one-editor:b0fb22229c","owner-added legal pages: the Studio's Terms / Privacy types stay legal through a save; no other page can be made legal by a save","test/website-one-editor.test.js"],
 ["unit:website:3725a4f374","draft is generated from business details, passes the claims filter, and is private until published","test/website.test.js"],
 ["unit:website:1e84ef12eb","validation: claims, limits, templates, colours and images that are not the business’s own","test/website.test.js"],
 ["unit:website:726e10b0e7","save → preview (owner only) → publish (confirmed) → public; unpublish → 404; nothing private leaks","test/website.test.js"],

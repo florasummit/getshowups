@@ -616,6 +616,8 @@ function StudioEditor({ website, assets: initialAssets, brand, visit, checkpoint
       onRemove: () => removeSection(id),
       onSettings: () => (setSelected(id), setTab('section')),
       onAdd: (type) => addSectionAfter(id, type),
+      // A legal page takes text sections only (the server keeps nothing else on it): offer only those.
+      addable: page.legal ? ['text'] : ADDABLE,
     }
   }
 
@@ -979,7 +981,7 @@ function SectionMenu({ actions: a }) {
           </button>
           {adding && (
             <div className="studio-submenu">
-              {ADDABLE.map((t) => (
+              {(a.addable || ADDABLE).map((t) => (
                 <button key={t} type="button" role="menuitem" onClick={pick(() => a.onAdd(t))}>
                   {SECTION_LABEL[t]}
                 </button>

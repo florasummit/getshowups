@@ -1,6 +1,7 @@
 // Website Studio editor in the browser (real local server, real routes): edit an AI-designed website directly, without
 // AI. Each browser project edits its own seeded business (e2e-editor / e2e-editor-m, test/e2e/editor-draft.json), so the
 // desktop and phone runs never touch the same website.
+import { readFileSync } from 'node:fs'
 import { test, expect } from './test.js'
 import { fixtures } from '../../playwright.config.js'
 import { useSession } from './helpers.js'
@@ -8,9 +9,21 @@ import { useSession } from './helpers.js'
 test.describe.configure({ mode: 'serial', timeout: 90_000 })
 const tokenFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_SESSION_TOKEN : fixtures.E2E_EDITOR_SESSION_TOKEN)
 const customerFor = (info) => (info.project.name === 'mobile' ? fixtures.E2E_EDITOR_M_CUSTOMER : fixtures.E2E_EDITOR_CUSTOMER)
+// The draft serve.sh seeds for both editor businesses. The first test starts from it every time (through the owner's
+// own routes: save the seeded draft, take the website offline), so a CI retry checks the same things from the same
+// start as the first attempt instead of failing on the first attempt's edits. A first-attempt failure still fails.
+const SEEDED = JSON.parse(readFileSync(new URL('./editor-draft.json', import.meta.url), 'utf8'))
+async function restoreSeededWebsite(page) {
+  await page.goto('/dashboard/website')
+  const origin = new URL(page.url()).origin
+  const post = (data) => page.request.post('/api/dashboard/website', { data, headers: { Origin: origin } })
+  expect((await post({ action: 'save', content: SEEDED, force: true })).status()).toBe(200)
+  expect((await post({ action: 'unpublish' })).status()).toBe(200)
+}
 
 test('owner edits the website on the website itself: text in place, button panel, section controls, colours, pages, preview mode; autosave survives a reload; publish, republish, restore @mobile', async ({ page, context }, info) => {
   await useSession(context, tokenFor(info))
+  await restoreSeededWebsite(page)
   const aiCalls = []
   page.on('request', (r) => /\/api\/dashboard\/website\/designer|\/api\/dashboard\/website$/.test(new URL(r.url()).pathname) && r.method() === 'POST' && /"action":"(generate|revise|message|different)"/.test(r.postData() || '') && aiCalls.push(r.url()))
   await page.goto('/dashboard/website')
@@ -172,6 +185,8 @@ test('owner edits the website on the website itself: text in place, button panel
     await expect(saved).toBeVisible()
     await status.getByRole('button', { name: /^Publish/ }).first().click()
     await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+    // The Terms page added above is a legal page: publishing asks the owner to confirm they read it, every time.
+    await page.getByRole('checkbox', { name: /read my terms page/ }).check()
     await page.getByRole('button', { name: /^Publish/ }).last().click()
     await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
   }
@@ -401,6 +416,8 @@ test('logo: upload → replace → remove from website (stays removed after a re
     await saved()
     await status.getByRole('button', { name: /^Publish/ }).first().click()
     await page.getByRole('checkbox', { name: /details are accurate/ }).check()
+    // The Terms page added above is a legal page: publishing asks the owner to confirm they read it, every time.
+    await page.getByRole('checkbox', { name: /read my terms page/ }).check()
     await page.getByRole('button', { name: /^Publish/ }).last().click()
     await expect(status.getByText('Live', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(status.getByText('aren’t published yet')).toHaveCount(0, { timeout: 15_000 })
